@@ -771,7 +771,7 @@ export default function SavedRecipesPage() {
                       onClick={() => setIsEditing(false)}
                       className="text-xs text-slate-400 hover:text-white"
                     >
-                      Cancel
+                      
                     </button>
                   </div>
 
@@ -1194,7 +1194,7 @@ export default function SavedRecipesPage() {
                 onClick={() => setShowShoppingModal(false)}
                 className="px-5 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition text-xs"
               >
-                Cancel
+                
               </button>
               <button
                 onClick={handleAddSelectedToShoppingList}
