@@ -1,6 +1,13 @@
 {
-  "/recipes/page": "app/recipes/page.js",
-  "/api/recipes/route": "app/api/recipes/route.js",
   "/planner/page": "app/planner/page.js",
-  "/shopping/page": "app/shopping/page.js"
+  "/recipes/page": "app/recipes/page.js",
+  "/books/page": "app/books/page.js",
+  "/manual/page": "app/manual/page.js",
+  "/api/recipes/route": "app/api/recipes/route.js",
+  "/import/page": "app/import/page.js",
+  "/chef/page": "app/chef/page.js",
+  "/page": "app/page.js",
+  "/pantry/page": "app/pantry/page.js",
+  "/shopping/page": "app/shopping/page.js",
+  "/templates/page": "app/templates/page.js"
 }

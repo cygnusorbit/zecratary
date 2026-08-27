@@ -3,7 +3,7 @@ import ClientLayout from './ClientLayout';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'FoodiePrep - AI Culinary Assistant & Meal Planner',
+  title: 'Zecratary - AI Culinary Assistant & Meal Planner',
   description: 'Organize recipes, manage pantry inventory, and plan meals with AI.',
 };
 

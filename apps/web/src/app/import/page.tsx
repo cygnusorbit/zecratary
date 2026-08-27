@@ -23,9 +23,9 @@ export default function ImportPage() {
       const result = await res.json();
       if (result.success && result.data) {
         // Sync to client local storage as immediate backup
-        const existing = JSON.parse(localStorage.getItem('zecratary_saved_recipes') || '[]');
+        const existing = JSON.parse(localStorage.getItem('zecratary_recipes') || '[]');
         const updated = [result.data, ...existing.filter((r: any) => r.title !== result.data.title)];
-        localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updated));
+        localStorage.setItem('zecratary_recipes', JSON.stringify(updated));
 
         setStatus({
           type: 'success',

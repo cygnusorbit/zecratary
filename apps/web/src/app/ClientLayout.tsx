@@ -21,15 +21,14 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           <div className="flex items-center gap-2.5 px-2 pt-1">
             <div className="text-[#E05638] text-xl">🥕</div>
             <span className="font-extrabold text-lg tracking-tight">
-              <span className="text-[#E05638]">Foodie</span>
-              <span className="text-emerald-500">Prep</span>
+              <span className="text-white">Zecratary</span>
             </span>
           </div>
 
           {/* Main Dashboard Link */}
           <nav className="space-y-1">
             <Link
-              href="/chef"
+              href="/"
               className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-bold text-xs transition ${
                 pathname === '/chef' || pathname === '/'
                   ? 'bg-[#141b2d] text-white shadow-sm'
