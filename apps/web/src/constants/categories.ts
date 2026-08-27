@@ -1,0 +1,22 @@
+export const CATEGORIES = [
+  "Produce",
+  "Dairy",
+  "Meat and Seafood",
+  "Bakery",
+  "Baking Supplies",
+  "Pantry Staples",
+  "Frozen Foods",
+  "Snacks and Sweets",
+  "Beverages",
+  "Deli",
+  "Condiments and Sauces",
+  "Grains and Pasta",
+  "Spices and Seasonings",
+  "Ready Meals",
+  "International Foods",
+  "Household Items",
+  "Personal Care",
+  "Pet Supplies",
+  "Baby Products",
+  "Miscellaneous"
+];

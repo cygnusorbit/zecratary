@@ -1,0 +1,6 @@
+{
+  "/recipes/page": "app/recipes/page.js",
+  "/api/recipes/route": "app/api/recipes/route.js",
+  "/planner/page": "app/planner/page.js",
+  "/shopping/page": "app/shopping/page.js"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "zecratary-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "start": "turbo run start",
+    "db:generate": "turbo run db:generate",
+    "db:push": "turbo run db:push",
+    "worker:dev": "turbo run worker:dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.2",
+    "typescript": "^5.7.3"
+  },
+  "packageManager": "npm@10.8.2"
+}
