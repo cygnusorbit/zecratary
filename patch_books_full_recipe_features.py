@@ -1,4 +1,6 @@
-'use client';
+import os
+
+code = """'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
@@ -1707,3 +1709,9 @@ export default function BooksPage() {
     </div>
   );
 }
+"""
+
+with open("apps/web/src/app/books/page.tsx", "w", encoding="utf-8") as f:
+    f.write(code)
+
+print("✅ Recipe popup on /books is now fully functional with Add to Book, Planner, Shopping List, and Recipe Editing!")
