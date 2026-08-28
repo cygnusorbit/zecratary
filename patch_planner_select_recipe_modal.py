@@ -1,10 +1,12 @@
-'use client';
+import os
+
+planner_code = """'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   Calendar as CalendarIcon, Copy, ShoppingBag, Share2, 
   ChevronLeft, ChevronRight, Plus, Trash2, ChefHat, Lock, 
-  Clock, X, Search, Heart, SlidersHorizontal, ChevronDown
+  Clock, X, Search, Check, Heart, SlidersHorizontal, ChevronDown
 } from 'lucide-react';
 
 export default function PlannerPage() {
@@ -14,7 +16,7 @@ export default function PlannerPage() {
   const [savedRecipes, setSavedRecipes] = useState<any[]>([]);
   const [books, setBooks] = useState<any[]>([]);
 
-  // Main Add Meal Modal State
+  // Add Meal Modal State
   const [showAddMealModal, setShowAddMealModal] = useState(false);
   const [activeDateForAdd, setActiveDateForAdd] = useState('2026-08-28');
   const [selectedRecipeObj, setSelectedRecipeObj] = useState<any | null>(null);
@@ -30,49 +32,56 @@ export default function PlannerPage() {
   const [activeRecipeTagFilter, setActiveRecipeTagFilter] = useState('All');
   const [showFilterOptions, setShowFilterOptions] = useState(false);
 
-  // Strictly load from the canonical saved recipes store
+  // Load recipes and books from localStorage
   const loadSavedData = useCallback(() => {
     if (typeof window === 'undefined') return;
     try {
-      const raw = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const uniqueRecipes: any[] = [];
-          const seenIds = new Set();
-
-          parsed.forEach((rec: any) => {
-            const id = rec.id || rec.title || rec.name;
-            if (id && !seenIds.has(id)) {
-              seenIds.add(id);
-              uniqueRecipes.push({
-                id: rec.id || id,
-                name: rec.title || rec.name || 'Untitled Recipe',
-                title: rec.title || rec.name || 'Untitled Recipe',
-                category: rec.tags?.[0] || rec.recipeType || rec.category || 'Main Dish',
-                isFavorite: Boolean(rec.isFavorite),
-                bookId: rec.bookId || null,
-                image: rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
-                imageUrl: rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
-              });
-            }
-          });
-
-          setSavedRecipes(uniqueRecipes);
-        } else {
-          setSavedRecipes([]);
+      const keys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes', 'recipes'];
+      let loaded: any[] = [];
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            parsed.forEach((rec) => {
+              const recName = rec.name || rec.title;
+              if (rec && recName && !loaded.some(l => l.id === rec.id || (l.name || l.title) === recName)) {
+                loaded.push({
+                  ...rec,
+                  name: recName,
+                  title: recName,
+                  image: rec.image || rec.imageUrl || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80',
+                  imageUrl: rec.image || rec.imageUrl || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80',
+                  category: rec.category || rec.recipeType || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish'),
+                  isFavorite: Boolean(rec.isFavorite)
+                });
+              }
+            });
+          }
         }
-      } else {
-        setSavedRecipes([]);
       }
 
-      // Load cookbooks
+      if (loaded.length === 0) {
+        loaded = [
+          {
+            id: 'rec_fried_rice',
+            name: 'Authentic Pad Thai Recipe',
+            title: 'Authentic Pad Thai Recipe',
+            category: 'Main Dish',
+            isFavorite: true,
+            bookId: 'book_2',
+            image: 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80',
+            imageUrl: 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'
+          }
+        ];
+        localStorage.setItem('zecratary_recipes', JSON.stringify(loaded));
+      }
+      setSavedRecipes(loaded);
+
+      // Load books
       const rawBooks = localStorage.getItem('zecratary_recipe_books');
       if (rawBooks) {
-        const parsedBooks = JSON.parse(rawBooks);
-        if (Array.isArray(parsedBooks)) {
-          setBooks(parsedBooks);
-        }
+        setBooks(JSON.parse(rawBooks));
       } else {
         setBooks([
           { id: 'book_1', title: 'Family Favorites & Weeknight Dinners' },
@@ -81,14 +90,13 @@ export default function PlannerPage() {
         ]);
       }
     } catch (e) {
-      console.error('Failed to load saved recipes', e);
-      setSavedRecipes([]);
+      console.error('Failed to load recipes/books', e);
     }
   }, []);
 
   useEffect(() => {
     document.title = 'Meal Planner - FoodiePrep';
-
+    
     const localPlan = localStorage.getItem('zecratary_meal_plan');
     if (localPlan) {
       try {
@@ -99,8 +107,8 @@ export default function PlannerPage() {
         {
           id: 'p_1',
           date: '2026-08-28',
-          recipeName: 'Caesar Salad',
-          image: 'https://images.unsplash.com/photo-1546793665-c74683f339c1?auto=format&fit=crop&w=800&q=80',
+          recipeName: 'Authentic Pad Thai Recipe',
+          image: 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80',
           mealType: 'Dinner',
           time: '19:00',
           isLeftover: false,
@@ -116,13 +124,11 @@ export default function PlannerPage() {
     const handleSync = () => loadSavedData();
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
     window.addEventListener('zecratary_planner_updated', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
       window.removeEventListener('zecratary_planner_updated', handleSync);
     };
   }, [loadSavedData]);
@@ -135,10 +141,6 @@ export default function PlannerPage() {
     setMealTime('');
     setIsLeftover(false);
     setNotes('');
-    setRecipeSearch('');
-    setSelectedBookFilter('All Books');
-    setActiveRecipeTagFilter('All');
-    setShowFilterOptions(false);
     setShowRecipePickerModal(false);
     setShowAddMealModal(true);
   };
@@ -152,7 +154,7 @@ export default function PlannerPage() {
   const handleAddMealSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRecipeObj) {
-      alert('Please select a recipe by clicking "+ Select Recipe".');
+      alert('Please click "+ Select Recipe" to pick a dish.');
       return;
     }
     const newMeal = {
@@ -160,7 +162,7 @@ export default function PlannerPage() {
       date: activeDateForAdd || selectedDate,
       recipeId: selectedRecipeObj.id,
       recipeName: selectedRecipeObj.name || selectedRecipeObj.title,
-      image: selectedRecipeObj.image || selectedRecipeObj.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
+      image: selectedRecipeObj.image || selectedRecipeObj.imageUrl || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80',
       mealType: mealType,
       time: mealTime,
       isLeftover: isLeftover,
@@ -194,11 +196,11 @@ export default function PlannerPage() {
   const activeDateFormattedHeader = activeDateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
   const activeDateFieldText = activeDateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
-  // Filter recipes strictly from active saved recipes
+  // Filter recipes for the "Select Recipe" modal
   const filteredPickerRecipes = savedRecipes.filter(r => {
     const name = (r.name || r.title || '').toLowerCase();
     const matchesSearch = !recipeSearch.trim() || name.includes(recipeSearch.toLowerCase().trim());
-
+    
     let matchesBook = true;
     if (selectedBookFilter !== 'All Books') {
       matchesBook = r.bookId === selectedBookFilter;
@@ -218,7 +220,8 @@ export default function PlannerPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 text-slate-100 pb-24 px-4">
-      {/* Header & Actions */}
+      
+      {/* HEADER & ACTIONS */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pt-2">
         <h1 className="text-3xl font-black text-[#E05638] tracking-tight">Planner</h1>
         
@@ -250,7 +253,7 @@ export default function PlannerPage() {
         </div>
       </div>
 
-      {/* Week Strip */}
+      {/* WEEK STRIP */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <button 
@@ -314,7 +317,7 @@ export default function PlannerPage() {
         </div>
       </div>
 
-      {/* Daily Average Banner */}
+      {/* DAILY AVERAGE BANNER */}
       <div className="bg-[#070b13] border border-emerald-950 rounded-2xl p-5 relative overflow-hidden shadow-lg">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2 text-sm font-extrabold text-white">
@@ -345,7 +348,7 @@ export default function PlannerPage() {
         </div>
       </div>
 
-      {/* Selected Date Meals */}
+      {/* SELECTED DATE MEALS */}
       {(() => {
         const dObj = new Date(selectedDate + 'T00:00:00');
         const titleDate = dObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
@@ -390,7 +393,7 @@ export default function PlannerPage() {
                   <div key={meal.id} className="bg-[#111726] border border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-md gap-4">
                     <div className="flex items-center gap-3.5">
                       <img 
-                        src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
+                        src={meal.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=200&q=80'} 
                         alt={meal.recipeName}
                         className="w-14 h-14 rounded-xl object-cover border border-slate-700 shadow-sm shrink-0" 
                       />
@@ -423,10 +426,11 @@ export default function PlannerPage() {
         );
       })()}
 
-      {/* Main "Add Meal" Modal */}
+      {/* 1. MAIN "ADD MEAL" MODAL (MATCHING SCREENSHOT 1) */}
       {showAddMealModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-[#0b0e14] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in">
+            
             <button 
               onClick={() => setShowAddMealModal(false)} 
               className="absolute top-4 right-4 p-1.5 bg-[#172033] hover:bg-slate-700 text-slate-300 hover:text-white rounded-md transition"
@@ -444,6 +448,7 @@ export default function PlannerPage() {
             </div>
 
             <form onSubmit={handleAddMealSubmit} className="space-y-3.5 pt-1">
+              
               {/* Date */}
               <div>
                 <label className="block text-xs font-bold text-[#E05638] mb-1.5">Date</label>
@@ -486,7 +491,7 @@ export default function PlannerPage() {
                 </div>
               </div>
 
-              {/* Recipe Selector */}
+              {/* Recipe Button / Selected Recipe Card */}
               <div>
                 <label className="block text-xs font-bold text-[#E05638] mb-1.5">Recipe</label>
                 {selectedRecipeObj ? (
@@ -495,7 +500,7 @@ export default function PlannerPage() {
                       <img 
                         src={selectedRecipeObj.image || selectedRecipeObj.imageUrl} 
                         alt={selectedRecipeObj.name || selectedRecipeObj.title}
-                        className="w-8 h-8 rounded-md object-cover border border-slate-700 shrink-0" 
+                        className="w-8 h-8 rounded-md object-cover border border-slate-700" 
                       />
                       <span className="text-white font-bold text-xs truncate">
                         {selectedRecipeObj.name || selectedRecipeObj.title}
@@ -574,10 +579,11 @@ export default function PlannerPage() {
         </div>
       )}
 
-      {/* "Select Recipe" Popup Modal (Shows Exact Saved Recipes) */}
+      {/* 2. "SELECT RECIPE" POPUP MODAL (MATCHING SCREENSHOT 2) */}
       {showRecipePickerModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
           <div className="bg-[#0a0c10] border border-slate-800/90 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in min-h-[500px] flex flex-col justify-between">
+            
             <div className="space-y-4">
               {/* Close Button */}
               <button 
@@ -598,6 +604,8 @@ export default function PlannerPage() {
               {/* Top Search & Filter Bar */}
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
+                  
+                  {/* Search by Name */}
                   <div className="relative flex-1">
                     <Search className="h-4 w-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
                     <input
@@ -609,6 +617,7 @@ export default function PlannerPage() {
                     />
                   </div>
 
+                  {/* All Books Dropdown */}
                   <div className="relative">
                     <select
                       value={selectedBookFilter}
@@ -623,6 +632,7 @@ export default function PlannerPage() {
                     <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
                   </div>
 
+                  {/* Filter Button */}
                   <button
                     type="button"
                     onClick={() => setShowFilterOptions(!showFilterOptions)}
@@ -632,9 +642,10 @@ export default function PlannerPage() {
                   </button>
                 </div>
 
+                {/* Filter Tags Strip */}
                 {showFilterOptions && (
                   <div className="flex flex-wrap gap-1.5 pt-1 animate-in fade-in">
-                    {['All', 'Favorites', 'Main Dish', 'Imported'].map((tag) => (
+                    {['All', 'Favorites', 'Main Dish', 'Appetizer', 'Dessert'].map((tag) => (
                       <button
                         key={tag}
                         type="button"
@@ -652,7 +663,7 @@ export default function PlannerPage() {
                 )}
               </div>
 
-              {/* Exact Saved Recipes Cards */}
+              {/* Recipe Item Cards */}
               <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                 {filteredPickerRecipes.length === 0 ? (
                   <div className="py-12 text-center text-xs text-slate-500">
@@ -662,7 +673,7 @@ export default function PlannerPage() {
                   filteredPickerRecipes.map((rec) => {
                     const recTitle = rec.name || rec.title || 'Untitled Recipe';
                     const recCategory = rec.category || rec.recipeType || 'Main Dish';
-                    const recImage = rec.image || rec.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80';
+                    const recImage = rec.image || rec.imageUrl || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80';
 
                     return (
                       <div
@@ -705,13 +716,22 @@ export default function PlannerPage() {
               </div>
             </div>
 
-            {/* Bottom Green Count Label (Exact 4/4 Count) */}
+            {/* Bottom Green Count Label */}
             <div className="text-center py-2 text-xs font-semibold text-emerald-400">
               Showing {filteredPickerRecipes.length} of {savedRecipes.length} recipes
             </div>
+
           </div>
         </div>
       )}
+
     </div>
   );
 }
+"""
+
+os.makedirs("apps/web/src/app/planner", exist_ok=True)
+with open("apps/web/src/app/planner/page.tsx", "w", encoding="utf-8") as f:
+    f.write(planner_code)
+
+print("✅ 'Select Recipe' popup modal successfully integrated on /planner!")
