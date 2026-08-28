@@ -6,40 +6,34 @@ export interface User {
   email: string;
   role: 'admin' | 'user';
   password?: string;
-  createdAt?: string;
+  createdAt: string;
 }
 
-const DEFAULT_ADMIN_USER: User = {
-  id: 'admin_1',
-  name: 'Admin User',
-  email: 'admin@foodieprep.io',
-  role: 'admin',
-  password: 'password123',
-  createdAt: '2026-08-24T00:00:00.000Z',
-};
-
 const DEFAULT_USERS: User[] = [
-  DEFAULT_ADMIN_USER,
   {
-    id: 'user_1',
-    name: 'Sample User',
-    email: 'user@foodieprep.io',
+    id: 'usr_admin_1',
+    name: 'System Admin',
+    email: 'admin@zecratary.com',
+    password: 'admin',
+    role: 'admin',
+    createdAt: '2026-08-24T00:00:00.000Z'
+  },
+  {
+    id: 'usr_demo_1',
+    name: 'Demo User',
+    email: 'user@zecratary.com',
+    password: 'user123',
     role: 'user',
-    password: 'password123',
-    createdAt: '2026-08-25T00:00:00.000Z',
+    createdAt: '2026-08-25T00:00:00.000Z'
   }
 ];
 
 export const initAuthStorage = () => {
   if (typeof window === 'undefined') return;
   try {
-    if (!localStorage.getItem('zecratary_users')) {
+    const existing = localStorage.getItem('zecratary_users');
+    if (!existing) {
       localStorage.setItem('zecratary_users', JSON.stringify(DEFAULT_USERS));
-    }
-    const current = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user');
-    if (!current) {
-      localStorage.setItem('zecratary_current_user', JSON.stringify(DEFAULT_ADMIN_USER));
-      localStorage.setItem('zecratary_user', JSON.stringify(DEFAULT_ADMIN_USER));
     }
   } catch (e) {
     console.error('Failed to initialize auth storage', e);
@@ -47,18 +41,16 @@ export const initAuthStorage = () => {
 };
 
 export const getCurrentUser = (): User | null => {
-  if (typeof window === 'undefined') {
-    return DEFAULT_ADMIN_USER;
-  }
+  if (typeof window === 'undefined') return null;
   try {
     initAuthStorage();
-    const stored = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user');
-    if (stored) {
-      return JSON.parse(stored);
+    const raw = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user');
+    if (raw) {
+      return JSON.parse(raw);
     }
-    return DEFAULT_ADMIN_USER;
+    return null;
   } catch (e) {
-    return DEFAULT_ADMIN_USER;
+    return null;
   }
 };
 
@@ -79,5 +71,5 @@ export const logoutUser = () => {
   localStorage.removeItem('zecratary_current_user');
   localStorage.removeItem('zecratary_user');
   window.dispatchEvent(new Event('zecratary_auth_changed'));
-  window.location.reload();
+  window.location.href = '/login';
 };
