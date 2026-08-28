@@ -1,4 +1,6 @@
-'use client';
+import os
+
+recipes_page_code = """'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
@@ -1317,3 +1319,11 @@ export default function SavedRecipesPage() {
     </div>
   );
 }
+"""
+
+for path in ["apps/web/src/app/recipes/page.tsx", "apps/web/src/app/recipe/page.tsx"]:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(recipes_page_code)
+
+print("✅ Font size enlarger fixed for both Ingredients & Instructions!")

@@ -6,7 +6,7 @@ import {
   X, UploadCloud, BookmarkPlus, CalendarPlus, ShoppingCart,
   Timer, Edit3, Share2, Star, Check, Book, ChevronDown,
   Trash2, Save, Plus, ImagePlus, Users, Calendar,
-  GripVertical, CheckSquare
+  GripVertical, CheckSquare, CheckCircle2
 } from 'lucide-react';
 import { getStoredCategories } from '@/lib/categories';
 
@@ -21,7 +21,7 @@ export default function SavedRecipesPage() {
   // Add to Book Dropdown State
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // Add to Plan / Calendar Modal State (Matching Screenshot)
+  // Add to Plan / Calendar Modal State
   const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
   const [planDate, setPlanDate] = useState('2026-08-28');
   const [planMealType, setPlanMealType] = useState('Dinner');
@@ -47,7 +47,7 @@ export default function SavedRecipesPage() {
   const [isReorderingSteps, setIsReorderingSteps] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // View States
+  // View States & Dynamic Font Scaling (70% - 160%)
   const [servingsMultiplier, setServingsMultiplier] = useState(1);
   const [fontSizeScale, setFontSizeScale] = useState(100);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
@@ -67,35 +67,36 @@ export default function SavedRecipesPage() {
 
   const defaultRecipes = [
     {
-      id: 'rec_fried_rice',
-      title: 'Authentic Pad Thai Recipe',
-      description: "This pad thai recipe is the real deal. Fully loaded with all the classic ingredients an authentic pad thai should have. Perfectly balanced flavour that is complex and not overly sweet.",
+      id: 'rec_caesar',
+      title: 'Caesar Salad',
+      description: 'Classic crisp romaine lettuce tossed with creamy Caesar dressing, crunchy homemade garlic croutons, and shaved Parmigiano-Reggiano.',
       servings: 4,
-      prepTimeMinutes: 30,
-      cookTimeMinutes: 10,
+      prepTimeMinutes: 20,
+      cookTimeMinutes: 25,
       tags: ['Main Dish'],
       recipeType: 'Main Dish',
       isFavorite: true,
-      isCooked: false,
+      isCooked: true,
       rating: 5,
-      note: 'Best with fresh lime and extra crushed peanuts!',
+      note: 'Extra shaved parmesan makes all the difference!',
       sourceUrl: '',
-      imageUrl: 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80',
-      bookId: 'book_2',
+      imageUrl: 'https://images.unsplash.com/photo-1546793665-c74683f339c1?auto=format&fit=crop&w=800&q=80',
+      bookId: 'book_3',
       ingredients: [
-        { amount: '250', unit: 'g', item: 'Rice noodles', category: 'Grains and Pasta' },
-        { amount: '200', unit: 'g', item: 'Shrimp or Tofu', category: 'Meat and Seafood' },
-        { amount: '2', unit: 'tbsp', item: 'Tamarind paste', category: 'Condiments and Sauces' },
-        { amount: '2', unit: 'tbsp', item: 'Fish sauce', category: 'Condiments and Sauces' },
-        { amount: '1.5', unit: 'tbsp', item: 'Palm sugar', category: 'Pantry Staples' },
-        { amount: '1', unit: 'cup', item: 'Bean sprouts & Peanuts', category: 'Produce' }
+        { amount: '4', unit: 'cups', item: 'cubed crusty bread', category: 'Bakery' },
+        { amount: '1', unit: 'Extra', item: '-virgin olive oil (for drizzling)', category: 'Pantry Staples' },
+        { amount: '1', unit: 'Sea', item: 'salt (for sprinkling)', category: 'Pantry Staples' },
+        { amount: '1', unit: 'cup', item: 'mayonnaise', category: 'Condiments and Sauces' },
+        { amount: '1/4', unit: 'cup', item: 'extra-virgin olive oil', category: 'Pantry Staples' },
+        { amount: '2', unit: 'tablespoons', item: 'fresh lemon juice', category: 'Produce' },
+        { amount: '2', unit: 'teaspoons', item: 'Dijon mustard', category: 'Condiments and Sauces' },
+        { amount: '1', unit: 'garlic', item: 'clove (grated)', category: 'Produce' }
       ],
       instructions: [
-        'Soak dried rice noodles in warm water until soft and pliable, then drain.',
-        'Mix tamarind paste, fish sauce, and palm sugar together in a small bowl for the sauce.',
-        'Heat oil in a wok over high heat, cook protein until done.',
-        'Add drained noodles and sauce directly into the wok, tossing continuously.',
-        'Push noodles aside, scramble eggs in the empty space, and toss with bean sprouts.'
+        'Preheat oven to 375°F (190°C). Toss cubed bread with olive oil and sea salt, then bake for 10-12 minutes until golden and crisp.',
+        'In a small bowl, whisk together mayonnaise, extra-virgin olive oil, fresh lemon juice, Dijon mustard, and grated garlic until smooth and creamy.',
+        'In a large salad bowl, toss chopped crisp romaine lettuce with the dressing until evenly coated.',
+        'Top generously with warm garlic croutons, freshly shaved Parmesan cheese, and freshly cracked black pepper before serving.'
       ]
     }
   ];
@@ -172,6 +173,24 @@ export default function SavedRecipesPage() {
     }
   };
 
+  const toggleFavorite = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const updated = recipes.map(r => r.id === id ? { ...r, isFavorite: !r.isFavorite } : r);
+    saveAllRecipes(updated);
+    if (selectedRecipe?.id === id) {
+      setSelectedRecipe({ ...selectedRecipe, isFavorite: !selectedRecipe.isFavorite });
+    }
+  };
+
+  const toggleCooked = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const updated = recipes.map(r => r.id === id ? { ...r, isCooked: !r.isCooked } : r);
+    saveAllRecipes(updated);
+    if (selectedRecipe?.id === id) {
+      setSelectedRecipe({ ...selectedRecipe, isCooked: !selectedRecipe.isCooked });
+    }
+  };
+
   const handleAssignToBook = (bookId: string) => {
     if (!selectedRecipe) return;
     const isRemoving = selectedRecipe.bookId === bookId;
@@ -190,7 +209,6 @@ export default function SavedRecipesPage() {
     }
   };
 
-  // Open "Add to Calendar" / Add to Plan Modal
   const openAddToPlanModal = () => {
     setPlanDate('2026-08-28');
     setPlanMealType('Dinner');
@@ -211,7 +229,7 @@ export default function SavedRecipesPage() {
       date: planDate,
       recipeId: selectedRecipe.id,
       recipeName: selectedRecipe.title || selectedRecipe.name,
-      image: selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80',
+      image: selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1546793665-c74683f339c1?auto=format&fit=crop&w=800&q=80',
       mealType: planMealType,
       time: planTime,
       notes: planNotes,
@@ -223,15 +241,6 @@ export default function SavedRecipesPage() {
     window.dispatchEvent(new Event('storage'));
     setShowAddToPlanModal(false);
     alert(`Successfully scheduled "${selectedRecipe.title || selectedRecipe.name}" in your meal plan!`);
-  };
-
-  const toggleFavorite = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const updated = recipes.map(r => r.id === id ? { ...r, isFavorite: !r.isFavorite } : r);
-    saveAllRecipes(updated);
-    if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isFavorite: !selectedRecipe.isFavorite });
-    }
   };
 
   const updateSelectedRecipeState = (key: string, val: any) => {
@@ -388,6 +397,8 @@ export default function SavedRecipesPage() {
   });
 
   const assignedBook = books.find(b => b.id === selectedRecipe?.bookId);
+  const computedFontSize = `${(fontSizeScale / 100) * 0.875}rem`;
+  const computedLineHeight = `${(fontSizeScale / 100) * 1.35}rem`;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 text-slate-100 pb-16 px-4">
@@ -462,16 +473,35 @@ export default function SavedRecipesPage() {
               >
                 <div className="relative h-44 w-full bg-slate-800 overflow-hidden">
                   <img
-                    src={r.imageUrl || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'}
+                    src={r.imageUrl || r.image || 'https://images.unsplash.com/photo-1546793665-c74683f339c1?auto=format&fit=crop&w=800&q=80'}
                     alt={r.title || r.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                   />
-                  <button
-                    onClick={(e) => toggleFavorite(e, r.id)}
-                    className="absolute top-3 right-3 p-2 bg-black/60 rounded-full text-white hover:text-[#E05638]"
-                  >
-                    <Heart className={`h-4 w-4 ${r.isFavorite ? 'fill-[#E05638] text-[#E05638]' : 'text-white'}`} />
-                  </button>
+                  
+                  {/* Top-Right Action Buttons */}
+                  <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={(e) => toggleCooked(e, r.id)}
+                      className={`p-2 rounded-full backdrop-blur-md transition shadow-md ${
+                        r.isCooked 
+                          ? 'bg-emerald-600/90 hover:bg-emerald-500 text-white' 
+                          : 'bg-black/60 hover:bg-black/80 text-slate-400 hover:text-white'
+                      }`}
+                      title={r.isCooked ? "Marked as Cooked (Click to undo)" : "Mark as Cooked"}
+                    >
+                      <CheckCircle2 className={`h-4 w-4 ${r.isCooked ? 'text-white' : 'text-slate-300'}`} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => toggleFavorite(e, r.id)}
+                      className="p-2 bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-full text-white hover:text-[#E05638] transition shadow-md"
+                      title="Favorite"
+                    >
+                      <Heart className={`h-4 w-4 ${r.isFavorite ? 'fill-[#E05638] text-[#E05638]' : 'text-white'}`} />
+                    </button>
+                  </div>
 
                   {cardBook && (
                     <div className="absolute bottom-3 left-3 bg-black/75 backdrop-blur-md text-[10px] text-amber-300 font-bold px-2.5 py-1 rounded-full flex items-center gap-1 border border-amber-400/30">
@@ -482,10 +512,24 @@ export default function SavedRecipesPage() {
 
                 <div className="p-4 space-y-2">
                   <h3 className="font-bold text-white text-base leading-snug">{r.title || r.name}</h3>
+                  
                   <div className="flex items-center justify-between pt-1">
-                    <span className="bg-[#E05638] text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                      {r.tags?.[0] || r.recipeType || 'Main Dish'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="bg-[#E05638] text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                        {r.tags?.[0] || r.recipeType || 'Main Dish'}
+                      </span>
+
+                      {(r.rating || 0) > 0 ? (
+                        <span className="flex items-center gap-1 text-amber-400 text-xs font-bold bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20 shadow-xs">
+                          <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> {r.rating}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-slate-500 text-[11px] font-medium">
+                          <Star className="h-3 w-3 text-slate-600" /> 0
+                        </span>
+                      )}
+                    </div>
+
                     <span className="text-xs text-slate-400 flex items-center gap-1">
                       <Clock className="h-3 w-3" /> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
                     </span>
@@ -512,9 +556,10 @@ export default function SavedRecipesPage() {
               {!isEditing ? (
                 /* RECIPE DETAILS VIEW */
                 <div className="space-y-5 pb-6">
+                  {/* Hero Banner */}
                   <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
                     <img
-                      src={selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80'}
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1546793665-c74683f339c1?auto=format&fit=crop&w=1000&q=80'}
                       alt={selectedRecipe.title || selectedRecipe.name}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
@@ -546,9 +591,8 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
-                  {/* Top Action Row with ADD TO BOOK and FUNCTIONAL ADD TO PLAN */}
+                  {/* Top Action Row */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
-                    {/* Add to Book Dropdown */}
                     <div className="relative">
                       <button
                         type="button"
@@ -607,7 +651,6 @@ export default function SavedRecipesPage() {
                       )}
                     </div>
 
-                    {/* Functional Add to Plan Button (Opens Modal) */}
                     <button
                       type="button"
                       onClick={openAddToPlanModal}
@@ -616,7 +659,6 @@ export default function SavedRecipesPage() {
                       <CalendarPlus className="h-4 w-4 text-[#E05638]" /> Add to Plan
                     </button>
 
-                    {/* Shopping List Modal Button */}
                     <button
                       onClick={handleOpenShoppingModal}
                       className="border border-[#E05638]/60 text-[#E05638] font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 hover:bg-[#E05638]/10"
@@ -627,6 +669,7 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t border-slate-800/80 mx-5" />
 
+                  {/* Servings Stepper & Tools */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <span className="text-xs font-bold text-[#E05638] flex items-center gap-1.5">
@@ -676,90 +719,31 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
+                  {/* Description */}
                   <div className="px-5 text-xs text-slate-300 leading-relaxed">
                     {selectedRecipe.description}
                   </div>
 
                   <div className="border-t border-slate-800/80 mx-5" />
 
-                  <div className="px-5 space-y-6">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                      <h3 className="text-base font-extrabold text-white">Ingredients</h3>
-                      <div className="flex items-center bg-[#070b13] border border-slate-800 rounded-lg text-xs">
-                        <button
-                          onClick={() => setFontSizeScale(Math.max(80, fontSizeScale - 10))}
-                          className="px-2 py-1 text-slate-400 hover:text-white"
-                        >
-                          -
-                        </button>
-                        <span className="px-2 py-1 font-bold text-slate-200">{fontSizeScale}%</span>
-                        <button
-                          onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
-                          className="px-2 py-1 text-slate-400 hover:text-white"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid md:grid-cols-2 gap-3" style={{ fontSize: `${fontSizeScale}%` }}>
-                      {Array.isArray(selectedRecipe.ingredients) && selectedRecipe.ingredients.map((ing: any, idx: number) => {
-                        const amt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
-                        const unit = typeof ing === 'string' ? '' : ing.unit || '';
-                        const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
-                        return (
-                          <div key={idx} className="flex items-start gap-2.5 text-xs py-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#E05638] mt-1.5 shrink-0" />
-                            <span className="text-slate-200">
-                              {(amt || unit) && <strong className="text-white font-bold">{amt} {unit} </strong>}
-                              {name}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="space-y-3 pt-2">
-                      <h3 className="text-base font-extrabold text-white">Instructions</h3>
-                      <div className="space-y-2.5" style={{ fontSize: `${fontSizeScale}%` }}>
-                        {Array.isArray(selectedRecipe.instructions) && selectedRecipe.instructions.map((step: string, idx: number) => {
-                          const isDone = completedSteps.includes(idx);
-                          return (
-                            <div
-                              key={idx}
-                              onClick={() => {
-                                if (completedSteps.includes(idx)) {
-                                  setCompletedSteps(completedSteps.filter(i => i !== idx));
-                                } else {
-                                  setCompletedSteps([...completedSteps, idx]);
-                                }
-                              }}
-                              className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition ${
-                                isDone ? 'bg-[#070b13]/50 border-slate-800/60 opacity-50 line-through' : 'bg-[#070b13] border-slate-800'
-                              }`}
-                            >
-                              <span className="font-extrabold text-[#E05638] shrink-0">{idx + 1}.</span>
-                              <span className="text-slate-200 leading-relaxed flex-1">{step}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-slate-800/80 mx-5" />
-
+                  {/* Cooked Status Column */}
                   <div className="px-5 space-y-3">
                     <div className="flex items-center justify-between">
                       <button
+                        type="button"
                         onClick={() => updateSelectedRecipeState('isCooked', !selectedRecipe.isCooked)}
-                        className="flex items-center gap-2 text-sm font-bold text-white cursor-pointer"
+                        className="flex items-center gap-2.5 text-base font-extrabold text-white group cursor-pointer select-none transition"
                       >
-                        Mark as Cooked
-                        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
-                          selectedRecipe.isCooked ? 'bg-slate-400 text-black' : 'border border-slate-600'
+                        <span className={selectedRecipe.isCooked ? "text-white font-extrabold tracking-tight" : "text-slate-200"}>
+                          {selectedRecipe.isCooked ? "Cooked" : "Mark as Cooked"}
+                        </span>
+                        
+                        <span className={`w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm ${
+                          selectedRecipe.isCooked 
+                            ? 'bg-[#22c55e] text-white' 
+                            : 'border border-slate-600 bg-transparent text-transparent'
                         }`}>
-                          {selectedRecipe.isCooked && '✓'}
+                          {selectedRecipe.isCooked && <Check className="h-3.5 w-3.5 stroke-[3]" />}
                         </span>
                       </button>
 
@@ -768,7 +752,7 @@ export default function SavedRecipesPage() {
                           <Star
                             key={star}
                             onClick={() => updateSelectedRecipeState('rating', star)}
-                            className={`h-4 w-4 cursor-pointer transition ${
+                            className={`h-5 w-5 cursor-pointer transition ${
                               (selectedRecipe.rating || 0) >= star
                                 ? 'fill-[#E05638] text-[#E05638]'
                                 : 'text-slate-700 hover:text-slate-500'
@@ -780,14 +764,16 @@ export default function SavedRecipesPage() {
 
                     <div className="space-y-2">
                       <button
+                        type="button"
                         onClick={() => setIsNoteOpen(!isNoteOpen)}
-                        className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200"
+                        className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition"
                       >
-                        <Edit3 className="h-3.5 w-3.5" /> Add a note
+                        <Edit3 className="h-3.5 w-3.5 text-slate-400" />
+                        <span className="italic">Add a note</span>
                       </button>
 
                       {isNoteOpen && (
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 animate-in fade-in">
                           <input
                             type="text"
                             placeholder="Add notes..."
@@ -796,11 +782,12 @@ export default function SavedRecipesPage() {
                             className="flex-1 bg-[#070b13] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#E05638]"
                           />
                           <button
+                            type="button"
                             onClick={() => {
                               updateSelectedRecipeState('note', noteText);
                               setIsNoteOpen(false);
                             }}
-                            className="bg-[#E05638] text-white font-bold text-xs px-3 py-2 rounded-xl"
+                            className="bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs px-3.5 py-2 rounded-xl transition"
                           >
                             Save
                           </button>
@@ -814,6 +801,110 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t border-slate-800/80 mx-5" />
 
+                  {/* ───────────────────────────────────────────────────────────── */}
+                  {/* INGREDIENTS & INSTRUCTIONS WITH REAL-TIME FONT RESIZING */}
+                  {/* ───────────────────────────────────────────────────────────── */}
+                  <div className="px-5 space-y-6">
+                    
+                    {/* Ingredients Header with Stepper Controls */}
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <h3 className="text-base font-extrabold text-white">Ingredients</h3>
+                      
+                      {/* Enlarger Percentage Stepper Container */}
+                      <div className="flex items-center bg-[#070b13] border border-slate-700/80 rounded-lg text-xs overflow-hidden shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => setFontSizeScale(prev => Math.max(70, prev - 10))}
+                          className="px-2.5 py-1 text-slate-300 hover:text-white hover:bg-slate-800 transition font-bold"
+                          title="Decrease font size"
+                        >
+                          -
+                        </button>
+                        <span className="px-3 py-1 font-bold text-slate-200 border-x border-slate-800 select-none bg-[#0b0e14]">
+                          {fontSizeScale}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setFontSizeScale(prev => Math.min(160, prev + 10))}
+                          className="px-2.5 py-1 text-slate-300 hover:text-white hover:bg-slate-800 transition font-bold"
+                          title="Increase font size"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Scalable Two-Column Ingredients */}
+                    <div 
+                      className="grid md:grid-cols-2 gap-x-8 gap-y-3 transition-all duration-150"
+                      style={{ fontSize: computedFontSize, lineHeight: computedLineHeight }}
+                    >
+                      {Array.isArray(selectedRecipe.ingredients) && selectedRecipe.ingredients.map((ing: any, idx: number) => {
+                        const amt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
+                        const unit = typeof ing === 'string' ? '' : ing.unit || '';
+                        const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
+                        return (
+                          <div key={idx} className="flex items-start gap-2.5 py-0.5">
+                            <span 
+                              className="rounded-full bg-[#E05638] shrink-0" 
+                              style={{ 
+                                width: `${(fontSizeScale / 100) * 0.45}rem`, 
+                                height: `${(fontSizeScale / 100) * 0.45}rem`,
+                                marginTop: `${(fontSizeScale / 100) * 0.45}rem`
+                              }}
+                            />
+                            <span className="text-slate-200">
+                              {(amt || unit) && (
+                                <strong className="text-white font-bold">
+                                  {amt} {unit && unit !== 'Unit' ? unit : ''}{' '}
+                                </strong>
+                              )}
+                              {name}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Scalable Instructions */}
+                    <div className="space-y-3 pt-3 border-t border-slate-800/80">
+                      <h3 className="text-base font-extrabold text-white">Instructions</h3>
+                      
+                      <div 
+                        className="space-y-2.5 transition-all duration-150"
+                        style={{ fontSize: computedFontSize, lineHeight: computedLineHeight }}
+                      >
+                        {Array.isArray(selectedRecipe.instructions) && selectedRecipe.instructions.map((step: string, idx: number) => {
+                          const isDone = completedSteps.includes(idx);
+                          return (
+                            <div
+                              key={idx}
+                              onClick={() => {
+                                if (completedSteps.includes(idx)) {
+                                  setCompletedSteps(completedSteps.filter(i => i !== idx));
+                                } else {
+                                  setCompletedSteps([...completedSteps, idx]);
+                                }
+                              }}
+                              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition select-none ${
+                                isDone 
+                                  ? 'bg-[#070b13]/50 border-slate-800/60 opacity-50 line-through' 
+                                  : 'bg-[#070b13] border-slate-800 hover:border-slate-700'
+                              }`}
+                            >
+                              <span className="font-extrabold text-[#E05638] shrink-0">{idx + 1}.</span>
+                              <span className="text-slate-200 flex-1 leading-relaxed">{step}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                  </div>
+
+                  <div className="border-t border-slate-800/80 mx-5" />
+
+                  {/* Delete Option */}
                   <div className="px-5 flex items-center justify-end text-xs">
                     <button
                       onClick={() => handleDeleteRecipe(selectedRecipe.id)}
@@ -1219,213 +1310,6 @@ export default function SavedRecipesPage() {
                   )}
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADD TO CALENDAR / ADD TO PLAN MODAL (MATCHING ATTACHED SCREENSHOT) */}
-      {showAddToPlanModal && selectedRecipe && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[70] flex items-center justify-center p-4">
-          <div className="bg-[#0f1115] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in">
-            
-            {/* Close Button */}
-            <button 
-              onClick={() => setShowAddToPlanModal(false)} 
-              className="absolute top-4 right-4 p-2 bg-[#1e2430] hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition"
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            {/* Header */}
-            <div className="pr-6 space-y-1">
-              <h2 className="text-xl font-black text-[#E05638] tracking-tight">Add to Calendar</h2>
-              <p className="text-xs text-slate-400 leading-snug">
-                Schedule {selectedRecipe.title || selectedRecipe.name} in your meal plan
-              </p>
-            </div>
-
-            {/* Form Fields */}
-            <form onSubmit={handleSaveToCalendar} className="space-y-4 pt-1">
-              
-              {/* Date */}
-              <div>
-                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Date</label>
-                <div className="relative flex items-center">
-                  <Calendar className="h-4 w-4 text-[#E05638] absolute left-3.5 pointer-events-none" />
-                  <input
-                    type="date"
-                    required
-                    value={planDate}
-                    onChange={(e) => setPlanDate(e.target.value)}
-                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl pl-10 pr-3 py-2.5 text-xs text-[#E05638] font-semibold outline-none focus:border-[#E05638] cursor-pointer"
-                  />
-                </div>
-              </div>
-
-              {/* Meal Type */}
-              <div>
-                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Meal Type</label>
-                <div className="relative flex items-center">
-                  <select
-                    value={planMealType}
-                    onChange={(e) => setPlanMealType(e.target.value)}
-                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638] cursor-pointer appearance-none"
-                  >
-                    <option value="Breakfast">Breakfast</option>
-                    <option value="Lunch">Lunch</option>
-                    <option value="Dinner">Dinner</option>
-                    <option value="Snack">Snack</option>
-                  </select>
-                  <ChevronDown className="h-4 w-4 text-slate-400 absolute right-3 pointer-events-none" />
-                </div>
-              </div>
-
-              {/* Time */}
-              <div>
-                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Time</label>
-                <div className="relative flex items-center">
-                  <Clock className="h-4 w-4 text-slate-400 absolute left-3.5 pointer-events-none" />
-                  <input
-                    type="time"
-                    value={planTime}
-                    onChange={(e) => setPlanTime(e.target.value)}
-                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-10 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638]"
-                    placeholder="--:-- --"
-                  />
-                  <Clock className="h-4 w-4 text-[#E05638] absolute right-3.5 pointer-events-none" />
-                </div>
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Notes</label>
-                <textarea
-                  value={planNotes}
-                  onChange={(e) => setPlanNotes(e.target.value)}
-                  placeholder="Add any notes or reminders..."
-                  rows={3}
-                  className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-[#E05638] resize-none"
-                />
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex justify-end gap-2.5 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddToPlanModal(false)}
-                  className="px-5 py-2.5 rounded-xl border border-emerald-900/80 hover:bg-emerald-950/20 text-[#E05638] font-bold text-xs transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs transition shadow-md"
-                >
-                  Add to Calendar
-                </button>
-              </div>
-
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* SHOPPING LIST MODAL */}
-      {isShoppingModalOpen && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-          <div className="bg-[#0c111d] border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <ShoppingCart className="h-5 w-5 text-[#E05638]" /> Add to Shopping List
-                </h3>
-                <p className="text-xs text-slate-400">Select or edit items to add directly to your list</p>
-              </div>
-              <button onClick={() => setIsShoppingModalOpen(false)} className="text-slate-400 hover:text-white">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="overflow-y-auto flex-1 space-y-3 pr-1 text-xs">
-              {shoppingModalIngredients.map((ing, idx) => (
-                <div key={ing.id} className="flex items-center gap-2 bg-[#070b13] p-2.5 rounded-xl border border-slate-800">
-                  <div
-                    onClick={() => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].selected = !updated[idx].selected;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className={`w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition ${
-                      ing.selected ? 'bg-[#E05638] border-[#E05638] text-white' : 'border-slate-700 bg-slate-900'
-                    }`}
-                  >
-                    {ing.selected && <CheckSquare className="h-3.5 w-3.5" />}
-                  </div>
-
-                  <input
-                    type="text"
-                    value={ing.amount}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].amount = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="w-16 bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-white font-bold outline-none"
-                    placeholder="Amt"
-                  />
-                  <input
-                    type="text"
-                    value={ing.unit}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].unit = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="w-20 bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-slate-300 outline-none"
-                    placeholder="Unit"
-                  />
-                  <input
-                    type="text"
-                    value={ing.name}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].name = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="flex-1 bg-transparent border-none text-white outline-none px-2"
-                    placeholder="Ingredient name..."
-                  />
-                  <select
-                    value={ing.category}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].category = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="w-36 bg-slate-900 border border-slate-800 rounded-lg p-2 text-[11px] text-slate-300 outline-none cursor-pointer"
-                  >
-                    {categories.map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
-              <button
-                onClick={() => setIsShoppingModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmAddToShoppingList}
-                className="px-6 py-2 rounded-xl bg-[#E05638] text-white font-bold text-xs flex items-center gap-1.5"
-              >
-                <ShoppingCart className="h-3.5 w-3.5" /> Add Selected to List
-              </button>
             </div>
           </div>
         </div>

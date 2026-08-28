@@ -1,4 +1,6 @@
-'use client';
+import os
+
+recipes_page_code = """'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
@@ -47,7 +49,7 @@ export default function SavedRecipesPage() {
   const [isReorderingSteps, setIsReorderingSteps] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // View States & Dynamic Font Scaling (70% - 160%)
+  // View States
   const [servingsMultiplier, setServingsMultiplier] = useState(1);
   const [fontSizeScale, setFontSizeScale] = useState(100);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
@@ -83,20 +85,15 @@ export default function SavedRecipesPage() {
       imageUrl: 'https://images.unsplash.com/photo-1546793665-c74683f339c1?auto=format&fit=crop&w=800&q=80',
       bookId: 'book_3',
       ingredients: [
-        { amount: '4', unit: 'cups', item: 'cubed crusty bread', category: 'Bakery' },
-        { amount: '1', unit: 'Extra', item: '-virgin olive oil (for drizzling)', category: 'Pantry Staples' },
-        { amount: '1', unit: 'Sea', item: 'salt (for sprinkling)', category: 'Pantry Staples' },
-        { amount: '1', unit: 'cup', item: 'mayonnaise', category: 'Condiments and Sauces' },
-        { amount: '1/4', unit: 'cup', item: 'extra-virgin olive oil', category: 'Pantry Staples' },
-        { amount: '2', unit: 'tablespoons', item: 'fresh lemon juice', category: 'Produce' },
-        { amount: '2', unit: 'teaspoons', item: 'Dijon mustard', category: 'Condiments and Sauces' },
-        { amount: '1', unit: 'garlic', item: 'clove (grated)', category: 'Produce' }
+        { amount: '1', unit: 'head', item: 'Romaine lettuce, chopped', category: 'Produce' },
+        { amount: '1/2', unit: 'cup', item: 'Grated Parmesan cheese', category: 'Dairy' },
+        { amount: '1', unit: 'cup', item: 'Garlic croutons', category: 'Bakery' },
+        { amount: '3', unit: 'tbsp', item: 'Caesar dressing', category: 'Condiments and Sauces' }
       ],
       instructions: [
-        'Preheat oven to 375°F (190°C). Toss cubed bread with olive oil and sea salt, then bake for 10-12 minutes until golden and crisp.',
-        'In a small bowl, whisk together mayonnaise, extra-virgin olive oil, fresh lemon juice, Dijon mustard, and grated garlic until smooth and creamy.',
-        'In a large salad bowl, toss chopped crisp romaine lettuce with the dressing until evenly coated.',
-        'Top generously with warm garlic croutons, freshly shaved Parmesan cheese, and freshly cracked black pepper before serving.'
+        'Wash, thoroughly dry, and chop the romaine lettuce.',
+        'In a large salad bowl, toss lettuce with Caesar dressing until evenly coated.',
+        'Top with crunchy croutons and generous shavings of fresh Parmesan.'
       ]
     }
   ];
@@ -397,8 +394,6 @@ export default function SavedRecipesPage() {
   });
 
   const assignedBook = books.find(b => b.id === selectedRecipe?.bookId);
-  const computedFontSize = `${(fontSizeScale / 100) * 0.875}rem`;
-  const computedLineHeight = `${(fontSizeScale / 100) * 1.35}rem`;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 text-slate-100 pb-16 px-4">
@@ -726,9 +721,12 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t border-slate-800/80 mx-5" />
 
-                  {/* Cooked Status Column */}
+                  {/* ───────────────────────────────────────────────────────────── */}
+                  {/* 1 & 2: MARK AS COOKED / RATING / NOTE MOVED ABOVE INGREDIENTS */}
+                  {/* ───────────────────────────────────────────────────────────── */}
                   <div className="px-5 space-y-3">
                     <div className="flex items-center justify-between">
+                      {/* Cooked Status Toggle */}
                       <button
                         type="button"
                         onClick={() => updateSelectedRecipeState('isCooked', !selectedRecipe.isCooked)}
@@ -747,6 +745,7 @@ export default function SavedRecipesPage() {
                         </span>
                       </button>
 
+                      {/* 5-Star Rating */}
                       <div className="flex items-center gap-1">
                         {[1, 2, 3, 4, 5].map((star) => (
                           <Star
@@ -762,6 +761,7 @@ export default function SavedRecipesPage() {
                       </div>
                     </div>
 
+                    {/* Add a note */}
                     <div className="space-y-2">
                       <button
                         type="button"
@@ -801,64 +801,37 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t border-slate-800/80 mx-5" />
 
-                  {/* ───────────────────────────────────────────────────────────── */}
-                  {/* INGREDIENTS & INSTRUCTIONS WITH REAL-TIME FONT RESIZING */}
-                  {/* ───────────────────────────────────────────────────────────── */}
+                  {/* Ingredients & Instructions Section */}
                   <div className="px-5 space-y-6">
-                    
-                    {/* Ingredients Header with Stepper Controls */}
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                       <h3 className="text-base font-extrabold text-white">Ingredients</h3>
-                      
-                      {/* Enlarger Percentage Stepper Container */}
-                      <div className="flex items-center bg-[#070b13] border border-slate-700/80 rounded-lg text-xs overflow-hidden shadow-sm">
+                      <div className="flex items-center bg-[#070b13] border border-slate-800 rounded-lg text-xs">
                         <button
-                          type="button"
-                          onClick={() => setFontSizeScale(prev => Math.max(70, prev - 10))}
-                          className="px-2.5 py-1 text-slate-300 hover:text-white hover:bg-slate-800 transition font-bold"
-                          title="Decrease font size"
+                          onClick={() => setFontSizeScale(Math.max(80, fontSizeScale - 10))}
+                          className="px-2 py-1 text-slate-400 hover:text-white"
                         >
                           -
                         </button>
-                        <span className="px-3 py-1 font-bold text-slate-200 border-x border-slate-800 select-none bg-[#0b0e14]">
-                          {fontSizeScale}%
-                        </span>
+                        <span className="px-2 py-1 font-bold text-slate-200">{fontSizeScale}%</span>
                         <button
-                          type="button"
-                          onClick={() => setFontSizeScale(prev => Math.min(160, prev + 10))}
-                          className="px-2.5 py-1 text-slate-300 hover:text-white hover:bg-slate-800 transition font-bold"
-                          title="Increase font size"
+                          onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
+                          className="px-2 py-1 text-slate-400 hover:text-white"
                         >
                           +
                         </button>
                       </div>
                     </div>
 
-                    {/* Scalable Two-Column Ingredients */}
-                    <div 
-                      className="grid md:grid-cols-2 gap-x-8 gap-y-3 transition-all duration-150"
-                      style={{ fontSize: computedFontSize, lineHeight: computedLineHeight }}
-                    >
+                    <div className="grid md:grid-cols-2 gap-3" style={{ fontSize: `${fontSizeScale}%` }}>
                       {Array.isArray(selectedRecipe.ingredients) && selectedRecipe.ingredients.map((ing: any, idx: number) => {
                         const amt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
                         const unit = typeof ing === 'string' ? '' : ing.unit || '';
                         const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
                         return (
-                          <div key={idx} className="flex items-start gap-2.5 py-0.5">
-                            <span 
-                              className="rounded-full bg-[#E05638] shrink-0" 
-                              style={{ 
-                                width: `${(fontSizeScale / 100) * 0.45}rem`, 
-                                height: `${(fontSizeScale / 100) * 0.45}rem`,
-                                marginTop: `${(fontSizeScale / 100) * 0.45}rem`
-                              }}
-                            />
+                          <div key={idx} className="flex items-start gap-2.5 text-xs py-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#E05638] mt-1.5 shrink-0" />
                             <span className="text-slate-200">
-                              {(amt || unit) && (
-                                <strong className="text-white font-bold">
-                                  {amt} {unit && unit !== 'Unit' ? unit : ''}{' '}
-                                </strong>
-                              )}
+                              {(amt || unit) && <strong className="text-white font-bold">{amt} {unit} </strong>}
                               {name}
                             </span>
                           </div>
@@ -866,14 +839,9 @@ export default function SavedRecipesPage() {
                       })}
                     </div>
 
-                    {/* Scalable Instructions */}
-                    <div className="space-y-3 pt-3 border-t border-slate-800/80">
+                    <div className="space-y-3 pt-2">
                       <h3 className="text-base font-extrabold text-white">Instructions</h3>
-                      
-                      <div 
-                        className="space-y-2.5 transition-all duration-150"
-                        style={{ fontSize: computedFontSize, lineHeight: computedLineHeight }}
-                      >
+                      <div className="space-y-2.5" style={{ fontSize: `${fontSizeScale}%` }}>
                         {Array.isArray(selectedRecipe.instructions) && selectedRecipe.instructions.map((step: string, idx: number) => {
                           const isDone = completedSteps.includes(idx);
                           return (
@@ -886,20 +854,17 @@ export default function SavedRecipesPage() {
                                   setCompletedSteps([...completedSteps, idx]);
                                 }
                               }}
-                              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition select-none ${
-                                isDone 
-                                  ? 'bg-[#070b13]/50 border-slate-800/60 opacity-50 line-through' 
-                                  : 'bg-[#070b13] border-slate-800 hover:border-slate-700'
+                              className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition ${
+                                isDone ? 'bg-[#070b13]/50 border-slate-800/60 opacity-50 line-through' : 'bg-[#070b13] border-slate-800'
                               }`}
                             >
                               <span className="font-extrabold text-[#E05638] shrink-0">{idx + 1}.</span>
-                              <span className="text-slate-200 flex-1 leading-relaxed">{step}</span>
+                              <span className="text-slate-200 leading-relaxed flex-1">{step}</span>
                             </div>
                           );
                         })}
                       </div>
                     </div>
-
                   </div>
 
                   <div className="border-t border-slate-800/80 mx-5" />
@@ -1314,6 +1279,210 @@ export default function SavedRecipesPage() {
           </div>
         </div>
       )}
+
+      {/* ADD TO PLAN MODAL */}
+      {showAddToPlanModal && selectedRecipe && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[70] flex items-center justify-center p-4">
+          <div className="bg-[#0f1115] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in">
+            <button 
+              onClick={() => setShowAddToPlanModal(false)} 
+              className="absolute top-4 right-4 p-2 bg-[#1e2430] hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="pr-6 space-y-1">
+              <h2 className="text-xl font-black text-[#E05638] tracking-tight">Add to Calendar</h2>
+              <p className="text-xs text-slate-400 leading-snug">
+                Schedule {selectedRecipe.title || selectedRecipe.name} in your meal plan
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveToCalendar} className="space-y-4 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Date</label>
+                <div className="relative flex items-center">
+                  <Calendar className="h-4 w-4 text-[#E05638] absolute left-3.5 pointer-events-none" />
+                  <input
+                    type="date"
+                    required
+                    value={planDate}
+                    onChange={(e) => setPlanDate(e.target.value)}
+                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl pl-10 pr-3 py-2.5 text-xs text-[#E05638] font-semibold outline-none focus:border-[#E05638] cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Meal Type</label>
+                <div className="relative flex items-center">
+                  <select
+                    value={planMealType}
+                    onChange={(e) => setPlanMealType(e.target.value)}
+                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638] cursor-pointer appearance-none"
+                  >
+                    <option value="Breakfast">Breakfast</option>
+                    <option value="Lunch">Lunch</option>
+                    <option value="Dinner">Dinner</option>
+                    <option value="Snack">Snack</option>
+                  </select>
+                  <ChevronDown className="h-4 w-4 text-slate-400 absolute right-3 pointer-events-none" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Time</label>
+                <div className="relative flex items-center">
+                  <Clock className="h-4 w-4 text-slate-400 absolute left-3.5 pointer-events-none" />
+                  <input
+                    type="time"
+                    value={planTime}
+                    onChange={(e) => setPlanTime(e.target.value)}
+                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-10 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638]"
+                    placeholder="--:-- --"
+                  />
+                  <Clock className="h-4 w-4 text-[#E05638] absolute right-3.5 pointer-events-none" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Notes</label>
+                <textarea
+                  value={planNotes}
+                  onChange={(e) => setPlanNotes(e.target.value)}
+                  placeholder="Add any notes or reminders..."
+                  rows={3}
+                  className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-[#E05638] resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddToPlanModal(false)}
+                  className="px-5 py-2.5 rounded-xl border border-emerald-900/80 hover:bg-emerald-950/20 text-[#E05638] font-bold text-xs transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs transition shadow-md"
+                >
+                  Add to Calendar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SHOPPING LIST MODAL */}
+      {isShoppingModalOpen && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-[#0c111d] border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <ShoppingCart className="h-5 w-5 text-[#E05638]" /> Add to Shopping List
+                </h3>
+                <p className="text-xs text-slate-400">Select or edit items to add directly to your list</p>
+              </div>
+              <button onClick={() => setIsShoppingModalOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-3 pr-1 text-xs">
+              {shoppingModalIngredients.map((ing, idx) => (
+                <div key={ing.id} className="flex items-center gap-2 bg-[#070b13] p-2.5 rounded-xl border border-slate-800">
+                  <div
+                    onClick={() => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].selected = !updated[idx].selected;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className={`w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition ${
+                      ing.selected ? 'bg-[#E05638] border-[#E05638] text-white' : 'border-slate-700 bg-slate-900'
+                    }`}
+                  >
+                    {ing.selected && <CheckSquare className="h-3.5 w-3.5" />}
+                  </div>
+
+                  <input
+                    type="text"
+                    value={ing.amount}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].amount = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-16 bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-white font-bold outline-none"
+                    placeholder="Amt"
+                  />
+                  <input
+                    type="text"
+                    value={ing.unit}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].unit = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-20 bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-slate-300 outline-none"
+                    placeholder="Unit"
+                  />
+                  <input
+                    type="text"
+                    value={ing.name}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].name = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="flex-1 bg-transparent border-none text-white outline-none px-2"
+                    placeholder="Ingredient name..."
+                  />
+                  <select
+                    value={ing.category}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].category = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-36 bg-slate-900 border border-slate-800 rounded-lg p-2 text-[11px] text-slate-300 outline-none cursor-pointer"
+                  >
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
+              <button
+                onClick={() => setIsShoppingModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmAddToShoppingList}
+                className="px-6 py-2 rounded-xl bg-[#E05638] text-white font-bold text-xs flex items-center gap-1.5"
+              >
+                <ShoppingCart className="h-3.5 w-3.5" /> Add Selected to List
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+"""
+
+for path in ["apps/web/src/app/recipes/page.tsx", "apps/web/src/app/recipe/page.tsx"]:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(recipes_page_code)
+
+print("✅ 'Cooked' status column moved above Ingredients and updated with green check badge!")
