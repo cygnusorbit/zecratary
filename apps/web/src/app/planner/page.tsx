@@ -44,12 +44,11 @@ export default function PlannerPage() {
   const [activeRecipeTagFilter, setActiveRecipeTagFilter] = useState('All');
   const [showFilterOptions, setShowFilterOptions] = useState(false);
 
-  // "Select Recipes for Shopping List" Modal State (Matching Screenshot)
+  // "Select Recipes for Shopping List" Modal State
   const [showShoppingListModal, setShowShoppingListModal] = useState(false);
   const [selectedMealIdsForShopping, setSelectedMealIdsForShopping] = useState<string[]>([]);
   const [expandedDayCards, setExpandedDayCards] = useState<{ [key: string]: boolean }>({});
 
-  // Strictly load canonical saved recipes
   const loadSavedData = useCallback(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -82,7 +81,6 @@ export default function PlannerPage() {
         }
       }
 
-      // Load cookbooks
       const rawBooks = localStorage.getItem('zecratary_recipe_books');
       if (rawBooks) {
         const parsedBooks = JSON.parse(rawBooks);
@@ -118,16 +116,6 @@ export default function PlannerPage() {
           image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=800&q=80',
           mealType: 'Dinner',
           time: '19:00',
-          isLeftover: false,
-          notes: ''
-        },
-        {
-          id: 'p_2',
-          date: '2026-08-28',
-          recipeName: 'Garden Salad',
-          image: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=800&q=80',
-          mealType: 'Lunch',
-          time: '12:30',
           isLeftover: false,
           notes: ''
         }
@@ -254,9 +242,6 @@ export default function PlannerPage() {
     }
   };
 
-  // -------------------------------------------------------------
-  // Shopping List Modal Handler (Matching Screenshot)
-  // -------------------------------------------------------------
   const openShoppingListSelectModal = () => {
     loadSavedData();
     const allMealIds = plannedMeals.filter(m => !m.isLeftover).map(m => m.id);
@@ -346,10 +331,8 @@ export default function PlannerPage() {
   const activeDateFormattedHeader = activeDateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
   const activeDateFieldText = activeDateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
-  // Dates with planned meals for shopping list
   const datesWithMeals = Array.from(new Set(plannedMeals.map(m => m.date))).sort();
 
-  // Filter recipes strictly from active saved recipes
   const filteredPickerRecipes = savedRecipes.filter(r => {
     const name = (r.name || r.title || '').toLowerCase();
     const matchesSearch = !recipeSearch.trim() || name.includes(recipeSearch.toLowerCase().trim());
@@ -390,7 +373,6 @@ export default function PlannerPage() {
           >
             <Copy className="h-4 w-4 text-[#E05638]" /> Copy Week
           </button>
-          {/* SHOPPING LIST BUTTON - OPENS EXACT POPUP MODAL */}
           <button
             type="button"
             onClick={openShoppingListSelectModal}
@@ -591,14 +573,16 @@ export default function PlannerPage() {
         );
       })()}
 
-      {/* ------------------------------------------------------------- */}
-      {/* EXACT "SELECT RECIPES FOR SHOPPING LIST" MODAL (MATCHING REF) */}
-      {/* ------------------------------------------------------------- */}
+      {/* 1. SELECT RECIPES FOR SHOPPING LIST MODAL (CLICK OUTSIDE CLOSES) */}
       {showShoppingListModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0b0e14] border border-slate-800/90 rounded-3xl max-w-lg w-full p-7 space-y-6 shadow-2xl relative max-h-[90vh] flex flex-col animate-in fade-in">
-            
-            {/* Close Button */}
+        <div 
+          onClick={() => setShowShoppingListModal(false)}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0b0e14] border border-slate-800/90 rounded-3xl max-w-lg w-full p-7 space-y-6 shadow-2xl relative max-h-[90vh] flex flex-col animate-in fade-in cursor-default"
+          >
             <button 
               onClick={() => setShowShoppingListModal(false)} 
               className="absolute top-5 right-5 p-2 bg-[#172033] hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition"
@@ -606,7 +590,6 @@ export default function PlannerPage() {
               <X className="h-4 w-4" />
             </button>
 
-            {/* Modal Header */}
             <div className="space-y-1.5 pr-8">
               <h2 className="text-xl font-bold text-[#E05638] tracking-tight">
                 Select Recipes for Shopping List
@@ -616,7 +599,6 @@ export default function PlannerPage() {
               </p>
             </div>
 
-            {/* Day Accordion Container */}
             <div className="overflow-y-auto flex-1 space-y-3 pr-1 py-1 text-xs">
               {datesWithMeals.length === 0 ? (
                 <div className="py-12 text-center text-xs text-slate-500 bg-[#07090e] rounded-2xl border border-slate-800">
@@ -638,13 +620,11 @@ export default function PlannerPage() {
                       key={dateStr}
                       className="border border-[#E05638] bg-[#0c0d11] rounded-2xl transition overflow-hidden shadow-md"
                     >
-                      {/* Day Header Row */}
                       <div 
                         onClick={() => toggleDaySelectionForShopping(dateStr, dayMeals)}
                         className="flex items-center justify-between p-4 cursor-pointer select-none"
                       >
                         <div className="flex items-center gap-3.5">
-                          {/* Checked Box */}
                           <div 
                             className={`w-5 h-5 rounded-md flex items-center justify-center transition shrink-0 ${
                               isAllDaySelected || isPartiallySelected
@@ -666,7 +646,6 @@ export default function PlannerPage() {
                           </div>
                         </div>
 
-                        {/* Expand/Collapse Chevron */}
                         <button
                           type="button"
                           onClick={(e) => {
@@ -679,7 +658,6 @@ export default function PlannerPage() {
                         </button>
                       </div>
 
-                      {/* Expanded Recipes inside Day */}
                       {isExpanded && (
                         <div className="px-4 pb-3 pt-1 space-y-2 border-t border-slate-800/80 bg-[#07090e]/60">
                           {dayMeals.map((meal) => {
@@ -731,7 +709,6 @@ export default function PlannerPage() {
               )}
             </div>
 
-            {/* Modal Bottom Buttons */}
             <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-800">
               <button
                 type="button"
@@ -748,15 +725,20 @@ export default function PlannerPage() {
                 Generate List
               </button>
             </div>
-
           </div>
         </div>
       )}
 
-      {/* Main Add Meal Modal */}
+      {/* 2. MAIN ADD MEAL MODAL (CLICK OUTSIDE CLOSES) */}
       {showAddMealModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0b0e14] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in">
+        <div 
+          onClick={() => setShowAddMealModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0b0e14] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
+          >
             <button 
               onClick={() => setShowAddMealModal(false)} 
               className="absolute top-4 right-4 p-1.5 bg-[#172033] hover:bg-slate-700 text-slate-300 hover:text-white rounded-md transition"
@@ -903,10 +885,16 @@ export default function PlannerPage() {
         </div>
       )}
 
-      {/* Edit Meal Modal */}
+      {/* 3. EDIT MEAL MODAL (CLICK OUTSIDE CLOSES) */}
       {showEditMealModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0b0e14] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in">
+        <div 
+          onClick={() => setShowEditMealModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0b0e14] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
+          >
             <button 
               onClick={() => setShowEditMealModal(false)} 
               className="absolute top-4 right-4 p-1.5 bg-[#172033] hover:bg-slate-700 text-slate-300 hover:text-white rounded-md transition"
@@ -1069,10 +1057,16 @@ export default function PlannerPage() {
         </div>
       )}
 
-      {/* Select Recipe Picker Modal */}
+      {/* 4. SELECT RECIPE PICKER MODAL (CLICK OUTSIDE CLOSES) */}
       {showRecipePickerModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
-          <div className="bg-[#0a0c10] border border-slate-800/90 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in min-h-[500px] flex flex-col justify-between">
+        <div 
+          onClick={() => setShowRecipePickerModal(false)}
+          className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[70] flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0a0c10] border border-slate-800/90 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in min-h-[500px] flex flex-col justify-between cursor-default"
+          >
             <div className="space-y-4">
               <button 
                 onClick={() => setShowRecipePickerModal(false)} 

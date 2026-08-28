@@ -47,7 +47,7 @@ export default function SavedRecipesPage() {
   const [isReorderingSteps, setIsReorderingSteps] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // View States & Dynamic Font Scaling (70% - 160%)
+  // View States & Dynamic Font Scaling
   const [servingsMultiplier, setServingsMultiplier] = useState(1);
   const [fontSizeScale, setFontSizeScale] = useState(100);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
@@ -541,10 +541,16 @@ export default function SavedRecipesPage() {
         </div>
       )}
 
-      {/* RECIPE DETAILS & EDIT MODAL */}
+      {/* 1. RECIPE DETAILS & EDIT MODAL (CLICK OUTSIDE CLOSES) */}
       {selectedRecipe && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-          <div className="bg-[#0c111d] border border-slate-800 rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative">
+        <div 
+          onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0c111d] border border-slate-800 rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default"
+          >
             <button
               onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
               className="absolute top-4 right-4 z-30 p-2 bg-black/70 hover:bg-black text-slate-300 hover:text-white rounded-xl border border-slate-700/60 transition"
@@ -613,7 +619,7 @@ export default function SavedRecipesPage() {
                       {isBookDropdownOpen && (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
-                          <div className="absolute left-0 top-full mt-2 w-64 bg-[#0d131f] border border-slate-700/80 rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in">
+                          <div className="absolute left-0 top-full mt-2 w-64 bg-[#0d131f] border border-slate-700/80 rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in" onClick={(e) => e.stopPropagation()}>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1.5 flex items-center justify-between">
                               <span>Select Cookbook</span>
                               <Link href="/books" className="text-emerald-400 hover:underline">Manage</Link>
@@ -801,16 +807,11 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t border-slate-800/80 mx-5" />
 
-                  {/* ───────────────────────────────────────────────────────────── */}
                   {/* INGREDIENTS & INSTRUCTIONS WITH REAL-TIME FONT RESIZING */}
-                  {/* ───────────────────────────────────────────────────────────── */}
                   <div className="px-5 space-y-6">
-                    
-                    {/* Ingredients Header with Stepper Controls */}
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                       <h3 className="text-base font-extrabold text-white">Ingredients</h3>
                       
-                      {/* Enlarger Percentage Stepper Container */}
                       <div className="flex items-center bg-[#070b13] border border-slate-700/80 rounded-lg text-xs overflow-hidden shadow-sm">
                         <button
                           type="button"
@@ -834,7 +835,6 @@ export default function SavedRecipesPage() {
                       </div>
                     </div>
 
-                    {/* Scalable Two-Column Ingredients */}
                     <div 
                       className="grid md:grid-cols-2 gap-x-8 gap-y-3 transition-all duration-150"
                       style={{ fontSize: computedFontSize, lineHeight: computedLineHeight }}
@@ -866,7 +866,6 @@ export default function SavedRecipesPage() {
                       })}
                     </div>
 
-                    {/* Scalable Instructions */}
                     <div className="space-y-3 pt-3 border-t border-slate-800/80">
                       <h3 className="text-base font-extrabold text-white">Instructions</h3>
                       
@@ -899,7 +898,6 @@ export default function SavedRecipesPage() {
                         })}
                       </div>
                     </div>
-
                   </div>
 
                   <div className="border-t border-slate-800/80 mx-5" />
@@ -1310,6 +1308,214 @@ export default function SavedRecipesPage() {
                   )}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. ADD TO PLAN / CALENDAR MODAL (CLICK OUTSIDE CLOSES) */}
+      {showAddToPlanModal && selectedRecipe && (
+        <div 
+          onClick={() => setShowAddToPlanModal(false)}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-[70] flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0f1115] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
+          >
+            <button 
+              onClick={() => setShowAddToPlanModal(false)} 
+              className="absolute top-4 right-4 p-2 bg-[#1e2430] hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="pr-6 space-y-1">
+              <h2 className="text-xl font-black text-[#E05638] tracking-tight">Add to Calendar</h2>
+              <p className="text-xs text-slate-400 leading-snug">
+                Schedule {selectedRecipe.title || selectedRecipe.name} in your meal plan
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveToCalendar} className="space-y-4 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Date</label>
+                <div className="relative flex items-center">
+                  <Calendar className="h-4 w-4 text-[#E05638] absolute left-3.5 pointer-events-none" />
+                  <input
+                    type="date"
+                    required
+                    value={planDate}
+                    onChange={(e) => setPlanDate(e.target.value)}
+                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl pl-10 pr-3 py-2.5 text-xs text-[#E05638] font-semibold outline-none focus:border-[#E05638] cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Meal Type</label>
+                <div className="relative flex items-center">
+                  <select
+                    value={planMealType}
+                    onChange={(e) => setPlanMealType(e.target.value)}
+                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638] cursor-pointer appearance-none"
+                  >
+                    <option value="Breakfast">Breakfast</option>
+                    <option value="Lunch">Lunch</option>
+                    <option value="Dinner">Dinner</option>
+                    <option value="Snack">Snack</option>
+                  </select>
+                  <ChevronDown className="h-4 w-4 text-slate-400 absolute right-3 pointer-events-none" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Time</label>
+                <div className="relative flex items-center">
+                  <Clock className="h-4 w-4 text-slate-400 absolute left-3.5 pointer-events-none" />
+                  <input
+                    type="time"
+                    value={planTime}
+                    onChange={(e) => setPlanTime(e.target.value)}
+                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-10 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638]"
+                    placeholder="--:-- --"
+                  />
+                  <Clock className="h-4 w-4 text-[#E05638] absolute right-3.5 pointer-events-none" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Notes</label>
+                <textarea
+                  value={planNotes}
+                  onChange={(e) => setPlanNotes(e.target.value)}
+                  placeholder="Add any notes or reminders..."
+                  rows={3}
+                  className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-[#E05638] resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddToPlanModal(false)}
+                  className="px-5 py-2.5 rounded-xl border border-emerald-900/80 hover:bg-emerald-950/20 text-[#E05638] font-bold text-xs transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs transition shadow-md"
+                >
+                  Add to Calendar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 3. SHOPPING LIST MODAL (CLICK OUTSIDE CLOSES) */}
+      {isShoppingModalOpen && (
+        <div 
+          onClick={() => setIsShoppingModalOpen(false)}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0c111d] border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default"
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <ShoppingCart className="h-5 w-5 text-[#E05638]" /> Add to Shopping List
+                </h3>
+                <p className="text-xs text-slate-400">Select or edit items to add directly to your list</p>
+              </div>
+              <button onClick={() => setIsShoppingModalOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-3 pr-1 text-xs">
+              {shoppingModalIngredients.map((ing, idx) => (
+                <div key={ing.id} className="flex items-center gap-2 bg-[#070b13] p-2.5 rounded-xl border border-slate-800">
+                  <div
+                    onClick={() => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].selected = !updated[idx].selected;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className={`w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition ${
+                      ing.selected ? 'bg-[#E05638] border-[#E05638] text-white' : 'border-slate-700 bg-slate-900'
+                    }`}
+                  >
+                    {ing.selected && <CheckSquare className="h-3.5 w-3.5" />}
+                  </div>
+
+                  <input
+                    type="text"
+                    value={ing.amount}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].amount = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-16 bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-white font-bold outline-none"
+                    placeholder="Amt"
+                  />
+                  <input
+                    type="text"
+                    value={ing.unit}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].unit = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-20 bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-slate-300 outline-none"
+                    placeholder="Unit"
+                  />
+                  <input
+                    type="text"
+                    value={ing.name}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].name = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="flex-1 bg-transparent border-none text-white outline-none px-2"
+                    placeholder="Ingredient name..."
+                  />
+                  <select
+                    value={ing.category}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].category = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-36 bg-slate-900 border border-slate-800 rounded-lg p-2 text-[11px] text-slate-300 outline-none cursor-pointer"
+                  >
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
+              <button
+                onClick={() => setIsShoppingModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmAddToShoppingList}
+                className="px-6 py-2 rounded-xl bg-[#E05638] text-white font-bold text-xs flex items-center gap-1.5"
+              >
+                <ShoppingCart className="h-3.5 w-3.5" /> Add Selected to List
+              </button>
             </div>
           </div>
         </div>
