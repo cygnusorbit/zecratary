@@ -1,9 +1,7 @@
 {
-  "/pantry/page": "app/pantry/page.js",
-  "/admin/ingredient-categories/page": "app/admin/ingredient-categories/page.js",
-  "/manual/page": "app/manual/page.js",
   "/admin/add-user/page": "app/admin/add-user/page.js",
-  "/recipes/page": "app/recipes/page.js",
-  "/books/page": "app/books/page.js",
-  "/admin/page": "app/admin/page.js"
+  "/admin/ingredient-categories/page": "app/admin/ingredient-categories/page.js",
+  "/admin/page": "app/admin/page.js",
+  "/profile/page": "app/profile/page.js",
+  "/recipes/page": "app/recipes/page.js"
 }
