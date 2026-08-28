@@ -5,7 +5,7 @@ import {
   Search, SlidersHorizontal, Heart, Clock, Utensils,
   X, UploadCloud, BookmarkPlus, CalendarPlus, ShoppingCart,
   Timer, Edit3, Share2, Star, Check, Book, ChevronDown,
-  Trash2, Save, Plus, ImagePlus, Users,
+  Trash2, Save, Plus, ImagePlus, Users, Calendar,
   GripVertical, CheckSquare
 } from 'lucide-react';
 import { getStoredCategories } from '@/lib/categories';
@@ -20,6 +20,13 @@ export default function SavedRecipesPage() {
 
   // Add to Book Dropdown State
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
+
+  // Add to Plan / Calendar Modal State (Matching Screenshot)
+  const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
+  const [planDate, setPlanDate] = useState('2026-08-28');
+  const [planMealType, setPlanMealType] = useState('Dinner');
+  const [planTime, setPlanTime] = useState('');
+  const [planNotes, setPlanNotes] = useState('');
 
   // Edit Mode & Form State
   const [isEditing, setIsEditing] = useState(false);
@@ -61,33 +68,34 @@ export default function SavedRecipesPage() {
   const defaultRecipes = [
     {
       id: 'rec_fried_rice',
-      title: 'Easy Fried Rice',
-      description: "This Easy Fried Rice has always been one of the most-loved recipes on my site! I have made different versions, but this classic recipe is the one everyone keeps coming back to because it's so easy and delicious!",
-      servings: 8,
-      prepTimeMinutes: 15,
-      cookTimeMinutes: 30,
+      title: 'Authentic Pad Thai Recipe',
+      description: "This pad thai recipe is the real deal. Fully loaded with all the classic ingredients an authentic pad thai should have. Perfectly balanced flavour that is complex and not overly sweet.",
+      servings: 4,
+      prepTimeMinutes: 30,
+      cookTimeMinutes: 10,
       tags: ['Main Dish'],
       recipeType: 'Main Dish',
       isFavorite: true,
       isCooked: false,
       rating: 5,
-      note: 'Best with day-old Jasmine rice!',
+      note: 'Best with fresh lime and extra crushed peanuts!',
       sourceUrl: '',
-      imageUrl: 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=1000&q=80',
+      imageUrl: 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80',
       bookId: 'book_2',
       ingredients: [
-        { amount: '4', unit: 'cups', item: 'cooked cold Jasmine rice', category: 'Grains and Pasta' },
-        { amount: '3', unit: 'tbsp', item: 'butter or vegetable oil', category: 'Pantry Staples' },
-        { amount: '3', unit: 'large', item: 'eggs, lightly beaten', category: 'Dairy' },
-        { amount: '2', unit: 'tbsp', item: 'soy sauce', category: 'Condiments and Sauces' },
-        { amount: '1', unit: 'cup', item: 'frozen peas and carrots', category: 'Produce' }
+        { amount: '250', unit: 'g', item: 'Rice noodles', category: 'Grains and Pasta' },
+        { amount: '200', unit: 'g', item: 'Shrimp or Tofu', category: 'Meat and Seafood' },
+        { amount: '2', unit: 'tbsp', item: 'Tamarind paste', category: 'Condiments and Sauces' },
+        { amount: '2', unit: 'tbsp', item: 'Fish sauce', category: 'Condiments and Sauces' },
+        { amount: '1.5', unit: 'tbsp', item: 'Palm sugar', category: 'Pantry Staples' },
+        { amount: '1', unit: 'cup', item: 'Bean sprouts & Peanuts', category: 'Produce' }
       ],
       instructions: [
-        'Heat a large skillet or wok over medium-high heat and melt 1 tbsp butter.',
-        'Add eggs and scramble until just cooked through; remove and set aside.',
-        'Melt remaining butter, add vegetables and cold rice, tossing quickly to coat.',
-        'Drizzle soy sauce over the rice and stir continuously for 3-4 minutes.',
-        'Fold in scrambled eggs and sliced green onions before serving warm.'
+        'Soak dried rice noodles in warm water until soft and pliable, then drain.',
+        'Mix tamarind paste, fish sauce, and palm sugar together in a small bowl for the sauce.',
+        'Heat oil in a wok over high heat, cook protein until done.',
+        'Add drained noodles and sauce directly into the wok, tossing continuously.',
+        'Push noodles aside, scramble eggs in the empty space, and toss with bean sprouts.'
       ]
     }
   ];
@@ -180,6 +188,41 @@ export default function SavedRecipesPage() {
     } else {
       alert(`Added "${selectedRecipe.title || selectedRecipe.name}" to "${bookTitle}"!`);
     }
+  };
+
+  // Open "Add to Calendar" / Add to Plan Modal
+  const openAddToPlanModal = () => {
+    setPlanDate('2026-08-28');
+    setPlanMealType('Dinner');
+    setPlanTime('');
+    setPlanNotes('');
+    setShowAddToPlanModal(true);
+  };
+
+  const handleSaveToCalendar = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRecipe) return;
+
+    const localPlan = localStorage.getItem('zecratary_meal_plan');
+    const currentPlan = localPlan ? JSON.parse(localPlan) : [];
+
+    const newPlanItem = {
+      id: 'plan_' + Date.now(),
+      date: planDate,
+      recipeId: selectedRecipe.id,
+      recipeName: selectedRecipe.title || selectedRecipe.name,
+      image: selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80',
+      mealType: planMealType,
+      time: planTime,
+      notes: planNotes,
+      isLeftover: false
+    };
+
+    localStorage.setItem('zecratary_meal_plan', JSON.stringify([...currentPlan, newPlanItem]));
+    window.dispatchEvent(new Event('zecratary_planner_updated'));
+    window.dispatchEvent(new Event('storage'));
+    setShowAddToPlanModal(false);
+    alert(`Successfully scheduled "${selectedRecipe.title || selectedRecipe.name}" in your meal plan!`);
   };
 
   const toggleFavorite = (e: React.MouseEvent, id: string) => {
@@ -420,7 +463,7 @@ export default function SavedRecipesPage() {
                 <div className="relative h-44 w-full bg-slate-800 overflow-hidden">
                   <img
                     src={r.imageUrl || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'}
-                    alt={r.title}
+                    alt={r.title || r.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                   />
                   <button
@@ -438,7 +481,7 @@ export default function SavedRecipesPage() {
                 </div>
 
                 <div className="p-4 space-y-2">
-                  <h3 className="font-bold text-white text-base leading-snug">{r.title}</h3>
+                  <h3 className="font-bold text-white text-base leading-snug">{r.title || r.name}</h3>
                   <div className="flex items-center justify-between pt-1">
                     <span className="bg-[#E05638] text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">
                       {r.tags?.[0] || r.recipeType || 'Main Dish'}
@@ -471,15 +514,15 @@ export default function SavedRecipesPage() {
                 <div className="space-y-5 pb-6">
                   <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
                     <img
-                      src={selectedRecipe.imageUrl || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80'}
-                      alt={selectedRecipe.title}
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80'}
+                      alt={selectedRecipe.title || selectedRecipe.name}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-[#0c111d] via-[#0c111d]/60 to-transparent" />
 
                     <div className="relative z-10 space-y-3">
                       <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
-                        {selectedRecipe.title}
+                        {selectedRecipe.title || selectedRecipe.name}
                       </h2>
 
                       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
@@ -503,8 +546,9 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
-                  {/* Top Action Row with ADD TO BOOK FUNCTIONAL DROPDOWN */}
+                  {/* Top Action Row with ADD TO BOOK and FUNCTIONAL ADD TO PLAN */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
+                    {/* Add to Book Dropdown */}
                     <div className="relative">
                       <button
                         type="button"
@@ -522,7 +566,6 @@ export default function SavedRecipesPage() {
                         <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5" />
                       </button>
 
-                      {/* Dropdown Menu */}
                       {isBookDropdownOpen && (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
@@ -564,12 +607,16 @@ export default function SavedRecipesPage() {
                       )}
                     </div>
 
+                    {/* Functional Add to Plan Button (Opens Modal) */}
                     <button
-                      onClick={() => alert(`Scheduled "${selectedRecipe.title}" in Meal Plan!`)}
+                      type="button"
+                      onClick={openAddToPlanModal}
                       className="border border-[#E05638]/60 text-[#E05638] font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 hover:bg-[#E05638]/10"
                     >
                       <CalendarPlus className="h-4 w-4 text-[#E05638]" /> Add to Plan
                     </button>
+
+                    {/* Shopping List Modal Button */}
                     <button
                       onClick={handleOpenShoppingModal}
                       className="border border-[#E05638]/60 text-[#E05638] font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 hover:bg-[#E05638]/10"
@@ -955,7 +1002,7 @@ export default function SavedRecipesPage() {
                     </div>
                   )}
 
-                  {/* TAB 2: INGREDIENTS WITH GLOBAL CATEGORIES */}
+                  {/* TAB 2: INGREDIENTS */}
                   {editTab === 'ingredients' && (
                     <div className="bg-[#070b13] border border-slate-800 rounded-2xl p-5 space-y-4 animate-in fade-in text-xs">
                       <div className="flex justify-between items-center">
@@ -1173,6 +1220,113 @@ export default function SavedRecipesPage() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD TO CALENDAR / ADD TO PLAN MODAL (MATCHING ATTACHED SCREENSHOT) */}
+      {showAddToPlanModal && selectedRecipe && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[70] flex items-center justify-center p-4">
+          <div className="bg-[#0f1115] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in">
+            
+            {/* Close Button */}
+            <button 
+              onClick={() => setShowAddToPlanModal(false)} 
+              className="absolute top-4 right-4 p-2 bg-[#1e2430] hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            {/* Header */}
+            <div className="pr-6 space-y-1">
+              <h2 className="text-xl font-black text-[#E05638] tracking-tight">Add to Calendar</h2>
+              <p className="text-xs text-slate-400 leading-snug">
+                Schedule {selectedRecipe.title || selectedRecipe.name} in your meal plan
+              </p>
+            </div>
+
+            {/* Form Fields */}
+            <form onSubmit={handleSaveToCalendar} className="space-y-4 pt-1">
+              
+              {/* Date */}
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Date</label>
+                <div className="relative flex items-center">
+                  <Calendar className="h-4 w-4 text-[#E05638] absolute left-3.5 pointer-events-none" />
+                  <input
+                    type="date"
+                    required
+                    value={planDate}
+                    onChange={(e) => setPlanDate(e.target.value)}
+                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl pl-10 pr-3 py-2.5 text-xs text-[#E05638] font-semibold outline-none focus:border-[#E05638] cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {/* Meal Type */}
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Meal Type</label>
+                <div className="relative flex items-center">
+                  <select
+                    value={planMealType}
+                    onChange={(e) => setPlanMealType(e.target.value)}
+                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638] cursor-pointer appearance-none"
+                  >
+                    <option value="Breakfast">Breakfast</option>
+                    <option value="Lunch">Lunch</option>
+                    <option value="Dinner">Dinner</option>
+                    <option value="Snack">Snack</option>
+                  </select>
+                  <ChevronDown className="h-4 w-4 text-slate-400 absolute right-3 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Time */}
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Time</label>
+                <div className="relative flex items-center">
+                  <Clock className="h-4 w-4 text-slate-400 absolute left-3.5 pointer-events-none" />
+                  <input
+                    type="time"
+                    value={planTime}
+                    onChange={(e) => setPlanTime(e.target.value)}
+                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-10 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638]"
+                    placeholder="--:-- --"
+                  />
+                  <Clock className="h-4 w-4 text-[#E05638] absolute right-3.5 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Notes</label>
+                <textarea
+                  value={planNotes}
+                  onChange={(e) => setPlanNotes(e.target.value)}
+                  placeholder="Add any notes or reminders..."
+                  rows={3}
+                  className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-[#E05638] resize-none"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-2.5 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddToPlanModal(false)}
+                  className="px-5 py-2.5 rounded-xl border border-emerald-900/80 hover:bg-emerald-950/20 text-[#E05638] font-bold text-xs transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs transition shadow-md"
+                >
+                  Add to Calendar
+                </button>
+              </div>
+
+            </form>
           </div>
         </div>
       )}
