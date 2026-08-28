@@ -1,4 +1,6 @@
-'use client';
+import os
+
+planner_code = """'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -26,8 +28,8 @@ export default function PlannerPage() {
   const [isLeftover, setIsLeftover] = useState(false);
   const [notes, setNotes] = useState('');
 
-  // Copy Day Dropdown State
-  const [activeCopyDropdownDate, setActiveCopyDropdownDate] = useState<string | null>(null);
+  // Copy Day Dropdown State (Matching Screenshot)
+  const [showCopyDayDropdown, setShowCopyDayDropdown] = useState(false);
   const [copyCustomDate, setCopyCustomDate] = useState('');
 
   // Edit Meal Modal State
@@ -163,7 +165,7 @@ export default function PlannerPage() {
     setActiveRecipeTagFilter('All');
     setShowFilterOptions(false);
     setShowRecipePickerModal(false);
-    setActiveCopyDropdownDate(null);
+    setShowCopyDayDropdown(false);
     setShowAddMealModal(true);
   };
 
@@ -189,19 +191,22 @@ export default function PlannerPage() {
     setSelectedBookFilter('All Books');
     setActiveRecipeTagFilter('All');
     setShowFilterOptions(false);
-    setActiveCopyDropdownDate(null);
+    setShowCopyDayDropdown(false);
     setShowEditMealModal(true);
   };
 
-  const handleCopyDayTo = (sourceDateStr: string, targetDateStr: string) => {
-    const sourceDayMeals = plannedMeals.filter(m => m.date === sourceDateStr);
-    if (sourceDayMeals.length === 0) {
+  // -------------------------------------------------------------
+  // Copy Day Logic (Tomorrow, Next Week, Pick a Date)
+  // -------------------------------------------------------------
+  const handleCopyDayTo = (targetDateStr: string) => {
+    const currentDayMeals = plannedMeals.filter(m => m.date === selectedDate);
+    if (currentDayMeals.length === 0) {
       alert('No meals scheduled on this date to copy.');
-      setActiveCopyDropdownDate(null);
+      setShowCopyDayDropdown(false);
       return;
     }
 
-    const copiedMeals = sourceDayMeals.map((m) => ({
+    const copiedMeals = currentDayMeals.map((m) => ({
       ...m,
       id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
       date: targetDateStr
@@ -209,28 +214,28 @@ export default function PlannerPage() {
 
     const updated = [...plannedMeals, ...copiedMeals];
     savePlan(updated);
-    setActiveCopyDropdownDate(null);
+    setShowCopyDayDropdown(false);
 
     const targetFormatted = new Date(targetDateStr + 'T00:00:00').toLocaleDateString('en-US', {
       weekday: 'short',
       month: 'short',
       day: 'numeric'
     });
-    alert(`Copied ${sourceDayMeals.length} meal(s) to ${targetFormatted}!`);
+    alert(`Copied ${currentDayMeals.length} meal(s) to ${targetFormatted}!`);
   };
 
-  const handleCopyTomorrow = (sourceDateStr: string) => {
-    const d = new Date(sourceDateStr + 'T00:00:00');
+  const handleCopyTomorrow = () => {
+    const d = new Date(selectedDate + 'T00:00:00');
     d.setDate(d.getDate() + 1);
     const nextDayStr = d.toISOString().split('T')[0];
-    handleCopyDayTo(sourceDateStr, nextDayStr);
+    handleCopyDayTo(nextDayStr);
   };
 
-  const handleCopyNextWeek = (sourceDateStr: string) => {
-    const d = new Date(sourceDateStr + 'T00:00:00');
+  const handleCopyNextWeek = () => {
+    const d = new Date(selectedDate + 'T00:00:00');
     d.setDate(d.getDate() + 7);
     const nextWeekStr = d.toISOString().split('T')[0];
-    handleCopyDayTo(sourceDateStr, nextWeekStr);
+    handleCopyDayTo(nextWeekStr);
   };
 
   const handleAddMealSubmit = (e: React.FormEvent) => {
@@ -241,7 +246,7 @@ export default function PlannerPage() {
     }
     const newMeal = {
       id: 'plan_' + Date.now(),
-      date: activeDateForAdd,
+      date: activeDateForAdd || selectedDate,
       recipeId: selectedRecipeObj.id,
       recipeName: selectedRecipeObj.name || selectedRecipeObj.title,
       image: selectedRecipeObj.image || selectedRecipeObj.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
@@ -369,10 +374,6 @@ export default function PlannerPage() {
   }
 
   const todayStr = '2026-08-28';
-  const tomorrowObj = new Date('2026-08-28T00:00:00');
-  tomorrowObj.setDate(tomorrowObj.getDate() + 1);
-  const tomorrowStr = tomorrowObj.toISOString().split('T')[0];
-
   const endDate = new Date(currentWeekStart);
   endDate.setDate(endDate.getDate() + 6);
   const rangeStr = `${currentWeekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -382,18 +383,6 @@ export default function PlannerPage() {
   const activeDateFieldText = activeDateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
   const datesWithMeals = Array.from(new Set(plannedMeals.map(m => m.date))).sort();
-
-  // 3-Day Sequential Display Feed (Selected Day + Next 2 Days)
-  const displayDays = [0, 1, 2].map((offset) => {
-    const d = new Date(selectedDate + 'T00:00:00');
-    d.setDate(d.getDate() + offset);
-    const dateStr = d.toISOString().split('T')[0];
-    const isToday = dateStr === todayStr;
-    const isTomorrow = dateStr === tomorrowStr;
-    const titleDate = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-    const dayMeals = plannedMeals.filter(m => m.date === dateStr);
-    return { dateStr, titleDate, isToday, isTomorrow, dayMeals };
-  });
 
   const filteredPickerRecipes = savedRecipes.filter(r => {
     const name = (r.name || r.title || '').toLowerCase();
@@ -498,7 +487,7 @@ export default function PlannerPage() {
                 key={d.dateStr}
                 onClick={() => {
                   setSelectedDate(d.dateStr);
-                  setActiveCopyDropdownDate(null);
+                  setShowCopyDayDropdown(false);
                 }}
                 className={`p-3.5 rounded-2xl border text-center cursor-pointer transition flex flex-col items-center justify-center ${
                   isToday 
@@ -549,85 +538,77 @@ export default function PlannerPage() {
         </div>
       </div>
 
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* 3-DAY FEED: SELECTED DAY + ADDITIONAL 2 DAYS OF MEALS */}
-      {/* ───────────────────────────────────────────────────────────── */}
-      <div className="space-y-6">
-        {displayDays.map((day) => {
-          const isCopyOpen = activeCopyDropdownDate === day.dateStr;
+      {/* Selected Date Meals */}
+      {(() => {
+        const dObj = new Date(selectedDate + 'T00:00:00');
+        const titleDate = dObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        const isToday = selectedDate === todayStr;
+        const dayMeals = plannedMeals.filter(m => m.date === selectedDate);
 
-          return (
-            <div
-              key={day.dateStr}
-              className="bg-[#070b13] border border-emerald-950 rounded-3xl p-6 space-y-6 shadow-xl"
-            >
-              {/* Day Header Row */}
-              <div className="flex items-center justify-between border-b border-emerald-950 pb-4">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-xl font-extrabold text-white">{day.titleDate}</h2>
-                  
-                  {day.isToday && (
-                    <span className="bg-[#E05638] text-white text-[10px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider shadow-sm">
-                      TODAY
-                    </span>
-                  )}
-                  {day.isTomorrow && !day.isToday && (
-                    <span className="bg-[#1f1618] border border-[#E05638]/70 text-[#E05638] text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                      TOMORROW
-                    </span>
-                  )}
-                </div>
+        return (
+          <div className="bg-[#070b13] border border-emerald-950 rounded-3xl p-6 space-y-6 shadow-xl">
+            <div className="flex items-center justify-between border-b border-emerald-950 pb-4">
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl font-extrabold text-white">{titleDate}</h2>
+                {isToday && (
+                  <span className="bg-[#E05638] text-white text-[10px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider shadow-sm">
+                    TODAY
+                  </span>
+                )}
+              </div>
 
-                {/* Right Action Cluster */}
-                <div className="flex items-center gap-2 relative">
-                  {/* Copy Day Popover */}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setActiveCopyDropdownDate(isCopyOpen ? null : day.dateStr)}
-                      className="bg-[#0b0e14] hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm"
-                    >
-                      <Copy className="h-4 w-4 text-slate-400" /> Copy
-                    </button>
+              {/* ACTION BUTTONS: COPY DAY DROPDOWN & ADD MEAL */}
+              <div className="flex items-center gap-2 relative">
+                {/* ── COPY DAY BUTTON & DROPDOWN ── */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowCopyDayDropdown(!showCopyDayDropdown)}
+                    className="bg-[#0b0e14] hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Copy className="h-4 w-4 text-slate-400" /> Copy
+                  </button>
 
-                    {isCopyOpen && (
-                      <>
-                        <div 
-                          className="fixed inset-0 z-40" 
-                          onClick={() => setActiveCopyDropdownDate(null)} 
-                        />
-                        <div 
-                          onClick={(e) => e.stopPropagation()}
-                          className="absolute right-0 top-full mt-2 w-60 bg-[#0b0e14] border border-slate-800/90 rounded-2xl shadow-2xl p-3.5 z-50 space-y-3 text-xs animate-in fade-in"
-                        >
-                          <h4 className="font-bold text-white text-xs px-1">Copy day to...</h4>
-                          
-                          <div className="space-y-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleCopyTomorrow(day.dateStr)}
-                              className="w-full text-left font-bold px-3 py-2 rounded-xl bg-[#07090e] hover:bg-[#141824] border border-slate-800 text-slate-200 hover:text-white transition"
-                            >
-                              Tomorrow
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCopyNextWeek(day.dateStr)}
-                              className="w-full text-left font-bold px-3 py-2 rounded-xl bg-[#07090e] hover:bg-[#141824] border border-slate-800 text-slate-200 hover:text-white transition"
-                            >
-                              Same day next week
-                            </button>
-                          </div>
+                  {/* Dropdown Card matching Reference Screenshot */}
+                  {showCopyDayDropdown && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-40" 
+                        onClick={() => setShowCopyDayDropdown(false)} 
+                      />
+                      <div 
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute right-0 top-full mt-2 w-60 bg-[#0b0e14] border border-slate-800/90 rounded-2xl shadow-2xl p-3.5 z-50 space-y-3 text-xs animate-in fade-in"
+                      >
+                        <h4 className="font-bold text-white text-xs px-1">Copy day to...</h4>
+                        
+                        <div className="space-y-1.5">
+                          <button
+                            type="button"
+                            onClick={handleCopyTomorrow}
+                            className="w-full text-left font-bold px-3 py-2 rounded-xl bg-[#07090e] hover:bg-[#141824] border border-slate-800 text-slate-200 hover:text-white transition"
+                          >
+                            Tomorrow
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCopyNextWeek}
+                            className="w-full text-left font-bold px-3 py-2 rounded-xl bg-[#07090e] hover:bg-[#141824] border border-slate-800 text-slate-200 hover:text-white transition"
+                          >
+                            Same day next week
+                          </button>
+                        </div>
 
-                          <div className="pt-2 border-t border-slate-800/80 space-y-1.5 px-1">
-                            <span className="block text-[11px] font-semibold text-slate-400">Pick a date</span>
+                        <div className="pt-2 border-t border-slate-800/80 space-y-1.5 px-1">
+                          <span className="block text-[11px] font-semibold text-slate-400">Pick a date</span>
+                          <div className="relative flex items-center">
                             <input
                               type="date"
                               value={copyCustomDate}
                               onChange={(e) => {
                                 setCopyCustomDate(e.target.value);
                                 if (e.target.value) {
-                                  handleCopyDayTo(day.dateStr, e.target.value);
+                                  handleCopyDayTo(e.target.value);
                                   setCopyCustomDate('');
                                 }
                               }}
@@ -635,86 +616,85 @@ export default function PlannerPage() {
                             />
                           </div>
                         </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* + Add Meal Button */}
-                  <button
-                    onClick={() => openAddModal(day.dateStr)}
-                    className="bg-[#0b0e14] hover:bg-slate-800 border border-slate-800 text-slate-200 hover:text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm"
-                  >
-                    <Plus className="h-4 w-4 text-[#E05638]" /> Add Meal
-                  </button>
-                </div>
-              </div>
-
-              {/* Day Meals Content */}
-              {day.dayMeals.length === 0 ? (
-                <div className="py-16 text-center space-y-4">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-950/40 border border-emerald-800 text-emerald-400 flex items-center justify-center mx-auto shadow-sm">
-                    <ChefHat className="h-6 w-6" />
-                  </div>
-                  <p className="text-sm font-semibold text-slate-400">Nothing planned yet</p>
-                  <button
-                    onClick={() => openAddModal(day.dateStr)}
-                    className="inline-flex items-center gap-2 bg-[#0f1117] hover:bg-slate-800 border border-emerald-900/60 text-[#E05638] font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-sm"
-                  >
-                    <Plus className="h-4 w-4" /> Add a meal
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {day.dayMeals.map((meal) => (
-                    <div key={meal.id} className="bg-[#0b0e14] border border-slate-800/90 rounded-2xl p-4 flex items-center justify-between shadow-md gap-4">
-                      <div className="flex items-center gap-3.5 min-w-0">
-                        <img 
-                          src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
-                          alt={meal.recipeName}
-                          className="w-14 h-14 rounded-xl object-cover border border-slate-700/80 shadow-sm shrink-0" 
-                        />
-                        <div className="space-y-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="bg-[#172033] text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">
-                              {meal.mealType}
-                            </span>
-                            {meal.isLeftover && (
-                              <span className="bg-amber-950/60 border border-amber-600/40 text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
-                                Leftover
-                              </span>
-                            )}
-                          </div>
-                          <h3 className="text-sm font-bold text-white leading-snug truncate">{meal.recipeName}</h3>
-                          {meal.time && <span className="text-[11px] text-slate-400 flex items-center gap-1">⏰ {meal.time}</span>}
-                        </div>
                       </div>
+                    </>
+                  )}
+                </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={() => openEditModal(meal)}
-                          className="p-2.5 text-slate-300 hover:text-white transition bg-[#172033] hover:bg-slate-700 rounded-xl border border-slate-700/60 shadow-sm"
-                          title="Edit Planned Meal"
-                        >
-                          <Edit3 className="h-4 w-4 text-[#E05638]" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteMeal(meal.id)}
-                          className="p-2.5 text-slate-400 hover:text-red-400 transition bg-[#172033] hover:bg-red-950/40 rounded-xl border border-slate-700/60 shadow-sm"
-                          title="Delete Meal"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                {/* ── ADD MEAL BUTTON ── */}
+                <button
+                  onClick={() => openAddModal(selectedDate)}
+                  className="bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md"
+                >
+                  <Plus className="h-4 w-4" /> Add Meal
+                </button>
+              </div>
+            </div>
+
+            {dayMeals.length === 0 ? (
+              <div className="py-16 text-center space-y-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-950/40 border border-emerald-800 text-emerald-400 flex items-center justify-center mx-auto shadow-sm">
+                  <ChefHat className="h-6 w-6" />
+                </div>
+                <p className="text-sm font-semibold text-slate-400">Nothing planned yet</p>
+                <button
+                  onClick={() => openAddModal(selectedDate)}
+                  className="inline-flex items-center gap-2 bg-[#0f1117] hover:bg-slate-800 border border-emerald-900/60 text-[#E05638] font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-sm"
+                >
+                  <Plus className="h-4 w-4" /> Add a meal
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {dayMeals.map((meal) => (
+                  <div key={meal.id} className="bg-[#0b0e14] border border-slate-800/90 rounded-2xl p-4 flex items-center justify-between shadow-md gap-4">
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <img 
+                        src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
+                        alt={meal.recipeName}
+                        className="w-14 h-14 rounded-xl object-cover border border-slate-700/80 shadow-sm shrink-0" 
+                      />
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-[#172033] text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">
+                            {meal.mealType}
+                          </span>
+                          {meal.isLeftover && (
+                            <span className="bg-amber-950/60 border border-amber-600/40 text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                              Leftover
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="text-sm font-bold text-white leading-snug truncate">{meal.recipeName}</h3>
+                        {meal.time && <span className="text-[11px] text-slate-400 flex items-center gap-1">⏰ {meal.time}</span>}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
 
-      {/* 1. SELECT RECIPES FOR SHOPPING LIST MODAL */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => openEditModal(meal)}
+                        className="p-2.5 text-slate-300 hover:text-white transition bg-[#172033] hover:bg-slate-700 rounded-xl border border-slate-700/60 shadow-sm"
+                        title="Edit Planned Meal"
+                      >
+                        <Edit3 className="h-4 w-4 text-[#E05638]" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteMeal(meal.id)}
+                        className="p-2.5 text-slate-400 hover:text-red-400 transition bg-[#172033] hover:bg-red-950/40 rounded-xl border border-slate-700/60 shadow-sm"
+                        title="Delete Meal"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* 1. SELECT RECIPES FOR SHOPPING LIST MODAL (CLICK OUTSIDE CLOSES) */}
       {showShoppingListModal && (
         <div 
           onClick={() => setShowShoppingListModal(false)}
@@ -870,7 +850,7 @@ export default function PlannerPage() {
         </div>
       )}
 
-      {/* 2. MAIN ADD MEAL MODAL */}
+      {/* 2. MAIN ADD MEAL MODAL (CLICK OUTSIDE CLOSES) */}
       {showAddMealModal && (
         <div 
           onClick={() => setShowAddMealModal(false)}
@@ -1026,7 +1006,7 @@ export default function PlannerPage() {
         </div>
       )}
 
-      {/* 3. EDIT MEAL MODAL */}
+      {/* 3. EDIT MEAL MODAL (CLICK OUTSIDE CLOSES) */}
       {showEditMealModal && (
         <div 
           onClick={() => setShowEditMealModal(false)}
@@ -1198,7 +1178,7 @@ export default function PlannerPage() {
         </div>
       )}
 
-      {/* 4. SELECT RECIPE PICKER MODAL */}
+      {/* 4. SELECT RECIPE PICKER MODAL (CLICK OUTSIDE CLOSES) */}
       {showRecipePickerModal && (
         <div 
           onClick={() => setShowRecipePickerModal(false)}
@@ -1344,3 +1324,9 @@ export default function PlannerPage() {
     </div>
   );
 }
+"""
+
+with open("apps/web/src/app/planner/page.tsx", "w", encoding="utf-8") as f:
+    f.write(planner_code)
+
+print("✅ 'Copy day to...' feature successfully added next to '+ Add Meal' on /planner!")

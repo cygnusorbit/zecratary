@@ -1,12 +1,7 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
-  "/manual/page": "app/manual/page.js",
+  "/planner/page": "app/planner/page.js",
   "/shopping/page": "app/shopping/page.js",
-  "/recipes/page": "app/recipes/page.js",
-  "/import/page": "app/import/page.js",
-  "/pantry/page": "app/pantry/page.js",
   "/page": "app/page.js",
-  "/templates/page": "app/templates/page.js",
-  "/books/page": "app/books/page.js",
-  "/planner/page": "app/planner/page.js"
+  "/import/page": "app/import/page.js",
+  "/recipes/page": "app/recipes/page.js"
 }

@@ -1,4 +1,6 @@
-'use client';
+import os
+
+planner_code = """'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -1344,3 +1346,9 @@ export default function PlannerPage() {
     </div>
   );
 }
+"""
+
+with open("apps/web/src/app/planner/page.tsx", "w", encoding="utf-8") as f:
+    f.write(planner_code)
+
+print("✅ /planner now renders the active day + additional 2 upcoming days in sequential cards!")
