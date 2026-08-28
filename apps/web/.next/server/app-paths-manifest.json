@@ -1,9 +1,7 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
-  "/page": "app/page.js",
-  "/import/page": "app/import/page.js",
   "/recipes/page": "app/recipes/page.js",
   "/books/page": "app/books/page.js",
-  "/chef/page": "app/chef/page.js",
-  "/api/recipes/route": "app/api/recipes/route.js"
+  "/admin/page": "app/admin/page.js",
+  "/manual/page": "app/manual/page.js",
+  "/admin/ingredient-categories/page": "app/admin/ingredient-categories/page.js"
 }
