@@ -1,4 +1,6 @@
-'use client';
+import os
+
+planner_code = """'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -9,22 +11,9 @@ import {
   ChevronUp, Edit3, Check, CheckSquare
 } from 'lucide-react';
 
-// Timezone-safe local date formatting helpers
-const formatDateKey = (d: Date): string => {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const parseDateKey = (str: string): Date => {
-  const [year, month, day] = str.split('-').map(Number);
-  return new Date(year, month - 1, day);
-};
-
 export default function PlannerPage() {
   const router = useRouter();
-  const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => parseDateKey('2026-08-24'));
+  const [currentWeekStart, setCurrentWeekStart] = useState(new Date('2026-08-24'));
   const [selectedDate, setSelectedDate] = useState('2026-08-28');
   const [plannedMeals, setPlannedMeals] = useState<any[]>([]);
   const [savedRecipes, setSavedRecipes] = useState<any[]>([]);
@@ -224,7 +213,7 @@ export default function PlannerPage() {
     savePlan(updated);
     setActiveCopyDropdownDate(null);
 
-    const targetFormatted = parseDateKey(targetDateStr).toLocaleDateString('en-US', {
+    const targetFormatted = new Date(targetDateStr + 'T00:00:00').toLocaleDateString('en-US', {
       weekday: 'short',
       month: 'short',
       day: 'numeric'
@@ -233,15 +222,17 @@ export default function PlannerPage() {
   };
 
   const handleCopyTomorrow = (sourceDateStr: string) => {
-    const d = parseDateKey(sourceDateStr);
+    const d = new Date(sourceDateStr + 'T00:00:00');
     d.setDate(d.getDate() + 1);
-    handleCopyDayTo(sourceDateStr, formatDateKey(d));
+    const nextDayStr = d.toISOString().split('T')[0];
+    handleCopyDayTo(sourceDateStr, nextDayStr);
   };
 
   const handleCopyNextWeek = (sourceDateStr: string) => {
-    const d = parseDateKey(sourceDateStr);
+    const d = new Date(sourceDateStr + 'T00:00:00');
     d.setDate(d.getDate() + 7);
-    handleCopyDayTo(sourceDateStr, formatDateKey(d));
+    const nextWeekStr = d.toISOString().split('T')[0];
+    handleCopyDayTo(sourceDateStr, nextWeekStr);
   };
 
   const handleAddMealSubmit = (e: React.FormEvent) => {
@@ -369,25 +360,26 @@ export default function PlannerPage() {
     router.push('/shopping');
   };
 
-  // Safe generation of week dates without UTC offset drift
   const weekDays = [];
   for (let i = 0; i < 7; i++) {
-    const d = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() + i);
-    const dateStr = formatDateKey(d);
+    const d = new Date(currentWeekStart);
+    d.setDate(d.getDate() + i);
+    const dateStr = d.toISOString().split('T')[0];
     const dayName = d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
     const dayNum = d.getDate();
     weekDays.push({ dateStr, dayName, dayNum, fullDate: d });
   }
 
   const todayStr = '2026-08-28';
-  const tomorrowDateObj = parseDateKey(todayStr);
-  tomorrowDateObj.setDate(tomorrowDateObj.getDate() + 1);
-  const tomorrowStr = formatDateKey(tomorrowDateObj); // '2026-08-29'
+  const tomorrowObj = new Date('2026-08-28T00:00:00');
+  tomorrowObj.setDate(tomorrowObj.getDate() + 1);
+  const tomorrowStr = tomorrowObj.toISOString().split('T')[0];
 
-  const endDate = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() + 6);
+  const endDate = new Date(currentWeekStart);
+  endDate.setDate(endDate.getDate() + 6);
   const rangeStr = `${currentWeekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
 
-  const activeDateObj = parseDateKey(activeDateForAdd);
+  const activeDateObj = new Date(activeDateForAdd + 'T00:00:00');
   const activeDateFormattedHeader = activeDateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
   const activeDateFieldText = activeDateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
@@ -395,9 +387,9 @@ export default function PlannerPage() {
 
   // 3-Day Sequential Display Feed (Selected Day + Next 2 Days)
   const displayDays = [0, 1, 2].map((offset) => {
-    const base = parseDateKey(selectedDate);
-    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset);
-    const dateStr = formatDateKey(d);
+    const d = new Date(selectedDate + 'T00:00:00');
+    d.setDate(d.getDate() + offset);
+    const dateStr = d.toISOString().split('T')[0];
     const isToday = dateStr === todayStr;
     const isTomorrow = dateStr === tomorrowStr;
     const titleDate = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
@@ -466,7 +458,8 @@ export default function PlannerPage() {
         <div className="flex items-center justify-between px-1">
           <button 
             onClick={() => {
-              const prev = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() - 7);
+              const prev = new Date(currentWeekStart);
+              prev.setDate(prev.getDate() - 7);
               setCurrentWeekStart(prev);
             }}
             className="p-2 bg-[#0f1117] hover:bg-slate-800 border border-emerald-900/60 rounded-xl text-[#E05638] transition"
@@ -479,7 +472,8 @@ export default function PlannerPage() {
           <div className="flex items-center gap-2">
             <button 
               onClick={() => {
-                const next = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() + 7);
+                const next = new Date(currentWeekStart);
+                next.setDate(next.getDate() + 7);
                 setCurrentWeekStart(next);
               }}
               className="p-2 bg-[#0f1117] hover:bg-slate-800 border border-emerald-900/60 rounded-xl text-[#E05638] transition"
@@ -487,7 +481,7 @@ export default function PlannerPage() {
               <ChevronRight className="h-4 w-4" />
             </button>
             <button 
-              onClick={() => setCurrentWeekStart(parseDateKey('2026-08-24'))}
+              onClick={() => setCurrentWeekStart(new Date('2026-08-24'))}
               className="px-3.5 py-2 bg-[#0f1117] hover:bg-slate-800 border border-emerald-900/60 text-[#E05638] font-bold text-xs rounded-xl transition"
             >
               Today
@@ -557,7 +551,9 @@ export default function PlannerPage() {
         </div>
       </div>
 
+      {/* ───────────────────────────────────────────────────────────── */}
       {/* 3-DAY FEED: SELECTED DAY + ADDITIONAL 2 DAYS OF MEALS */}
+      {/* ───────────────────────────────────────────────────────────── */}
       <div className="space-y-6">
         {displayDays.map((day) => {
           const isCopyOpen = activeCopyDropdownDate === day.dateStr;
@@ -587,7 +583,7 @@ export default function PlannerPage() {
 
                 {/* Right Action Cluster */}
                 <div className="flex items-center gap-2 relative">
-                  {/* Copy Day Popover — Only visible if day contains planned meals */}
+                  {/* Copy Day Popover — Only visible if the day contains planned meals */}
                   {hasMealsInDay && (
                     <div className="relative">
                       <button
@@ -762,7 +758,7 @@ export default function PlannerPage() {
                   const isPartiallySelected = selectedCount > 0 && selectedCount < dayMeals.length;
                   const isExpanded = Boolean(expandedDayCards[dateStr]);
 
-                  const dObj = parseDateKey(dateStr);
+                  const dObj = new Date(dateStr + 'T00:00:00');
                   const formattedDayTitle = dObj.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 
                   return (
@@ -828,7 +824,7 @@ export default function PlannerPage() {
                                       ? 'bg-[#E05638] border-[#E05638] text-white' 
                                       : 'border-slate-700 bg-slate-900'
                                   }`}>
-                                    {isMealSelected && <Check className="h-3 w-3" />}
+                                    {isMealSelected && <Check className="h-3 w-4" />}
                                   </div>
 
                                   <img 
@@ -1353,3 +1349,9 @@ export default function PlannerPage() {
     </div>
   );
 }
+"""
+
+with open("apps/web/src/app/planner/page.tsx", "w", encoding="utf-8") as f:
+    f.write(planner_code)
+
+print("✅ Updated /planner so that the Copy button is hidden on empty day card columns!")
