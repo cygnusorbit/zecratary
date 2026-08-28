@@ -1,0 +1,127 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum IntervalType {
+  MONTH
+  YEAR
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String?
+  country       String         @default("Singapore")
+  role          Role           @default(USER)
+  subscription  Subscription?
+  recipes       Recipe[]
+  pantryItems   PantryItem[]
+  mealPlans     MealPlan[]
+  templates     MealTemplate[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model SubscriptionPlan {
+  id                 String         @id @default(cuid())
+  name               String         // e.g. "Taster", "Nutrition Pro"
+  slug               String         @unique
+  description        String?
+  priceCents         Int            @default(0)
+  currency           String         @default("usd")
+  interval           IntervalType   @default(MONTH)
+  isActive           Boolean        @default(true)
+  aiRecipeLimit      Int            @default(5)      // -1 = Unlimited
+  recipeLibraryLimit Int            @default(25)     // -1 = Unlimited
+  socialScrapeLimit  Int            @default(3)      // -1 = Unlimited
+  canViewMacros      Boolean        @default(false)
+  allowedAiModels    String[]       @default(["gemini-1.5-flash", "gpt-4o-mini"])
+  stripeProductId    String?        @unique
+  stripePriceId      String?        @unique
+  subscriptions      Subscription[]
+  createdAt          DateTime       @default(now())
+}
+
+model Subscription {
+  id                   String           @id @default(cuid())
+  userId               String           @unique
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId               String
+  plan                 SubscriptionPlan @relation(fields: [planId], references: [id])
+  stripeCustomerId     String?          @unique
+  stripeSubscriptionId String?          @unique
+  status               String           @default("active")
+  renewsOn             DateTime         @default(dbgenerated("NOW() + interval '30 days'"))
+  monthlyAiCount       Int              @default(0)
+  monthlyScrapeCount   Int              @default(0)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+}
+
+model Recipe {
+  id              String   @id @default(cuid())
+  userId          String?
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  title           String
+  description     String?
+  sourceUrl       String?
+  imageUrl        String?
+  servings        Int      @default(2)
+  prepTimeMinutes Int      @default(15)
+  cookTimeMinutes Int      @default(20)
+  calories        Int      @default(0)
+  proteinGrams    Float    @default(0)
+  carbsGrams      Float    @default(0)
+  fatGrams        Float    @default(0)
+  fiberGrams      Float    @default(0)
+  tags            String[] @default([])
+  ingredients     Json
+  instructions    String[]
+  createdAt       DateTime @default(now())
+}
+
+model PantryItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  quantity  Float    @default(1)
+  unit      String   @default("item")
+  category  String   @default("Produce")
+  createdAt DateTime @default(now())
+}
+
+model MealPlan {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime
+  mealType  String   // Breakfast, Lunch, Dinner, Snack
+  recipeId  String?
+  customName String?
+  calories  Int      @default(0)
+  protein   Float    @default(0)
+  carbs     Float    @default(0)
+  fat       Float    @default(0)
+}
+
+model MealTemplate {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  mealsCount  Int      @default(1)
+  payload     Json
+  createdAt   DateTime @default(now())
+}
