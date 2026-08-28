@@ -1,4 +1,6 @@
-'use client';
+import os
+
+planner_code = """'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -1209,3 +1211,9 @@ export default function PlannerPage() {
     </div>
   );
 }
+"""
+
+with open("apps/web/src/app/planner/page.tsx", "w", encoding="utf-8") as f:
+    f.write(planner_code)
+
+print("✅ 'Select Recipes for Shopping List' modal integrated into /planner!")

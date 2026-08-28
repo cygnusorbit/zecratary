@@ -571,6 +571,12 @@ video {
 .top-full {
   top: 100%;
 }
+.right-5 {
+  right: 1.25rem;
+}
+.top-5 {
+  top: 1.25rem;
+}
 .z-10 {
   z-index: 10;
 }
@@ -731,6 +737,9 @@ video {
 .h-screen {
   height: 100vh;
 }
+.h-2 {
+  height: 0.5rem;
+}
 .max-h-52 {
   max-height: 13rem;
 }
@@ -820,6 +829,9 @@ video {
 }
 .w-full {
   width: 100%;
+}
+.w-2 {
+  width: 0.5rem;
 }
 .min-w-0 {
   min-width: 0px;
@@ -1074,6 +1086,9 @@ video {
 .rounded-xl {
   border-radius: 0.75rem;
 }
+.rounded-sm {
+  border-radius: 0.125rem;
+}
 .border {
   border-width: 1px;
 }
@@ -1251,6 +1266,9 @@ video {
 }
 .border-red-900\/60 {
   border-color: rgb(127 29 29 / 0.6);
+}
+.border-amber-700\/40 {
+  border-color: rgb(180 83 9 / 0.4);
 }
 .bg-\[\#07090e\] {
   --tw-bg-opacity: 1;
@@ -1490,6 +1508,17 @@ video {
 .bg-white\/95 {
   background-color: rgb(255 255 255 / 0.95);
 }
+.bg-\[\#07090e\]\/60 {
+  background-color: rgb(7 9 14 / 0.6);
+}
+.bg-\[\#0c0d11\] {
+  --tw-bg-opacity: 1;
+  background-color: rgb(12 13 17 / var(--tw-bg-opacity, 1));
+}
+.bg-\[\#1a141a\] {
+  --tw-bg-opacity: 1;
+  background-color: rgb(26 20 26 / var(--tw-bg-opacity, 1));
+}
 .bg-gradient-to-br {
   background-image: linear-gradient(to bottom right, var(--tw-gradient-stops));
 }
@@ -1606,6 +1635,9 @@ video {
 .fill-amber-400 {
   fill: #fbbf24;
 }
+.stroke-\[3\] {
+  stroke-width: 3;
+}
 .object-cover {
   -o-object-fit: cover;
      object-fit: cover;
@@ -1645,6 +1677,9 @@ video {
 }
 .p-8 {
   padding: 2rem;
+}
+.p-7 {
+  padding: 1.75rem;
 }
 .px-1 {
   padding-left: 0.25rem;
