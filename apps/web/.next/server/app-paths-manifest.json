@@ -1,7 +1,7 @@
 {
   "/recipes/page": "app/recipes/page.js",
+  "/admin/ingredient-categories/page": "app/admin/ingredient-categories/page.js",
   "/books/page": "app/books/page.js",
-  "/admin/page": "app/admin/page.js",
   "/manual/page": "app/manual/page.js",
-  "/admin/ingredient-categories/page": "app/admin/ingredient-categories/page.js"
+  "/admin/page": "app/admin/page.js"
 }

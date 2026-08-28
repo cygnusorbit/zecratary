@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {
   Search, SlidersHorizontal, Heart, Clock, Utensils,
   X, UploadCloud, BookmarkPlus, CalendarPlus, ShoppingCart,
-  Timer, Edit3, Share2, Star,
+  Timer, Edit3, Share2, Star, Check, Book, ChevronDown,
   Trash2, Save, Plus, ImagePlus, Users,
   GripVertical, CheckSquare
 } from 'lucide-react';
@@ -12,10 +12,14 @@ import { getStoredCategories } from '@/lib/categories';
 
 export default function SavedRecipesPage() {
   const [recipes, setRecipes] = useState<any[]>([]);
+  const [books, setBooks] = useState<any[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
   const [selectedRecipe, setSelectedRecipe] = useState<any | null>(null);
+
+  // Add to Book Dropdown State
+  const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
   // Edit Mode & Form State
   const [isEditing, setIsEditing] = useState(false);
@@ -48,6 +52,12 @@ export default function SavedRecipesPage() {
   const [isShoppingModalOpen, setIsShoppingModalOpen] = useState(false);
   const [shoppingModalIngredients, setShoppingModalIngredients] = useState<any[]>([]);
 
+  const defaultBooks = [
+    { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.' },
+    { id: 'book_2', title: 'Authentic Asian Cuisine', description: 'Traditional recipes & stir-fries.' },
+    { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
+  ];
+
   const defaultRecipes = [
     {
       id: 'rec_fried_rice',
@@ -64,6 +74,7 @@ export default function SavedRecipesPage() {
       note: 'Best with day-old Jasmine rice!',
       sourceUrl: '',
       imageUrl: 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=1000&q=80',
+      bookId: 'book_2',
       ingredients: [
         { amount: '4', unit: 'cups', item: 'cooked cold Jasmine rice', category: 'Grains and Pasta' },
         { amount: '3', unit: 'tbsp', item: 'butter or vegetable oil', category: 'Pantry Staples' },
@@ -81,20 +92,38 @@ export default function SavedRecipesPage() {
     }
   ];
 
-  const fetchRecipesAndCategories = () => {
+  const loadData = () => {
     setCategories(getStoredCategories());
     try {
-      const local = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      if (local) {
-        const parsed = JSON.parse(local);
+      const localRecipes = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
+      const localBooks = localStorage.getItem('zecratary_recipe_books');
+
+      let parsedRecipes = defaultRecipes;
+      if (localRecipes) {
+        const parsed = JSON.parse(localRecipes);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setRecipes(parsed);
-          setLoading(false);
-          return;
+          parsedRecipes = parsed;
         }
       }
-      setRecipes(defaultRecipes);
-      localStorage.setItem('zecratary_recipes', JSON.stringify(defaultRecipes));
+      setRecipes(parsedRecipes);
+
+      let parsedBooks = defaultBooks;
+      if (localBooks) {
+        const parsed = JSON.parse(localBooks);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          parsedBooks = parsed;
+        }
+      }
+
+      const booksWithCounts = parsedBooks.map((b: any) => ({
+        ...b,
+        recipeCount: parsedRecipes.filter((r: any) => r.bookId === b.id).length
+      }));
+
+      setBooks(booksWithCounts);
+      localStorage.setItem('zecratary_recipes', JSON.stringify(parsedRecipes));
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(parsedRecipes));
+      localStorage.setItem('zecratary_recipe_books', JSON.stringify(booksWithCounts));
     } catch (e) {
       console.error(e);
     } finally {
@@ -103,15 +132,17 @@ export default function SavedRecipesPage() {
   };
 
   useEffect(() => {
-    fetchRecipesAndCategories();
+    loadData();
 
-    const handleCatSync = () => setCategories(getStoredCategories());
-    window.addEventListener('zecratary_categories_changed', handleCatSync);
-    window.addEventListener('storage', handleCatSync);
+    const handleSync = () => loadData();
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_categories_changed', handleSync);
 
     return () => {
-      window.removeEventListener('zecratary_categories_changed', handleCatSync);
-      window.removeEventListener('storage', handleCatSync);
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_categories_changed', handleSync);
     };
   }, []);
 
@@ -119,6 +150,36 @@ export default function SavedRecipesPage() {
     setRecipes(updatedList);
     localStorage.setItem('zecratary_recipes', JSON.stringify(updatedList));
     localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updatedList));
+
+    const updatedBooks = books.map((b: any) => ({
+      ...b,
+      recipeCount: updatedList.filter((r: any) => r.bookId === b.id).length
+    }));
+    setBooks(updatedBooks);
+    localStorage.setItem('zecratary_recipe_books', JSON.stringify(updatedBooks));
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+  };
+
+  const handleAssignToBook = (bookId: string) => {
+    if (!selectedRecipe) return;
+    const isRemoving = selectedRecipe.bookId === bookId;
+    const targetBookId = isRemoving ? null : bookId;
+    const updatedRecipe = { ...selectedRecipe, bookId: targetBookId };
+    setSelectedRecipe(updatedRecipe);
+
+    const updatedList = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
+    saveAllRecipes(updatedList);
+
+    const bookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
+    if (isRemoving) {
+      alert(`Removed "${selectedRecipe.title || selectedRecipe.name}" from "${bookTitle}"`);
+    } else {
+      alert(`Added "${selectedRecipe.title || selectedRecipe.name}" to "${bookTitle}"!`);
+    }
   };
 
   const toggleFavorite = (e: React.MouseEvent, id: string) => {
@@ -283,6 +344,8 @@ export default function SavedRecipesPage() {
     return true;
   });
 
+  const assignedBook = books.find(b => b.id === selectedRecipe?.bookId);
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 text-slate-100 pb-16 px-4">
       {/* Top Header */}
@@ -339,45 +402,55 @@ export default function SavedRecipesPage() {
         <div className="text-slate-500 text-xs py-12 text-center">Loading recipes...</div>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filtered.map((r) => (
-            <div
-              key={r.id}
-              onClick={() => {
-                setSelectedRecipe(r);
-                setServingsMultiplier(1);
-                setCompletedSteps([]);
-                setNoteText(r.note || '');
-                setIsEditing(false);
-              }}
-              className="bg-[#070b13] border border-slate-800 hover:border-slate-700 rounded-2xl overflow-hidden transition cursor-pointer group shadow-lg"
-            >
-              <div className="relative h-44 w-full bg-slate-800 overflow-hidden">
-                <img
-                  src={r.imageUrl || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'}
-                  alt={r.title}
-                  className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                />
-                <button
-                  onClick={(e) => toggleFavorite(e, r.id)}
-                  className="absolute top-3 right-3 p-2 bg-black/60 rounded-full text-white hover:text-[#E05638]"
-                >
-                  <Heart className={`h-4 w-4 ${r.isFavorite ? 'fill-[#E05638] text-[#E05638]' : 'text-white'}`} />
-                </button>
-              </div>
+          {filtered.map((r) => {
+            const cardBook = books.find(b => b.id === r.bookId);
+            return (
+              <div
+                key={r.id}
+                onClick={() => {
+                  setSelectedRecipe(r);
+                  setServingsMultiplier(1);
+                  setCompletedSteps([]);
+                  setNoteText(r.note || '');
+                  setIsBookDropdownOpen(false);
+                  setIsEditing(false);
+                }}
+                className="bg-[#070b13] border border-slate-800 hover:border-slate-700 rounded-2xl overflow-hidden transition cursor-pointer group shadow-lg relative"
+              >
+                <div className="relative h-44 w-full bg-slate-800 overflow-hidden">
+                  <img
+                    src={r.imageUrl || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'}
+                    alt={r.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                  />
+                  <button
+                    onClick={(e) => toggleFavorite(e, r.id)}
+                    className="absolute top-3 right-3 p-2 bg-black/60 rounded-full text-white hover:text-[#E05638]"
+                  >
+                    <Heart className={`h-4 w-4 ${r.isFavorite ? 'fill-[#E05638] text-[#E05638]' : 'text-white'}`} />
+                  </button>
 
-              <div className="p-4 space-y-2">
-                <h3 className="font-bold text-white text-base leading-snug">{r.title}</h3>
-                <div className="flex items-center justify-between pt-1">
-                  <span className="bg-[#E05638] text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                    {r.tags?.[0] || r.recipeType || 'Main Dish'}
-                  </span>
-                  <span className="text-xs text-slate-400 flex items-center gap-1">
-                    <Clock className="h-3 w-3" /> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
-                  </span>
+                  {cardBook && (
+                    <div className="absolute bottom-3 left-3 bg-black/75 backdrop-blur-md text-[10px] text-amber-300 font-bold px-2.5 py-1 rounded-full flex items-center gap-1 border border-amber-400/30">
+                      <Book className="h-3 w-3" /> {cardBook.title}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-4 space-y-2">
+                  <h3 className="font-bold text-white text-base leading-snug">{r.title}</h3>
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="bg-[#E05638] text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                      {r.tags?.[0] || r.recipeType || 'Main Dish'}
+                    </span>
+                    <span className="text-xs text-slate-400 flex items-center gap-1">
+                      <Clock className="h-3 w-3" /> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -386,7 +459,7 @@ export default function SavedRecipesPage() {
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
           <div className="bg-[#0c111d] border border-slate-800 rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative">
             <button
-              onClick={() => { setSelectedRecipe(null); setIsEditing(false); }}
+              onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
               className="absolute top-4 right-4 z-30 p-2 bg-black/70 hover:bg-black text-slate-300 hover:text-white rounded-xl border border-slate-700/60 transition"
             >
               <X className="h-5 w-5" />
@@ -430,13 +503,67 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
+                  {/* Top Action Row with ADD TO BOOK FUNCTIONAL DROPDOWN */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
-                    <button
-                      onClick={() => alert(`Added "${selectedRecipe.title}" to Book!`)}
-                      className="border border-[#E05638]/60 text-[#E05638] font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 hover:bg-[#E05638]/10"
-                    >
-                      <BookmarkPlus className="h-4 w-4 text-[#E05638]" /> Add to Book
-                    </button>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
+                        className={`w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 ${
+                          assignedBook
+                            ? 'bg-[#E05638]/20 border-[#E05638] text-[#E05638]'
+                            : 'border-[#E05638]/60 text-[#E05638] hover:bg-[#E05638]/10'
+                        }`}
+                      >
+                        <BookmarkPlus className="h-4 w-4 shrink-0 text-[#E05638]" />
+                        <span className="truncate">
+                          {assignedBook ? assignedBook.title : 'Add to Book'}
+                        </span>
+                        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5" />
+                      </button>
+
+                      {/* Dropdown Menu */}
+                      {isBookDropdownOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
+                          <div className="absolute left-0 top-full mt-2 w-64 bg-[#0d131f] border border-slate-700/80 rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1.5 flex items-center justify-between">
+                              <span>Select Cookbook</span>
+                              <Link href="/books" className="text-emerald-400 hover:underline">Manage</Link>
+                            </div>
+
+                            <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                              {books.length === 0 ? (
+                                <div className="text-xs text-slate-500 px-2.5 py-2">No cookbooks available</div>
+                              ) : (
+                                books.map((b) => {
+                                  const isAssigned = selectedRecipe.bookId === b.id;
+                                  return (
+                                    <button
+                                      key={b.id}
+                                      type="button"
+                                      onClick={() => {
+                                        handleAssignToBook(b.id);
+                                        setIsBookDropdownOpen(false);
+                                      }}
+                                      className={`w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition ${
+                                        isAssigned
+                                          ? 'bg-[#E05638]/20 text-[#E05638] border border-[#E05638]/30'
+                                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                                      }`}
+                                    >
+                                      <span className="truncate flex-1 pr-2">{b.title}</span>
+                                      {isAssigned && <Check className="h-3.5 w-3.5 text-[#E05638] shrink-0" />}
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
                     <button
                       onClick={() => alert(`Scheduled "${selectedRecipe.title}" in Meal Plan!`)}
                       className="border border-[#E05638]/60 text-[#E05638] font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 hover:bg-[#E05638]/10"
@@ -828,7 +955,7 @@ export default function SavedRecipesPage() {
                     </div>
                   )}
 
-                  {/* TAB 2: INGREDIENTS WITH DYNAMIC GLOBAL CATEGORIES */}
+                  {/* TAB 2: INGREDIENTS WITH GLOBAL CATEGORIES */}
                   {editTab === 'ingredients' && (
                     <div className="bg-[#070b13] border border-slate-800 rounded-2xl p-5 space-y-4 animate-in fade-in text-xs">
                       <div className="flex justify-between items-center">
@@ -1050,7 +1177,7 @@ export default function SavedRecipesPage() {
         </div>
       )}
 
-      {/* SHOPPING LIST MODAL WITH DYNAMIC GLOBAL CATEGORIES */}
+      {/* SHOPPING LIST MODAL */}
       {isShoppingModalOpen && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
           <div className="bg-[#0c111d] border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5">

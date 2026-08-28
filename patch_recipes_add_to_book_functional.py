@@ -1,4 +1,6 @@
-'use client';
+import os
+
+code = """'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
@@ -1279,3 +1281,11 @@ export default function SavedRecipesPage() {
     </div>
   );
 }
+"""
+
+for path in ["apps/web/src/app/recipes/page.tsx", "apps/web/src/app/recipe/page.tsx"]:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(code)
+
+print("✅ 'Add to Book' button on /recipes is now fully interactive with dynamic cookbook assignment!")
