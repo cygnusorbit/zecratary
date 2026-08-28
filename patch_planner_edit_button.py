@@ -1,4 +1,6 @@
-'use client';
+import os
+
+planner_code = """'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
@@ -956,3 +958,9 @@ export default function PlannerPage() {
     </div>
   );
 }
+"""
+
+with open("apps/web/src/app/planner/page.tsx", "w", encoding="utf-8") as f:
+    f.write(planner_code)
+
+print("✅ Added Edit button to planned meal cards in /planner!")
