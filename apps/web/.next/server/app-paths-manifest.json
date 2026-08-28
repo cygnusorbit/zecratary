@@ -1,6 +1,8 @@
 {
-  "/planner/page": "app/planner/page.js",
-  "/shopping/page": "app/shopping/page.js",
+  "/api/recipes/route": "app/api/recipes/route.js",
   "/manual/page": "app/manual/page.js",
-  "/recipes/page": "app/recipes/page.js"
+  "/import/page": "app/import/page.js",
+  "/recipes/page": "app/recipes/page.js",
+  "/shopping/page": "app/shopping/page.js",
+  "/planner/page": "app/planner/page.js"
 }
