@@ -1,4 +1,10 @@
-'use client';
+import os
+
+target_path = "apps/web/src/app/admin/ai-settings/page.tsx"
+if not os.path.exists("apps/web/src/app/admin/ai-settings"):
+    target_path = "src/app/admin/ai-settings/page.tsx"
+
+patch_code = r'''use client';
 import { useState, useEffect, useCallback } from 'react';
 import { 
   Radio, Activity, CheckCircle2, XCircle, Loader2,
@@ -674,7 +680,7 @@ export default function ChefAISettingsPage() {
                 </button>
               </div>
 
-              <div className="pt-2 space-y-4 text-xs">
+              <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>API Key</label>
@@ -1788,3 +1794,13 @@ export default function ChefAISettingsPage() {
     </div>
   );
 }
+'''
+
+if not patch_code.startswith("'use client';"):
+    patch_code = "'" + patch_code
+
+os.makedirs(os.path.dirname(target_path), exist_ok=True)
+with open(target_path, "w", encoding="utf-8") as f:
+    f.write(patch_code)
+
+print(f"✅ Successfully moved 'Autonomous Capabilities & Search Scope Control' into Tab 'Agent Parameters' above 'Agent Parameters & Knowledge Tuning' at: {target_path}")
