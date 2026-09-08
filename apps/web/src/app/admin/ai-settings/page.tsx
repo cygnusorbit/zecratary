@@ -766,10 +766,6 @@ export default function ChefAISettingsPage() {
                       <>
                         <option value="gemini-3.6-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.6 Flash (Latest Recommended)</option>
                         <option value="gemini-3.5-flash-lite" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.5 Flash Lite (Lightweight & Fast)</option>
-                        <option value="gemini-3.8" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.8 (High Intelligence)</option>
-                        <option value="gemini-3.1-pro" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.1 Pro (Deep Reasoning)</option>
-                        <option value="gemini-2.5-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 2.5 Flash</option>
-                        <option value="gemini-1.5-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 1.5 Flash (Legacy)</option>
                       </>
                     ) : (
                       <>

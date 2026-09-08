@@ -1,4 +1,6 @@
-// @ts-nocheck
+import os
+
+code = r"""// @ts-nocheck
 'use client';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -3043,3 +3045,23 @@ export default function ChefChatPage() {
     </div>
   );
 }
+"""
+
+target_paths = [
+    "apps/web/src/app/chef/page.tsx",
+    "src/app/chef/page.tsx"
+]
+
+written = False
+for tp in target_paths:
+    if os.path.exists(os.path.dirname(tp)):
+        with open(tp, "w", encoding="utf-8") as f:
+            f.write(code)
+        print(f"Updated: {tp}")
+        written = True
+
+if not written:
+    os.makedirs("apps/web/src/app/chef", exist_ok=True)
+    with open("apps/web/src/app/chef/page.tsx", "w", encoding="utf-8") as f:
+        f.write(code)
+    print("Created: apps/web/src/app/chef/page.tsx")

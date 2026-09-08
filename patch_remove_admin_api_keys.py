@@ -1,4 +1,6 @@
-'use client';
+import os
+
+admin_page_code = """'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
@@ -809,3 +811,30 @@ export default function AdminSettingsPage() {
     </div>
   );
 }
+"""
+
+admin_candidates = [
+    "apps/web/src/app/admin/page.tsx",
+    "src/app/admin/page.tsx",
+    "apps/web/src/app/(app)/admin/page.tsx",
+    "src/app/(app)/admin/page.tsx"
+]
+
+patched = False
+for path in admin_candidates:
+    if os.path.exists(path) or os.path.exists(os.path.dirname(path)):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(admin_page_code)
+        print(f"✅ Removed API Keys tab & related code from: {path}")
+        patched = True
+        break
+
+if not patched:
+    fallback = admin_candidates[0]
+    os.makedirs(os.path.dirname(fallback), exist_ok=True)
+    with open(fallback, "w", encoding="utf-8") as f:
+        f.write(admin_page_code)
+    print(f"✅ Created fallback without API Keys tab at: {fallback}")
+
+print("🎉 API Keys tab and all related logic successfully purged from /admin!")
