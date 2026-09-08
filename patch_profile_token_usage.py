@@ -1,4 +1,6 @@
-'use client';
+import os
+
+profile_code = """'use client';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -1295,3 +1297,25 @@ export default function ProfilePage() {
     </div>
   );
 }
+"""
+
+targets = [
+    "apps/web/src/app/profile/page.tsx",
+    "src/app/profile/page.tsx"
+]
+
+patched = False
+for path in targets:
+    if os.path.exists(os.path.dirname(path)) or os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(profile_code)
+        print(f"✅ Successfully added Token Usage section to profile page at: {path}")
+        patched = True
+
+if not patched:
+    os.makedirs("apps/web/src/app/profile", exist_ok=True)
+    with open("apps/web/src/app/profile/page.tsx", "w", encoding="utf-8") as f:
+        f.write(profile_code)
+    print("✅ Created and patched apps/web/src/app/profile/page.tsx")
+
+print("\n🎉 /profile now features a complete AI Token Usage & Quota tracking card alongside account settings and membership plans!")
