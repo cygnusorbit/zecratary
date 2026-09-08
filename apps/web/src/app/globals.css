@@ -1,0 +1,52 @@
+
+:root {
+  --color-primary: #E05638;
+  --color-primary-hover: #c94529;
+  --color-bg: #070b13;
+  --color-card: #111726;
+  --color-border: #1e293b;
+  --color-text: #ffffff;
+  --color-text-secondary: #94a3b8;
+  --color-emerald: #10b981;
+}
+
+body {
+  background-color: var(--color-bg) !important;
+  color: var(--color-text) !important;
+}
+
+/* Global Dynamic Theme Helper Classes */
+.theme-bg {
+  background-color: var(--color-bg) !important;
+}
+
+.theme-card {
+  background-color: var(--color-card) !important;
+  border-color: var(--color-border) !important;
+}
+
+.theme-primary-btn {
+  background-color: var(--color-primary) !important;
+  color: #ffffff !important;
+}
+
+.theme-primary-btn:hover {
+  background-color: var(--color-primary-hover) !important;
+}
+
+.theme-primary-text {
+  color: var(--color-primary) !important;
+}
+
+.theme-border {
+  border-color: var(--color-border) !important;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #0B101D;
+  color: #F1F5F9;
+}

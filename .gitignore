@@ -1,0 +1,11 @@
+node_modules/
+*/node_modules/
+.next/
+*/.next/
+.turbo/
+*/.turbo/
+*.zip
+*.sql
+.env
+apps/web/.env.local
+.DS_Store
