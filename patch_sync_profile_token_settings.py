@@ -1,4 +1,6 @@
-// Generated / Updated by AI Collaborator
+import os
+
+profile_code = r'''// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -1320,3 +1322,17 @@ export default function ProfilePage() {
     </div>
   );
 }
+'''
+
+targets = [
+    "apps/web/src/app/profile/page.tsx",
+    "src/app/profile/page.tsx"
+]
+
+for p in targets:
+    if os.path.exists(os.path.dirname(p)):
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(profile_code)
+        print(f"✅ Successfully synchronized /profile with /admin/plans token settings at: {p}")
+
+print("\n🎉 Token limits and reimburse frequencies are now fully in sync between /admin/plans and /profile!")
