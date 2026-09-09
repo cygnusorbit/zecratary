@@ -459,12 +459,12 @@ export default function Sidebar() {
 
         {/* FOOTER CONTROLS */}
         <div className="pt-3 border-t border-[var(--color-border)] space-y-1">
-          {/* QUICK LANGUAGE SELECTOR */}
+          {/* QUICK LANGUAGE SELECTOR & DARK MODE TOGGLE */}
           {showCollapsed ? (
-            <div className="flex justify-center p-1" title={availableLanguages.find((l) => l.code === locale)?.name || 'Language'}>
+            <div className="flex flex-col items-center gap-2 p-1">
               <div className={`relative flex items-center justify-center p-2 rounded-xl border border-[var(--color-border)] text-base cursor-pointer hover:border-emerald-500/40 transition ${
                 isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
-              }`}>
+              }`} title={availableLanguages.find((l) => l.code === locale)?.name || 'Language'}>
                 <span>{availableLanguages.find((l) => l.code === locale)?.flag || '🌐'}</span>
                 <select
                   value={locale}
@@ -479,10 +479,21 @@ export default function Sidebar() {
                   ))}
                 </select>
               </div>
+              <button
+                type="button"
+                onClick={toggleThemeMode}
+                className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer ${
+                  isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
+                }`}
+                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                aria-label="Toggle Theme Mode"
+              >
+                {isDarkMode ? <Moon className="h-4 w-4 text-[#E05638]" /> : <Sun className="h-4 w-4 text-amber-500" />}
+              </button>
             </div>
           ) : (
-            <div className="px-1 py-1">
-              <div className={`flex items-center border border-[var(--color-border)] rounded-xl px-2.5 py-1.5 shadow-sm ${
+            <div className="px-1 py-1 flex items-center gap-2">
+              <div className={`flex-1 flex items-center border border-[var(--color-border)] rounded-xl px-2.5 py-1.5 shadow-sm ${
                 isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
               }`}>
                 <select
@@ -499,21 +510,19 @@ export default function Sidebar() {
                   ))}
                 </select>
               </div>
+              <button
+                type="button"
+                onClick={toggleThemeMode}
+                className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer shrink-0 ${
+                  isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
+                }`}
+                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                aria-label="Toggle Theme Mode"
+              >
+                {isDarkMode ? <Moon className="h-4 w-4 text-[#E05638]" /> : <Sun className="h-4 w-4 text-amber-500" />}
+              </button>
             </div>
           )}
-
-          {/* DARK MODE / DAY MODE TOGGLE BUTTON */}
-          <div className={showCollapsed ? "flex justify-center p-1" : "px-3.5 py-1.5"}>
-            <button
-              type="button"
-              onClick={toggleThemeMode}
-              className="p-1 text-[#E05638] hover:text-amber-400 transition-colors flex items-center justify-center rounded-lg cursor-pointer"
-              title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-              aria-label="Toggle Theme Mode"
-            >
-              {isDarkMode ? <Moon className="h-5 w-5 text-[#E05638]" /> : <Sun className="h-5 w-5 text-amber-500" />}
-            </button>
-          </div>
 
           <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
             <Settings className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`} />

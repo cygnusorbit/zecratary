@@ -1,4 +1,17 @@
-// Generated / Updated by AI Collaborator
+import os
+
+target_paths = [
+    'apps/web/src/app/profile/page.tsx',
+    'src/app/profile/page.tsx'
+]
+
+profile_path = next((p for p in target_paths if os.path.exists(p)), None)
+
+if not profile_path:
+    print("Error: Could not locate profile/page.tsx")
+    exit(1)
+
+fixed_content = """// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -191,7 +204,7 @@ export default function ProfilePage() {
   });
   const [activeModelName, setActiveModelName] = useState('gemini-1.5-flash');
 
-  // Dynamic Theme & Day/Night Mode Synchronization matching /admin/language
+  // Dynamic Theme & Day/Night Mode Synchronization
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -199,42 +212,14 @@ export default function ProfilePage() {
       setIsDayMode(isDay);
 
       const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
+      if (stored) {
+        const c = JSON.parse(stored);
+        const root = document.documentElement;
+        if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
+        if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
+        if (c.accentEmerald || c.accentColor) {
+          root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
+          root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor);
         }
       }
 
@@ -268,9 +253,6 @@ export default function ProfilePage() {
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_payment_updated', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
-      }
     };
   }, [applySavedTheme]);
 
@@ -777,19 +759,16 @@ export default function ProfilePage() {
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200 min-h-screen"
-      style={{ 
-        color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)',
-        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)'
-      }}
+      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
     >
       <style dangerouslySetInnerHTML={{ __html: `
         .profile-input:-webkit-autofill,
         .profile-input:-webkit-autofill:hover,
         .profile-input:-webkit-autofill:focus,
         .profile-input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'} inset !important;
-          box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'} inset !important;
+          -webkit-box-shadow: 0 0 0 1000px ${isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)'} inset !important;
+          box-shadow: 0 0 0 1000px ${isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)'} inset !important;
           -webkit-text-fill-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
           caret-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
           transition: background-color 50000s ease-in-out 0s !important;
@@ -812,7 +791,7 @@ export default function ProfilePage() {
               href="/admin"
               className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
                 borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                 color: isDayMode ? '#0f172a' : '#cbd5e1'
               }}
@@ -823,7 +802,7 @@ export default function ProfilePage() {
               href="/admin/plans"
               className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
                 borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                 color: isDayMode ? '#0f172a' : '#cbd5e1'
               }}
@@ -862,7 +841,7 @@ export default function ProfilePage() {
         <div 
           className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
           style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
             borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
           }}
         >
@@ -871,7 +850,7 @@ export default function ProfilePage() {
               <div 
                 className="w-14 h-14 rounded-2xl border flex items-center justify-center text-xl font-black shadow-inner"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                  backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                   color: 'var(--color-primary, #E05638)'
                 }}
@@ -941,7 +920,7 @@ export default function ProfilePage() {
                     placeholder="e.g. Jordan Smith"
                     className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                       borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
@@ -963,7 +942,7 @@ export default function ProfilePage() {
                     placeholder="name@example.com"
                     className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                       borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
@@ -989,7 +968,7 @@ export default function ProfilePage() {
                     placeholder="••••••••"
                     className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                       borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
@@ -1013,7 +992,7 @@ export default function ProfilePage() {
                     placeholder="••••••••"
                     className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                       borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
@@ -1055,7 +1034,7 @@ export default function ProfilePage() {
         <div 
           className="lg:col-span-5 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
           style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
             borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
           }}
         >
@@ -1067,7 +1046,7 @@ export default function ProfilePage() {
               <span 
                 className="text-[10px] font-mono px-2.5 py-1 rounded-lg border font-bold shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : '#0B101D',
+                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
                   borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
                   color: '#f97316'
                 }}
@@ -1091,7 +1070,7 @@ export default function ProfilePage() {
               <div 
                 className="border rounded-full h-3.5 overflow-hidden p-0.5 shadow-inner"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
+                  backgroundColor: isDayMode ? '#f1f5f9' : '#070b13',
                   borderColor: isDayMode ? '#cbd5e1' : '#1e293b'
                 }}
               >
@@ -1114,7 +1093,7 @@ export default function ProfilePage() {
               <div 
                 className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                   borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
                 }}
               >
@@ -1126,7 +1105,7 @@ export default function ProfilePage() {
               <div 
                 className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                   borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
                 }}
               >
@@ -1140,7 +1119,7 @@ export default function ProfilePage() {
           <div 
             className="p-4 rounded-2xl border text-[11px] space-y-2 shadow-inner"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
               borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#64748b' : '#94a3b8'
             }}
@@ -1165,7 +1144,7 @@ export default function ProfilePage() {
       <div 
         className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
           borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
         }}
       >
@@ -1183,7 +1162,7 @@ export default function ProfilePage() {
           <div 
             className="flex items-center p-1 rounded-xl border text-xs font-bold self-start sm:self-auto shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
               borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
             }}
           >
@@ -1236,7 +1215,7 @@ export default function ProfilePage() {
                     : 'hover:scale-[1.01]'
                 }`}
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                   borderColor: isCurrent 
                     ? 'var(--color-emerald, #10b981)' 
                     : (plan.badge ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'))
@@ -1376,3 +1355,9 @@ export default function ProfilePage() {
     </div>
   );
 }
+"""
+
+with open(profile_path, 'w', encoding='utf-8') as f:
+    f.write(fixed_content)
+
+print(f"Successfully fixed Day/Night mode support in {profile_path}")

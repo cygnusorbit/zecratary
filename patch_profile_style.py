@@ -1,4 +1,17 @@
-// Generated / Updated by AI Collaborator
+import os
+
+target_paths = [
+    'apps/web/src/app/profile/page.tsx',
+    'src/app/profile/page.tsx'
+]
+
+profile_path = next((p for p in target_paths if os.path.exists(p)), None)
+
+if not profile_path:
+    print("Error: Could not locate profile/page.tsx")
+    exit(1)
+
+fixed_content = """// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -1376,3 +1389,9 @@ export default function ProfilePage() {
     </div>
   );
 }
+"""
+
+with open(profile_path, 'w', encoding='utf-8') as f:
+    f.write(fixed_content)
+
+print(f"Successfully updated Profile page styling to match Image 1 (Day/Dark theme consistency)")
