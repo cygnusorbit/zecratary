@@ -1,0 +1,13 @@
+{
+  "googleEnabled": true,
+  "googleClientId": "admin@zecratary.com",
+  "googleClientSecret": "admin",
+  "facebookEnabled": false,
+  "facebookClientId": "",
+  "facebookClientSecret": "",
+  "appleEnabled": false,
+  "appleClientId": "",
+  "appleTeamId": "",
+  "appleKeyId": "",
+  "redirectUri": "http://localhost:3000/api/auth/callback"
+}

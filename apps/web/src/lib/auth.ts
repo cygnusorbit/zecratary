@@ -58,9 +58,11 @@ export const setCurrentUser = (user: User | null) => {
   if (typeof window === 'undefined') return;
   if (user) {
     localStorage.setItem('zecratary_current_user', JSON.stringify(user));
+  document.cookie = `zecratary_session=${encodeURIComponent(JSON.stringify(user))}; path=/; max-age=604800; SameSite=Lax`;
     localStorage.setItem('zecratary_user', JSON.stringify(user));
   } else {
     localStorage.removeItem('zecratary_current_user');
+  document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     localStorage.removeItem('zecratary_user');
   }
   window.dispatchEvent(new Event('zecratary_auth_changed'));
@@ -69,6 +71,7 @@ export const setCurrentUser = (user: User | null) => {
 export const logoutUser = () => {
   if (typeof window === 'undefined') return;
   localStorage.removeItem('zecratary_current_user');
+  document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
   localStorage.removeItem('zecratary_user');
   window.dispatchEvent(new Event('zecratary_auth_changed'));
   window.location.href = '/login';

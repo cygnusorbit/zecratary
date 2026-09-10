@@ -125,3 +125,19 @@ model MealTemplate {
   payload     Json
   createdAt   DateTime @default(now())
 }
+
+model SocialConfig {
+  id                   String   @id @default(cuid())
+  googleEnabled        Boolean  @default(true)
+  googleClientId       String?
+  googleClientSecret   String?
+  facebookEnabled      Boolean  @default(true)
+  facebookClientId     String?
+  facebookClientSecret String?
+  appleEnabled         Boolean  @default(true)
+  appleClientId        String?
+  appleTeamId          String?
+  appleKeyId           String?
+  redirectUri          String   @default("http://localhost:3000/api/auth/callback")
+  updatedAt            DateTime @updatedAt
+}

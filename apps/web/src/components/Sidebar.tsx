@@ -27,7 +27,8 @@ import {
   Languages,
   Cpu,
   Moon,
-  Sun
+  Sun,
+  Key
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -195,7 +196,7 @@ export default function Sidebar() {
     setIsOpen(false);
   }, [pathname]);
 
-  if (pathname === '/login' || pathname === '/register') {
+  if (pathname === '/login' || pathname === '/register' || pathname === '/forgot-password') {
     return null;
   }
 
@@ -427,6 +428,10 @@ export default function Sidebar() {
                 <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
                   <Cpu className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
+                </Link>
+                <Link href="/admin/social-settings" className={navClass('/admin/social-settings')} title="Social Setting">
+                  <Key className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Social Setting</span>}
                 </Link>
                 <Link href="/admin/plans" className={navClass('/admin/plans')} title={t('subscriptionPlans') || 'Subscription Plans'}>
                   <CreditCard className="h-4 w-4 text-[var(--color-primary)] shrink-0" />

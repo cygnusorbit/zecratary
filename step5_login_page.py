@@ -1,4 +1,31 @@
-'use client';
+import os
+import glob
+
+# 1. Dynamically locate the active App Router directory
+potential_app_roots = [
+    'apps/web/src/app',
+    'src/app',
+    'apps/web/app',
+    'app'
+]
+
+app_dir = next((c for c in potential_app_roots if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/lib/auth.ts', recursive=True)
+    if matches:
+        app_dir = os.path.join(os.path.dirname(os.path.dirname(matches[0])), 'app')
+
+if not app_dir:
+    print("❌ Error: Could not locate Next.js app directory.")
+    exit(1)
+
+# 2. Check for auth route groups (e.g., (auth))
+dest_dirs = [os.path.join(app_dir, 'login')]
+if os.path.exists(os.path.join(app_dir, '(auth)')):
+    dest_dirs.append(os.path.join(app_dir, '(auth)', 'login'))
+
+login_code = """'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -70,34 +97,6 @@ export default function LoginPage() {
       window.removeEventListener('zecratary_social_login_updated', syncSocialConfig);
     };
   }, [syncTheme, syncSocialConfig]);
-
-  // Intercept Server-Side OAuth Callbacks
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('social_success') === 'true') {
-        const provider = params.get('provider') as SocialProvider;
-        const email = params.get('email') || '';
-        const name = params.get('name') || '';
-        
-        if (provider && email) {
-          try {
-            executeSocialAuth({ name, email, provider });
-            setSuccess(`Authenticated with ${provider.toUpperCase()} via OAuth! Redirecting...`);
-            
-            // Clean URL and redirect
-            window.history.replaceState({}, document.title, '/login');
-            setTimeout(() => triggerLoginSuccess(), 600);
-          } catch (e) {
-            setError('Failed to finalize OAuth session.');
-          }
-        }
-      } else if (params.get('error')) {
-        setError(`OAuth Error: ${params.get('error')?.replace(/_/g, ' ')}`);
-        window.history.replaceState({}, document.title, '/login');
-      }
-    }
-  }, []);
 
   useEffect(() => {
     initAuthStorage();
@@ -393,3 +392,13 @@ export default function LoginPage() {
     </div>
   );
 }
+"""
+
+for d in dest_dirs:
+    os.makedirs(d, exist_ok=True)
+    target_path = os.path.join(d, 'page.tsx')
+    with open(target_path, 'w', encoding='utf-8') as f:
+        f.write(login_code)
+    print(f"✓ Installed Step 5: functional /login page at: {target_path}")
+
+print("Done! If your dev server returns a 404, restart it (Ctrl + C -> npm run dev).")
