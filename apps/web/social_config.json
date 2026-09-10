@@ -2,7 +2,7 @@
   "googleEnabled": true,
   "googleClientId": "admin@zecratary.com",
   "googleClientSecret": "admin",
-  "facebookEnabled": false,
+  "facebookEnabled": true,
   "facebookClientId": "",
   "facebookClientSecret": "",
   "appleEnabled": false,
