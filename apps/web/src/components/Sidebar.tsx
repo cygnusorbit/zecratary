@@ -27,8 +27,8 @@ import {
   Languages,
   Cpu,
   Moon,
-  Sun
-} from 'lucide-react';
+  Sun,
+  Key } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -435,6 +435,10 @@ export default function Sidebar() {
                 <Link href="/admin/payment" className={navClass('/admin/payment')} title={t('paymentGateway') || 'Payment Gateway'}>
                   <Wallet className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">{t('paymentGateway') || 'Payment Gateway'}</span>}
+                </Link>
+                <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
+                  <Key className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
                 </Link>
                 <Link href="/admin/add-user" className={navClass('/admin/add-user')} title={t('addUser') || 'Add User'}>
                   <UserPlus className="h-4 w-4 text-[var(--color-primary)] shrink-0" />

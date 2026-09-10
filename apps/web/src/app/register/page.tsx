@@ -3,24 +3,34 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Mail, Lock, CheckCircle2, AlertCircle, ArrowRight, Sparkles, Eye, EyeOff, ShieldCheck, Loader2 } from 'lucide-react';
+import { 
+  User as UserIcon, Mail, Lock, CheckCircle2, 
+  AlertCircle, ArrowRight, Sparkles, Eye, EyeOff,
+  ShieldCheck, Loader2
+} from 'lucide-react';
 import { getCurrentUser, setCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { executeSocialAuth, SocialProvider } from '@/lib/socialAuth';
 import { useTranslation } from '@/components/LanguageProvider';
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const router = useRouter();
   const { t } = useTranslation();
 
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [agreeTerms, setAgreeTerms] = useState(true);
+
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [socialLoading, setSocialLoading] = useState<SocialProvider | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isDayMode, setIsDayMode] = useState(false);
 
+  // Social modal state
   const [socialModalProvider, setSocialModalProvider] = useState<SocialProvider | null>(null);
   const [socialName, setSocialName] = useState('');
   const [socialEmail, setSocialEmail] = useState('');
@@ -47,30 +57,55 @@ export default function LoginPage() {
     if (getCurrentUser()) router.replace('/profile');
   }, [router]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
+
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanName) return setError('Please provide your full name.');
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return setError('Please enter a valid email.');
+    if (password.length < 6) return setError('Password must be at least 6 characters.');
+    if (password !== confirmPassword) return setError('Passwords do not match.');
+    if (!agreeTerms) return setError('Please accept the Terms of Service.');
+
     setLoading(true);
 
-    const cleanEmail = email.trim().toLowerCase();
-    const rawUsers = localStorage.getItem('zecratary_users');
-    const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
+    try {
+      const rawUsers = localStorage.getItem('zecratary_users');
+      const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
 
-    const matched = users.find((u) => u.email.toLowerCase() === cleanEmail && u.password === password);
+      if (users.some((u) => u.email.toLowerCase() === cleanEmail)) {
+        setLoading(false);
+        return setError('An account with this email already exists. Please log in.');
+      }
 
-    if (!matched) {
+      const newUser: User = {
+        id: 'usr_' + Date.now().toString(36),
+        name: cleanName,
+        email: cleanEmail,
+        password,
+        role: 'user',
+        subscriptionPlan: 'taster',
+        subscriptionTier: 'taster',
+        createdAt: new Date().toISOString(),
+      };
+
+      localStorage.setItem('zecratary_users', JSON.stringify([newUser, ...users]));
+      setCurrentUser(newUser);
+
+      window.dispatchEvent(new Event('zecratary_users_updated'));
+      window.dispatchEvent(new Event('zecratary_auth_changed'));
+      window.dispatchEvent(new Event('storage'));
+
+      setSuccess('Account created! Redirecting to profile...');
+      setTimeout(() => router.replace('/profile'), 700);
+    } catch (err: any) {
+      setError(err.message || 'Registration failed.');
       setLoading(false);
-      return setError('Invalid email address or password.');
     }
-
-    setCurrentUser(matched);
-    window.dispatchEvent(new Event('zecratary_users_updated'));
-    window.dispatchEvent(new Event('zecratary_auth_changed'));
-    window.dispatchEvent(new Event('storage'));
-
-    setSuccess('Signed in successfully! Redirecting...');
-    setTimeout(() => router.replace('/profile'), 600);
   };
 
   const startSocialAuth = (provider: SocialProvider) => {
@@ -131,10 +166,10 @@ export default function LoginPage() {
             <Sparkles className="h-6 w-6" />
           </div>
           <h1 className="text-2xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            Welcome Back
+            Create an Account
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            Sign in to access your saved recipes, meals, and analytics.
+            Join Zecratary to unlock AI meal planning and nutrition analytics.
           </p>
         </div>
 
@@ -220,15 +255,35 @@ export default function LoginPage() {
         <div className="flex items-center gap-3">
           <div className="h-px flex-1" style={{ backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b' }} />
           <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-            or sign in with email
+            or register with email
           </span>
           <div className="h-px flex-1" style={{ backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b' }} />
         </div>
 
         {/* Email Form */}
-        <form onSubmit={handleLogin} className="space-y-4 text-xs" autoComplete="off">
+        <form onSubmit={handleRegister} className="space-y-4 text-xs" autoComplete="off">
           <div>
-            <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Email Address</label>
+            <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Full Name *</label>
+            <div className="relative">
+              <UserIcon className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Alex Morgan"
+                className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs font-bold outline-none"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Email Address *</label>
             <div className="relative">
               <Mail className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
               <input
@@ -236,7 +291,7 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
+                placeholder="alex@example.com"
                 className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs font-mono outline-none"
                 style={{
                   backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
@@ -248,7 +303,7 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Password</label>
+            <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Password *</label>
             <div className="relative">
               <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
               <input
@@ -256,7 +311,7 @@ export default function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="At least 6 characters"
                 className="w-full border rounded-xl pl-10 pr-10 py-2.5 text-xs outline-none"
                 style={{
                   backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
@@ -274,6 +329,45 @@ export default function LoginPage() {
             </div>
           </div>
 
+          <div>
+            <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Confirm Password *</label>
+            <div className="relative">
+              <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
+              <input
+                type={showConfirmPassword ? 'text' : 'password'}
+                required
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Repeat password"
+                className="w-full border rounded-xl pl-10 pr-10 py-2.5 text-xs outline-none"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                className="absolute right-3 top-3 text-slate-500 hover:text-slate-300"
+              >
+                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+
+          <label className="flex items-start gap-2 pt-1 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={agreeTerms}
+              onChange={(e) => setAgreeTerms(e.target.checked)}
+              className="mt-0.5 rounded accent-[var(--color-primary)] cursor-pointer"
+            />
+            <span className="text-[11px] leading-snug" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              I agree to the Terms of Service and Privacy Policy.
+            </span>
+          </label>
+
           <button
             type="submit"
             disabled={loading || socialLoading !== null}
@@ -281,14 +375,14 @@ export default function LoginPage() {
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-            Sign In
+            Create Free Account
           </button>
         </form>
 
         <div className="text-center pt-2 border-t text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-          <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Don't have an account? </span>
-          <Link href="/register" className="font-extrabold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
-            Register Now
+          <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Already have an account? </span>
+          <Link href="/login" className="font-extrabold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
+            Sign In
           </Link>
         </div>
       </div>
