@@ -5,7 +5,7 @@
   "facebookEnabled": true,
   "facebookClientId": "",
   "facebookClientSecret": "",
-  "appleEnabled": false,
+  "appleEnabled": true,
   "appleClientId": "",
   "appleTeamId": "",
   "appleKeyId": "",
