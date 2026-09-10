@@ -1,4 +1,26 @@
-// Generated & Maintained by Zecratary Admin Suite
+import os
+
+target_dirs = [
+    'apps/web/src/app/admin/payment',
+    'src/app/admin/payment'
+]
+
+target_dir = next((d for d in target_dirs if os.path.exists(d)), None)
+
+if not target_dir:
+    if os.path.exists('apps/web/src/app/admin'):
+        target_dir = 'apps/web/src/app/admin/payment'
+    elif os.path.exists('src/app/admin'):
+        target_dir = 'src/app/admin/payment'
+    elif os.path.exists('apps/web'):
+        target_dir = 'apps/web/src/app/admin/payment'
+    else:
+        target_dir = 'src/app/admin/payment'
+
+os.makedirs(target_dir, exist_ok=True)
+payment_page_path = os.path.join(target_dir, 'page.tsx')
+
+payment_code = """// Generated & Maintained by Zecratary Admin Suite
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -438,7 +460,7 @@ export default function AdminPaymentPage() {
       t.status,
       new Date(t.createdAt).toLocaleDateString()
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
@@ -651,314 +673,7 @@ export default function AdminPaymentPage() {
         </div>
       </div>
 
-      {/* TRANSACTIONS AUDIT TABLE WITH PAGINATION (PLACED ABOVE GATEWAYS) */}
-      <div 
-        className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-        style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-        }}
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-          <div>
-            <h2 className="text-lg font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              <CreditCard className="h-5 w-5 text-emerald-500" />
-              Transaction Ledger & Reconciliation
-            </h2>
-            <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-              Showing {filteredTransactions.length} transaction{filteredTransactions.length === 1 ? '' : 's'} matching active filters.
-            </p>
-          </div>
-
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
-              <Search className="h-3.5 w-3.5 absolute left-3 top-2.5 text-slate-400" />
-              <input 
-                type="text"
-                placeholder="Search user, email, tx..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 pr-3 py-1.5 text-xs rounded-xl border outline-none w-48"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-              />
-            </div>
-
-            <select
-              value={filterGateway}
-              onChange={(e) => setFilterGateway(e.target.value)}
-              className="text-xs py-1.5 px-2.5 rounded-xl border outline-none cursor-pointer font-bold"
-              style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            >
-              <option value="all">All Gateways</option>
-              <option value="stripe">Stripe</option>
-              <option value="paypal">PayPal</option>
-              <option value="manual">Manual / Test</option>
-            </select>
-
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="text-xs py-1.5 px-2.5 rounded-xl border outline-none cursor-pointer font-bold"
-              style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            >
-              <option value="all">All Statuses</option>
-              <option value="succeeded">Succeeded</option>
-              <option value="pending">Pending</option>
-              <option value="refunded">Refunded</option>
-              <option value="failed">Failed</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Table View */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)', color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                <th className="py-3 px-3 font-bold">Transaction ID</th>
-                <th className="py-3 px-3 font-bold">Customer</th>
-                <th className="py-3 px-3 font-bold">Plan & Amount</th>
-                <th className="py-3 px-3 font-bold">Gateway</th>
-                <th className="py-3 px-3 font-bold">Status</th>
-                <th className="py-3 px-3 font-bold">Date</th>
-                <th className="py-3 px-3 font-bold text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y" style={{ borderColor: isDayMode ? '#f1f5f9' : '#1e293b' }}>
-              {paginatedTransactions.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-8" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                    No transactions match your current search criteria.
-                  </td>
-                </tr>
-              ) : (
-                paginatedTransactions.map((tx) => (
-                  <tr key={tx.id} className="hover:opacity-90 transition">
-                    <td className="py-3.5 px-3 font-mono text-[11px] font-bold" style={{ color: isDayMode ? '#334155' : '#93c5fd' }}>
-                      {tx.id}
-                      {tx.testMode && (
-                        <span className="ml-1.5 px-1.5 py-0.2 rounded text-[9px] uppercase font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                          Test
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-3">
-                      <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.customerName || 'Anonymous'}</div>
-                      <div className="text-[11px] font-mono" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.customerEmail}</div>
-                    </td>
-                    <td className="py-3.5 px-3">
-                      <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.planName}</div>
-                      <div className="font-mono text-emerald-500 font-extrabold text-[11px]">
-                        {currentCurrencySymbol}{Number(tx.amount || 0).toFixed(2)} {tx.currency}
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-3 uppercase font-extrabold text-[10px] tracking-wider">
-                      <span className={`px-2 py-0.5 rounded-md border ${
-                        tx.gateway === 'stripe' ? 'bg-[#635BFF]/10 text-[#635BFF] border-[#635BFF]/20' :
-                        tx.gateway === 'paypal' ? 'bg-[#0079C1]/10 text-[#0079C1] border-[#0079C1]/20' :
-                        'bg-slate-500/10 text-slate-400 border-slate-500/20'
-                      }`}>
-                        {tx.gateway}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border inline-flex items-center gap-1 ${
-                        tx.status === 'succeeded' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' :
-                        tx.status === 'refunded' ? 'bg-orange-500/15 text-orange-400 border-orange-500/30' :
-                        tx.status === 'pending' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
-                        'bg-red-500/15 text-red-400 border-red-500/30'
-                      }`}>
-                        {tx.status}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-3 text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                      {new Date(tx.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </td>
-                    <td className="py-3.5 px-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {tx.status === 'succeeded' && (
-                          <button
-                            type="button"
-                            title="Refund Transaction"
-                            onClick={() => handleRefund(tx)}
-                            className="p-1.5 rounded-lg border text-orange-400 hover:bg-orange-500/10 transition cursor-pointer"
-                            style={{ borderColor: isDayMode ? '#fdba74' : '#7c2d12' }}
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          title="Delete Record"
-                          onClick={() => handleDeleteTx(tx.id)}
-                          className="p-1.5 rounded-lg border text-red-400 hover:bg-red-500/10 transition cursor-pointer"
-                          style={{ borderColor: isDayMode ? '#fca5a5' : '#991b1b' }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* PAGINATION CONTROLS */}
-        <div 
-          className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t text-xs"
-          style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
-        >
-          {/* Summary & Page Size Selector */}
-          <div className="flex items-center gap-3">
-            <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-              Showing <strong className="font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{startItem}</strong> to <strong className="font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{endItem}</strong> of <strong className="font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{filteredTransactions.length}</strong> entries
-            </span>
-
-            <div className="flex items-center gap-1.5 pl-2 border-l" style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}>
-              <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Rows:</span>
-              <select
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                className="py-1 px-2 rounded-lg border outline-none font-bold cursor-pointer text-xs"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-              >
-                <option value={5}>5</option>
-                <option value={10}>10</option>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Navigation Buttons */}
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(1)}
-              title="First Page"
-              className="p-1.5 rounded-lg border transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            >
-              <ChevronsLeft className="h-3.5 w-3.5" />
-            </button>
-
-            <button
-              type="button"
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              title="Previous Page"
-              className="p-1.5 rounded-lg border transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-
-            <div className="flex items-center gap-1 mx-1">
-              {paginationRange.map((page, idx) => {
-                if (page === '...') {
-                  return (
-                    <span 
-                      key={`ellipsis-${idx}`} 
-                      className="px-2 py-1 text-xs" 
-                      style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
-                    >
-                      ...
-                    </span>
-                  );
-                }
-
-                const isCurrent = page === currentPage;
-                return (
-                  <button
-                    key={`page-${page}`}
-                    type="button"
-                    onClick={() => setCurrentPage(Number(page))}
-                    className={`min-w-[28px] h-7 px-2 rounded-lg text-xs font-mono font-bold transition cursor-pointer border ${
-                      isCurrent
-                        ? 'text-white shadow-sm'
-                        : 'hover:opacity-80'
-                    }`}
-                    style={
-                      isCurrent
-                        ? {
-                            backgroundColor: 'var(--color-primary, #E05638)',
-                            borderColor: 'var(--color-primary, #E05638)',
-                          }
-                        : {
-                            backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#0f172a' : '#cbd5e1'
-                          }
-                    }
-                  >
-                    {page}
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              type="button"
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-              title="Next Page"
-              className="p-1.5 rounded-lg border transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-
-            <button
-              type="button"
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage(totalPages)}
-              title="Last Page"
-              className="p-1.5 rounded-lg border transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            >
-              <ChevronsRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* GATEWAYS CONFIGURATION SECTION (PLACED BELOW TRANSACTIONS) */}
+      {/* GATEWAYS CONFIGURATION SECTION */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* STRIPE GATEWAY */}
@@ -1252,6 +967,319 @@ export default function AdminPaymentPage() {
         </button>
       </div>
 
+      {/* TRANSACTIONS AUDIT TABLE WITH PAGINATION */}
+      <div 
+        className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+        style={{
+          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+        }}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+          <div>
+            <h2 className="text-lg font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              <CreditCard className="h-5 w-5 text-emerald-500" />
+              Transaction Ledger & Reconciliation
+            </h2>
+            <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              Showing {filteredTransactions.length} transaction{filteredTransactions.length === 1 ? '' : 's'} matching active filters.
+            </p>
+          </div>
+
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 absolute left-3 top-2.5 text-slate-400" />
+              <input 
+                type="text"
+                placeholder="Search user, email, tx..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-8 pr-3 py-1.5 text-xs rounded-xl border outline-none w-48"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              />
+            </div>
+
+            <select
+              value={filterGateway}
+              onChange={(e) => setFilterGateway(e.target.value)}
+              className="text-xs py-1.5 px-2.5 rounded-xl border outline-none cursor-pointer font-bold"
+              style={{
+                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#ffffff'
+              }}
+            >
+              <option value="all">All Gateways</option>
+              <option value="stripe">Stripe</option>
+              <option value="paypal">PayPal</option>
+              <option value="manual">Manual / Test</option>
+            </select>
+
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="text-xs py-1.5 px-2.5 rounded-xl border outline-none cursor-pointer font-bold"
+              style={{
+                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#ffffff'
+              }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="succeeded">Succeeded</option>
+              <option value="pending">Pending</option>
+              <option value="refunded">Refunded</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Table View */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)', color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                <th className="py-3 px-3 font-bold">Transaction ID</th>
+                <th className="py-3 px-3 font-bold">Customer</th>
+                <th className="py-3 px-3 font-bold">Plan & Amount</th>
+                <th className="py-3 px-3 font-bold">Gateway</th>
+                <th className="py-3 px-3 font-bold">Status</th>
+                <th className="py-3 px-3 font-bold">Date</th>
+                <th className="py-3 px-3 font-bold text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y" style={{ borderColor: isDayMode ? '#f1f5f9' : '#1e293b' }}>
+              {paginatedTransactions.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-8" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                    No transactions match your current search criteria.
+                  </td>
+                </tr>
+              ) : (
+                paginatedTransactions.map((tx) => (
+                  <tr key={tx.id} className="hover:opacity-90 transition">
+                    <td className="py-3.5 px-3 font-mono text-[11px] font-bold" style={{ color: isDayMode ? '#334155' : '#93c5fd' }}>
+                      {tx.id}
+                      {tx.testMode && (
+                        <span className="ml-1.5 px-1.5 py-0.2 rounded text-[9px] uppercase font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                          Test
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.customerName || 'Anonymous'}</div>
+                      <div className="text-[11px] font-mono" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.customerEmail}</div>
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.planName}</div>
+                      <div className="font-mono text-emerald-500 font-extrabold text-[11px]">
+                        {currentCurrencySymbol}{Number(tx.amount || 0).toFixed(2)} {tx.currency}
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-3 uppercase font-extrabold text-[10px] tracking-wider">
+                      <span className={`px-2 py-0.5 rounded-md border ${
+                        tx.gateway === 'stripe' ? 'bg-[#635BFF]/10 text-[#635BFF] border-[#635BFF]/20' :
+                        tx.gateway === 'paypal' ? 'bg-[#0079C1]/10 text-[#0079C1] border-[#0079C1]/20' :
+                        'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                      }`}>
+                        {tx.gateway}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border inline-flex items-center gap-1 ${
+                        tx.status === 'succeeded' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' :
+                        tx.status === 'refunded' ? 'bg-orange-500/15 text-orange-400 border-orange-500/30' :
+                        tx.status === 'pending' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
+                        'bg-red-500/15 text-red-400 border-red-500/30'
+                      }`}>
+                        {tx.status}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-3 text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      {new Date(tx.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </td>
+                    <td className="py-3.5 px-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {tx.status === 'succeeded' && (
+                          <button
+                            type="button"
+                            title="Refund Transaction"
+                            onClick={() => handleRefund(tx)}
+                            className="p-1.5 rounded-lg border text-orange-400 hover:bg-orange-500/10 transition cursor-pointer"
+                            style={{ borderColor: isDayMode ? '#fdba74' : '#7c2d12' }}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          title="Delete Record"
+                          onClick={() => handleDeleteTx(tx.id)}
+                          className="p-1.5 rounded-lg border text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                          style={{ borderColor: isDayMode ? '#fca5a5' : '#991b1b' }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* PAGINATION CONTROLS */}
+        <div 
+          className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t text-xs"
+          style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+        >
+          {/* Summary & Page Size Selector */}
+          <div className="flex items-center gap-3">
+            <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              Showing <strong className="font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{startItem}</strong> to <strong className="font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{endItem}</strong> of <strong className="font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{filteredTransactions.length}</strong> entries
+            </span>
+
+            <div className="flex items-center gap-1.5 pl-2 border-l" style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}>
+              <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Rows:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="py-1 px-2 rounded-lg border outline-none font-bold cursor-pointer text-xs"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              >
+                <option value={5}>5</option>
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Navigation Buttons */}
+          <div className="flex items-center gap-1">
+            {/* First Page */}
+            <button
+              type="button"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(1)}
+              title="First Page"
+              className="p-1.5 rounded-lg border transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              style={{
+                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#ffffff'
+              }}
+            >
+              <ChevronsLeft className="h-3.5 w-3.5" />
+            </button>
+
+            {/* Previous Page */}
+            <button
+              type="button"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              title="Previous Page"
+              className="p-1.5 rounded-lg border transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              style={{
+                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#ffffff'
+              }}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+
+            {/* Numeric Page Range */}
+            <div className="flex items-center gap-1 mx-1">
+              {paginationRange.map((page, idx) => {
+                if (page === '...') {
+                  return (
+                    <span 
+                      key={`ellipsis-${idx}`} 
+                      className="px-2 py-1 text-xs" 
+                      style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
+                    >
+                      ...
+                    </span>
+                  );
+                }
+
+                const isCurrent = page === currentPage;
+                return (
+                  <button
+                    key={`page-${page}`}
+                    type="button"
+                    onClick={() => setCurrentPage(Number(page))}
+                    className={`min-w-[28px] h-7 px-2 rounded-lg text-xs font-mono font-bold transition cursor-pointer border ${
+                      isCurrent
+                        ? 'text-white shadow-sm'
+                        : 'hover:opacity-80'
+                    }`}
+                    style={
+                      isCurrent
+                        ? {
+                            backgroundColor: 'var(--color-primary, #E05638)',
+                            borderColor: 'var(--color-primary, #E05638)',
+                          }
+                        : {
+                            backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                            color: isDayMode ? '#0f172a' : '#cbd5e1'
+                          }
+                    }
+                  >
+                    {page}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Next Page */}
+            <button
+              type="button"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              title="Next Page"
+              className="p-1.5 rounded-lg border transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              style={{
+                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#ffffff'
+              }}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+
+            {/* Last Page */}
+            <button
+              type="button"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(totalPages)}
+              title="Last Page"
+              className="p-1.5 rounded-lg border transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              style={{
+                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#ffffff'
+              }}
+            >
+              <ChevronsRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+
+      </div>
+
       {/* MODAL: SIMULATE CHECKOUT */}
       {showSimulateModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1393,3 +1421,9 @@ export default function AdminPaymentPage() {
     </div>
   );
 }
+"""
+
+with open(payment_page_path, 'w', encoding='utf-8') as f:
+    f.write(payment_code)
+
+print(f"Successfully added pagination to {payment_page_path}")

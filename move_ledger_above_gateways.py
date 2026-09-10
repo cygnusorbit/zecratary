@@ -1,4 +1,26 @@
-// Generated & Maintained by Zecratary Admin Suite
+import os
+
+target_dirs = [
+    'apps/web/src/app/admin/payment',
+    'src/app/admin/payment'
+]
+
+target_dir = next((d for d in target_dirs if os.path.exists(d)), None)
+
+if not target_dir:
+    if os.path.exists('apps/web/src/app/admin'):
+        target_dir = 'apps/web/src/app/admin/payment'
+    elif os.path.exists('src/app/admin'):
+        target_dir = 'src/app/admin/payment'
+    elif os.path.exists('apps/web'):
+        target_dir = 'apps/web/src/app/admin/payment'
+    else:
+        target_dir = 'src/app/admin/payment'
+
+os.makedirs(target_dir, exist_ok=True)
+payment_page_path = os.path.join(target_dir, 'page.tsx')
+
+payment_code = """// Generated & Maintained by Zecratary Admin Suite
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -438,7 +460,7 @@ export default function AdminPaymentPage() {
       t.status,
       new Date(t.createdAt).toLocaleDateString()
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
@@ -1393,3 +1415,9 @@ export default function AdminPaymentPage() {
     </div>
   );
 }
+"""
+
+with open(payment_page_path, 'w', encoding='utf-8') as f:
+    f.write(payment_code)
+
+print(f"Successfully positioned 'Transaction Ledger & Reconciliation' above 'Stripe Gateway' at {payment_page_path}")
