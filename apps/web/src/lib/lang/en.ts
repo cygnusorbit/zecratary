@@ -231,7 +231,7 @@ export const en: Record<string, string> = {
   "saveProfileBtn": "Save Profile",
   "upgradeChangePlanTitle": "Upgrade or Change Membership Plan",
   "onePlanPerEmailSub": "Strictly 1 plan per email limit. Switching from monthly to annual or annual to monthly will automatically cancel your prior plan and recalculate the expiry date.",
-  "annualSaveLabel": "Annual (Save up to 44%)",
+  "annualSaveLabel": "Annual (Save 44%)",
   "currentPlanBadge": "Current Plan",
   "includesFullTierFeatureAccess": "Includes full tier feature access",
   "switchToFreeBtn": "Switch to Free",

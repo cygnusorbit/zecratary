@@ -7756,7 +7756,7 @@ export default function ChefChatPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const ideasInputRef = useRef<HTMLInputElement>(null);
 
-  // AI Settings State from Admin
+  // AI Settings State synchronized with /admin/ai-settings
   const [questionnaireSections, setQuestionnaireSections] = useState<any[]>(DEFAULT_SECTIONS);
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
@@ -7821,17 +7821,18 @@ export default function ChefChatPage() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Load Admin AI Settings
+  // Synchronize Multi-Topic Questionnaire from /admin/ai-settings
   const loadAdminAiSettings = useCallback(() => {
     if (typeof window === 'undefined') return;
     try {
-      const raw = localStorage.getItem('zecratary_chef_ai_settings');
+      const raw = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed.sections)) {
+        if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
           const active = parsed.sections.filter((s: any) => s.enabled !== false);
-          setQuestionnaireSections(active.length > 0 ? active : DEFAULT_SECTIONS);
-          const allQs = active.flatMap((s: any) => s.questions || []);
+          const sectionsToUse = active.length > 0 ? active : parsed.sections;
+          setQuestionnaireSections(sectionsToUse);
+          const allQs = sectionsToUse.flatMap((s: any) => s.questions || []);
           setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
         } else {
           setQuestionnaireSections(DEFAULT_SECTIONS);
@@ -7850,7 +7851,7 @@ export default function ChefChatPage() {
     }
   }, []);
 
-  // Day / Night Mode Theme Inversion Handler
+  // Day / Night Theme Application
   const applySavedTheme = useCallback(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -7903,6 +7904,7 @@ export default function ChefChatPage() {
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_updated', applySavedTheme);
     window.addEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
+    window.addEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
     window.addEventListener('storage', applySavedTheme);
     window.addEventListener('storage', loadAdminAiSettings);
 
@@ -7911,6 +7913,7 @@ export default function ChefChatPage() {
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
+      window.removeEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
       window.removeEventListener('storage', applySavedTheme);
       window.removeEventListener('storage', loadAdminAiSettings);
     };
@@ -8097,6 +8100,7 @@ export default function ChefChatPage() {
       loadScopedData(active);
       loadUserChatState(active);
       loadUserPreferences(active);
+      loadAdminAiSettings();
     };
 
     window.addEventListener('storage', handleSync);
@@ -8105,6 +8109,8 @@ export default function ChefChatPage() {
     window.addEventListener('zecratary_pantry_updated', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_login_success', handleSync);
+    window.addEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
+    window.addEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -8113,8 +8119,10 @@ export default function ChefChatPage() {
       window.removeEventListener('zecratary_pantry_updated', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('zecratary_login_success', handleSync);
+      window.removeEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
+      window.removeEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
     };
-  }, [loadScopedData, loadUserChatState, loadUserPreferences, t]);
+  }, [loadScopedData, loadUserChatState, loadUserPreferences, loadAdminAiSettings, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -8176,6 +8184,7 @@ export default function ChefChatPage() {
     showToast("Chat reset.");
   };
 
+  // Start specific topic wizard from synced admin buttons
   const handleStartTopicWizard = (sec: any) => {
     const qList = Array.isArray(sec.questions) && sec.questions.length > 0
       ? sec.questions
@@ -8192,17 +8201,14 @@ export default function ChefChatPage() {
       { 
         id: 'ast_' + Date.now(), 
         role: 'assistant', 
-        content: `📋 **${sec.topicTitle}**
-${sec.description || ''}
-
-**Step 1 of ${qList.length}:**
-${qList[0]}` 
+        content: `📋 **${sec.topicTitle}**\n${sec.description || ''}\n\n**Step 1 of ${qList.length}:**\n${qList[0]}` 
       }
     ]);
   };
 
   const handleStartFullWizard = () => {
-    const allQuestions = questionnaireSections.flatMap((s: any) => s.questions || []);
+    const activeSections = questionnaireSections.filter((s: any) => s.enabled !== false);
+    const allQuestions = activeSections.flatMap((s: any) => s.questions || []);
     const qList = allQuestions.length > 0 ? allQuestions : wizardQuestionsList;
 
     setActiveTopicTitle('Complete Meal Plan Wizard');
@@ -8216,9 +8222,7 @@ ${qList[0]}`
       { 
         id: 'ast_' + Date.now(), 
         role: 'assistant', 
-        content: `Starting complete meal plan intake wizard (**Step 1 of ${qList.length}**):
-
-${qList[0]}` 
+        content: `Starting complete meal plan intake wizard (**Step 1 of ${qList.length}**):\n\n${qList[0]}` 
       }
     ]);
   };
@@ -8392,7 +8396,7 @@ ${qList[0]}`
       return;
     }
 
-    // Explicit Meal Plan initiation only
+    // Explicit Meal Plan initiation command
     const isExplicitMealPlanCommand = /^(?:create|start|make|build)\s+(?:a\s+)?meal\s+plan/i.test(lower) || lower === 'create a meal plan' || lower === 'meal plan';
     if (isExplicitMealPlanCommand && wizardStep === null) {
       handleStartFullWizard();
@@ -8877,6 +8881,11 @@ ${qList[0]}`
     return activeSwapPlan.meals.filter(m => !activeSwapMeal || m.id !== activeSwapMeal.id);
   }, [activeSwapPlan, activeSwapMeal]);
 
+  // Active enabled questionnaire sections for topic buttons on /chef
+  const activeQuestionnaireSections = useMemo(() => {
+    return questionnaireSections.filter((s: any) => s.enabled !== false);
+  }, [questionnaireSections]);
+
   return (
     <div 
       className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
@@ -9062,6 +9071,7 @@ ${qList[0]}`
               </p>
             </div>
 
+            {/* SYNCED TOPIC BUTTONS FROM /admin/ai-settings */}
             <div className="flex flex-wrap justify-center gap-2.5 max-w-xl mx-auto">
               <button
                 type="button"
@@ -9075,7 +9085,7 @@ ${qList[0]}`
                 <Sparkles className="h-4 w-4" /> Start Complete Meal Plan Intake
               </button>
 
-              {questionnaireSections.map((sec) => (
+              {activeQuestionnaireSections.map((sec) => (
                 <button
                   key={sec.id}
                   type="button"
@@ -9552,6 +9562,33 @@ ${qList[0]}`
         )}
         <div ref={chatEndRef} />
       </div>
+
+      {/* Suggested Topic Buttons Bar (Accessible even during ongoing chat) */}
+      {wizardStep === null && activeQuestionnaireSections.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0">
+          <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary, #64748b)' }}>
+            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary, #E05638)' }} /> Topics:
+          </span>
+          {activeQuestionnaireSections.map((sec) => (
+            <button
+              key={`chip-${sec.id}`}
+              type="button"
+              onClick={() => handleStartTopicWizard(sec)}
+              className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
+              style={{
+                backgroundColor: 'var(--color-card, #ffffff)',
+                borderColor: 'var(--color-border, #e2e8f0)',
+                color: 'var(--color-text, #0f172a)'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
+            >
+              <Layers className="h-3 w-3" style={{ color: 'var(--color-primary, #E05638)' }} />
+              <span>{sec.topicTitle}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Input Prompt Box */}
       <div 
@@ -12250,1787 +12287,22 @@ export default function SavedRecipesPage() {
 
 ```
 
-## File: `apps/web/src/app/add-user/page.tsx`
-```typescript
-'use client';
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import Link from 'next/link';
-import { 
-  Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
-  Search, CheckCircle, AlertCircle, X, ShieldAlert, Check,
-  ShieldCheck, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
-  Users, CreditCard, Zap, Sparkles, RefreshCw
-} from 'lucide-react';
-import { getCurrentUser, logoutUser, initAuthStorage } from '@/lib/auth';
-
-interface AppUser {
-  id: string;
-  name: string;
-  email: string;
-  password?: string;
-  role: 'admin' | 'user';
-  subscriptionPlan?: string;
-  createdAt: string;
-}
-
-interface PlanOption {
-  id: string;
-  name: string;
-  slug: string;
-  priceFormatted: string;
-  interval?: string;
-  isFree?: boolean;
-}
-
-const DEFAULT_AVAILABLE_PLANS: PlanOption[] = [
-  { id: 'taster', name: 'Taster (Free)', slug: 'taster', priceFormatted: 'Free', isFree: true },
-  { id: 'nutrition-pro-monthly', name: 'Nutrition Pro (Monthly)', slug: 'nutrition-pro-monthly', priceFormatted: '$8.99/mo', interval: 'MONTH' },
-  { id: 'nutrition-pro-annual', name: 'Nutrition Pro (Annual)', slug: 'nutrition-pro-annual', priceFormatted: '$59.99/yr', interval: 'YEAR' },
-];
-
-type SortField = 'name' | 'createdAt' | 'subscriptionPlan';
-type SortOrder = 'asc' | 'desc';
-
-const ITEMS_PER_PAGE = 10;
-
-export default function AdminUserManagementPage() {
-  const [currentUser, setCurrentUser] = useState<any | null>(null);
-  const [users, setUsers] = useState<AppUser[]>([]);
-  const [availablePlans, setAvailablePlans] = useState<PlanOption[]>(DEFAULT_AVAILABLE_PLANS);
-  const [search, setSearch] = useState('');
-  const [feedbackMsg, setFeedbackMsg] = useState('');
-
-  // Admin Table Sorting & Pagination State
-  const [adminSortField, setAdminSortField] = useState<SortField>('createdAt');
-  const [adminSortOrder, setAdminSortOrder] = useState<SortOrder>('desc');
-  const [adminCurrentPage, setAdminCurrentPage] = useState(1);
-
-  // Standard User Table Sorting & Pagination State
-  const [userSortField, setUserSortField] = useState<SortField>('createdAt');
-  const [userSortOrder, setUserSortOrder] = useState<SortOrder>('desc');
-  const [userCurrentPage, setUserCurrentPage] = useState(1);
-
-  // Add User Modal State
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [addName, setAddName] = useState('');
-  const [addEmail, setAddEmail] = useState('');
-  const [addPassword, setAddPassword] = useState('');
-  const [addRole, setAddRole] = useState<'admin' | 'user'>('user');
-  const [addSubscriptionPlan, setAddSubscriptionPlan] = useState<string>('taster');
-  const [addError, setAddError] = useState('');
-
-  // Edit User Modal State
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editEmail, setEditEmail] = useState('');
-  const [editPassword, setEditPassword] = useState('');
-  const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
-  const [editSubscriptionPlan, setEditSubscriptionPlan] = useState<string>('taster');
-  const [editError, setEditError] = useState('');
-
-  // Helper: Identify Root / Primary First Administrator
-  const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
-    if (!targetUser) return false;
-    
-    // Explicit System Admin default ID or Email check
-    if (
-      targetUser.id === 'usr_admin_1' || 
-      targetUser.email.toLowerCase() === 'admin@zecratary.com' ||
-      targetUser.email.toLowerCase() === 'admin@foodieprep.com'
-    ) {
-      return true;
-    }
-
-    // Earliest created administrator check
-    const sortedAdmins = users
-      .filter((u) => u.role === 'admin')
-      .sort((a, b) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return dateA - dateB;
-      });
-
-    return sortedAdmins.length > 0 && sortedAdmins[0].id === targetUser.id;
-  }, [users]);
-
-  const isEditingFirstAdmin = useMemo(() => {
-    const target = users.find((u) => u.id === editingUserId);
-    return isFirstAdminUser(target);
-  }, [editingUserId, users, isFirstAdminUser]);
-
-  // Dynamic Theme Synchronization
-  useEffect(() => {
-    const applySavedTheme = () => {
-      try {
-        const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-        if (stored) {
-          const c = JSON.parse(stored);
-          const root = document.documentElement;
-          if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
-          if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
-          if (c.backgroundDark || c.backgroundColor) {
-            root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor);
-            root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor);
-            root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor);
-          }
-          if (c.cardDark || c.cardBackground) {
-            root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground);
-            root.style.setProperty('--color-card', c.cardDark || c.cardBackground);
-          }
-          if (c.innerDark || c.backgroundColor) root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor);
-          if (c.borderColor || c.cardBorder) root.style.setProperty('--color-border', c.borderColor || c.cardBorder);
-          if (c.accentEmerald || c.accentColor) {
-            root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
-            root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor);
-          }
-          if (c.textColor) root.style.setProperty('--color-text', c.textColor);
-          if (c.textSecondary) root.style.setProperty('--color-text-secondary', c.textSecondary);
-        }
-      } catch (e) {}
-    };
-
-    applySavedTheme();
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('storage', applySavedTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('storage', applySavedTheme);
-    };
-  }, []);
-
-  // Synchronize System Packages directly from /admin/plans
-  const loadPlans = useCallback(async () => {
-    let parsedPlans: PlanOption[] = [];
-
-    // 1. Primary Source: Saved System Packages configurations from /admin/plans
-    try {
-      const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
-      if (rawConfigs) {
-        const configs = JSON.parse(rawConfigs);
-        if (Array.isArray(configs) && configs.length > 0) {
-          configs.forEach((cfg: any) => {
-            const isZeroCost = cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0);
-            
-            if (isZeroCost) {
-              parsedPlans.push({
-                id: cfg.id || cfg.slug,
-                name: `${cfg.name} (Free)`,
-                slug: cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                priceFormatted: 'Free',
-                isFree: true,
-              });
-            } else {
-              if (cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0) {
-                const mPrice = Number(cfg.monthlyPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-monthly`,
-                  name: `${cfg.name} (Monthly)`,
-                  slug: `${cfg.slug}-monthly`,
-                  priceFormatted: `$${mPrice.toFixed(2)}/mo`,
-                  interval: 'MONTH',
-                  isFree: false,
-                });
-              }
-              if (cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0) {
-                const aPrice = Number(cfg.annualPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-annual`,
-                  name: `${cfg.name} (Annual)`,
-                  slug: `${cfg.slug}-annual`,
-                  priceFormatted: `$${aPrice.toFixed(2)}/yr`,
-                  interval: 'YEAR',
-                  isFree: false,
-                });
-              }
-            }
-          });
-        }
-      }
-    } catch (e) {}
-
-    // 2. Secondary Local Fallback: zecratary_subscription_plans
-    if (parsedPlans.length === 0) {
-      try {
-        const rawPlans = localStorage.getItem('zecratary_subscription_plans');
-        if (rawPlans) {
-          const directPlans = JSON.parse(rawPlans);
-          if (Array.isArray(directPlans) && directPlans.length > 0) {
-            parsedPlans = directPlans.map((p: any) => ({
-              id: p.id || p.slug,
-              name: p.name,
-              slug: p.slug,
-              priceFormatted: p.priceCents === 0 ? 'Free' : `$${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`,
-              interval: p.interval,
-              isFree: p.priceCents === 0,
-            }));
-          }
-        }
-      } catch (e) {}
-    }
-
-    // 3. API Fallback: /api/admin/plans
-    if (parsedPlans.length === 0) {
-      try {
-        const res = await fetch('/api/admin/plans');
-        const data = await res.json();
-        if (data.success && Array.isArray(data.plans) && data.plans.length > 0) {
-          parsedPlans = data.plans.map((p: any) => ({
-            id: p.id || p.slug,
-            name: p.name,
-            slug: p.slug,
-            priceFormatted: p.priceCents === 0 ? 'Free' : `$${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`,
-            interval: p.interval,
-            isFree: p.priceCents === 0,
-          }));
-        }
-      } catch (e) {}
-    }
-
-    if (parsedPlans.length > 0) {
-      setAvailablePlans(parsedPlans);
-    } else {
-      setAvailablePlans(DEFAULT_AVAILABLE_PLANS);
-    }
-  }, []);
-
-  const loadUsers = useCallback(() => {
-    initAuthStorage();
-    const raw = localStorage.getItem('zecratary_users');
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        const mapped = parsed.map((u: any) => ({
-          ...u,
-          subscriptionPlan: u.subscriptionPlan || (u.role === 'admin' ? 'nutrition-pro-annual' : 'taster')
-        }));
-        setUsers(mapped);
-      } catch (e) {}
-    }
-  }, []);
-
-  useEffect(() => {
-    document.title = 'User Management - Admin Console';
-    initAuthStorage();
-    const user = getCurrentUser();
-    setCurrentUser(user);
-    loadUsers();
-    loadPlans();
-
-    const handleSync = () => {
-      loadUsers();
-      loadPlans();
-    };
-
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_users_updated', handleSync);
-    window.addEventListener('zecratary_plans_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
-
-    return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_users_updated', handleSync);
-      window.removeEventListener('zecratary_plans_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
-    };
-  }, [loadUsers, loadPlans]);
-
-  const saveUsersList = (updated: AppUser[]) => {
-    setUsers(updated);
-    localStorage.setItem('zecratary_users', JSON.stringify(updated));
-    window.dispatchEvent(new Event('zecratary_users_updated'));
-    window.dispatchEvent(new Event('storage'));
-  };
-
-  const showToast = (msg: string) => {
-    setFeedbackMsg(msg);
-    setTimeout(() => setFeedbackMsg(''), 3500);
-  };
-
-  // Sort Toggles
-  const handleAdminSort = (field: SortField) => {
-    if (adminSortField === field) {
-      setAdminSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setAdminSortField(field);
-      setAdminSortOrder('asc');
-    }
-  };
-
-  const handleUserSort = (field: SortField) => {
-    if (userSortField === field) {
-      setUserSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setUserSortField(field);
-      setUserSortOrder('asc');
-    }
-  };
-
-  // Filter & Sort for Admins
-  const processedAdmins = useMemo(() => {
-    const admins = users.filter(u => u.role === 'admin');
-    const filtered = admins.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
-    );
-
-    return filtered.sort((a, b) => {
-      let comparison = 0;
-      if (adminSortField === 'name') {
-        comparison = (a.name || '').localeCompare(b.name || '');
-      } else if (adminSortField === 'subscriptionPlan') {
-        comparison = (a.subscriptionPlan || '').localeCompare(b.subscriptionPlan || '');
-      } else if (adminSortField === 'createdAt') {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        comparison = dateA - dateB;
-      }
-      return adminSortOrder === 'asc' ? comparison : -comparison;
-    });
-  }, [users, search, adminSortField, adminSortOrder]);
-
-  // Filter & Sort for Standard Users
-  const processedStandardUsers = useMemo(() => {
-    const standardUsers = users.filter(u => u.role === 'user');
-    const filtered = standardUsers.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
-    );
-
-    return filtered.sort((a, b) => {
-      let comparison = 0;
-      if (userSortField === 'name') {
-        comparison = (a.name || '').localeCompare(b.name || '');
-      } else if (userSortField === 'subscriptionPlan') {
-        comparison = (a.subscriptionPlan || '').localeCompare(b.subscriptionPlan || '');
-      } else if (userSortField === 'createdAt') {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        comparison = dateA - dateB;
-      }
-      return userSortOrder === 'asc' ? comparison : -comparison;
-    });
-  }, [users, search, userSortField, userSortOrder]);
-
-  // Pagination Calculations
-  const adminTotalPages = Math.max(1, Math.ceil(processedAdmins.length / ITEMS_PER_PAGE));
-  const adminStartIndex = (adminCurrentPage - 1) * ITEMS_PER_PAGE;
-  const adminEndIndex = Math.min(adminStartIndex + ITEMS_PER_PAGE, processedAdmins.length);
-  const paginatedAdmins = processedAdmins.slice(adminStartIndex, adminEndIndex);
-
-  const userTotalPages = Math.max(1, Math.ceil(processedStandardUsers.length / ITEMS_PER_PAGE));
-  const userStartIndex = (userCurrentPage - 1) * ITEMS_PER_PAGE;
-  const userEndIndex = Math.min(userStartIndex + ITEMS_PER_PAGE, processedStandardUsers.length);
-  const paginatedStandardUsers = processedStandardUsers.slice(userStartIndex, userEndIndex);
-
-  useEffect(() => {
-    setAdminCurrentPage(1);
-    setUserCurrentPage(1);
-  }, [search]);
-
-  // Add User
-  const handleOpenAddModal = (presetRole: 'admin' | 'user' = 'user') => {
-    setAddName('');
-    setAddEmail('');
-    setAddPassword('');
-    setAddRole(presetRole);
-    
-    // Auto-select preferred tier from synchronized live plans
-    const defaultAdminPlan = availablePlans.find(p => p.slug.includes('annual') || p.slug.includes('pro'))?.slug || availablePlans[availablePlans.length - 1]?.slug || 'nutrition-pro-annual';
-    const defaultUserPlan = availablePlans.find(p => p.isFree || p.slug === 'taster')?.slug || availablePlans[0]?.slug || 'taster';
-    
-    setAddSubscriptionPlan(presetRole === 'admin' ? defaultAdminPlan : defaultUserPlan);
-    setAddError('');
-    setShowAddModal(true);
-  };
-
-  const handleAddUserSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAddError('');
-
-    const cleanEmail = addEmail.trim().toLowerCase();
-    const cleanName = addName.trim();
-
-    if (!cleanName || !cleanEmail) {
-      setAddError('Please fill in all required fields.');
-      return;
-    }
-
-    if (users.some(u => u.email.toLowerCase() === cleanEmail)) {
-      setAddError('A user with this email address already exists.');
-      return;
-    }
-
-    if (addPassword.length < 4) {
-      setAddError('Password must be at least 4 characters long.');
-      return;
-    }
-
-    const assignedPlan = addSubscriptionPlan || (addRole === 'admin' ? 'nutrition-pro-annual' : 'taster');
-
-    const newUser: AppUser = {
-      id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      name: cleanName,
-      email: cleanEmail,
-      password: addPassword,
-      role: addRole,
-      subscriptionPlan: assignedPlan,
-      createdAt: new Date().toISOString()
-    };
-
-    const updated = [newUser, ...users];
-    saveUsersList(updated);
-    setShowAddModal(false);
-    showToast(`User "${newUser.name}" created with "${getPlanBadge(newUser.subscriptionPlan).label}" plan!`);
-  };
-
-  // Edit User
-  const handleOpenEditModal = (user: AppUser) => {
-    setEditingUserId(user.id);
-    setEditName(user.name);
-    setEditEmail(user.email);
-    setEditPassword(user.password || '');
-    setEditRole(user.role);
-    setEditSubscriptionPlan(user.subscriptionPlan || (user.role === 'admin' ? 'nutrition-pro-annual' : 'taster'));
-    setEditError('');
-    setShowEditModal(true);
-  };
-
-  const handleEditUserSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingUserId) return;
-    setEditError('');
-
-    const cleanEmail = editEmail.trim().toLowerCase();
-    const cleanName = editName.trim();
-
-    if (!cleanName || !cleanEmail) {
-      setEditError('Name and Email cannot be empty.');
-      return;
-    }
-
-    const emailTaken = users.some(u => u.id !== editingUserId && u.email.toLowerCase() === cleanEmail);
-    if (emailTaken) {
-      setEditError('Another user is already registered with this email.');
-      return;
-    }
-
-    const targetUser = users.find(u => u.id === editingUserId);
-    const isFirstAdmin = isFirstAdminUser(targetUser);
-
-    // Enforce role preservation for first admin
-    const finalRole: 'admin' | 'user' = isFirstAdmin ? 'admin' : editRole;
-
-    const updated = users.map(u => {
-      if (u.id === editingUserId) {
-        return {
-          ...u,
-          name: cleanName,
-          email: cleanEmail,
-          password: editPassword ? editPassword : u.password,
-          role: finalRole,
-          subscriptionPlan: editSubscriptionPlan
-        };
-      }
-      return u;
-    });
-
-    saveUsersList(updated);
-
-    if (currentUser?.id === editingUserId) {
-      const activeUserUpdated = {
-        ...currentUser,
-        name: cleanName,
-        email: cleanEmail,
-        role: finalRole,
-        subscriptionPlan: editSubscriptionPlan
-      };
-      localStorage.setItem('zecratary_current_user', JSON.stringify(activeUserUpdated));
-      setCurrentUser(activeUserUpdated);
-      window.dispatchEvent(new Event('zecratary_auth_changed'));
-    }
-
-    setShowEditModal(false);
-    showToast(`User "${cleanName}" updated successfully!`);
-  };
-
-  // Delete User
-  const handleDeleteUser = (id: string, userEmail: string, userName: string) => {
-    const targetUser = users.find(u => u.id === id);
-
-    if (currentUser?.email === userEmail || currentUser?.id === id) {
-      alert('You cannot delete your own active admin account.');
-      return;
-    }
-
-    if (isFirstAdminUser(targetUser)) {
-      alert('The primary system administrator account cannot be deleted.');
-      return;
-    }
-
-    if (!confirm(`Are you sure you want to delete "${userName}" (${userEmail})? This action cannot be undone.`)) return;
-
-    const updated = users.filter(u => u.id !== id);
-    saveUsersList(updated);
-    showToast(`User "${userName}" has been deleted.`);
-  };
-
-  const renderSortIcon = (currentField: SortField, targetField: SortField, order: SortOrder) => {
-    if (currentField !== targetField) {
-      return <ArrowUpDown className="h-3.5 w-3.5 text-slate-500 opacity-60" />;
-    }
-    return order === 'asc' ? (
-      <ArrowUp className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary, #E05638)' }} />
-    ) : (
-      <ArrowDown className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary, #E05638)' }} />
-    );
-  };
-
-  // Dynamic Subscription Plan Badge Renderer
-  const getPlanBadge = (planKey?: string) => {
-    if (!planKey) {
-      return {
-        label: 'Taster (Free)',
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
-        icon: Sparkles
-      };
-    }
-
-    // Match against live system packages list
-    const matched = availablePlans.find(
-      p => p.slug === planKey || p.id === planKey || p.slug.toLowerCase() === planKey.toLowerCase()
-    );
-
-    if (matched) {
-      if (matched.isFree || planKey === 'taster' || planKey.includes('free')) {
-        return {
-          label: matched.name,
-          bg: 'rgba(16, 185, 129, 0.15)',
-          border: 'var(--color-emerald, #10b981)',
-          color: 'var(--color-emerald, #10b981)',
-          icon: Sparkles
-        };
-      }
-      if (matched.interval === 'YEAR' || planKey.includes('annual') || planKey.includes('year')) {
-        return {
-          label: matched.name,
-          bg: 'rgba(59, 130, 246, 0.15)',
-          border: '#3b82f6',
-          color: '#60a5fa',
-          icon: Zap
-        };
-      }
-      if (matched.interval === 'MONTH' || planKey.includes('monthly')) {
-        return {
-          label: matched.name,
-          bg: 'rgba(224, 86, 56, 0.15)',
-          border: 'var(--color-primary, #E05638)',
-          color: 'var(--color-primary, #E05638)',
-          icon: Zap
-        };
-      }
-      return {
-        label: matched.name,
-        bg: 'rgba(168, 85, 247, 0.15)',
-        border: '#a855f7',
-        color: '#c084fc',
-        icon: CreditCard
-      };
-    }
-
-    // Generic formatting fallback
-    const formatted = planKey
-      .split('-')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-
-    if (planKey.includes('free') || planKey === 'taster') {
-      return {
-        label: `${formatted} (Free)`,
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
-        icon: Sparkles
-      };
-    }
-
-    return {
-      label: formatted,
-      bg: 'rgba(168, 85, 247, 0.15)',
-      border: '#a855f7',
-      color: '#c084fc',
-      icon: CreditCard
-    };
-  };
-
-  return (
-    <div className="max-w-6xl mx-auto space-y-8 text-slate-100 pb-24 px-2 sm:px-4 pt-2">
-      
-      {/* ACCESS WARNING FOR NON-ADMINS */}
-      {currentUser && currentUser.role !== 'admin' && (
-        <div 
-          className="rounded-2xl p-4 flex items-center justify-between text-xs border"
-          style={{
-            backgroundColor: 'rgba(120, 53, 15, 0.4)',
-            borderColor: 'rgba(217, 119, 6, 0.4)',
-            color: '#fde68a'
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-amber-400 shrink-0" />
-            <span>
-              Signed in as <strong>{currentUser.email}</strong>. Switch to an admin account to manage user subscription permissions.
-            </span>
-          </div>
-          <button 
-            onClick={() => window.location.href = '/login'}
-            className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-          >
-            Switch to Admin
-          </button>
-        </div>
-      )}
-
-      {/* FEEDBACK TOAST */}
-      {feedbackMsg && (
-        <div 
-          className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in border"
-          style={{
-            backgroundColor: 'rgba(16, 185, 129, 0.2)',
-            borderColor: 'var(--color-emerald, #10b981)',
-            color: 'var(--color-emerald, #10b981)'
-          }}
-        >
-          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
-          <span>{feedbackMsg}</span>
-        </div>
-      )}
-
-      {/* PAGE HEADER */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-             User & Subscription Management
-          </h1>
-          <p className="text-xs text-[var(--color-text-secondary)]">
-            Active System Packages synced: {availablePlans.length} plans available from /admin/plans
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => handleOpenAddModal('user')}
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-          >
-            <UserPlus className="h-4 w-4" /> Add New User
-          </button>
-          <Link
-            href="/admin/plans"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)',
-              color: '#cbd5e1'
-            }}
-          >
-            <CreditCard className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Manage Plans
-          </Link>
-          <Link
-            href="/admin"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)',
-              color: '#cbd5e1'
-            }}
-          >
-            <Shield className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} /> Admin Settings
-          </Link>
-        </div>
-      </div>
-
-      {/* SEARCH BAR */}
-      <div className="relative">
-        <Search className="h-4 w-4 text-slate-500 absolute left-4 top-3.5 pointer-events-none" />
-        <input
-          type="text"
-          placeholder="Search by name, email, or subscription plan across all tables..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition shadow-inner"
-          style={{
-            backgroundColor: 'var(--color-inner-dark, #070b13)',
-            borderColor: 'var(--color-border, #1e293b)'
-          }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-        />
-      </div>
-
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* TABLE 1: ADMINISTRATORS */}
-      {/* ───────────────────────────────────────────────────────────── */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2">
-            <div 
-              className="w-8 h-8 rounded-xl border flex items-center justify-center"
-              style={{
-                backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: 'var(--color-emerald, #10b981)'
-              }}
-            >
-              <Shield className="h-4 w-4" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-white flex items-center gap-2">
-                Administrators
-                <span 
-                  className="text-xs border font-bold px-2 py-0.5 rounded-full"
-                  style={{
-                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                    borderColor: 'var(--color-emerald, #10b981)',
-                    color: 'var(--color-emerald, #10b981)'
-                  }}
-                >
-                  {processedAdmins.length}
-                </span>
-              </h2>
-            </div>
-          </div>
-
-          <button
-            onClick={() => handleOpenAddModal('admin')}
-            className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline"
-            style={{ color: 'var(--color-emerald, #10b981)' }}
-          >
-            <UserPlus className="h-3.5 w-3.5" /> Add Admin
-          </button>
-        </div>
-
-        <div 
-          className="border rounded-3xl overflow-hidden shadow-xl"
-          style={{
-            backgroundColor: 'var(--color-card, #0b0f17)',
-            borderColor: 'var(--color-border, #1e293b)'
-          }}
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead 
-                className="border-b text-slate-400 uppercase font-bold text-[10px] tracking-wider"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #070b13)',
-                  borderColor: 'var(--color-border, #1e293b)'
-                }}
-              >
-                <tr>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleAdminSort('name')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Admin User</span>
-                      {renderSortIcon(adminSortField, 'name', adminSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">Email Address</th>
-                  <th className="px-5 py-4">Role</th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleAdminSort('subscriptionPlan')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Subscription Type</span>
-                      {renderSortIcon(adminSortField, 'subscriptionPlan', adminSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleAdminSort('createdAt')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Created Date</span>
-                      {renderSortIcon(adminSortField, 'createdAt', adminSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody 
-                className="divide-y text-slate-300"
-                style={{ borderColor: 'var(--color-border, #1e293b)' }}
-              >
-                {paginatedAdmins.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-500">
-                      No administrators found {search ? `matching "${search}"` : ''}.
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedAdmins.map((user) => {
-                    const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
-                    const isPrimary = isFirstAdminUser(user);
-                    const planBadge = getPlanBadge(user.subscriptionPlan);
-                    const PlanIcon = planBadge.icon;
-                    return (
-                      <tr 
-                        key={user.id} 
-                        className="transition"
-                        style={{ borderColor: 'var(--color-border, #1e293b)' }}
-                      >
-                        <td className="px-5 py-4 font-bold text-white flex items-center gap-3">
-                          <div 
-                            className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0"
-                            style={{
-                              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                              borderColor: 'var(--color-emerald, #10b981)',
-                              color: 'var(--color-emerald, #10b981)'
-                            }}
-                          >
-                            {user.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-white">{user.name}</span>
-                              {isPrimary && (
-                                <span 
-                                  className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded"
-                                  style={{
-                                    backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                                    borderColor: '#f59e0b',
-                                    color: '#fbbf24'
-                                  }}
-                                  title="Primary Administrator"
-                                >
-                                  PRIMARY
-                                </span>
-                              )}
-                              {isCurrent && !isPrimary && (
-                                <span 
-                                  className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded"
-                                  style={{
-                                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                                    borderColor: 'var(--color-emerald, #10b981)',
-                                    color: 'var(--color-emerald, #10b981)'
-                                  }}
-                                >
-                                  YOU
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 text-slate-400 font-mono text-xs">{user.email}</td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit"
-                            style={{
-                              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                              borderColor: 'var(--color-emerald, #10b981)',
-                              color: 'var(--color-emerald, #10b981)'
-                            }}
-                          >
-                            <Shield className="h-3 w-3" /> Admin
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 w-fit"
-                            style={{
-                              backgroundColor: planBadge.bg,
-                              borderColor: planBadge.border,
-                              color: planBadge.color
-                            }}
-                          >
-                            <PlanIcon className="h-3 w-3 shrink-0" />
-                            {planBadge.label}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 text-slate-500">
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric'
-                          }) : 'Active'}
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditModal(user)}
-                              className="p-2 text-slate-300 hover:text-white rounded-xl border transition shadow-sm cursor-pointer"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
-                              }}
-                              title="Edit Admin Account & Plan"
-                            >
-                              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isCurrent || isPrimary}
-                              onClick={() => handleDeleteUser(user.id, user.email, user.name)}
-                              className={`p-2 rounded-xl border transition shadow-sm ${
-                                isCurrent || isPrimary
-                                  ? 'opacity-30 cursor-not-allowed text-slate-600'
-                                  : 'text-slate-400 hover:text-red-400 cursor-pointer'
-                              }`}
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
-                              }}
-                              title={
-                                isPrimary
-                                  ? 'Cannot delete primary system admin'
-                                  : isCurrent
-                                    ? 'Cannot delete active session account'
-                                    : 'Delete Admin'
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Admin Pagination */}
-          {processedAdmins.length > ITEMS_PER_PAGE && (
-            <div 
-              className="px-5 py-3.5 border-t flex items-center justify-between text-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                borderColor: 'var(--color-border, #1e293b)'
-              }}
-            >
-              <span className="text-slate-400">
-                Showing {adminStartIndex + 1} to {adminEndIndex} of {processedAdmins.length} admins
-              </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={adminCurrentPage <= 1}
-                  onClick={() => setAdminCurrentPage(p => Math.max(1, p - 1))}
-                  className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-card, #0b0f17)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <span className="font-bold text-white px-2">Page {adminCurrentPage} of {adminTotalPages}</span>
-                <button
-                  type="button"
-                  disabled={adminCurrentPage >= adminTotalPages}
-                  onClick={() => setAdminCurrentPage(p => Math.min(adminTotalPages, p + 1))}
-                  className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-card, #0b0f17)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* TABLE 2: STANDARD USERS */}
-      {/* ───────────────────────────────────────────────────────────── */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2">
-            <div 
-              className="w-8 h-8 rounded-xl border flex items-center justify-center text-blue-400"
-              style={{
-                backgroundColor: 'rgba(30, 58, 138, 0.4)',
-                borderColor: 'rgba(59, 130, 246, 0.4)'
-              }}
-            >
-              <Users className="h-4 w-4" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-white flex items-center gap-2">
-                Standard Users
-                <span 
-                  className="text-xs border font-bold px-2 py-0.5 rounded-full text-blue-300"
-                  style={{
-                    backgroundColor: 'rgba(30, 58, 138, 0.6)',
-                    borderColor: 'rgba(59, 130, 246, 0.5)'
-                  }}
-                >
-                  {processedStandardUsers.length}
-                </span>
-              </h2>
-            </div>
-          </div>
-
-          <button
-            onClick={() => handleOpenAddModal('user')}
-            className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline"
-            style={{ color: 'var(--color-primary, #E05638)' }}
-          >
-            <UserPlus className="h-3.5 w-3.5" /> Add Standard User
-          </button>
-        </div>
-
-        <div 
-          className="border rounded-3xl overflow-hidden shadow-xl"
-          style={{
-            backgroundColor: 'var(--color-card, #0b0f17)',
-            borderColor: 'var(--color-border, #1e293b)'
-          }}
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead 
-                className="border-b text-slate-400 uppercase font-bold text-[10px] tracking-wider"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #070b13)',
-                  borderColor: 'var(--color-border, #1e293b)'
-                }}
-              >
-                <tr>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleUserSort('name')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Standard User</span>
-                      {renderSortIcon(userSortField, 'name', userSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">Email Address</th>
-                  <th className="px-5 py-4">Role</th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleUserSort('subscriptionPlan')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Subscription Type</span>
-                      {renderSortIcon(userSortField, 'subscriptionPlan', userSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleUserSort('createdAt')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Created Date</span>
-                      {renderSortIcon(userSortField, 'createdAt', userSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody 
-                className="divide-y text-slate-300"
-                style={{ borderColor: 'var(--color-border, #1e293b)' }}
-              >
-                {paginatedStandardUsers.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-500">
-                      No standard users found {search ? `matching "${search}"` : ''}.
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedStandardUsers.map((user) => {
-                    const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
-                    const planBadge = getPlanBadge(user.subscriptionPlan);
-                    const PlanIcon = planBadge.icon;
-                    return (
-                      <tr 
-                        key={user.id} 
-                        className="transition"
-                        style={{ borderColor: 'var(--color-border, #1e293b)' }}
-                      >
-                        <td className="px-5 py-4 font-bold text-white flex items-center gap-3">
-                          <div 
-                            className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0"
-                            style={{
-                              backgroundColor: 'var(--color-card, #111726)',
-                              borderColor: 'var(--color-border, #1e293b)',
-                              color: 'var(--color-primary, #E05638)'
-                            }}
-                          >
-                            {user.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-white">{user.name}</span>
-                              {isCurrent && (
-                                <span 
-                                  className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded"
-                                  style={{
-                                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                                    borderColor: 'var(--color-emerald, #10b981)',
-                                    color: 'var(--color-emerald, #10b981)'
-                                  }}
-                                >
-                                  YOU
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 text-slate-400 font-mono text-xs">{user.email}</td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border text-slate-300 flex items-center gap-1 w-fit"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark, #070b13)',
-                              borderColor: 'var(--color-border, #1e293b)'
-                            }}
-                          >
-                            <UserIcon className="h-3 w-3 text-slate-400" /> Standard User
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 w-fit shadow-sm"
-                            style={{
-                              backgroundColor: planBadge.bg,
-                              borderColor: planBadge.border,
-                              color: planBadge.color
-                            }}
-                          >
-                            <PlanIcon className="h-3 w-3 shrink-0" />
-                            {planBadge.label}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 text-slate-500">
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric'
-                          }) : 'Active'}
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditModal(user)}
-                              className="p-2 text-slate-300 hover:text-white rounded-xl border transition shadow-sm cursor-pointer"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
-                              }}
-                              title="Edit User & Plan Assignment"
-                            >
-                              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isCurrent}
-                              onClick={() => handleDeleteUser(user.id, user.email, user.name)}
-                              className={`p-2 rounded-xl border transition shadow-sm ${
-                                isCurrent
-                                  ? 'opacity-30 cursor-not-allowed text-slate-600'
-                                  : 'text-slate-400 hover:text-red-400 cursor-pointer'
-                              }`}
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
-                              }}
-                              title={isCurrent ? 'Cannot delete active account' : 'Delete User'}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Standard User Pagination */}
-          <div 
-            className="px-5 py-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark, #070b13)',
-              borderColor: 'var(--color-border, #1e293b)'
-            }}
-          >
-            <div className="text-slate-400">
-              {processedStandardUsers.length === 0 ? (
-                'Showing 0 standard users'
-              ) : (
-                <>
-                  Showing <span className="font-bold text-white">{userStartIndex + 1}</span> to{' '}
-                  <span className="font-bold text-white">{userEndIndex}</span> of{' '}
-                  <span className="font-bold text-white">{processedStandardUsers.length}</span> standard users
-                </>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                disabled={userCurrentPage <= 1}
-                onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))}
-                className={`p-2 rounded-xl border flex items-center justify-center transition ${
-                  userCurrentPage <= 1
-                    ? 'opacity-40 cursor-not-allowed'
-                    : 'text-slate-300 hover:text-white cursor-pointer'
-                }`}
-                style={{
-                  backgroundColor: 'var(--color-card, #0b0f17)',
-                  borderColor: 'var(--color-border, #1e293b)'
-                }}
-                title="Previous Page"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-
-              {Array.from({ length: userTotalPages }, (_, i) => i + 1).map((pageNum) => (
-                <button
-                  key={pageNum}
-                  type="button"
-                  onClick={() => setUserCurrentPage(pageNum)}
-                  className="min-w-[34px] h-[34px] rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer"
-                  style={userCurrentPage === pageNum ? {
-                    backgroundColor: 'var(--color-primary, #E05638)',
-                    borderColor: 'var(--color-primary, #E05638)',
-                    color: '#ffffff'
-                  } : {
-                    backgroundColor: 'var(--color-card, #0b0f17)',
-                    borderColor: 'var(--color-border, #1e293b)',
-                    color: '#cbd5e1'
-                  }}
-                >
-                  {pageNum}
-                </button>
-              ))}
-
-              <button
-                type="button"
-                disabled={userCurrentPage >= userTotalPages}
-                onClick={() => setUserCurrentPage(p => Math.min(userTotalPages, p + 1))}
-                className={`p-2 rounded-xl border flex items-center justify-center transition ${
-                  userCurrentPage >= userTotalPages
-                    ? 'opacity-40 cursor-not-allowed'
-                    : 'text-slate-300 hover:text-white cursor-pointer'
-                }`}
-                style={{
-                  backgroundColor: 'var(--color-card, #0b0f17)',
-                  borderColor: 'var(--color-border, #1e293b)'
-                }}
-                title="Next Page"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* 1. ADD USER MODAL WITH SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
-      {/* ───────────────────────────────────────────────────────────── */}
-      {showAddModal && (
-        <div 
-          onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)'
-            }}
-          >
-            <button 
-              onClick={() => setShowAddModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer text-slate-300 hover:text-white"
-              style={{ backgroundColor: 'var(--color-inner-dark, #172033)' }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
-              >
-                <UserPlus className="h-5 w-5" /> Add New User
-              </h2>
-              <p className="text-slate-400 text-xs">Create a new user account with role & active package tier.</p>
-            </div>
-
-            {addError && (
-              <div className="p-3 bg-red-950/40 border border-red-800 text-red-300 rounded-xl font-semibold flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
-                <span>{addError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleAddUserSubmit} className="space-y-3.5 pt-1">
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Full Name *</label>
-                <div className="relative">
-                  <UserIcon className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Jordan Smith"
-                    value={addName}
-                    onChange={(e) => setAddName(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Email Address *</label>
-                <div className="relative">
-                  <Mail className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="email"
-                    required
-                    placeholder="jordan@example.com"
-                    value={addEmail}
-                    onChange={(e) => setAddEmail(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Password *</label>
-                <div className="relative">
-                  <Lock className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="password"
-                    required
-                    placeholder="Minimum 4 characters"
-                    value={addPassword}
-                    onChange={(e) => setAddPassword(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              {/* SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <CreditCard className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-                    Active Subscription Plan *
-                  </span>
-                  <Link href="/admin/plans" className="text-[10px] text-slate-400 hover:text-white underline">
-                    Manage Plans ({availablePlans.length})
-                  </Link>
-                </label>
-                <select
-                  value={addSubscriptionPlan}
-                  onChange={(e) => setAddSubscriptionPlan(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 text-xs text-white outline-none transition cursor-pointer font-bold"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                >
-                  {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug}>
-                      {plan.name} — ({plan.priceFormatted})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Assigned Role</label>
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <label 
-                    onClick={() => setAddRole('user')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between"
-                    style={addRole === 'user' ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-white text-xs">Standard User</div>
-                      <div className="text-[10px] text-slate-400">App Subscriber</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="addRole"
-                      checked={addRole === 'user'}
-                      onChange={() => setAddRole('user')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-
-                  <label 
-                    onClick={() => setAddRole('admin')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between"
-                    style={addRole === 'admin' ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-white text-xs flex items-center gap-1">
-                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> Admin
-                      </div>
-                      <div className="text-[10px] text-slate-400">Full Access</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="addRole"
-                      checked={addRole === 'admin'}
-                      onChange={() => setAddRole('admin')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer text-slate-300"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  <UserPlus className="h-4 w-4" /> Create User
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* 2. EDIT USER MODAL WITH ROLE LOCK FOR PRIMARY ADMIN */}
-      {/* ───────────────────────────────────────────────────────────── */}
-      {showEditModal && (
-        <div 
-          onClick={() => setShowEditModal(false)}
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)'
-            }}
-          >
-            <button 
-              onClick={() => setShowEditModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer text-slate-300 hover:text-white"
-              style={{ backgroundColor: 'var(--color-inner-dark, #172033)' }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
-              >
-                <Edit3 className="h-5 w-5" /> Edit User & Plan
-              </h2>
-              <p className="text-slate-400 text-xs">Update account details, role permissions, and active subscription plan.</p>
-            </div>
-
-            {editError && (
-              <div className="p-3 bg-red-950/40 border border-red-800 text-red-300 rounded-xl font-semibold flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
-                <span>{editError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleEditUserSubmit} className="space-y-3.5 pt-1">
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Full Name *</label>
-                <div className="relative">
-                  <UserIcon className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="text"
-                    required
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Email Address *</label>
-                <div className="relative">
-                  <Mail className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="email"
-                    required
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Change Password (leave blank to keep current)</label>
-                <div className="relative">
-                  <Lock className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="password"
-                    placeholder="Enter new password..."
-                    value={editPassword}
-                    onChange={(e) => setEditPassword(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-600 outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              {/* SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <CreditCard className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-                    Active Subscription Plan
-                  </span>
-                  <span className="text-[10px] text-emerald-400 font-bold">Live Synced ({availablePlans.length})</span>
-                </label>
-                <select
-                  value={editSubscriptionPlan}
-                  onChange={(e) => setEditSubscriptionPlan(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 text-xs text-white outline-none transition cursor-pointer font-bold"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                >
-                  {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug}>
-                      {plan.name} — ({plan.priceFormatted})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* ASSIGNED ROLE WITH PRIMARY ADMIN LOCK */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block font-bold text-slate-300">Assigned Role</label>
-                  {isEditingFirstAdmin && (
-                    <span 
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border"
-                      style={{
-                        backgroundColor: 'rgba(245, 158, 11, 0.15)',
-                        borderColor: '#f59e0b',
-                        color: '#fbbf24'
-                      }}
-                    >
-                      <Lock className="h-3 w-3" /> Primary Admin Locked
-                    </span>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <label 
-                    onClick={() => {
-                      if (!isEditingFirstAdmin) setEditRole('user');
-                    }}
-                    className={`p-3 rounded-2xl border transition flex items-center justify-between ${
-                      isEditingFirstAdmin ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
-                    }`}
-                    style={editRole === 'user' && !isEditingFirstAdmin ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-white text-xs">Standard User</div>
-                      <div className="text-[10px] text-slate-400">App Subscriber</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="editRole"
-                      disabled={isEditingFirstAdmin}
-                      checked={editRole === 'user'}
-                      onChange={() => {
-                        if (!isEditingFirstAdmin) setEditRole('user');
-                      }}
-                      className="accent-[#E05638] disabled:opacity-50"
-                    />
-                  </label>
-
-                  <label 
-                    onClick={() => setEditRole('admin')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between"
-                    style={editRole === 'admin' ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-white text-xs flex items-center gap-1">
-                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> Admin
-                      </div>
-                      <div className="text-[10px] text-slate-400">Full Access</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="editRole"
-                      checked={editRole === 'admin'}
-                      onChange={() => setEditRole('admin')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-                </div>
-
-                {isEditingFirstAdmin && (
-                  <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
-                    The primary system administrator role is permanently protected and cannot be changed or demoted.
-                  </p>
-                )}
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer text-slate-300"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  <Check className="h-4 w-4" /> Save Changes
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
-}
-
-```
-
 ## File: `apps/web/src/app/admin/page.tsx`
 ```typescript
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
-  Shield, Key, Globe, Plus, Edit3, Trash2, Eye, EyeOff, 
-  Check, CheckCircle, X, UserPlus, RotateCcw, Save, Copy, Cpu, 
-  RefreshCw, AlertCircle, Palette, Sparkles, Layers 
+  Globe, 
+  Check, 
+  CheckCircle, 
+  UserPlus, 
+  RotateCcw, 
+  Save, 
+  Palette, 
+  Sparkles, 
+  Layers, 
+  Eye 
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -14053,20 +12325,9 @@ import {
   applyCssThemeVariables 
 } from '@/lib/theme';
 
-interface ApiKeyItem {
-  id: string;
-  name: string;
-  provider: string;
-  keyValue: string;
-  status: 'active' | 'inactive';
-  lastUpdated: string;
-  source?: 'env' | 'custom';
-  envKey: string;
-}
-
 export default function AdminSettingsPage() {
   const { t, version } = useTranslation();
-  const [activeTab, setActiveTab] = useState<'general' | 'theme' | 'apikeys'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'theme'>('general');
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
@@ -14078,42 +12339,6 @@ export default function AdminSettingsPage() {
   // Global Theme & Colors State
   const [themeColors, setThemeColors] = useState<ThemeColors>(DEFAULT_THEME_COLORS);
   const [themeFeedback, setThemeFeedback] = useState('');
-
-  // API Key State
-  const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([]);
-  const [visibleKeyIds, setVisibleKeyIds] = useState<Record<string, boolean>>({});
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [editingKey, setEditingKey] = useState<ApiKeyItem | null>(null);
-  const [keyName, setKeyName] = useState('');
-  const [provider, setProvider] = useState('Google Gemini (gemini-1.5-flash)');
-  const [keyValue, setKeyValue] = useState('');
-  const [keyStatus, setKeyStatus] = useState<'active' | 'inactive'>('active');
-  const [apiKeyFeedback, setApiKeyFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [loadingAction, setLoadingAction] = useState(false);
-
-  const fetchEnvKeys = async (showFeedback = false) => {
-    setLoadingAction(true);
-    try {
-      const res = await fetch(`/api/admin/keys?t=${Date.now()}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.keys)) {
-        setApiKeys(data.keys);
-        if (showFeedback) {
-          setApiKeyFeedback({ type: 'success', text: `${data.keys.length} ${t('loadedKeysFromEnv')}` });
-          setTimeout(() => setApiKeyFeedback(null), 3500);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to read .env keys:', e);
-      if (showFeedback) {
-        setApiKeyFeedback({ type: 'error', text: t('errorReadingEnv') });
-        setTimeout(() => setApiKeyFeedback(null), 3500);
-      }
-    } finally {
-      setLoadingAction(false);
-    }
-  };
 
   // Dynamic Theme Synchronization & Color Inversion
   const applySavedTheme = useCallback(() => {
@@ -14179,7 +12404,6 @@ export default function AdminSettingsPage() {
     updateFavicon(icon);
 
     applySavedTheme();
-    fetchEnvKeys(false);
 
     const handleSiteSync = () => {
       setLocalSiteName(getSiteName());
@@ -14260,95 +12484,6 @@ export default function AdminSettingsPage() {
     }
   };
 
-  // API Key Handlers
-  const handleSaveKeySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!keyValue.trim()) return;
-
-    setLoadingAction(true);
-    try {
-      const res = await fetch('/api/admin/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: keyName.trim() || provider.split('(')[0].trim(),
-          provider,
-          keyValue: keyValue.trim(),
-          status: keyStatus,
-          prevEnvKey: editingKey?.envKey
-        })
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setApiKeyFeedback({ type: 'success', text: editingKey ? (t('apiKeyUpdatedEnv') || 'API Key updated successfully in .env!') : (t('newApiKeyWrittenEnv') || 'New API Key successfully written to .env!') });
-        setShowKeyModal(false);
-        await fetchEnvKeys(false);
-      } else {
-        setApiKeyFeedback({ type: 'error', text: data.error || 'Failed to write to .env file' });
-      }
-    } catch (err: any) {
-      setApiKeyFeedback({ type: 'error', text: err.message || 'Network error writing .env' });
-    } finally {
-      setLoadingAction(false);
-      setTimeout(() => setApiKeyFeedback(null), 3500);
-    }
-  };
-
-  const handleDeleteKey = async (item: ApiKeyItem) => {
-    if (!confirm(`${t('confirmRemoveKey') || 'Are you sure you want to remove'} ${item.name} (${item.envKey})?`)) return;
-
-    setLoadingAction(true);
-    try {
-      const res = await fetch(`/api/admin/keys?envKey=${encodeURIComponent(item.envKey)}`, {
-        method: 'DELETE'
-      });
-      const data = await res.json();
-      if (data.success) {
-        setApiKeyFeedback({ type: 'success', text: `${item.envKey} ${t('removedKeyFromEnv') || 'removed successfully from .env'}` });
-        await fetchEnvKeys(false);
-      } else {
-        setApiKeyFeedback({ type: 'error', text: data.error || 'Failed to remove key from .env' });
-      }
-    } catch (err: any) {
-      setApiKeyFeedback({ type: 'error', text: err.message || 'Network error deleting .env key' });
-    } finally {
-      setLoadingAction(false);
-      setTimeout(() => setApiKeyFeedback(null), 3500);
-    }
-  };
-
-  const toggleKeyStatus = async (item: ApiKeyItem) => {
-    const nextStatus = item.status === 'active' ? 'inactive' : 'active';
-    try {
-      await fetch('/api/admin/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: item.name,
-          provider: item.provider,
-          keyValue: item.keyValue,
-          status: nextStatus,
-          prevEnvKey: item.envKey
-        })
-      });
-      await fetchEnvKeys(false);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleCopy = (id: string, val: string) => {
-    navigator.clipboard.writeText(val);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 1500);
-  };
-
-  const maskKey = (val: string) => {
-    if (val.length <= 8) return '••••••••';
-    return val.substring(0, 6) + '••••••••••••' + val.substring(val.length - 4);
-  };
-
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
@@ -14361,7 +12496,7 @@ export default function AdminSettingsPage() {
             {t('adminSettingsTitle') || 'Admin Settings'}
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('adminSettingsSubtitle') || 'Manage system configurations, branding, colors, and live .env credentials'}
+            {t('adminSettingsSubtitle') || 'Manage system configurations, branding, and color themes'}
           </p>
         </div>
 
@@ -14411,20 +12546,6 @@ export default function AdminSettingsPage() {
           }}
         >
           <Palette className="h-4 w-4" /> {t('themeColorsTab') || 'Theme Colors'}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('apikeys')}
-          className="flex items-center gap-2 pb-3 text-sm font-bold border-b-2 transition shrink-0 cursor-pointer"
-          style={activeTab === 'apikeys' ? {
-            borderColor: 'var(--color-primary, #E05638)',
-            color: 'var(--color-primary, #E05638)'
-          } : {
-            borderColor: 'transparent',
-            color: isDayMode ? '#64748b' : '#94a3b8'
-          }}
-        >
-          <Key className="h-4 w-4" /> {t('apiKeysTab') || 'API Keys'} ({apiKeys.length})
         </button>
       </div>
 
@@ -14976,476 +13097,6 @@ export default function AdminSettingsPage() {
           </div>
         </div>
       )}
-
-      {/* TAB 3: LIVE .ENV API KEYS */}
-      {activeTab === 'apikeys' && (
-        <div className="space-y-6">
-          {apiKeyFeedback && (
-            <div 
-              className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 animate-in fade-in border"
-              style={apiKeyFeedback.type === 'success' ? {
-                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-              } : {
-                backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                borderColor: isDayMode ? '#f87171' : 'rgba(239, 68, 68, 0.6)',
-                color: isDayMode ? '#b91c1c' : '#f87171'
-              }}
-            >
-              {apiKeyFeedback.type === 'success' ? (
-                <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
-              ) : (
-                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-              )}
-              <span>{apiKeyFeedback.text}</span>
-            </div>
-          )}
-
-          {/* STATUS CARDS */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div 
-              className="border rounded-2xl p-4 flex items-center gap-3.5 shadow-xs transition-colors duration-200"
-              style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-              }}
-            >
-              <div 
-                className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0"
-                style={{
-                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                  borderColor: 'var(--color-emerald, #10b981)',
-                  color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                }}
-              >
-                <Cpu className="h-5 w-5" />
-              </div>
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('activeAiEngine') || 'Active AI Engine'}</span>
-                <span className="text-sm font-extrabold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  {apiKeys.find(k => k.status === 'active')?.provider.split('(')[0].trim() || 'Deterministic Fallback'}
-                </span>
-              </div>
-            </div>
-
-            <div 
-              className="border rounded-2xl p-4 flex items-center gap-3.5 shadow-xs transition-colors duration-200"
-              style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-              }}
-            >
-              <div 
-                className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0"
-                style={{
-                  backgroundColor: isDayMode ? '#eff6ff' : 'rgba(30, 58, 138, 0.4)',
-                  borderColor: isDayMode ? '#bfdbfe' : 'rgba(59, 130, 246, 0.4)',
-                  color: isDayMode ? '#1d4ed8' : '#60a5fa'
-                }}
-              >
-                <Key className="h-5 w-5" />
-              </div>
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('configuredKeysOnDisk') || 'Configured Keys on Disk'}</span>
-                <span className="text-sm font-extrabold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{apiKeys.length} Variables</span>
-              </div>
-            </div>
-
-            <div 
-              className="border rounded-2xl p-4 flex items-center gap-3.5 shadow-xs transition-colors duration-200"
-              style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-              }}
-            >
-              <div 
-                className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0"
-                style={{
-                  backgroundColor: isDayMode ? '#faf5ff' : 'rgba(88, 28, 135, 0.4)',
-                  borderColor: isDayMode ? '#e9d5ff' : 'rgba(147, 51, 234, 0.4)',
-                  color: isDayMode ? '#7e22ce' : '#c084fc'
-                }}
-              >
-                <Shield className="h-5 w-5" />
-              </div>
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('sourceTarget') || 'Source Target'}</span>
-                <span className="text-sm font-extrabold" style={{ color: isDayMode ? '#7e22ce' : '#d8b4fe' }}>.env & .env.local</span>
-              </div>
-            </div>
-          </div>
-
-          {/* TABLE CONTAINER */}
-          <div 
-            className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-            }}
-          >
-            <div className="p-5 border-b flex items-center justify-between" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <div>
-                <h2 className="text-base font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directEnvCredentialsTitle') || 'Direct .env Credentials'}</h2>
-                <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('directEnvCredentialsSub') || 'Manage secure API keys and backend environment variables'}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => fetchEnvKeys(true)}
-                  disabled={loadingAction}
-                  className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#cbd5e1'
-                  }}
-                  title="Reload from .env file"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${loadingAction ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald, #10b981)' }} /> 
-                  <span>{t('reloadEnvBtn') || 'Reload .env'}</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setEditingKey(null);
-                    setKeyName('');
-                    setProvider('Google Gemini (gemini-1.5-flash)');
-                    setKeyValue('');
-                    setKeyStatus('active');
-                    setShowKeyModal(true);
-                  }}
-                  className="text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  <Plus className="h-4 w-4" /> {t('addApiKeyBtn') || 'Add API Key'}
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead 
-                  className="border-b uppercase font-bold text-[10px] tracking-wider"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#64748b' : '#94a3b8'
-                  }}
-                >
-                  <tr>
-                    <th className="px-5 py-3.5">{t('envVarCol') || 'Environment Variable'}</th>
-                    <th className="px-5 py-3.5">{t('providerModelCol') || 'Provider & Model'}</th>
-                    <th className="px-5 py-3.5">{t('keyValueCol') || 'Key Value'}</th>
-                    <th className="px-5 py-3.5">{t('statusCol') || 'Status'}</th>
-                    <th className="px-5 py-3.5 text-right">{t('actionsCol') || 'Actions'}</th>
-                  </tr>
-                </thead>
-                <tbody 
-                  className="divide-y"
-                  style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
-                >
-                  {apiKeys.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-center py-12 text-slate-500">
-                        {t('noApiKeysFound') || 'No API keys configured in .env'}
-                      </td>
-                    </tr>
-                  ) : (
-                    apiKeys.map((item) => {
-                      const isVisible = visibleKeyIds[item.id];
-                      return (
-                        <tr 
-                          key={item.id} 
-                          className={`transition ${isDayMode ? 'hover:bg-slate-50' : 'hover:bg-slate-900/40'}`}
-                          style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
-                        >
-                          <td className="px-5 py-4 font-bold flex items-center gap-2.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                            <div 
-                              className="w-7 h-7 rounded-lg border flex items-center justify-center shrink-0 shadow-xs"
-                              style={{
-                                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: 'var(--color-primary, #E05638)'
-                              }}
-                            >
-                              <Key className="h-3.5 w-3.5" />
-                            </div>
-                            <div>
-                              <div className="font-bold">{item.name}</div>
-                              <div className="font-mono text-[10px]" style={{ color: isDayMode ? '#7e22ce' : '#c084fc' }}>{item.envKey}</div>
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span 
-                              className="border text-[10px] font-bold px-2.5 py-1 rounded-lg shadow-xs"
-                              style={{
-                                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#334155' : '#cbd5e1'
-                              }}
-                            >
-                              {item.provider}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4 font-mono text-[11px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                            <div className="flex items-center gap-2">
-                              <span>{isVisible ? item.keyValue : maskKey(item.keyValue)}</span>
-                              <button
-                                onClick={() => setVisibleKeyIds((p) => ({ ...p, [item.id]: !p[item.id] }))}
-                                className="transition cursor-pointer"
-                                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
-                                title={isVisible ? (t('hideKeyTooltip') || 'Hide Key') : (t('showKeyTooltip') || 'Show Key')}
-                              >
-                                {isVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                              </button>
-                              <button
-                                onClick={() => handleCopy(item.id, item.keyValue)}
-                                className="transition cursor-pointer"
-                                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
-                                title={t('copyClipboardTooltip') || 'Copy to clipboard'}
-                              >
-                                {copiedId === item.id ? (
-                                  <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-                                ) : (
-                                  <Copy className="h-3.5 w-3.5" />
-                                )}
-                              </button>
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <button
-                              onClick={() => toggleKeyStatus(item)}
-                              className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border cursor-pointer transition shadow-xs"
-                              style={item.status === 'active' ? {
-                                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                                borderColor: 'var(--color-emerald, #10b981)',
-                                color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                              } : {
-                                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#64748b' : '#94a3b8'
-                              }}
-                              title={t('toggleAiProviderTooltip') || 'Toggle AI Provider Status'}
-                            >
-                              {item.status === 'active' ? (t('active') || 'Active') : (t('inactive') || 'Inactive')}
-                            </button>
-                          </td>
-                          <td className="px-5 py-4 text-right space-x-2">
-                            <button
-                              onClick={() => {
-                                setEditingKey(item);
-                                setKeyName(item.name);
-                                setProvider(item.provider);
-                                setKeyValue(item.keyValue);
-                                setKeyStatus(item.status);
-                                setShowKeyModal(true);
-                              }}
-                              className="p-1.5 rounded-lg border transition cursor-pointer shadow-xs"
-                              style={{
-                                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#64748b' : '#94a3b8'
-                              }}
-                              title={t('editInEnvTooltip') || 'Edit in .env'}
-                            >
-                              <Edit3 className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteKey(item)}
-                              className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
-                              style={{
-                                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#64748b' : '#94a3b8'
-                              }}
-                              title={t('deleteFromEnvTooltip') || 'Delete from .env'}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADD / EDIT API KEY MODAL */}
-      {showKeyModal && (
-        <div 
-          onClick={() => setShowKeyModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
-            }}
-          >
-            <button 
-              onClick={() => setShowKeyModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #172033)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-            <h2 
-              className="text-lg font-black flex items-center gap-2"
-              style={{ color: 'var(--color-primary, #E05638)' }}
-            >
-              <Key className="h-5 w-5" /> {editingKey ? (t('editApiKeyModalTitle') || 'Edit API Key') : (t('addApiKeyModalTitle') || 'Add API Key')}
-            </h2>
-            <form onSubmit={handleSaveKeySubmit} className="space-y-4 pt-1">
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('integrationLabel') || 'Integration Name'}
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Gemini Production Key"
-                  value={keyName}
-                  onChange={(e) => setKeyName(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('serviceProviderModelLabel') || 'Service Provider & Model'}
-                </label>
-                <select
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs outline-none cursor-pointer transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                >
-                  <option value="Google Gemini (gemini-1.5-flash)" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Google Gemini (gemini-1.5-flash) [GEMINI_API_KEY]</option>
-                  <option value="Google Gemini (gemini-2.0-flash)" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Google Gemini (gemini-2.0-flash) [GEMINI_API_KEY]</option>
-                  <option value="OpenAI (gpt-4o)" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>OpenAI (gpt-4o) [OPENAI_API_KEY]</option>
-                  <option value="OpenAI (gpt-4o-mini)" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>OpenAI (gpt-4o-mini) [OPENAI_API_KEY]</option>
-                  <option value="Anthropic Claude 3.5" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Anthropic Claude 3.5 [CLAUDE_API_KEY]</option>
-                  <option value="Custom API Service" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Custom API Service [CUSTOM_API_KEY]</option>
-                </select>
-              </div>
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('apiKeyValueLabel') || 'API Key Value *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="AIzaSy... / sk-proj..."
-                  value={keyValue}
-                  onChange={(e) => setKeyValue(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs font-mono outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('defaultAiEngineLabel') || 'Default AI Engine Status'}
-                </label>
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <label 
-                    onClick={() => setKeyStatus('active')}
-                    className="p-3 rounded-xl border cursor-pointer transition flex items-center justify-between shadow-xs"
-                    style={keyStatus === 'active' ? {
-                      backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <span className="font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active') || 'Active'}</span>
-                    <input
-                      type="radio"
-                      name="keyStatus"
-                      checked={keyStatus === 'active'}
-                      onChange={() => setKeyStatus('active')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-
-                  <label 
-                    onClick={() => setKeyStatus('inactive')}
-                    className="p-3 rounded-xl border cursor-pointer transition flex items-center justify-between shadow-xs"
-                    style={keyStatus === 'inactive' ? {
-                      backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <span className="font-bold text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('inactive') || 'Inactive'}</span>
-                    <input
-                      type="radio"
-                      name="keyStatus"
-                      checked={keyStatus === 'inactive'}
-                      onChange={() => setKeyStatus('inactive')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-                </div>
-              </div>
-              <div className="flex justify-end gap-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowKeyModal(false)}
-                  className="px-4 py-2 border rounded-xl cursor-pointer transition shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#475569' : '#cbd5e1'
-                  }}
-                >
-                  {t('cancel') || 'Cancel'}
-                </button>
-                <button
-                  type="submit"
-                  disabled={loadingAction}
-                  className="px-5 py-2 text-white font-bold rounded-xl shadow-md transition cursor-pointer disabled:opacity-50"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  {loadingAction ? (t('writingToEnv') || 'Writing to .env...') : (t('saveToEnvFile') || 'Save to .env File')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -15495,7 +13146,7 @@ const DEFAULT_SECTIONS: QuestionnaireSection[] = [
 ];
 
 export default function ChefAISettingsPage() {
-  const [activeTab, setActiveTab] = useState<'general' | 'questionnaire' | 'capabilities' | 'voice' | 'advanced'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'questionnaire' | 'voice' | 'advanced'>('general');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   // AI Configurations
@@ -16008,7 +13659,6 @@ export default function ChefAISettingsPage() {
         {[
           { id: 'general', label: 'General AI Configuration', icon: Cpu },
           { id: 'questionnaire', label: `Multi-Topic Questionnaires (${sections.filter(s => s.enabled !== false).length}/${sections.length} Active)`, icon: Layers },
-          { id: 'capabilities', label: 'Search & Capabilities', icon: Globe },
           { id: 'voice', label: 'Voice Interaction', icon: Mic },
           { id: 'advanced', label: 'Agent Parameters', icon: SlidersHorizontal },
         ].map((tab) => {
@@ -16131,7 +13781,7 @@ export default function ChefAISettingsPage() {
                 </button>
               </div>
 
-              <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="pt-2 space-y-4 text-xs">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>API Key</label>
@@ -16222,10 +13872,6 @@ export default function ChefAISettingsPage() {
                       <>
                         <option value="gemini-3.6-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.6 Flash (Latest Recommended)</option>
                         <option value="gemini-3.5-flash-lite" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.5 Flash Lite (Lightweight & Fast)</option>
-                        <option value="gemini-3.8" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.8 (High Intelligence)</option>
-                        <option value="gemini-3.1-pro" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.1 Pro (Deep Reasoning)</option>
-                        <option value="gemini-2.5-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 2.5 Flash</option>
-                        <option value="gemini-1.5-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 1.5 Flash (Legacy)</option>
                       </>
                     ) : (
                       <>
@@ -16698,106 +14344,7 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 3: SEARCH & CAPABILITIES */}
-        {activeTab === 'capabilities' && (
-          <div 
-            className="border rounded-3xl p-6 space-y-4 shadow-sm animate-in fade-in transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-            }}
-          >
-            <h2 
-              className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-              style={{ color: 'var(--color-primary, #E05638)' }}
-            >
-              <Globe className="h-4 w-4" /> Autonomous Capabilities & Search Scope Control
-            </h2>
-            <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Control what data sources the AI agent searches and incorporates when responding on <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/chef</span>.</p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-              <div 
-                onClick={() => setEnableWebSearch(!enableWebSearch)}
-                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
-                style={{
-                  backgroundColor: enableWebSearch 
-                    ? (isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 12%, transparent)') 
-                    : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                  borderColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
-                  color: enableWebSearch ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <Globe className="h-5 w-5" style={{ color: enableWebSearch ? 'var(--color-primary, #E05638)' : '#64748b' }} />
-                  <div 
-                    className="w-9 h-5 rounded-full p-0.5 transition"
-                    style={{ backgroundColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#334155') }}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableWebSearch ? 'translate-x-4' : 'translate-x-0'}`} />
-                  </div>
-                </div>
-                <div>
-                  <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Live Web Search</span>
-                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Allows AI to search external culinary web data, trends, and ingredient substitutes.</span>
-                </div>
-              </div>
-
-              <div 
-                onClick={() => setEnablePantryContext(!enablePantryContext)}
-                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
-                style={{
-                  backgroundColor: enablePantryContext 
-                    ? (isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 12%, transparent)') 
-                    : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                  borderColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
-                  color: enablePantryContext ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? (isDayMode ? '#059669' : 'var(--color-emerald, #10b981)') : '#64748b' }} />
-                  <div 
-                    className="w-9 h-5 rounded-full p-0.5 transition"
-                    style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : '#334155') }}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${enablePantryContext ? 'translate-x-4' : 'translate-x-0'}`} />
-                  </div>
-                </div>
-                <div>
-                  <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Pantry Context Search</span>
-                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Automatically scans user pantry inventory to build recipes matching in-stock ingredients.</span>
-                </div>
-              </div>
-
-              <div 
-                onClick={() => setStrictDietEnforcement(!strictDietEnforcement)}
-                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
-                style={{
-                  backgroundColor: strictDietEnforcement 
-                    ? (isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)') 
-                    : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                  borderColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
-                  color: strictDietEnforcement ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? (isDayMode ? '#2563eb' : '#60a5fa') : '#64748b' }} />
-                  <div 
-                    className="w-9 h-5 rounded-full p-0.5 transition"
-                    style={{ backgroundColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? '#cbd5e1' : '#334155') }}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
-                  </div>
-                </div>
-                <div>
-                  <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Strict Dietary Filters</span>
-                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: VOICE INTERACTION SETTINGS */}
+        {/* TAB 3: VOICE INTERACTION SETTINGS */}
         {activeTab === 'voice' && (
           <div 
             className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
@@ -16936,51 +14483,398 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 5: AGENT PARAMETERS */}
+        {/* TAB 4: AGENT PARAMETERS (INCLUDING AUTONOMOUS CAPABILITIES & KNOWLEDGE TUNING) */}
         {activeTab === 'advanced' && (
-          <div 
-            className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-            }}
-          >
-            <h2 
-              className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-              style={{ color: 'var(--color-primary, #E05638)' }}
+          <div className="space-y-6 animate-in fade-in">
+            {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
+            <div 
+              className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              }}
             >
-              <SlidersHorizontal className="h-4 w-4" /> Agent Parameters & Knowledge Tuning
-            </h2>
+              <h2 
+                className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                style={{ color: 'var(--color-primary, #E05638)' }}
+              >
+                <Globe className="h-4 w-4" /> Autonomous Capabilities & Search Scope Control
+              </h2>
+              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Control what data sources the AI agent searches and incorporates when responding on <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/chef</span>.</p>
 
-            {/* CREATIVITY & MAX PLAN DAYS */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <div className="space-y-2">
-                <div className="flex justify-between font-bold">
-                  <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Temperature (Creativity): {temperature}</span>
-                  <span style={{ color: isDayMode ? '#059669' : '#34d399' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+                <div 
+                  onClick={() => setEnableWebSearch(!enableWebSearch)}
+                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
+                  style={{
+                    backgroundColor: enableWebSearch 
+                      ? (isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 12%, transparent)') 
+                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
+                    borderColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                    color: enableWebSearch ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <Globe className="h-5 w-5" style={{ color: enableWebSearch ? 'var(--color-primary, #E05638)' : '#64748b' }} />
+                    <div 
+                      className="w-9 h-5 rounded-full p-0.5 transition"
+                      style={{ backgroundColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                    >
+                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableWebSearch ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </div>
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Live Web Search</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Allows AI to search external culinary web data, trends, and ingredient substitutes.</span>
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={temperature}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                  className="w-full cursor-pointer"
-                  style={{ accentColor: 'var(--color-primary, #E05638)' }}
-                />
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.</p>
+
+                <div 
+                  onClick={() => setEnablePantryContext(!enablePantryContext)}
+                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
+                  style={{
+                    backgroundColor: enablePantryContext 
+                      ? (isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 12%, transparent)') 
+                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
+                    borderColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                    color: enablePantryContext ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? (isDayMode ? '#059669' : 'var(--color-emerald, #10b981)') : '#64748b' }} />
+                    <div 
+                      className="w-9 h-5 rounded-full p-0.5 transition"
+                      style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                    >
+                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${enablePantryContext ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </div>
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Pantry Context Search</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Automatically scans user pantry inventory to build recipes matching in-stock ingredients.</span>
+                  </div>
+                </div>
+
+                <div 
+                  onClick={() => setStrictDietEnforcement(!strictDietEnforcement)}
+                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
+                  style={{
+                    backgroundColor: strictDietEnforcement 
+                      ? (isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)') 
+                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
+                    borderColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                    color: strictDietEnforcement ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? (isDayMode ? '#2563eb' : '#60a5fa') : '#64748b' }} />
+                    <div 
+                      className="w-9 h-5 rounded-full p-0.5 transition"
+                      style={{ backgroundColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                    >
+                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </div>
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Strict Dietary Filters</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* AGENT PARAMETERS & KNOWLEDGE TUNING */}
+            <div 
+              className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              }}
+            >
+              <h2 
+                className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                style={{ color: 'var(--color-primary, #E05638)' }}
+              >
+                <SlidersHorizontal className="h-4 w-4" /> Agent Parameters & Knowledge Tuning
+              </h2>
+
+              {/* CREATIVITY & MAX PLAN DAYS */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                <div className="space-y-2">
+                  <div className="flex justify-between font-bold">
+                    <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Temperature (Creativity): {temperature}</span>
+                    <span style={{ color: isDayMode ? '#059669' : '#34d399' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={temperature}
+                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                    className="w-full cursor-pointer"
+                    style={{ accentColor: 'var(--color-primary, #E05638)' }}
+                  />
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Max Plan Days Limit (Wizard Cap)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="14"
+                    value={maxPlanDays}
+                    onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
+                    className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Maximum number of days the AI can structure in a single meal plan wizard sequence.</p>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Max Plan Days Limit (Wizard Cap)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="14"
-                  value={maxPlanDays}
-                  onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
-                  className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
+              {/* KNOWLEDGE BASE FEATURE */}
+              <div className="space-y-3 pt-1">
+                <div>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Knowledge Base
+                  </h3>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Fine-tune the assistant to your needs by adding reference source documents or databases.</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <div 
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="Knowledge Base..."
+                      value={newKbInput}
+                      onChange={(e) => setNewKbInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newKbInput.trim()) {
+                          e.preventDefault();
+                          setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
+                          setNewKbInput('');
+                        }
+                      }}
+                      className="bg-transparent border-none outline-none w-full text-xs"
+                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (newKbInput.trim()) {
+                          setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
+                          setNewKbInput('');
+                        }
+                      }}
+                      className="w-6 h-6 rounded-lg font-bold flex items-center justify-center shrink-0 cursor-pointer transition"
+                      style={{
+                        backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {knowledgeBaseList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
+                      style={{
+                        backgroundColor: isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 15%, transparent)',
+                        borderColor: 'var(--color-primary, #E05638)',
+                        color: isDayMode ? '#991b1b' : '#ffffff'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx))}
+                        className="hover:text-red-500 cursor-pointer"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* CUSTOM VOCABULARY FEATURE */}
+              <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                <div>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <BookA className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> Custom Vocabulary
+                  </h3>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enhance accuracy with specialized culinary or business terminology.</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <div 
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="Start typing to add"
+                      value={newVocabInput}
+                      onChange={(e) => setNewVocabInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newVocabInput.trim()) {
+                          e.preventDefault();
+                          setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
+                          setNewVocabInput('');
+                        }
+                      }}
+                      className="bg-transparent border-none outline-none w-full text-xs"
+                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                    />
+                    <span 
+                      onClick={() => {
+                        if (newVocabInput.trim()) {
+                          setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
+                          setNewVocabInput('');
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition"
+                      style={{
+                        backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                        color: isDayMode ? '#334155' : '#cbd5e1'
+                      }}
+                    >
+                      Enter
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {customVocabularyList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
+                      style={{
+                        backgroundColor: isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 15%, transparent)',
+                        borderColor: 'var(--color-emerald, #10b981)',
+                        color: isDayMode ? '#065f46' : '#ffffff'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx))}
+                        className="hover:text-red-500 cursor-pointer"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* FILTER WORDS FEATURE */}
+              <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                <div>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <Ban className="h-4 w-4 text-red-500" /> Filter Words
+                  </h3>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Restricted words or ingredients remain unspoken or avoided in AI outputs.</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <div 
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="Start typing to add"
+                      value={newFilterInput}
+                      onChange={(e) => setNewFilterInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newFilterInput.trim()) {
+                          e.preventDefault();
+                          setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
+                          setNewFilterInput('');
+                        }
+                      }}
+                      className="bg-transparent border-none outline-none w-full text-xs"
+                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                    />
+                    <span 
+                      onClick={() => {
+                        if (newFilterInput.trim()) {
+                          setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
+                          setNewFilterInput('');
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition"
+                      style={{
+                        backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                        color: isDayMode ? '#334155' : '#cbd5e1'
+                      }}
+                    >
+                      Enter
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {filterWordsList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
+                      style={{
+                        backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
+                        borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.6)',
+                        color: isDayMode ? '#991b1b' : '#ffffff'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => setFilterWordsList(filterWordsList.filter((_, i) => i !== idx))}
+                        className="hover:text-red-500 cursor-pointer"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* SYSTEM PROMPT / PERSONA */}
+              <div className="space-y-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  System Prompt / Autonomous Persona
+                </label>
+                <textarea
+                  rows={5}
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
                   style={{
                     backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
                     borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
@@ -16989,257 +14883,10 @@ export default function ChefAISettingsPage() {
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 />
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Maximum number of days the AI can structure in a single meal plan wizard sequence.</p>
+                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  Defines how the AI agent behaves, formats responses, and handles user queries on the <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> page.
+                </p>
               </div>
-            </div>
-
-            {/* KNOWLEDGE BASE FEATURE */}
-            <div className="space-y-3 pt-1">
-              <div>
-                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Knowledge Base
-                </h3>
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Fine-tune the assistant to your needs by adding reference source documents or databases.</p>
-              </div>
-
-              <div className="flex gap-2">
-                <div 
-                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                >
-                  <input
-                    type="text"
-                    placeholder="Knowledge Base..."
-                    value={newKbInput}
-                    onChange={(e) => setNewKbInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newKbInput.trim()) {
-                        e.preventDefault();
-                        setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
-                        setNewKbInput('');
-                      }
-                    }}
-                    className="bg-transparent border-none outline-none w-full text-xs"
-                    style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (newKbInput.trim()) {
-                        setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
-                        setNewKbInput('');
-                      }
-                    }}
-                    className="w-6 h-6 rounded-lg font-bold flex items-center justify-center shrink-0 cursor-pointer transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {knowledgeBaseList.map((item, idx) => (
-                  <span 
-                    key={idx}
-                    className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                    style={{
-                      backgroundColor: isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 15%, transparent)',
-                      borderColor: 'var(--color-primary, #E05638)',
-                      color: isDayMode ? '#991b1b' : '#ffffff'
-                    }}
-                  >
-                    {item}
-                    <button
-                      type="button"
-                      onClick={() => setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx))}
-                      className="hover:text-red-500 cursor-pointer"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* CUSTOM VOCABULARY FEATURE */}
-            <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <div>
-                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <BookA className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> Custom Vocabulary
-                </h3>
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enhance accuracy with specialized culinary or business terminology.</p>
-              </div>
-
-              <div className="flex gap-2">
-                <div 
-                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                >
-                  <input
-                    type="text"
-                    placeholder="Start typing to add"
-                    value={newVocabInput}
-                    onChange={(e) => setNewVocabInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newVocabInput.trim()) {
-                        e.preventDefault();
-                        setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
-                        setNewVocabInput('');
-                      }
-                    }}
-                    className="bg-transparent border-none outline-none w-full text-xs"
-                    style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
-                  />
-                  <span 
-                    onClick={() => {
-                      if (newVocabInput.trim()) {
-                        setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
-                        setNewVocabInput('');
-                      }
-                    }}
-                    className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
-                      color: isDayMode ? '#334155' : '#cbd5e1'
-                    }}
-                  >
-                    Enter
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {customVocabularyList.map((item, idx) => (
-                  <span 
-                    key={idx}
-                    className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                    style={{
-                      backgroundColor: isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 15%, transparent)',
-                      borderColor: 'var(--color-emerald, #10b981)',
-                      color: isDayMode ? '#065f46' : '#ffffff'
-                    }}
-                  >
-                    {item}
-                    <button
-                      type="button"
-                      onClick={() => setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx))}
-                      className="hover:text-red-500 cursor-pointer"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* FILTER WORDS FEATURE */}
-            <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <div>
-                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <Ban className="h-4 w-4 text-red-500" /> Filter Words
-                </h3>
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Restricted words or ingredients remain unspoken or avoided in AI outputs.</p>
-              </div>
-
-              <div className="flex gap-2">
-                <div 
-                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                >
-                  <input
-                    type="text"
-                    placeholder="Start typing to add"
-                    value={newFilterInput}
-                    onChange={(e) => setNewFilterInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newFilterInput.trim()) {
-                        e.preventDefault();
-                        setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
-                        setNewFilterInput('');
-                      }
-                    }}
-                    className="bg-transparent border-none outline-none w-full text-xs"
-                    style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
-                  />
-                  <span 
-                    onClick={() => {
-                      if (newFilterInput.trim()) {
-                        setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
-                        setNewFilterInput('');
-                      }
-                    }}
-                    className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
-                      color: isDayMode ? '#334155' : '#cbd5e1'
-                    }}
-                  >
-                    Enter
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {filterWordsList.map((item, idx) => (
-                  <span 
-                    key={idx}
-                    className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                    style={{
-                      backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
-                      borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.6)',
-                      color: isDayMode ? '#991b1b' : '#ffffff'
-                    }}
-                  >
-                    {item}
-                    <button
-                      type="button"
-                      onClick={() => setFilterWordsList(filterWordsList.filter((_, i) => i !== idx))}
-                      className="hover:text-red-500 cursor-pointer"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* SYSTEM PROMPT / PERSONA */}
-            <div className="space-y-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                System Prompt / Autonomous Persona
-              </label>
-              <textarea
-                rows={5}
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-              />
-              <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                Defines how the AI agent behaves, formats responses, and handles user queries on the <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> page.
-              </p>
             </div>
           </div>
         )}
@@ -17259,7 +14906,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   PlusCircle, PackageCheck, Zap, Trash2, Sparkles, AlertCircle, 
-  Check, Shield, CheckCircle2, Eye, RefreshCw, Edit3, DollarSign, Copy, Plus, Calendar, Tag, Star
+  Check, Shield, CheckCircle2, Eye, RefreshCw, Edit3, DollarSign, Copy, Plus, Calendar, Tag, Star, Cpu, Bot, X
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -17284,6 +14931,8 @@ interface SubscriptionPackageConfig {
   canViewMacros: boolean;
   allowedAiModels: string;
   featuresText: string;
+  tokenLimit: number;
+  tokenReimburseFrequency: 'once' | 'weekly' | 'monthly';
 }
 
 const BLANK_NEW_PLAN: SubscriptionPackageConfig = {
@@ -17292,20 +14941,22 @@ const BLANK_NEW_PLAN: SubscriptionPackageConfig = {
   slug: '',
   isFree: false,
   isDefault: false,
-  monthlyPriceDollars: 0,
-  annualPriceDollars: 0,
+  monthlyPriceDollars: 12.99,
+  annualPriceDollars: 99.99,
   monthlyBadge: '',
-  annualBadge: '',
-  trialBadge: '',
-  descriptionMonthly: '',
-  descriptionAnnual: '',
-  buttonText: '',
-  aiRecipeLimit: 0,
-  recipeLibraryLimit: 0,
-  socialScrapeLimit: 0,
-  canViewMacros: false,
-  allowedAiModels: '',
-  featuresText: '',
+  annualBadge: 'Save 35%',
+  trialBadge: '14-Day Free Trial',
+  descriptionMonthly: 'Full kitchen access, billed monthly',
+  descriptionAnnual: 'Best value for avid cooks, billed annually',
+  buttonText: 'Choose Plan',
+  aiRecipeLimit: 50,
+  recipeLibraryLimit: 100,
+  socialScrapeLimit: 25,
+  canViewMacros: true,
+  allowedAiModels: 'gemini-3.6-flash,gpt-4o-mini',
+  featuresText: 'AI-powered recipe generation\nUnlimited cookbook library\nAutomated nutritional analysis\nMeal planner synchronization',
+  tokenLimit: 100000,
+  tokenReimburseFrequency: 'monthly',
 };
 
 const DEFAULT_PRESET_TASTER: SubscriptionPackageConfig = {
@@ -17326,8 +14977,10 @@ const DEFAULT_PRESET_TASTER: SubscriptionPackageConfig = {
   recipeLibraryLimit: 25,
   socialScrapeLimit: 5,
   canViewMacros: false,
-  allowedAiModels: 'gemini-1.5-flash,gpt-4o-mini',
-  featuresText: `Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition`,
+  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
+  featuresText: 'Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition',
+  tokenLimit: 50000,
+  tokenReimburseFrequency: 'monthly',
 };
 
 const DEFAULT_PRESET_NUTRITION_PRO: SubscriptionPackageConfig = {
@@ -17348,9 +15001,26 @@ const DEFAULT_PRESET_NUTRITION_PRO: SubscriptionPackageConfig = {
   recipeLibraryLimit: -1,
   socialScrapeLimit: -1,
   canViewMacros: true,
-  allowedAiModels: 'gemini-1.5-flash,gpt-4o,gpt-4o-mini',
-  featuresText: `Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)`,
+  allowedAiModels: 'gemini-3.6-flash,gpt-4o',
+  featuresText: 'Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)',
+  tokenLimit: 1000000,
+  tokenReimburseFrequency: 'monthly',
 };
+
+const GEMINI_MODEL_VERSIONS = [
+  { value: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash (Latest Recommended)' },
+  { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite (Lightweight & Fast)' },
+  { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Fast)' },
+  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Deep Reasoning)' },
+  { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (Standard)' },
+  { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+];
+
+const OPENAI_MODEL_VERSIONS = [
+  { value: 'gpt-4o', label: 'GPT-4o (Advanced Reasoning)' },
+  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo (High Speed)' },
+];
 
 export default function AdminSubscriptionPlans() {
   const { t, version } = useTranslation();
@@ -17367,9 +15037,48 @@ export default function AdminSubscriptionPlans() {
   const [settingsFilter, setSettingsFilter] = useState<'both' | 'monthly' | 'annual'>('both');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
+  // Synced state from /admin/ai-settings
+  const [activeSettingsModel, setActiveSettingsModel] = useState<string>('gemini-3.6-flash');
+  const [selectedAiProvider, setSelectedAiProvider] = useState<'gemini' | 'openai'>('gemini');
+  const [selectedAiVersion, setSelectedAiVersion] = useState<string>('gemini-3.6-flash');
+
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Synchronize with /admin/ai-settings configuration
+  const syncWithAiSettings = useCallback(() => {
+    try {
+      const stored = localStorage.getItem('zecratary_chef_ai_settings') || 
+                     localStorage.getItem('zecratary_engine_config') || 
+                     localStorage.getItem('zecratary_settings');
+      if (stored) {
+        const c = JSON.parse(stored);
+        if (c.model) {
+          setActiveSettingsModel(c.model);
+          if (c.provider === 'openai' || c.model.startsWith('gpt')) {
+            setSelectedAiProvider('openai');
+            setSelectedAiVersion(c.model);
+          } else {
+            setSelectedAiProvider('gemini');
+            setSelectedAiVersion(c.model);
+          }
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    syncWithAiSettings();
+    window.addEventListener('zecratary_settings_updated', syncWithAiSettings);
+    window.addEventListener('zecratary_engine_config_updated', syncWithAiSettings);
+    window.addEventListener('storage', syncWithAiSettings);
+    return () => {
+      window.removeEventListener('zecratary_settings_updated', syncWithAiSettings);
+      window.removeEventListener('zecratary_engine_config_updated', syncWithAiSettings);
+      window.removeEventListener('storage', syncWithAiSettings);
+    };
+  }, [syncWithAiSettings]);
 
   // Dynamic Theme Synchronization & Color Inversion
   const applySavedTheme = useCallback(() => {
@@ -17447,6 +15156,13 @@ export default function AdminSubscriptionPlans() {
           const hasTaster = parsed.some((p) => p.slug === 'taster' || p.id === 'preset_taster');
           let list = hasTaster ? parsed : [{ ...DEFAULT_PRESET_TASTER }, ...parsed];
 
+          list = list.map((p: any) => ({
+            ...p,
+            tokenLimit: p.tokenLimit !== undefined ? p.tokenLimit : (p.slug === 'taster' ? 50000 : 500000),
+            tokenReimburseFrequency: p.tokenReimburseFrequency || 'monthly',
+            allowedAiModels: p.allowedAiModels || 'gemini-3.6-flash'
+          }));
+
           const hasDefault = list.some((p) => p.isDefault);
           if (!hasDefault) {
             list = list.map((p) => ({
@@ -17508,7 +15224,8 @@ export default function AdminSubscriptionPlans() {
     setForm({
       ...BLANK_NEW_PLAN,
       id: 'plan_' + Date.now(),
-      slug: ''
+      slug: '',
+      allowedAiModels: activeSettingsModel || 'gemini-3.6-flash'
     });
   };
 
@@ -17527,7 +15244,28 @@ export default function AdminSubscriptionPlans() {
     const planIsFree = Boolean(pkg.isFree || (Number(pkg.monthlyPriceDollars) === 0 && Number(pkg.annualPriceDollars) === 0));
     setEditingId(targetIdentifier);
     setIsFree(planIsFree);
-    setForm({ ...pkg, isFree: planIsFree });
+    setForm({ 
+      ...pkg, 
+      isFree: planIsFree,
+      tokenLimit: pkg.tokenLimit !== undefined ? pkg.tokenLimit : 100000,
+      tokenReimburseFrequency: pkg.tokenReimburseFrequency || 'monthly',
+      allowedAiModels: pkg.allowedAiModels || activeSettingsModel || 'gemini-3.6-flash'
+    });
+  };
+
+  const handleAddAiModel = (modelVal: string) => {
+    if (!modelVal) return;
+    const current = form.allowedAiModels ? form.allowedAiModels.split(',').map(s => s.trim()).filter(Boolean) : [];
+    if (!current.includes(modelVal)) {
+      const updated = [...current, modelVal].join(',');
+      setForm({ ...form, allowedAiModels: updated });
+    }
+  };
+
+  const handleRemoveAiModel = (modelVal: string) => {
+    const current = form.allowedAiModels ? form.allowedAiModels.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const updated = current.filter(m => m !== modelVal).join(',');
+    setForm({ ...form, allowedAiModels: updated });
   };
 
   const handleSavePlan = async (e: React.FormEvent) => {
@@ -17536,7 +15274,7 @@ export default function AdminSubscriptionPlans() {
     setFeedback(null);
 
     const parsedFeatures = form.featuresText
-      .split('\n')
+      .split(/\r?\n/)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
 
@@ -17551,6 +15289,8 @@ export default function AdminSubscriptionPlans() {
       isDefault: form.isDefault ?? (generatedSlug === 'taster'),
       monthlyPriceDollars: isFree ? 0 : Number(form.monthlyPriceDollars) || 0,
       annualPriceDollars: isFree ? 0 : Number(form.annualPriceDollars) || 0,
+      tokenLimit: Number(form.tokenLimit) || 100000,
+      tokenReimburseFrequency: form.tokenReimburseFrequency || 'monthly',
       features: parsedFeatures,
       allowedAiModels: form.allowedAiModels.split(',').map((m) => m.trim()),
     };
@@ -17570,6 +15310,8 @@ export default function AdminSubscriptionPlans() {
         isDefault: form.isDefault ?? (generatedSlug === 'taster'),
         monthlyPriceDollars: isFree ? 0 : Number(form.monthlyPriceDollars) || 0,
         annualPriceDollars: isFree ? 0 : Number(form.annualPriceDollars) || 0,
+        tokenLimit: Number(form.tokenLimit) || 100000,
+        tokenReimburseFrequency: form.tokenReimburseFrequency || 'monthly',
         featuresText: parsedFeatures.join('\n'),
       };
 
@@ -17665,7 +15407,8 @@ export default function AdminSubscriptionPlans() {
     return <div className="max-w-7xl mx-auto p-8 text-slate-400 text-xs">{t('loadingPlans', 'Loading subscription plans...')}</div>;
   }
 
-  const currentFeaturesList = form.featuresText.split('\n').filter(Boolean);
+  const currentFeaturesList = form.featuresText.split(/\r?\n/).filter(Boolean);
+  const currentAllowedModels = form.allowedAiModels ? form.allowedAiModels.split(',').map(s => s.trim()).filter(Boolean) : [];
   const annualMonthlyEquivalent = form.annualPriceDollars > 0 ? (form.annualPriceDollars / 12).toFixed(2) : '0.00';
   const calculatedSavings = form.monthlyPriceDollars > 0 && form.annualPriceDollars > 0
     ? Math.max(0, Math.round((1 - (form.annualPriceDollars / (form.monthlyPriceDollars * 12))) * 100))
@@ -17683,6 +15426,15 @@ export default function AdminSubscriptionPlans() {
   const submitButtonBg = isCreateMode ? '#10b981' : 'var(--color-primary, #E05638)';
   const submitButtonHoverBg = isCreateMode ? '#059669' : 'var(--color-primary-hover, #c94529)';
 
+  const getReimburseLabel = (freq: string) => {
+    switch (freq) {
+      case 'once': return 'Once (Non-recurring)';
+      case 'weekly': return 'Weekly';
+      case 'monthly': return 'Monthly';
+      default: return 'Monthly';
+    }
+  };
+
   return (
     <div 
       className="max-w-7xl mx-auto space-y-8 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
@@ -17694,7 +15446,7 @@ export default function AdminSubscriptionPlans() {
             {t('subscriptionPlansTitle', 'Subscription Plans')}
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('subscriptionPlansSubtitle', 'Manage plan pricing, usage quotas, features, and subscriber packages')}
+            {t('subscriptionPlansSubtitle', 'Manage plan pricing, usage quotas, token availability, reimburse schedule, and subscriber packages')}
           </p>
         </div>
 
@@ -17827,7 +15579,6 @@ export default function AdminSubscriptionPlans() {
                   {t('clearNewBtn', 'Clear / New')}
                 </button>
               )}
-              {/* Free Plan and Paid Plan Side by Side */}
               <div 
                 className="flex items-center gap-1 p-1 rounded-xl border transition"
                 style={{
@@ -17914,6 +15665,201 @@ export default function AdminSubscriptionPlans() {
                   color: isDayMode ? '#0f172a' : '#cbd5e1'
                 }}
               />
+            </div>
+          </div>
+
+          {/* TOKEN AVAILABILITY & REIMBURSE SCHEDULE */}
+          <div 
+            className="p-4 rounded-2xl border space-y-3 transition shadow-xs"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-orange-500">
+              <Cpu className="h-4 w-4" /> Token Availability & Reimburse Schedule
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  Token Limit (Availability)
+                </label>
+                <input
+                  type="number"
+                  value={form.tokenLimit}
+                  onChange={(e) => setForm({ ...form, tokenLimit: parseInt(e.target.value) || 0 })}
+                  placeholder="e.g. 50000"
+                  className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
+                  style={{
+                    backgroundColor: isDayMode ? '#ffffff' : '#0B101D',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                />
+                <span className="text-[10px] block mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>(-1 for unlimited tokens)</span>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  Token Reimburse Frequency
+                </label>
+                <select
+                  value={form.tokenReimburseFrequency}
+                  onChange={(e) => setForm({ ...form, tokenReimburseFrequency: e.target.value as any })}
+                  className="w-full border rounded-xl p-2.5 text-xs font-bold outline-none transition cursor-pointer"
+                  style={{
+                    backgroundColor: isDayMode ? '#ffffff' : '#0B101D',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                >
+                  <option value="once">Once (Non-recurring)</option>
+                  <option value="weekly">Every Week (From purchase date)</option>
+                  <option value="monthly">Every Month (From purchase date)</option>
+                </select>
+                <span className="text-[10px] block mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Quota refresh schedule</span>
+              </div>
+            </div>
+          </div>
+
+          {/* ALLOWED AI MODELS DROPDOWN & BUTTON PICKER */}
+          <div 
+            className="p-4 rounded-2xl border space-y-3 transition shadow-xs"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <label className="text-xs uppercase font-bold flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <Bot className="h-4 w-4 text-[var(--color-primary)]" />
+                {t('allowedAiModelsLabel', 'Allowed AI Models')}
+              </label>
+
+              {activeSettingsModel && (
+                <button
+                  type="button"
+                  onClick={() => handleAddAiModel(activeSettingsModel)}
+                  className="text-[10px] font-mono px-2 py-0.5 rounded-md border cursor-pointer transition flex items-center gap-1 font-bold shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.12)',
+                    borderColor: 'var(--color-primary, #E05638)',
+                    color: 'var(--color-primary, #E05638)'
+                  }}
+                  title="Click to sync and add active model configured in /admin/ai-settings"
+                >
+                  <Sparkles className="h-3 w-3" /> Sync Active: {activeSettingsModel}
+                </button>
+              )}
+            </div>
+
+            <div>
+              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                1. Choose AI Model Provider
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAiProvider('gemini');
+                    setSelectedAiVersion(GEMINI_MODEL_VERSIONS[0]?.value || 'gemini-3.6-flash');
+                  }}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                    selectedAiProvider === 'gemini'
+                      ? 'bg-[var(--color-primary,#E05638)] text-white border-[var(--color-primary,#E05638)]'
+                      : (isDayMode ? 'bg-white text-slate-700 border-slate-300' : 'bg-[#111726] text-slate-300 border-slate-700')
+                  }`}
+                >
+                  <Bot className="h-3.5 w-3.5" /> Google Gemini
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAiProvider('openai');
+                    setSelectedAiVersion(OPENAI_MODEL_VERSIONS[0]?.value || 'gpt-4o');
+                  }}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                    selectedAiProvider === 'openai'
+                      ? 'bg-[#10b981] text-white border-[#10b981]'
+                      : (isDayMode ? 'bg-white text-slate-700 border-slate-300' : 'bg-[#111726] text-slate-300 border-slate-700')
+                  }`}
+                >
+                  <Zap className="h-3.5 w-3.5" /> OpenAI GPT
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                2. Choose AI Version (Synced from /admin/ai-settings)
+              </span>
+              <div className="flex gap-2">
+                <select
+                  value={selectedAiVersion}
+                  onChange={(e) => setSelectedAiVersion(e.target.value)}
+                  className="flex-1 border rounded-xl px-3 py-2 text-xs font-medium outline-none transition cursor-pointer"
+                  style={{
+                    backgroundColor: isDayMode ? '#ffffff' : '#0B101D',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                >
+                  {(selectedAiProvider === 'gemini' ? GEMINI_MODEL_VERSIONS : OPENAI_MODEL_VERSIONS).map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label} {m.value === activeSettingsModel ? '★ [Active in AI Settings]' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => handleAddAiModel(selectedAiVersion)}
+                  className="px-4 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1 shadow-md cursor-pointer transition shrink-0"
+                  style={{ backgroundColor: selectedAiProvider === 'gemini' ? 'var(--color-primary, #E05638)' : '#10b981' }}
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                Configured Allowed Models for this plan:
+              </span>
+              {currentAllowedModels.length === 0 ? (
+                <span className="text-[11px] text-red-500 italic block">No models assigned yet. Select a version above and click 'Add'.</span>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {currentAllowedModels.map((modelName) => {
+                    const isGem = modelName.includes('gemini');
+                    return (
+                      <span
+                        key={modelName}
+                        className="border px-2.5 py-1 rounded-lg text-xs font-mono font-semibold flex items-center gap-1.5 shadow-xs"
+                        style={{
+                          backgroundColor: isGem 
+                            ? (isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)') 
+                            : (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)'),
+                          borderColor: isGem ? 'var(--color-primary, #E05638)' : '#10b981',
+                          color: isGem 
+                            ? (isDayMode ? '#991b1b' : 'var(--color-primary, #E05638)') 
+                            : (isDayMode ? '#047857' : '#10b981')
+                        }}
+                      >
+                        {modelName}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAiModel(modelName)}
+                          className="hover:opacity-75 transition cursor-pointer p-0.5"
+                          title={`Remove ${modelName}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 
@@ -18270,24 +16216,6 @@ export default function AdminSubscriptionPlans() {
             <span className="text-[10px] block mt-1 leading-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('onePerLineNote', 'Each line will render with a checkmark on the pricing card.')}</span>
           </div>
 
-          <div>
-            <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
-              {t('allowedAiModelsLabel', 'Allowed AI Models (Comma-separated)')}
-            </label>
-            <input
-              type="text"
-              value={form.allowedAiModels}
-              onChange={(e) => setForm({ ...form, allowedAiModels: e.target.value })}
-              className="w-full border rounded-xl p-2.5 text-xs text-mono outline-none transition"
-              style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            />
-            <span className="text-[10px] block mt-1 leading-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('commaSeparatedNote', 'e.g. gemini-1.5-flash, gpt-4o-mini')}</span>
-          </div>
-
           <div className="flex items-center gap-2 pt-1">
             <input
               type="checkbox"
@@ -18363,6 +16291,8 @@ export default function AdminSubscriptionPlans() {
                 packages.map((pkg) => {
                   const cardIdentifier = pkg.id || pkg.slug;
                   const isTaster = pkg.slug === 'taster' || pkg.id === 'preset_taster';
+                  const modelsList = pkg.allowedAiModels ? pkg.allowedAiModels.split(',').map(m => m.trim()).filter(Boolean) : [];
+
                   return (
                     <div
                       key={cardIdentifier}
@@ -18374,8 +16304,8 @@ export default function AdminSubscriptionPlans() {
                           : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)')
                       }}
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                      <div className="space-y-1.5 min-w-0 flex-1 pr-3">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{pkg.name}</span>
                           
                           {pkg.isDefault ? (
@@ -18428,12 +16358,36 @@ export default function AdminSubscriptionPlans() {
                             </div>
                           )}
                         </div>
-                        <div className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                          {pkg.aiRecipeLimit === -1 ? t('unlimitedLabel', 'Unlimited') : pkg.aiRecipeLimit} {t('aiRecipesLabel', 'AI recipes')} • {pkg.recipeLibraryLimit === -1 ? t('unlimitedLabel', 'Unlimited') : pkg.recipeLibraryLimit} {t('savedRecipesLabel', 'saved')} • {pkg.canViewMacros ? t('macrosUnlockedLabel', 'Macros unlocked') : t('macrosStandardLabel', 'Standard')}
+
+                        <div className="text-xs space-x-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                          <span>{pkg.aiRecipeLimit === -1 ? t('unlimitedLabel', 'Unlimited') : pkg.aiRecipeLimit} AI recipes</span>
+                          <span>•</span>
+                          <span className="text-orange-400 font-mono font-semibold">
+                            {pkg.tokenLimit === -1 ? 'Unlimited Tokens' : `${(pkg.tokenLimit || 0).toLocaleString()} tokens`} ({getReimburseLabel(pkg.tokenReimburseFrequency)})
+                          </span>
+                        </div>
+
+                        {/* Models pill preview */}
+                        <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                          {modelsList.map((m) => (
+                            <span
+                              key={m}
+                              className="text-[9px] font-mono px-1.5 py-0.2 rounded border"
+                              style={{
+                                backgroundColor: m.includes('gemini')
+                                  ? (isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.1)')
+                                  : (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.1)'),
+                                borderColor: m.includes('gemini') ? 'var(--color-primary, #E05638)' : '#10b981',
+                                color: m.includes('gemini') ? 'var(--color-primary, #E05638)' : '#10b981'
+                              }}
+                            >
+                              {m}
+                            </span>
+                          ))}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
                           onClick={() => handleSetDefaultPlan(pkg)}
@@ -18546,9 +16500,14 @@ export default function AdminSubscriptionPlans() {
               )}
 
               <div className="space-y-3.5">
-                <h3 className="text-2xl font-black text-[#589c3a]">
-                  {form.name || t('planNameLabel', 'Plan Name')}
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-2xl font-black text-[#589c3a]">
+                    {form.name || t('planNameLabel', 'Plan Name')}
+                  </h3>
+                  <span className="text-[10px] bg-orange-100 text-orange-800 font-bold px-2.5 py-1 rounded-full border border-orange-300 font-mono">
+                    {form.tokenLimit === -1 ? 'Unlimited Tokens' : `${(form.tokenLimit || 0).toLocaleString()} tokens`} ({getReimburseLabel(form.tokenReimburseFrequency)})
+                  </span>
+                </div>
 
                 {isFree ? (
                   <div>
@@ -18619,6 +16578,16 @@ export default function AdminSubscriptionPlans() {
                     </p>
                   </div>
                 )}
+
+                {/* Live Model Access list */}
+                <div className="flex items-center gap-1 flex-wrap pt-1">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase">Allowed AI Models:</span>
+                  {currentAllowedModels.map((m) => (
+                    <span key={m} className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-slate-100 border-slate-300 text-slate-700 font-bold">
+                      {m}
+                    </span>
+                  ))}
+                </div>
 
                 <div className="pt-2 space-y-2 text-xs font-semibold text-slate-700">
                   {currentFeaturesList.map((feature, i) => (
@@ -31690,15 +29659,16 @@ export default function ManualRecipePage() {
 
 ## File: `apps/web/src/app/profile/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   User as UserIcon, Mail, Lock, CheckCircle, 
   AlertCircle, Calendar, LogOut, Check, CreditCard,
   Zap, Sparkles, CheckCircle2, RefreshCw, Shield,
-  ArrowUpRight, Clock, Ban, AlertTriangle
+  Clock, Activity, Cpu, Repeat
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -31725,6 +29695,8 @@ interface SubscriptionPlanItem {
   buttonTheme?: 'orange' | 'green';
   features?: string[];
   isFree?: boolean;
+  tokenLimit?: number;
+  tokenReimburseFrequency?: 'once' | 'weekly' | 'monthly';
 }
 
 interface PaymentTransaction {
@@ -31743,6 +29715,15 @@ interface PaymentTransaction {
   expiryDate?: string;
 }
 
+interface TokenUsageData {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  requestCount: number;
+  monthlyLimit: number;
+  reimburseFrequency: 'once' | 'weekly' | 'monthly';
+}
+
 const DEFAULT_TASTER_FEATURES = [
   'Create up to 5 AI-powered recipes per month',
   'Personal recipe library (25 total recipes)',
@@ -31756,7 +29737,7 @@ const DEFAULT_TASTER_FEATURES = [
 const DEFAULT_PRO_FEATURES = [
   'Unlimited AI-powered recipe generation',
   'Unlimited recipe library',
-  'Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)'
+  'Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, carbohydrates)'
 ];
 
 const DEFAULT_PLANS: SubscriptionPlanItem[] = [
@@ -31773,7 +29754,9 @@ const DEFAULT_PLANS: SubscriptionPlanItem[] = [
     saveBadge: '',
     buttonText: 'Active Plan',
     buttonTheme: 'orange',
-    features: DEFAULT_TASTER_FEATURES
+    features: DEFAULT_TASTER_FEATURES,
+    tokenLimit: 50000,
+    tokenReimburseFrequency: 'monthly'
   },
   {
     id: 'nutrition-pro-monthly',
@@ -31788,7 +29771,9 @@ const DEFAULT_PLANS: SubscriptionPlanItem[] = [
     saveBadge: '',
     buttonText: 'Choose Plan',
     buttonTheme: 'green',
-    features: DEFAULT_PRO_FEATURES
+    features: DEFAULT_PRO_FEATURES,
+    tokenLimit: 1000000,
+    tokenReimburseFrequency: 'monthly'
   },
   {
     id: 'nutrition-pro-annual',
@@ -31805,7 +29790,9 @@ const DEFAULT_PLANS: SubscriptionPlanItem[] = [
     strikethroughPrice: '$8.99/month',
     buttonText: 'Choose Plan',
     buttonTheme: 'green',
-    features: DEFAULT_PRO_FEATURES
+    features: DEFAULT_PRO_FEATURES,
+    tokenLimit: 1000000,
+    tokenReimburseFrequency: 'monthly'
   }
 ];
 
@@ -31847,13 +29834,26 @@ export default function ProfilePage() {
   const [successMsg, setSuccessMsg] = useState('');
 
   const [plans, setPlans] = useState<SubscriptionPlanItem[]>(DEFAULT_PLANS);
+  const plansRef = useRef<SubscriptionPlanItem[]>(DEFAULT_PLANS);
+  plansRef.current = plans;
+
   const [selectedInterval, setSelectedInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
   const [currencyCode, setCurrencyCode] = useState('USD');
   const [currencySymbol, setCurrencySymbol] = useState('$');
 
-  // Dynamic Theme Synchronization & Day Mode Inversion
-  const applyGlobalTheme = useCallback(() => {
+  const [tokenUsage, setTokenUsage] = useState<TokenUsageData>({
+    promptTokens: 1420,
+    completionTokens: 850,
+    totalTokens: 2270,
+    requestCount: 14,
+    monthlyLimit: 50000,
+    reimburseFrequency: 'monthly'
+  });
+  const [activeModelName, setActiveModelName] = useState('gemini-1.5-flash');
+
+  // Dynamic Theme & Day/Night Mode Synchronization matching /admin/language
+  const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
       const isDay = mode === 'light';
@@ -31906,31 +29906,36 @@ export default function ProfilePage() {
         JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
       };
       setCurrencySymbol(symbols[curr] || '$');
+
+      const aiConfigRaw = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
+      if (aiConfigRaw) {
+        const aiCfg = JSON.parse(aiConfigRaw);
+        if (aiCfg.model) setActiveModelName(aiCfg.model);
+      }
     } catch (e) {}
   }, []);
 
   useEffect(() => {
-    applyGlobalTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
-    window.addEventListener('zecratary_payment_updated', applyGlobalTheme);
-    window.addEventListener('storage', applyGlobalTheme);
+    applySavedTheme();
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
+    window.addEventListener('zecratary_payment_updated', applySavedTheme);
+    window.addEventListener('storage', applySavedTheme);
 
     return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
-      window.removeEventListener('zecratary_payment_updated', applyGlobalTheme);
-      window.removeEventListener('storage', applyGlobalTheme);
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+      window.removeEventListener('zecratary_payment_updated', applySavedTheme);
+      window.removeEventListener('storage', applySavedTheme);
       if (typeof document !== 'undefined' && document.body) {
         document.body.style.backgroundColor = '';
       }
     };
-  }, [applyGlobalTheme]);
+  }, [applySavedTheme]);
 
-  // Fully dynamic synchronization supporting all 8+ plans without key collisions
-  const syncPlansFromAdmin = useCallback(async () => {
+  const syncPlansFromAdmin = useCallback(() => {
     const plansMap = new Map<string, SubscriptionPlanItem>();
 
     try {
@@ -31938,30 +29943,28 @@ export default function ProfilePage() {
       if (rawConfigs) {
         const configs = JSON.parse(rawConfigs);
         if (Array.isArray(configs) && configs.length > 0) {
-          configs.forEach((cfg: any, idx: number) => {
-            if (!cfg) return;
-            const name = cfg.name || cfg.title || `Plan ${idx + 1}`;
-            const rawSlug = (cfg.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
-            const description = cfg.description || cfg.descriptionMonthly || cfg.descriptionAnnual || 'Subscription plan';
-            const isFree = Boolean(cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0 && !cfg.monthlyPriceDollars && !cfg.annualPriceDollars));
+          configs.forEach((cfg: any) => {
+            const rawSlug = (cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
+            if (rawSlug === 'pro-unlimited') return;
+
+            const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
+            const isFree = cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0);
             
             let planFeatures = Array.isArray(cfg.features) && cfg.features.length > 0 ? cfg.features : null;
-            if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim().length > 0) {
-              planFeatures = cfg.featuresText.split('\n').map((s: string) => s.trim()).filter(Boolean);
-            }
-            if (!planFeatures || planFeatures.length === 0) {
+            if (!planFeatures || planFeatures.length < (isFree ? 7 : 3)) {
               planFeatures = isFree ? DEFAULT_TASTER_FEATURES : DEFAULT_PRO_FEATURES;
             }
 
-            const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
+            const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
+            const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
 
             if (isFree) {
               const freeSlug = cleanBaseSlug.includes('taster') ? 'taster' : cleanBaseSlug;
               plansMap.set(freeSlug, {
                 id: cfg.id || freeSlug,
-                name,
+                name: cfg.name,
                 slug: freeSlug,
-                description,
+                description: cfg.description || 'Free tier with standard features',
                 priceCents: 0,
                 priceFormatted: 'Free',
                 interval: 'MONTH',
@@ -31975,18 +29978,18 @@ export default function ProfilePage() {
                 recipeLibraryLimit: cfg.recipeLibraryLimit,
                 socialScrapeLimit: cfg.socialScrapeLimit,
                 canViewMacros: cfg.canViewMacros,
+                tokenLimit,
+                tokenReimburseFrequency,
               });
             } else {
-              const mPrice = Number(cfg.monthlyPriceDollars ?? cfg.monthlyPrice ?? 0);
-              const aPrice = Number(cfg.annualPriceDollars ?? cfg.annualPrice ?? 0);
-
-              if (mPrice > 0 || (mPrice === 0 && aPrice === 0)) {
-                const monthlySlug = `${cleanBaseSlug}-monthly-${idx}`;
+              if (cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0) {
+                const monthlySlug = `${cleanBaseSlug}-monthly`;
+                const mPrice = Number(cfg.monthlyPriceDollars);
                 plansMap.set(monthlySlug, {
                   id: `${cfg.id || cleanBaseSlug}-monthly`,
-                  name,
-                  slug: `${cleanBaseSlug}-monthly`,
-                  description: cfg.descriptionMonthly || description,
+                  name: cfg.name,
+                  slug: monthlySlug,
+                  description: cfg.description || `Full access to ${cfg.name}, billed monthly`,
                   priceCents: Math.round(mPrice * 100),
                   priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
                   interval: 'MONTH',
@@ -32000,17 +30003,20 @@ export default function ProfilePage() {
                   recipeLibraryLimit: cfg.recipeLibraryLimit,
                   socialScrapeLimit: cfg.socialScrapeLimit,
                   canViewMacros: cfg.canViewMacros,
+                  tokenLimit,
+                  tokenReimburseFrequency,
                 });
               }
 
-              if (aPrice > 0) {
-                const annualSlug = `${cleanBaseSlug}-annual-${idx}`;
+              if (cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0) {
+                const annualSlug = `${cleanBaseSlug}-annual`;
+                const aPrice = Number(cfg.annualPriceDollars);
                 const mEquivalent = (aPrice / 12).toFixed(2);
                 plansMap.set(annualSlug, {
                   id: `${cfg.id || cleanBaseSlug}-annual`,
-                  name,
-                  slug: `${cleanBaseSlug}-annual`,
-                  description: cfg.descriptionAnnual || description,
+                  name: cfg.name,
+                  slug: annualSlug,
+                  description: cfg.description || `Best value - all ${cfg.name} features, billed annually`,
                   priceCents: Math.round(aPrice * 100),
                   priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
                   interval: 'YEAR',
@@ -32018,7 +30024,7 @@ export default function ProfilePage() {
                   badge: cfg.annualBadge || 'Best Value',
                   saveBadge: cfg.saveBadge || 'Save 44%',
                   subPrice: `${currencySymbol}${mEquivalent}/month`,
-                  strikethroughPrice: mPrice > 0 ? `${currencySymbol}${mPrice.toFixed(2)}/month` : undefined,
+                  strikethroughPrice: cfg.monthlyPriceDollars ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
                   buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
                   buttonTheme: 'green',
                   features: planFeatures,
@@ -32026,6 +30032,8 @@ export default function ProfilePage() {
                   recipeLibraryLimit: cfg.recipeLibraryLimit,
                   socialScrapeLimit: cfg.socialScrapeLimit,
                   canViewMacros: cfg.canViewMacros,
+                  tokenLimit,
+                  tokenReimburseFrequency,
                 });
               }
             }
@@ -32035,41 +30043,58 @@ export default function ProfilePage() {
     } catch (e) {}
 
     if (plansMap.size === 0) {
-      try {
-        const rawPlans = localStorage.getItem('zecratary_subscription_plans');
-        if (rawPlans) {
-          const directPlans = JSON.parse(rawPlans);
-          if (Array.isArray(directPlans) && directPlans.length > 0) {
-            directPlans.forEach((p: any) => {
-              const isFree = p.priceCents === 0 || p.isFree;
-              plansMap.set(p.slug, {
-                ...p,
-                features: (Array.isArray(p.features) && p.features.length > 0) ? p.features : (isFree ? DEFAULT_TASTER_FEATURES : DEFAULT_PRO_FEATURES),
-                priceFormatted: isFree ? 'Free' : `${currencySymbol}${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`
-              });
-            });
-          }
-        }
-      } catch (e) {}
-    }
-
-    if (plansMap.size === 0) {
-      DEFAULT_PLANS.forEach(p => {
-        plansMap.set(p.slug, p);
-      });
+      DEFAULT_PLANS.forEach(p => plansMap.set(p.slug, p));
     }
 
     const mergedPlans = Array.from(plansMap.values());
+    plansRef.current = mergedPlans;
     setPlans(mergedPlans);
   }, [currencySymbol, t]);
+
+  const syncActivePlanTokens = useCallback((activeUserPlanSlug: string, currentPlans: SubscriptionPlanItem[]) => {
+    const cleanSlug = sanitizeSinglePlan(activeUserPlanSlug).toLowerCase();
+    const matchedPlan = currentPlans.find(p => p.slug.toLowerCase() === cleanSlug || p.id.toLowerCase() === cleanSlug);
+
+    let assignedLimit = 50000;
+    let assignedFrequency: 'once' | 'weekly' | 'monthly' = 'monthly';
+
+    if (matchedPlan) {
+      if (matchedPlan.tokenLimit !== undefined) {
+        assignedLimit = matchedPlan.tokenLimit;
+      }
+      if (matchedPlan.tokenReimburseFrequency) {
+        assignedFrequency = matchedPlan.tokenReimburseFrequency;
+      }
+    } else if (cleanSlug.includes('pro') || cleanSlug.includes('annual')) {
+      assignedLimit = 1000000;
+    }
+
+    try {
+      const storedTokens = localStorage.getItem('zecratary_token_usage');
+      const parsed = storedTokens ? JSON.parse(storedTokens) : {};
+      const updated = {
+        promptTokens: parsed.promptTokens || 1420,
+        completionTokens: parsed.completionTokens || 850,
+        totalTokens: (parsed.promptTokens || 1420) + (parsed.completionTokens || 850),
+        requestCount: parsed.requestCount || 14,
+        monthlyLimit: assignedLimit,
+        reimburseFrequency: assignedFrequency
+      };
+      setTokenUsage(updated);
+      localStorage.setItem('zecratary_token_usage', JSON.stringify(updated));
+    } catch (_) {}
+  }, []);
 
   const reloadActiveUser = useCallback(() => {
     initAuthStorage();
     const active = getCurrentUser();
-    if (!active) return;
+    if (!active) {
+      router.replace('/login');
+      return;
+    }
 
     const rawUsers = localStorage.getItem('zecratary_users');
-    let matchedUser = active;
+    let matchedUser = { ...active };
 
     if (rawUsers) {
       try {
@@ -32081,6 +30106,10 @@ export default function ProfilePage() {
             ...fresh,
             subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || (fresh.role === 'admin' ? 'nutrition-pro-annual' : 'taster'))
           };
+          try {
+            localStorage.setItem('zecratary_current_user', JSON.stringify(matchedUser));
+            localStorage.setItem('zecratary_user', JSON.stringify(matchedUser));
+          } catch (_) {}
         }
       } catch (e) {}
     }
@@ -32104,17 +30133,14 @@ export default function ProfilePage() {
           matchedUser.subscriptionPlan = sanitizeSinglePlan(latestActiveTx.planSlug || matchedUser.subscriptionPlan);
           (matchedUser as any).expiryDate = latestActiveTx.expiryDate;
           (matchedUser as any).planExpiryDate = latestActiveTx.expiryDate;
-        } else {
-          if (userTxs.length > 0 && userTxs[0].status === 'refunded') {
-            matchedUser.subscriptionPlan = 'taster';
-            (matchedUser as any).expiryDate = '';
-            (matchedUser as any).planExpiryDate = '';
-          }
+        } else if (userTxs.length > 0 && userTxs[0].status === 'refunded') {
+          matchedUser.subscriptionPlan = 'taster';
+          (matchedUser as any).expiryDate = '';
+          (matchedUser as any).planExpiryDate = '';
         }
       }
     } catch (_) {}
 
-    setCurrentUser(matchedUser);
     setUserState(matchedUser);
     setName(matchedUser.name || '');
     setEmail(matchedUser.email || '');
@@ -32126,32 +30152,32 @@ export default function ProfilePage() {
     } else if (userInterval === 'MONTH' || userPlan.includes('monthly')) {
       setSelectedInterval('MONTH');
     }
-  }, []);
+
+    syncActivePlanTokens(userPlan, plansRef.current.length > 0 ? plansRef.current : DEFAULT_PLANS);
+  }, [router, syncActivePlanTokens]);
 
   useEffect(() => {
     document.title = `${t('accountProfileTitle') || 'Account Profile'} - Zecratary`;
-    reloadActiveUser();
     syncPlansFromAdmin();
+    reloadActiveUser();
 
     const handleSyncEvent = () => {
-      reloadActiveUser();
       syncPlansFromAdmin();
+      reloadActiveUser();
     };
 
     window.addEventListener('zecratary_plans_updated', handleSyncEvent);
     window.addEventListener('zecratary_users_updated', handleSyncEvent);
     window.addEventListener('zecratary_payment_updated', handleSyncEvent);
-    window.addEventListener('zecratary_auth_changed', handleSyncEvent);
     window.addEventListener('storage', handleSyncEvent);
 
     return () => {
       window.removeEventListener('zecratary_plans_updated', handleSyncEvent);
       window.removeEventListener('zecratary_users_updated', handleSyncEvent);
       window.removeEventListener('zecratary_payment_updated', handleSyncEvent);
-      window.removeEventListener('zecratary_auth_changed', handleSyncEvent);
       window.removeEventListener('storage', handleSyncEvent);
     };
-  }, [reloadActiveUser, syncPlansFromAdmin]);
+  }, [reloadActiveUser, syncPlansFromAdmin, t]);
 
   const userPlanBadge = useMemo(() => {
     const rawKey = ((user as any)?.subscriptionPlan || (user as any)?.subscriptionTier || '').toLowerCase().trim();
@@ -32160,9 +30186,9 @@ export default function ProfilePage() {
     if (!planKey || planKey === 'taster' || planKey.includes('free')) {
       return {
         label: t('freeTierNoExpiry') || 'Taster (Free)',
-        bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+        bg: 'rgba(16, 185, 129, 0.15)',
         border: 'var(--color-emerald, #10b981)',
-        color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
+        color: 'var(--color-emerald, #10b981)',
         icon: Sparkles
       };
     }
@@ -32173,24 +30199,24 @@ export default function ProfilePage() {
       if (matched.isFree) {
         return {
           label: `${matched.name} (Free)`,
-          bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+          bg: 'rgba(16, 185, 129, 0.15)',
           border: 'var(--color-emerald, #10b981)',
-          color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
+          color: 'var(--color-emerald, #10b981)',
           icon: Sparkles
         };
       }
       if (matched.interval === 'YEAR' || planKey.includes('annual')) {
         return {
           label: `${matched.name} (Annual)`,
-          bg: isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)',
+          bg: 'rgba(59, 130, 246, 0.15)',
           border: '#3b82f6',
-          color: isDayMode ? '#1d4ed8' : '#60a5fa',
+          color: '#60a5fa',
           icon: Zap
         };
       }
       return {
         label: `${matched.name} (Monthly)`,
-        bg: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
+        bg: 'rgba(224, 86, 56, 0.15)',
         border: 'var(--color-primary, #E05638)',
         color: 'var(--color-primary, #E05638)',
         icon: Zap
@@ -32202,24 +30228,14 @@ export default function ProfilePage() {
       .map(w => w.charAt(0).toUpperCase() + w.slice(1))
       .join(' ');
 
-    if (planKey.includes('annual')) {
-      return {
-        label: formatted,
-        bg: isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)',
-        border: '#3b82f6',
-        color: isDayMode ? '#1d4ed8' : '#60a5fa',
-        icon: Zap
-      };
-    }
-
     return {
       label: formatted,
-      bg: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
+      bg: 'rgba(224, 86, 56, 0.15)',
       border: 'var(--color-primary, #E05638)',
       color: 'var(--color-primary, #E05638)',
       icon: Zap
     };
-  }, [user, plans, t, isDayMode]);
+  }, [user, plans, t]);
 
   const checkIsCurrentPlan = (plan: SubscriptionPlanItem): boolean => {
     if (!user) return false;
@@ -32289,7 +30305,6 @@ export default function ProfilePage() {
     setConfirmPassword('');
 
     window.dispatchEvent(new Event('zecratary_users_updated'));
-    window.dispatchEvent(new Event('zecratary_auth_changed'));
     window.dispatchEvent(new Event('storage'));
 
     setSuccessMsg(t('profileSavedSuccess') || 'Your profile changes have been saved successfully!');
@@ -32305,11 +30320,11 @@ export default function ProfilePage() {
     try {
       const isFree = plan.priceCents === 0 || plan.isFree;
       const targetSlug = sanitizeSinglePlan(plan.slug);
+      const currentPlanSlug = sanitizeSinglePlan((user as any).subscriptionPlan || (user as any).subscriptionTier);
       const userEmail = user.email.toLowerCase();
 
-      const currentActivePlan = sanitizeSinglePlan((user as any).subscriptionPlan);
-      if (currentActivePlan === targetSlug) {
-        setError(`You are already subscribed to ${plan.name}. Please select a different tier to change your plan.`);
+      if (currentPlanSlug === targetSlug) {
+        setError(`You are already subscribed to ${plan.name}.`);
         setPaymentLoading(null);
         return;
       }
@@ -32377,15 +30392,15 @@ export default function ProfilePage() {
       setCurrentUser(updatedUser);
       setUserState(updatedUser);
 
-      window.dispatchEvent(new Event('zecratary_auth_changed'));
+      syncActivePlanTokens(targetSlug, plans);
+
       window.dispatchEvent(new Event('zecratary_users_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      const actionMsg = isFree 
-        ? `Switched to the free ${plan.name} tier! Any previous subscription has been cancelled.` 
-        : `Plan changed successfully to ${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})! Previous plan was cancelled. Renewal date: ${new Date(newExpiryDate).toLocaleDateString()}.`;
-
-      setSuccessMsg(actionMsg);
+      setSuccessMsg(isFree 
+        ? `Switched to free ${plan.name}!` 
+        : `Plan changed successfully to ${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})!`
+      );
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err: any) {
       setError(err.message || 'Payment processing failed. Please try again.');
@@ -32409,12 +30424,26 @@ export default function ProfilePage() {
   const filteredPlans = plans.filter(p => p.isFree || p.priceCents === 0 || p.interval === selectedInterval);
   const activeExpiryDate = (user as any).planExpiryDate || (user as any).expiryDate;
 
+  const isUnlimited = tokenUsage.monthlyLimit === -1;
+  const tokenPercentage = isUnlimited ? 5 : Math.min(Math.round((tokenUsage.totalTokens / tokenUsage.monthlyLimit) * 100), 100);
+
+  const getReimburseScheduleText = (freq: string) => {
+    switch(freq) {
+      case 'once': return 'Reimbursed: Once (Non-recurring)';
+      case 'weekly': return 'Reimbursed: Every Week from purchase date';
+      case 'monthly': return 'Reimbursed: Every Month from purchase date';
+      default: return 'Reimbursed: Monthly';
+    }
+  };
+
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200 min-h-screen"
+      style={{ 
+        color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)',
+        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)'
+      }}
     >
-      
       <style dangerouslySetInnerHTML={{ __html: `
         .profile-input:-webkit-autofill,
         .profile-input:-webkit-autofill:hover,
@@ -32434,7 +30463,7 @@ export default function ProfilePage() {
              {t('accountProfileTitle') || 'Account Profile'}
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('accountProfileSubtitle') || 'Manage your personal credentials, security password, and active subscription package'}
+            {t('accountProfileSubtitle') || 'Manage your credentials, active AI token quotas, and subscription plan'}
           </p>
         </div>
 
@@ -32444,256 +30473,360 @@ export default function ProfilePage() {
               href="/admin"
               className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
                 borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                 color: isDayMode ? '#0f172a' : '#cbd5e1'
               }}
             >
-              <Shield className="h-3.5 w-3.5" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminAccess') || 'Admin Access'}
-            </Link>
-            <Link
-              href="/admin/payment"
-              className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
-              }}
-            >
-              <CreditCard className="h-3.5 w-3.5 text-blue-500" /> {t('paymentGateway') || 'Payment & Gateway'}
+              <Shield className="h-3.5 w-3.5 text-emerald-400" /> {t('adminAccess') || 'Admin Access'}
             </Link>
             <Link
               href="/admin/plans"
               className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
                 borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                 color: isDayMode ? '#0f172a' : '#cbd5e1'
               }}
             >
-              <Zap className="h-3.5 w-3.5 text-orange-500" /> {t('subscriptionPlans') || 'Subscription Plans'}
+              <Zap className="h-3.5 w-3.5 text-orange-400" /> {t('subscriptionPlans') || 'Subscription Plans'}
             </Link>
           </div>
         )}
       </div>
 
       {error && (
-        <div className="p-3.5 bg-red-50 border border-red-300 text-red-900 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-sm">
-          <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+        <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-2xl text-xs text-red-300 font-semibold flex items-center gap-2 shadow-lg">
+          <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
       {successMsg && (
         <div 
-          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-sm animate-in fade-in"
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
           style={{
             backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
             borderColor: 'var(--color-emerald, #10b981)',
             color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
           }}
         >
-          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }} />
+          <CheckCircle className="h-4 w-4 shrink-0" />
           <span>{successMsg}</span>
         </div>
       )}
 
-      <div 
-        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm transition-colors duration-200"
-        style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-        }}
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-          <div className="flex items-center gap-4">
-            <div 
-              className="w-14 h-14 rounded-2xl border flex items-center justify-center text-xl font-black shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: 'var(--color-primary, #E05638)'
-              }}
-            >
-              {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+      {/* USER DETAILS & TOKEN USAGE GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        {/* MAIN PROFILE CARD */}
+        <div 
+          className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <div className="flex items-center gap-4">
+              <div 
+                className="w-14 h-14 rounded-2xl border flex items-center justify-center text-xl font-black shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: 'var(--color-primary, #E05638)'
+                }}
+              >
+                {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{user.name}</h1>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
+                    user.role === 'admin'
+                      ? (isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-emerald-950/60 border-emerald-500/60 text-emerald-400')
+                      : (isDayMode ? 'bg-slate-100 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-300')
+                  }`}>
+                    {user.role}
+                  </span>
+                </div>
+                <p className="text-xs font-mono" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{user.email}</p>
+              </div>
             </div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{user.name}</h1>
-                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border shadow-xs ${
-                  user.role === 'admin'
-                    ? (isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-emerald-950/60 border-emerald-500/60 text-emerald-400')
-                    : (isDayMode ? 'bg-slate-100 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-300')
-                }`}>
-                  {user.role}
+
+            <div className="text-left sm:text-right text-[11px] space-y-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <div className="flex sm:justify-end items-center gap-1.5">
+                <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                <span>{t('joinedPrefix') || 'Joined: '} {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : (t('activeStatus') || 'Active')}</span>
+              </div>
+              
+              <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
+                <span className="font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('activeMembershipLabel') || 'Membership:'}</span>
+                <span 
+                  className="font-bold px-2.5 py-0.5 rounded-full text-[10px] uppercase border shadow-sm inline-flex items-center gap-1"
+                  style={{
+                    backgroundColor: userPlanBadge.bg,
+                    borderColor: userPlanBadge.border,
+                    color: userPlanBadge.color
+                  }}
+                >
+                  <PlanHeaderIcon className="h-3 w-3 shrink-0" />
+                  {userPlanBadge.label}
                 </span>
               </div>
-              <p className="text-xs font-mono" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{user.email}</p>
+
+              {activeExpiryDate ? (
+                <div className="flex sm:justify-end items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold pt-0.5">
+                  <Clock className="h-3 w-3" />
+                  <span>{t('renewalExpiryPrefix') || 'Expiry: '} {new Date(activeExpiryDate).toLocaleDateString()}</span>
+                </div>
+              ) : (
+                <div className="flex sm:justify-end items-center gap-1 text-[11px] italic pt-0.5" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                  <span>{t('freeTierNoExpiry') || 'Free Tier'}</span>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="text-left sm:text-right text-[11px] space-y-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-            <div className="flex sm:justify-end items-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-              <span>{t('joinedPrefix') || 'Joined: '} {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : (t('activeStatus') || 'Active')}</span>
+          <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('fullNameLabel') || 'Full Name *'}</label>
+                <div className="relative">
+                  <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Jordan Smith"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('emailAddressLabel') || 'Email Address *'}</label>
+                <div className="relative">
+                  <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
             </div>
-            
-            <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
-              <span className="font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('activeMembershipLabel') || 'Active Membership:'}</span>
-              <span 
-                className="font-bold px-2.5 py-0.5 rounded-full text-[10px] uppercase border shadow-xs inline-flex items-center gap-1"
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('newPasswordLabel') || 'New Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('leaveBlankCurrentPass') || '(leave blank)'}</span>
+                </label>
+                <div className="relative">
+                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('confirmPasswordLabel') || 'Confirm Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('repeatNewPass') || '(repeat)'}</span>
+                </label>
+                <div className="relative">
+                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <button
+                type="button"
+                onClick={logoutUser}
+                className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                 style={{
-                  backgroundColor: userPlanBadge.bg,
-                  borderColor: userPlanBadge.border,
-                  color: userPlanBadge.color
+                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.2)',
+                  borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.5)',
+                  color: isDayMode ? '#b91c1c' : '#fca5a5'
                 }}
               >
-                <PlanHeaderIcon className="h-3 w-3 shrink-0" />
-                {userPlanBadge.label}
+                <LogOut className="h-4 w-4 text-red-500" /> {t('signOutBtn') || 'Sign Out'}
+              </button>
+
+              <button
+                type="submit"
+                className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+              >
+                <Check className="h-4 w-4" /> {t('saveProfileBtn') || 'Save Profile'}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* AI TOKEN USAGE & CONSUMPTION CARD */}
+        <div 
+          className="lg:col-span-5 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                <Cpu className="h-5 w-5 text-orange-400" /> AI Token Usage & Quota
+              </h2>
+              <span 
+                className="text-[10px] font-mono px-2.5 py-1 rounded-lg border font-bold shadow-xs"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : '#0B101D',
+                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                  color: '#f97316'
+                }}
+              >
+                {activeModelName}
               </span>
             </div>
 
-            {activeExpiryDate ? (
-              <div className="flex sm:justify-end items-center gap-1 text-[11px] font-semibold pt-0.5" style={{ color: isDayMode ? '#047857' : '#34d399' }}>
-                <Clock className="h-3 w-3" />
-                <span>{t('renewalExpiryPrefix') || 'Renewal / Expiry: '} {new Date(activeExpiryDate).toLocaleDateString()}</span>
+            <div className="space-y-3">
+              <div className="flex justify-between items-baseline">
+                <span className="text-xs font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Token Allocation Limit</span>
+                <span className="text-sm font-black font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {tokenUsage.totalTokens.toLocaleString()}{' '}
+                  <span className="text-[11px]" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                    / {isUnlimited ? '∞ Unlimited' : tokenUsage.monthlyLimit.toLocaleString()}
+                  </span>
+                </span>
               </div>
-            ) : (
-              <div className="flex sm:justify-end items-center gap-1 text-[11px] italic pt-0.5" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                <span>{t('freeTierNoExpiry') || 'Free Tier (No Expiry)'}</span>
+
+              {/* Progress bar */}
+              <div 
+                className="border rounded-full h-3.5 overflow-hidden p-0.5 shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
+                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b'
+                }}
+              >
+                <div 
+                  className="h-full rounded-full transition-all duration-500" 
+                  style={{ 
+                    width: isUnlimited ? '100%' : `${tokenPercentage}%`,
+                    backgroundColor: isUnlimited ? '#10b981' : tokenPercentage > 85 ? '#ef4444' : tokenPercentage > 60 ? '#f59e0b' : 'var(--color-primary, #E05638)'
+                  }}
+                />
               </div>
-            )}
+
+              <div className="flex justify-between text-[11px]">
+                <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{isUnlimited ? 'Unlimited Tokens Tier' : `${tokenPercentage}% of quota used`}</span>
+                <span className="text-emerald-500 dark:text-emerald-400 font-semibold">{tokenUsage.requestCount} AI Requests</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div 
+                className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                }}
+              >
+                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Prompt Input</span>
+                <span className="text-base font-black font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tokenUsage.promptTokens.toLocaleString()}</span>
+                <span className="text-[10px] block" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>Tokens (User & Context)</span>
+              </div>
+
+              <div 
+                className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                }}
+              >
+                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Completion Output</span>
+                <span className="text-base font-black text-emerald-500 dark:text-emerald-400 font-mono">{tokenUsage.completionTokens.toLocaleString()}</span>
+                <span className="text-[10px] block" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>Tokens (Generated Reply)</span>
+              </div>
+            </div>
+          </div>
+
+          <div 
+            className="p-4 rounded-2xl border text-[11px] space-y-2 shadow-inner"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#64748b' : '#94a3b8'
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <Repeat className="h-3.5 w-3.5 text-orange-400" /> Reimburse Schedule
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold uppercase bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                {tokenUsage.reimburseFrequency || 'monthly'}
+              </span>
+            </div>
+            <p className="leading-relaxed">
+              {getReimburseScheduleText(tokenUsage.reimburseFrequency)}. Quotas are automatically reimbursed based on your initial subscription purchase date.
+            </p>
           </div>
         </div>
 
-        <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('fullNameLabel') || 'Full Name *'}</label>
-              <div className="relative">
-                <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Jordan Smith"
-                  className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('emailAddressLabel') || 'Email Address *'}</label>
-              <div className="relative">
-                <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('newPasswordLabel') || 'New Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('leaveBlankCurrentPass') || '(leave blank to keep current)'}</span>
-              </label>
-              <div className="relative">
-                <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('confirmPasswordLabel') || 'Confirm Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('repeatNewPass') || '(repeat new password)'}</span>
-              </label>
-              <div className="relative">
-                <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-            <button
-              type="button"
-              onClick={logoutUser}
-              className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
-                borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.5)',
-                color: isDayMode ? '#b91c1c' : '#fca5a5'
-              }}
-            >
-              <LogOut className="h-4 w-4" /> {t('signOutBtn') || 'Sign Out'}
-            </button>
-
-            <button
-              type="submit"
-              className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
-              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-            >
-              <Check className="h-4 w-4" /> {t('saveProfileBtn') || 'Save Profile'}
-            </button>
-          </div>
-        </form>
       </div>
 
+      {/* UPGRADE OR CHANGE MEMBERSHIP PLAN */}
       <div 
-        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm transition-colors duration-200"
+        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
           borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
         }}
       >
@@ -32711,7 +30844,7 @@ export default function ProfilePage() {
           <div 
             className="flex items-center p-1 rounded-xl border text-xs font-bold self-start sm:self-auto shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
               borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
             }}
           >
@@ -32721,10 +30854,12 @@ export default function ProfilePage() {
               className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
                 selectedInterval === 'MONTH'
                   ? 'text-white shadow'
-                  : (isDayMode ? 'text-slate-600 hover:text-black' : 'text-slate-400 hover:text-white')
+                  : ''
               }`}
-              style={{
-                backgroundColor: selectedInterval === 'MONTH' ? 'var(--color-primary, #E05638)' : 'transparent'
+              style={selectedInterval === 'MONTH' ? {
+                backgroundColor: 'var(--color-primary, #E05638)'
+              } : {
+                color: isDayMode ? '#64748b' : '#94a3b8'
               }}
             >
               {t('monthlyBtn') || 'Monthly'}
@@ -32735,10 +30870,12 @@ export default function ProfilePage() {
               className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
                 selectedInterval === 'YEAR'
                   ? 'text-white shadow'
-                  : (isDayMode ? 'text-slate-600 hover:text-black' : 'text-slate-400 hover:text-white')
+                  : ''
               }`}
-              style={{
-                backgroundColor: selectedInterval === 'YEAR' ? 'var(--color-primary, #E05638)' : 'transparent'
+              style={selectedInterval === 'YEAR' ? {
+                backgroundColor: 'var(--color-primary, #E05638)'
+              } : {
+                color: isDayMode ? '#64748b' : '#94a3b8'
               }}
             >
               {t('annualSaveLabel') || 'Annual (Save up to 44%)'}
@@ -32754,13 +30891,13 @@ export default function ProfilePage() {
             return (
               <div 
                 key={plan.id || plan.slug}
-                className={`rounded-3xl p-6 border-2 relative flex flex-col justify-between shadow-sm transition-all duration-200 ${
+                className={`rounded-3xl p-6 border-2 relative flex flex-col justify-between shadow-xl transition-all duration-200 ${
                   isCurrent 
                     ? 'ring-4 ring-emerald-500/25 scale-[1.02]' 
                     : 'hover:scale-[1.01]'
                 }`}
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
                   borderColor: isCurrent 
                     ? 'var(--color-emerald, #10b981)' 
                     : (plan.badge ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'))
@@ -32793,7 +30930,7 @@ export default function ProfilePage() {
                       </h3>
                       {isCurrent && (
                         <span 
-                          className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border shadow-xs"
+                          className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border"
                           style={{
                             backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
                             borderColor: 'var(--color-emerald, #10b981)',
@@ -32809,10 +30946,19 @@ export default function ProfilePage() {
                     </p>
                   </div>
 
+                  {/* Token availability pill for this plan */}
+                  <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-orange-400 bg-orange-950/40 border border-orange-500/30 px-3 py-1.5 rounded-xl w-fit shadow-xs">
+                    <Cpu className="h-3.5 w-3.5" />
+                    <span>{plan.tokenLimit === -1 ? 'Unlimited Tokens' : `${(plan.tokenLimit || 0).toLocaleString()} Tokens`}</span>
+                    <span className="text-[10px] font-sans font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      ({plan.tokenReimburseFrequency === 'once' ? 'Once' : plan.tokenReimburseFrequency === 'weekly' ? 'Weekly' : 'Monthly'})
+                    </span>
+                  </div>
+
                   <div>
                     {isFree ? (
                       <div className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
-                        {t('Free') || 'Free'}
+                        {t('free') || 'Free'}
                       </div>
                     ) : (
                       <div className="flex items-baseline gap-1">
@@ -32827,7 +30973,7 @@ export default function ProfilePage() {
 
                     {!isFree && plan.interval === 'YEAR' && plan.subPrice && (
                       <div className="text-[11px] font-medium mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                        <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#e2e8f0' }}>{plan.subPrice}</span>{' '}
+                        <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>{plan.subPrice}</span>{' '}
                         {plan.strikethroughPrice && (
                           <span className="line-through" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{plan.strikethroughPrice}</span>
                         )}
@@ -32839,7 +30985,7 @@ export default function ProfilePage() {
                     {plan.features && plan.features.length > 0 ? (
                       plan.features.map((f, i) => (
                         <div key={i} className="flex items-start gap-2">
-                          <Check className="h-4 w-4 shrink-0 mt-0.5" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} />
+                          <Check className="h-4 w-4 shrink-0 mt-0.5 text-emerald-500 dark:text-emerald-400" />
                           <span className="leading-snug">{f}</span>
                         </div>
                       ))
@@ -38999,12 +37145,12 @@ export default function Sidebar() {
 
         {/* FOOTER CONTROLS */}
         <div className="pt-3 border-t border-[var(--color-border)] space-y-1">
-          {/* QUICK LANGUAGE SELECTOR */}
+          {/* QUICK LANGUAGE SELECTOR & DARK MODE TOGGLE */}
           {showCollapsed ? (
-            <div className="flex justify-center p-1" title={availableLanguages.find((l) => l.code === locale)?.name || 'Language'}>
+            <div className="flex flex-col items-center gap-2 p-1">
               <div className={`relative flex items-center justify-center p-2 rounded-xl border border-[var(--color-border)] text-base cursor-pointer hover:border-emerald-500/40 transition ${
                 isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
-              }`}>
+              }`} title={availableLanguages.find((l) => l.code === locale)?.name || 'Language'}>
                 <span>{availableLanguages.find((l) => l.code === locale)?.flag || '🌐'}</span>
                 <select
                   value={locale}
@@ -39019,10 +37165,21 @@ export default function Sidebar() {
                   ))}
                 </select>
               </div>
+              <button
+                type="button"
+                onClick={toggleThemeMode}
+                className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer ${
+                  isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
+                }`}
+                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                aria-label="Toggle Theme Mode"
+              >
+                {isDarkMode ? <Moon className="h-4 w-4 text-[#E05638]" /> : <Sun className="h-4 w-4 text-amber-500" />}
+              </button>
             </div>
           ) : (
-            <div className="px-1 py-1">
-              <div className={`flex items-center border border-[var(--color-border)] rounded-xl px-2.5 py-1.5 shadow-sm ${
+            <div className="px-1 py-1 flex items-center gap-2">
+              <div className={`flex-1 flex items-center border border-[var(--color-border)] rounded-xl px-2.5 py-1.5 shadow-sm ${
                 isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
               }`}>
                 <select
@@ -39039,21 +37196,19 @@ export default function Sidebar() {
                   ))}
                 </select>
               </div>
+              <button
+                type="button"
+                onClick={toggleThemeMode}
+                className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer shrink-0 ${
+                  isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
+                }`}
+                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                aria-label="Toggle Theme Mode"
+              >
+                {isDarkMode ? <Moon className="h-4 w-4 text-[#E05638]" /> : <Sun className="h-4 w-4 text-amber-500" />}
+              </button>
             </div>
           )}
-
-          {/* DARK MODE / DAY MODE TOGGLE BUTTON */}
-          <div className={showCollapsed ? "flex justify-center p-1" : "px-3.5 py-1.5"}>
-            <button
-              type="button"
-              onClick={toggleThemeMode}
-              className="p-1 text-[#E05638] hover:text-amber-400 transition-colors flex items-center justify-center rounded-lg cursor-pointer"
-              title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-              aria-label="Toggle Theme Mode"
-            >
-              {isDarkMode ? <Moon className="h-5 w-5 text-[#E05638]" /> : <Sun className="h-5 w-5 text-amber-500" />}
-            </button>
-          </div>
 
           <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
             <Settings className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`} />
@@ -40814,7 +38969,7 @@ export const en: Record<string, string> = {
   "saveProfileBtn": "Save Profile",
   "upgradeChangePlanTitle": "Upgrade or Change Membership Plan",
   "onePlanPerEmailSub": "Strictly 1 plan per email limit. Switching from monthly to annual or annual to monthly will automatically cancel your prior plan and recalculate the expiry date.",
-  "annualSaveLabel": "Annual (Save up to 44%)",
+  "annualSaveLabel": "Annual (Save 44%)",
   "currentPlanBadge": "Current Plan",
   "includesFullTierFeatureAccess": "Includes full tier feature access",
   "switchToFreeBtn": "Switch to Free",
