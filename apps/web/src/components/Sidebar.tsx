@@ -1,4 +1,5 @@
 'use client';
+import packageInfo from '../../package.json';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -436,9 +437,9 @@ export default function Sidebar() {
                   <Wallet className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">{t('paymentGateway') || 'Payment Gateway'}</span>}
                 </Link>
-                <Link href="/admin/add-user" className={navClass('/admin/add-user')} title={t('addUser') || 'Add User'}>
+                <Link href="/admin/users" className={navClass('/admin/users')} title={t('users') || 'Users'}>
                   <UserPlus className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('addUser') || 'Add User'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('users') || 'Users'}</span>}
                 </Link>
                 <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title={t('recipeType') || 'Recipe Type'}>
                   <Utensils className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
@@ -557,6 +558,13 @@ export default function Sidebar() {
             <LogOut className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-800'}`} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('logout')}</span>}
           </button>
+          {/* DYNAMIC VERSION BADGE */}
+          <div className={`pt-2 select-none flex items-center ${showCollapsed ? 'justify-center text-[10px]' : 'px-3.5 justify-between text-[11px]'} font-mono ${
+            isDarkMode ? 'text-slate-500' : 'text-slate-600'
+          }`}>
+            {!showCollapsed && <span className="text-[10px] uppercase tracking-wider font-semibold opacity-75">Version</span>}
+            <span className="font-semibold tracking-tight opacity-90">v{packageInfo.version || '1.0.0'}</span>
+          </div>
         </div>
       </aside>
     </>

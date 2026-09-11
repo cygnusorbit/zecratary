@@ -163,18 +163,29 @@ export default function ChefAISettingsPage() {
     try {
       const res = await fetch('/api/admin/keys?t=' + Date.now(), { cache: 'no-store' });
       const data = await res.json();
-      if (data.success && Array.isArray(data.keys)) {
-        const map: Record<string, string> = {};
-        data.keys.forEach((k: any) => {
-          if (k.envKey) map[k.envKey] = k.keyValue;
-          if (k.provider?.includes('Gemini')) map['GEMINI_API_KEY'] = k.keyValue;
-          if (k.provider?.includes('OpenAI')) map['OPENAI_API_KEY'] = k.keyValue;
-        });
+      if (data.success) {
+        const map: Record<string, string> = { ...(data.envMap || {}) };
+        if (Array.isArray(data.keys)) {
+          data.keys.forEach((k: any) => {
+            if (k.envKey && k.keyValue) {
+              map[k.envKey] = k.keyValue;
+              const u = k.envKey.toUpperCase();
+              if (u.includes('GEMINI') || u.includes('GOOGLE')) {
+                map['GEMINI_API_KEY'] = k.keyValue;
+              }
+              if (u.includes('OPENAI')) {
+                map['OPENAI_API_KEY'] = k.keyValue;
+              }
+            }
+          });
+        }
         setEnvKeysMap(map);
+        return map;
       }
     } catch (e) {
       console.error('Failed to load .env keys:', e);
     }
+    return {};
   };
 
   useEffect(() => {
@@ -348,16 +359,56 @@ export default function ChefAISettingsPage() {
 
   const handleReloadEnvKey = async () => {
     setSyncingEnvKey(true);
-    await fetchEnvKeys();
-    setTimeout(() => {
-      autoConnectGemini(true);
-    }, 400);
-    if (provider === 'gemini' && envKeysMap['GEMINI_API_KEY']) {
-      setApiKey(envKeysMap['GEMINI_API_KEY']);
-    } else if (provider === 'openai' && envKeysMap['OPENAI_API_KEY']) {
-      setApiKey(envKeysMap['OPENAI_API_KEY']);
+    setTestResult(null);
+    try {
+      const map = await fetchEnvKeys();
+      const resolvedGemini = map['GEMINI_API_KEY'] || 
+                             map['GOOGLE_API_KEY'] || 
+                             map['NEXT_PUBLIC_GEMINI_API_KEY'] || 
+                             map['NEXT_PUBLIC_GOOGLE_API_KEY'] || '';
+      const resolvedOpenAI = map['OPENAI_API_KEY'] || 
+                             map['NEXT_PUBLIC_OPENAI_API_KEY'] || '';
+
+      const targetKey = provider === 'gemini' ? resolvedGemini : resolvedOpenAI;
+
+      if (targetKey && targetKey.trim().length > 5) {
+        const cleanKey = targetKey.trim();
+        setApiKey(cleanKey);
+        setTestResult({
+          success: true,
+          message: `Synced ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} key (${cleanKey.substring(0, 8)}...) from .env successfully!`
+        });
+
+        // Update active localStorage keys
+        try {
+          const rawStored = localStorage.getItem('zecratary_chef_ai_settings');
+          const current = rawStored ? JSON.parse(rawStored) : {};
+          localStorage.setItem('zecratary_chef_ai_settings', JSON.stringify({
+            ...current,
+            apiKey: cleanKey,
+            provider
+          }));
+        } catch (_) {}
+
+        setTimeout(() => {
+          if (provider === 'gemini') {
+            autoConnectGemini(true);
+          }
+        }, 300);
+      } else {
+        setTestResult({
+          success: false,
+          message: `No active ${provider === 'gemini' ? 'GEMINI_API_KEY or GOOGLE_API_KEY' : 'OPENAI_API_KEY'} found in your local .env file.`
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: 'Sync error: ' + (err?.message || 'Could not read from backend.')
+      });
+    } finally {
+      setTimeout(() => setSyncingEnvKey(false), 500);
     }
-    setTimeout(() => setSyncingEnvKey(false), 600);
   };
 
   const handleAddTopicSection = (e: React.FormEvent) => {
@@ -418,11 +469,13 @@ export default function ChefAISettingsPage() {
     }));
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanApiKey = apiKey.trim();
+
     const config = {
       provider,
-      apiKey: apiKey.trim(),
+      apiKey: cleanApiKey,
       model,
       temperature,
       maxTokens,
@@ -448,28 +501,51 @@ export default function ChefAISettingsPage() {
     localStorage.setItem('zecratary_engine_config', JSON.stringify(config));
     localStorage.setItem('zecratary_settings', JSON.stringify({
       provider,
-      geminiApiKey: provider === 'gemini' ? apiKey.trim() : '',
+      geminiApiKey: provider === 'gemini' ? cleanApiKey : '',
       geminiModel: provider === 'gemini' ? model : 'gemini-3.6-flash',
-      openaiApiKey: provider === 'openai' ? apiKey.trim() : '',
+      openaiApiKey: provider === 'openai' ? cleanApiKey : '',
       openaiModel: provider === 'openai' ? model : 'gpt-4o',
       lastUpdated: new Date().toISOString()
     }));
 
-    try {
-      if (apiKey.trim()) {
-        await fetch('/api/admin/keys', {
+    let envSavedSuccessfully = false;
+    let envErrorMessage = '';
+
+    if (cleanApiKey) {
+      try {
+        const res = await fetch('/api/admin/keys', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o',
-            provider: provider === 'gemini' ? `Google Gemini (${model})` : `OpenAI (${model})`,
-            keyValue: apiKey.trim(),
+            provider,
+            envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
+            keyValue: cleanApiKey,
             status: 'active'
           })
         });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          envSavedSuccessfully = true;
+          setTestResult({
+            success: true,
+            message: `Key saved to local .env and synchronized (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
+          });
+        } else {
+          envErrorMessage = data.error || 'Server rejected key save';
+          setTestResult({
+            success: false,
+            message: `Local settings stored, but .env save failed: ${envErrorMessage}`
+          });
+        }
+      } catch (err: any) {
+        envErrorMessage = err.message || 'Network error writing to /api/admin/keys';
+        setTestResult({
+          success: false,
+          message: `Local settings stored, but .env save failed: ${envErrorMessage}`
+        });
       }
-    } catch (err) {
-      console.error('Failed to sync API key back to backend:', err);
     }
 
     const activeFlattenedQuestions = sections
@@ -482,7 +558,7 @@ export default function ChefAISettingsPage() {
     window.dispatchEvent(new Event('zecratary_settings_updated'));
     
     setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    setTimeout(() => setSaved(false), 3500);
   };
 
   const activeSection = sections.find(s => s.id === activeTopicId) || sections[0];
