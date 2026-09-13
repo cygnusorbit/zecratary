@@ -1,4 +1,26 @@
-'use client';
+import os
+import glob
+import re
+
+# 1. Locate Manual Recipe Page
+manual_candidates = [
+    'apps/web/src/app/recipes/manual/page.tsx',
+    'src/app/recipes/manual/page.tsx',
+    'apps/web/src/app/manual/page.tsx',
+    'src/app/manual/page.tsx'
+]
+manual_path = next((p for p in manual_candidates if os.path.exists(p)), None)
+if not manual_path:
+    matches = glob.glob('**/manual/page.tsx', recursive=True)
+    if matches:
+        manual_path = matches[0]
+
+if not manual_path:
+    print("❌ Error: Could not locate manual/page.tsx")
+    exit(1)
+
+# 2. Write Cleaned, Fully-Fitted Manual Recipe Page
+cleaned_manual_code = """'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -796,3 +818,54 @@ export default function ManualRecipePage() {
     </div>
   );
 }
+"""
+
+with open(manual_path, 'w', encoding='utf-8') as f:
+    f.write(cleaned_manual_code)
+
+print(f"✓ Successfully updated Manual Recipe Page at: {manual_path}")
+
+# 3. Check Sidebar & Layout Background Alignment
+sidebar_candidates = ['apps/web/src/components/Sidebar.tsx', 'src/components/Sidebar.tsx']
+sidebar_path = next((p for p in sidebar_candidates if os.path.exists(p)), None)
+if sidebar_path:
+    with open(sidebar_path, 'r', encoding='utf-8') as f:
+        sb_code = f.read()
+
+    # Ensure sidebar aside element has responsive light mode background
+    if 'bg-[#070b13]' in sb_code and 'isDarkMode' in sb_code:
+        # Check if the main aside tag is hardcoded dark
+        sb_code = re.sub(
+            r'<aside className={`([^`]*?)bg-\[#070b13\]([^`]*?)`}',
+            r'<aside className={`\1${isDarkMode ? "bg-[#070b13]" : "bg-white"}\2`}',
+            sb_code
+        )
+        sb_code = re.sub(
+            r'<aside className={`([^`]*?)bg-\[#0b0f17\]([^`]*?)`}',
+            r'<aside className={`\1${isDarkMode ? "bg-[#0b0f17]" : "bg-white"}\2`}',
+            sb_code
+        )
+        with open(sidebar_path, 'w', encoding='utf-8') as f:
+            f.write(sb_code)
+        print(f"✓ Checked and aligned Sidebar background in: {sidebar_path}")
+
+# 4. Check Root/Dashboard Layout main element
+layout_candidates = [
+    'apps/web/src/app/(dashboard)/layout.tsx',
+    'src/app/(dashboard)/layout.tsx',
+    'apps/web/src/app/layout.tsx',
+    'src/app/layout.tsx'
+]
+for lp in layout_candidates:
+    if os.path.exists(lp):
+        with open(lp, 'r', encoding='utf-8') as f:
+            l_code = f.read()
+        
+        # Replace fixed bg-[#070b13] on main with CSS variable so it adapts cleanly to day mode
+        if 'bg-[#070b13]' in l_code:
+            l_code = l_code.replace('bg-[#070b13]', 'bg-[var(--color-bg,#070b13)]')
+            with open(lp, 'w', encoding='utf-8') as f:
+                f.write(l_code)
+            print(f"✓ Converted hardcoded background to CSS variable in layout: {lp}")
+
+print("✨ All Day Mode backgrounds successfully synchronized to match Image 2.")

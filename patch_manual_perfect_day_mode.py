@@ -1,10 +1,32 @@
-'use client';
+import os
+import glob
+
+candidates = [
+    'apps/web/src/app/recipes/manual/page.tsx',
+    'src/app/recipes/manual/page.tsx',
+    'apps/web/src/app/manual/page.tsx',
+    'src/app/manual/page.tsx'
+]
+
+manual_path = next((p for p in candidates if os.path.exists(p)), None)
+if not manual_path:
+    matches = glob.glob('**/manual/page.tsx', recursive=True)
+    if matches:
+        manual_path = matches[0]
+
+if not manual_path:
+    print("Error: Could not locate manual recipe page.tsx")
+    exit(1)
+
+print(f"Updating manual page at: {manual_path}")
+
+complete_code = """'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { 
   Plus, Trash2, Save, ArrowLeft, ImagePlus, GripVertical 
 } from 'lucide-react';
+import Link from 'next/link';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useRecipeTypes } from '@/lib/recipe-types';
 import { useIngredientCategories } from '@/lib/categories';
@@ -45,7 +67,7 @@ export default function ManualRecipePage() {
   const [isReorderingSteps, setIsReorderingSteps] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Synchronize entire page & application theme CSS
+  // Sync theme & Day/Night mode matching /import & /profile
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -56,50 +78,29 @@ export default function ManualRecipePage() {
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
-      if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
-      if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
-      if (c.accentEmerald || c.accentColor) root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
-
       if (isDay) {
-        root.style.setProperty('--color-bg', '#f8fafc');
+        if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
+        if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
         root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-card', '#ffffff');
         root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-inner', '#f1f5f9');
         root.style.setProperty('--color-inner-dark', '#f1f5f9');
         root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-
-        root.classList.remove('dark');
-        root.classList.add('light');
-
+        if (c.accentEmerald || c.accentColor) {
+          root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
+        }
         if (typeof document !== 'undefined' && document.body) {
           document.body.style.backgroundColor = '#f8fafc';
-          document.body.style.color = '#0f172a';
         }
       } else {
-        const bg = c.backgroundDark || c.backgroundColor || '#070b13';
-        const card = c.cardDark || c.cardBackground || '#111726';
-        const inner = c.innerDark || '#070b13';
-        const border = c.borderColor || c.cardBorder || '#1e293b';
-
-        root.style.setProperty('--color-bg', bg);
-        root.style.setProperty('--color-bg-dark', bg);
-        root.style.setProperty('--color-card', card);
-        root.style.setProperty('--color-card-dark', card);
-        root.style.setProperty('--color-inner', inner);
-        root.style.setProperty('--color-inner-dark', inner);
-        root.style.setProperty('--color-border', border);
-        root.style.setProperty('--color-text', '#ffffff');
-        root.style.setProperty('--color-text-secondary', '#94a3b8');
-
-        root.classList.remove('light');
-        root.classList.add('dark');
-
+        if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
+        if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
+        if (c.backgroundDark || c.backgroundColor) root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor);
+        if (c.cardDark || c.cardBackground) root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground);
+        if (c.innerDark || c.backgroundColor) root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor);
+        if (c.borderColor || c.cardBorder) root.style.setProperty('--color-border', c.borderColor || c.cardBorder);
+        if (c.accentEmerald || c.accentColor) root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
         if (typeof document !== 'undefined' && document.body) {
           document.body.style.backgroundColor = '';
-          document.body.style.color = '';
         }
       }
     } catch (e) {}
@@ -128,11 +129,11 @@ export default function ManualRecipePage() {
       window.removeEventListener('storage', applySavedTheme);
       if (typeof document !== 'undefined' && document.body) {
         document.body.style.backgroundColor = '';
-        document.body.style.color = '';
       }
     };
   }, [router, t, applySavedTheme]);
 
+  // Set default recipe type if current is empty
   useEffect(() => {
     if (recipeTypes.length > 0 && !recipeTypes.includes(form.recipeType)) {
       setForm(prev => ({ ...prev, recipeType: recipeTypes[0] }));
@@ -278,35 +279,28 @@ export default function ManualRecipePage() {
     }
   };
 
-  // Color tokens
-  const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
-  const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #111726)';
-  const cInnerBg = isDayMode ? '#f1f5f9' : 'var(--color-inner, #070b13)';
-  const cInputBg = isDayMode ? '#f8fafc' : 'var(--color-inner, #070b13)';
-  const cBorder = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)';
-  const cText = isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)';
-  const cSubText = isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)';
-  const cLabel = isDayMode ? '#334155' : '#cbd5e1';
-
   return (
     <div 
-      className="w-full min-h-screen pb-24 px-2 sm:px-6 pt-4 font-sans transition-colors duration-200"
-      style={{ backgroundColor: cPageBg, color: cText }}
+      className="w-full min-h-screen pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      style={{ 
+        color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)',
+        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)'
+      }}
     >
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         {/* Top Header */}
         <div 
-          className="flex items-center justify-between border-b pb-4"
-          style={{ borderColor: cBorder }}
+          className="flex items-center justify-between border-b pb-4 pt-2"
+          style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
         >
           <div className="flex items-center gap-3">
             <Link 
               href="/saved" 
-              className="p-2.5 rounded-xl transition shadow-xs border"
+              className="p-2.5 rounded-xl transition shadow-sm border"
               style={{
-                backgroundColor: cCardBg,
-                borderColor: cBorder,
-                color: cSubText
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)'
               }}
             >
               <ArrowLeft className="h-4 w-4" />
@@ -315,7 +309,7 @@ export default function ManualRecipePage() {
               <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary,#E05638)]">
                 {t('createRecipe') || 'Create Recipe'}
               </h1>
-              <p className="text-xs" style={{ color: cSubText }}>
+              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary,#94a3b8)' }}>
                 {t('createRecipeSubtitle') || 'Fill in details, ingredients, and preparation steps'}
               </p>
             </div>
@@ -324,8 +318,11 @@ export default function ManualRecipePage() {
 
         {/* Tabs Navigation */}
         <div 
-          className="flex p-1.5 rounded-2xl border shadow-xs"
-          style={{ backgroundColor: cInnerBg, borderColor: cBorder }}
+          className="flex p-1.5 rounded-2xl border shadow-sm"
+          style={{
+            backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-bg, #070b13)',
+            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+          }}
         >
           {[
             { id: 'info', label: t('basicInfoTab') || 'Basic Info' },
@@ -340,13 +337,13 @@ export default function ManualRecipePage() {
                 onClick={() => setActiveTab(tab.id as any)}
                 className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer border"
                 style={isActive ? {
-                  backgroundColor: cCardBg,
+                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
                   color: 'var(--color-primary, #E05638)',
-                  borderColor: cBorder
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
                 } : {
                   backgroundColor: 'transparent',
                   borderColor: 'transparent',
-                  color: cSubText
+                  color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)'
                 }}
               >
                 {tab.label}
@@ -365,29 +362,35 @@ export default function ManualRecipePage() {
                   {t('photoLabel') || 'Photo'}
                 </label>
                 <label 
-                  className="border-2 border-dashed rounded-2xl h-48 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group shadow-xs"
-                  style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+                  className="border-2 border-dashed rounded-2xl h-48 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group shadow-sm"
+                  style={{
+                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                  }}
                 >
                   {form.imageUrl ? (
                     <img src={form.imageUrl} alt="Recipe Preview" className="absolute inset-0 w-full h-full object-cover" />
                   ) : (
                     <div className="text-center space-y-2">
                       <ImagePlus className="h-8 w-8 mx-auto transition text-slate-400 group-hover:text-[var(--color-primary,#E05638)]" />
-                      <span className="text-xs font-bold block" style={{ color: cText }}>{t('addAPhoto') || 'Add a photo'}</span>
-                      <span className="text-[11px]" style={{ color: cSubText }}>{t('uploadsHint') || 'Uploads save to local drive /uploads/recipes/'}</span>
+                      <span className="text-xs font-bold block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('addAPhoto') || 'Add a photo'}</span>
+                      <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('uploadsHint') || 'Uploads save to local drive /uploads/recipes/'}</span>
                     </div>
                   )}
                   <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
                 </label>
               </div>
 
-              {/* General Info Inputs Card */}
+              {/* General Info Inputs */}
               <div 
-                className="border rounded-2xl p-6 space-y-4 text-xs shadow-xs"
-                style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+                className="border rounded-2xl p-6 space-y-4 text-xs shadow-sm"
+                style={{
+                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                }}
               >
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: cLabel }}>
+                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                     {t('recipeTitleRequired') || 'Recipe Title *'}
                   </label>
                   <input
@@ -398,17 +401,17 @@ export default function ManualRecipePage() {
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: cInputBg,
-                      borderColor: cBorder,
-                      color: cText
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = cBorder)}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
                 </div>
 
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: cLabel }}>
+                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                     {t('description') || 'Description'}
                   </label>
                   <textarea
@@ -418,26 +421,26 @@ export default function ManualRecipePage() {
                     onChange={(e) => setForm({ ...form, description: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none resize-y transition"
                     style={{
-                      backgroundColor: cInputBg,
-                      borderColor: cBorder,
-                      color: cText
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = cBorder)}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
-                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('recipeTypeLabel') || 'Recipe Type'}</label>
+                    <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('recipeTypeLabel') || 'Recipe Type'}</label>
                     <select
                       value={form.recipeType}
                       onChange={(e) => setForm({ ...form, recipeType: e.target.value })}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
                       style={{
-                        backgroundColor: cInputBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     >
                       {recipeTypes.map((type) => (
@@ -447,46 +450,46 @@ export default function ManualRecipePage() {
                   </div>
 
                   <div>
-                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('servingsLabel') || 'Servings'}</label>
+                    <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('servingsLabel') || 'Servings'}</label>
                     <input
                       type="number"
                       value={form.servings}
                       onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
-                        backgroundColor: cInputBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     />
                   </div>
 
                   <div>
-                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('prepTimeMinsLabel') || 'Prep Time (m)'}</label>
+                    <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('prepTimeMinsLabel') || 'Prep Time (m)'}</label>
                     <input
                       type="number"
                       value={form.prepTimeMinutes}
                       onChange={(e) => setForm({ ...form, prepTimeMinutes: parseInt(e.target.value) || 0 })}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
-                        backgroundColor: cInputBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     />
                   </div>
 
                   <div>
-                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('cookTimeMinsLabel') || 'Cook Time (m)'}</label>
+                    <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('cookTimeMinsLabel') || 'Cook Time (m)'}</label>
                     <input
                       type="number"
                       value={form.cookTimeMinutes}
                       onChange={(e) => setForm({ ...form, cookTimeMinutes: parseInt(e.target.value) || 0 })}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
-                        backgroundColor: cInputBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     />
                   </div>
@@ -511,8 +514,11 @@ export default function ManualRecipePage() {
           {/* TAB 2: INGREDIENTS */}
           {activeTab === 'ingredients' && (
             <div 
-              className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
-              style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+              className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-sm"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+              }}
             >
               <div className="flex justify-between items-center">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--color-primary,#E05638)]">
@@ -528,9 +534,9 @@ export default function ManualRecipePage() {
                       borderColor: 'var(--color-emerald, #10b981)',
                       color: '#ffffff'
                     } : {
-                      backgroundColor: cInputBg,
-                      borderColor: cBorder,
-                      color: cSubText
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)'
                     }}
                   >
                     {isReorderingIngredients ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
@@ -556,8 +562,8 @@ export default function ManualRecipePage() {
                     onDrop={handleDrop}
                     className="flex items-center gap-2 p-2.5 rounded-xl border transition"
                     style={{
-                      backgroundColor: cInputBg,
-                      borderColor: isReorderingIngredients ? 'var(--color-emerald, #10b981)' : cBorder,
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                      borderColor: isReorderingIngredients ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'),
                       cursor: isReorderingIngredients ? 'grab' : 'default'
                     }}
                   >
@@ -572,9 +578,9 @@ export default function ManualRecipePage() {
                       }}
                       className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
                       style={{
-                        backgroundColor: cCardBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     />
                     <input
@@ -588,9 +594,9 @@ export default function ManualRecipePage() {
                       }}
                       className="w-20 border rounded-lg p-2 text-center outline-none"
                       style={{
-                        backgroundColor: cCardBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     />
                     <input
@@ -603,7 +609,7 @@ export default function ManualRecipePage() {
                         setForm({ ...form, ingredients: list });
                       }}
                       className="flex-1 bg-transparent border-none outline-none px-2 font-medium"
-                      style={{ color: cText }}
+                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
                     />
                     <select
                       value={ing.category}
@@ -614,9 +620,9 @@ export default function ManualRecipePage() {
                       }}
                       className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
                       style={{
-                        backgroundColor: cCardBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        color: isDayMode ? '#0f172a' : '#cbd5e1'
                       }}
                     >
                       {ingredientCategories.map((cat) => (
@@ -632,7 +638,7 @@ export default function ManualRecipePage() {
                       <button
                         type="button"
                         onClick={() => setForm({ ...form, ingredients: form.ingredients.filter((_, i) => i !== idx) })}
-                        className="p-2 text-red-400 hover:text-red-500 transition cursor-pointer"
+                        className="p-2 text-red-400 hover:text-red-300 transition cursor-pointer"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -643,16 +649,16 @@ export default function ManualRecipePage() {
 
               <div 
                 className="flex justify-between pt-3 border-t"
-                style={{ borderColor: cBorder }}
+                style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
               >
                 <button
                   type="button"
                   onClick={() => setActiveTab('info')}
                   className="border font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer"
                   style={{
-                    backgroundColor: cInputBg,
-                    borderColor: cBorder,
-                    color: cLabel
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#334155' : '#cbd5e1'
                   }}
                 >
                   {t('backBtn') || '← Back'}
@@ -674,8 +680,11 @@ export default function ManualRecipePage() {
           {/* TAB 3: STEPS */}
           {activeTab === 'steps' && (
             <div 
-              className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
-              style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+              className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-sm"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+              }}
             >
               <div className="flex justify-between items-center">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--color-primary,#E05638)]">
@@ -691,9 +700,9 @@ export default function ManualRecipePage() {
                       borderColor: 'var(--color-emerald, #10b981)',
                       color: '#ffffff'
                     } : {
-                      backgroundColor: cInputBg,
-                      borderColor: cBorder,
-                      color: cSubText
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)'
                     }}
                   >
                     {isReorderingSteps ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
@@ -719,14 +728,14 @@ export default function ManualRecipePage() {
                     onDrop={handleDrop}
                     className="flex items-start gap-3 p-3 rounded-xl border transition"
                     style={{
-                      backgroundColor: cInputBg,
-                      borderColor: isReorderingSteps ? 'var(--color-emerald, #10b981)' : cBorder
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                      borderColor: isReorderingSteps ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')
                     }}
                   >
                     <span 
                       className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
                       style={{
-                        backgroundColor: 'rgba(224, 86, 56, 0.15)',
+                        backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.15)' : 'rgba(224, 86, 56, 0.2)',
                         color: 'var(--color-primary, #E05638)'
                       }}
                     >
@@ -742,7 +751,7 @@ export default function ManualRecipePage() {
                         setForm({ ...form, instructions: list });
                       }}
                       className="flex-1 bg-transparent border-none outline-none resize-y font-medium"
-                      style={{ color: cText }}
+                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
                     />
 
                     {isReorderingSteps ? (
@@ -753,7 +762,7 @@ export default function ManualRecipePage() {
                       <button
                         type="button"
                         onClick={() => setForm({ ...form, instructions: form.instructions.filter((_, i) => i !== idx) })}
-                        className="p-2 text-red-400 hover:text-red-500 transition h-fit cursor-pointer"
+                        className="p-2 text-red-400 hover:text-red-300 transition h-fit cursor-pointer"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -764,16 +773,16 @@ export default function ManualRecipePage() {
 
               <div 
                 className="flex justify-between pt-3 border-t"
-                style={{ borderColor: cBorder }}
+                style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
               >
                 <button
                   type="button"
                   onClick={() => setActiveTab('ingredients')}
                   className="border font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer"
                   style={{
-                    backgroundColor: cInputBg,
-                    borderColor: cBorder,
-                    color: cLabel
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#334155' : '#cbd5e1'
                   }}
                 >
                   {t('backBtn') || '← Back'}
@@ -796,3 +805,9 @@ export default function ManualRecipePage() {
     </div>
   );
 }
+"""
+
+with open(manual_path, 'w', encoding='utf-8') as f:
+    f.write(complete_code)
+
+print(f"Successfully updated manual recipe page at {manual_path} for clean day/night mode background.")

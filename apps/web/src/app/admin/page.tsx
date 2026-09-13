@@ -211,7 +211,7 @@ export default function AdminSettingsPage() {
 
         <div className="flex items-center gap-2.5">
           <Link
-            href="/admin/add-user"
+            href="/admin/users"
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
             style={{
               backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
