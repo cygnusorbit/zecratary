@@ -73,3 +73,18 @@ export const logoutUser = () => {
   window.dispatchEvent(new Event('zecratary_auth_changed'));
   window.location.href = '/login';
 };
+
+// Edge Middleware Cookie Synchronization
+function syncSessionCookie(user: User | null): void {
+  if (typeof document === 'undefined') return;
+  if (user) {
+    const payload = encodeURIComponent(JSON.stringify({ 
+      id: user.id, 
+      email: user.email, 
+      role: user.role || 'user' 
+    }));
+    document.cookie = `zecratary_session=${payload}; path=/; max-age=604800; SameSite=Lax`;
+  } else {
+    document.cookie = 'zecratary_session=; path=/; max-age=0; SameSite=Lax';
+  }
+}
