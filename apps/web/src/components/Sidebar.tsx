@@ -68,6 +68,14 @@ const getLanguageFlag = (code: string): string => {
   return LANGUAGE_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
 };
 
+const isImageIcon = (icon?: unknown): icon is string =>
+  typeof icon === 'string' && (
+    icon.startsWith('/') ||
+    icon.startsWith('http://') ||
+    icon.startsWith('https://') ||
+    icon.startsWith('data:image')
+  );
+
 export default function Sidebar() {
   const pathname = usePathname();
   const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
@@ -237,7 +245,7 @@ export default function Sidebar() {
     }
   `;
 
-  const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
+    const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
 
   return (
@@ -245,7 +253,7 @@ export default function Sidebar() {
       {/* MOBILE TOP BAR */}
       <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
         <Link href="/dashboard" className="flex items-center gap-2">
-          <span className="text-2xl">{displayIcon}</span>
+          {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
           <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[200px]">
             {displayName}
           </span>
@@ -298,7 +306,7 @@ export default function Sidebar() {
                 <Menu className="h-5 w-5" />
               </button>
               <Link href="/dashboard" className="flex items-center justify-center p-1" title={displayName}>
-                <span className="text-2xl">{displayIcon}</span>
+                {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
               </Link>
             </div>
           ) : (
@@ -318,7 +326,7 @@ export default function Sidebar() {
                   <Menu className="h-5 w-5" />
                 </button>
                 <Link href="/dashboard" className="flex items-center gap-2 truncate">
-                  <span className="text-2xl shrink-0">{displayIcon}</span>
+                  {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
                   <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate">
                     {displayName}
                   </span>

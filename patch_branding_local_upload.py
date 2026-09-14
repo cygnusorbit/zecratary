@@ -1,4 +1,108 @@
-'use client';
+import os
+import glob
+import re
+
+# 1. Locate App Router directory
+app_candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in app_candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/lib/siteConfig.ts', recursive=True)
+    if matches:
+        app_dir = os.path.join(os.path.dirname(os.path.dirname(matches[0])), 'app')
+
+if not app_dir:
+    print("❌ Error: Could not locate App Router directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+lib_dir = os.path.join(base_dir, 'lib')
+components_dir = os.path.join(base_dir, 'components')
+
+print(f"✓ Found App Router root: {app_dir}")
+
+# 2. CREATE SERVER API ROUTE: /api/admin/upload-branding/route.ts
+upload_api_dir = os.path.join(app_dir, 'api', 'admin', 'upload-branding')
+os.makedirs(upload_api_dir, exist_ok=True)
+upload_api_path = os.path.join(upload_api_dir, 'route.ts')
+
+upload_api_code = """import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getUploadDirectories(): string[] {
+  const cwd = process.cwd();
+  const dirs: string[] = [];
+
+  const candidatePublics = [
+    path.join(cwd, 'apps', 'web', 'public'),
+    path.join(cwd, 'public'),
+    path.resolve(cwd, '..', 'public'),
+    path.resolve(cwd, '..', 'apps', 'web', 'public')
+  ];
+
+  for (const pub of candidatePublics) {
+    if (fs.existsSync(pub)) {
+      dirs.push(path.join(pub, 'uploads'));
+    }
+  }
+
+  if (dirs.length === 0) {
+    const fallback = fs.existsSync(path.join(cwd, 'apps', 'web'))
+      ? path.join(cwd, 'apps', 'web', 'public', 'uploads')
+      : path.join(cwd, 'public', 'uploads');
+    dirs.push(fallback);
+  }
+
+  return dirs;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const formData = await req.formData();
+    const file = formData.get('file') as File | null;
+    const targetType = (formData.get('type') as string) || 'branding';
+
+    if (!file) {
+      return NextResponse.json({ success: false, error: 'No file provided' }, { status: 400 });
+    }
+
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+
+    const origExt = path.extname(file.name || '').toLowerCase() || '.png';
+    const cleanPrefix = targetType === 'favicon' ? 'favicon' : 'titlebar-logo';
+    const fileName = `${cleanPrefix}-${Date.now()}${origExt}`;
+
+    const uploadDirs = getUploadDirectories();
+    for (const uDir of uploadDirs) {
+      if (!fs.existsSync(uDir)) {
+        fs.mkdirSync(uDir, { recursive: true });
+      }
+      fs.writeFileSync(path.join(uDir, fileName), buffer);
+    }
+
+    const relativeUrl = `/uploads/${fileName}`;
+    return NextResponse.json({
+      success: true,
+      url: relativeUrl,
+      fileName
+    });
+  } catch (err: any) {
+    console.error('Error uploading branding image:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Upload failed' }, { status: 500 });
+  }
+}
+"""
+with open(upload_api_path, 'w', encoding='utf-8') as f:
+    f.write(upload_api_code)
+print(f"✓ Provisioned upload handler at: {upload_api_path}")
+
+# 3. UPDATE /admin/page.tsx TO UPLOAD TO PUBLIC DIRECTORY & PREVIEW URL
+admin_page_path = os.path.join(app_dir, 'admin', 'page.tsx')
+admin_page_code = """'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -497,3 +601,60 @@ export default function AdminSettingsPage() {
     </div>
   );
 }
+"""
+with open(admin_page_path, 'w', encoding='utf-8') as f:
+    f.write(admin_page_code)
+print(f"✓ Updated admin branding page with local upload at: {admin_page_path}")
+
+# 4. FIX SIDEBAR RENDERING TO DISPLAY <img /> INSTEAD OF PRINTING IMAGE STRINGS
+sidebar_candidates = [
+    os.path.join(components_dir, 'Sidebar.tsx'),
+    'apps/web/src/components/Sidebar.tsx',
+    'src/components/Sidebar.tsx'
+]
+sidebar_path = next((p for p in sidebar_candidates if os.path.exists(p)), None)
+
+if sidebar_path:
+    with open(sidebar_path, 'r', encoding='utf-8') as f:
+        sidebar_code = f.read()
+
+    # Add isImageIcon helper if missing
+    if 'const isImageIcon' not in sidebar_code:
+        helper_code = """const isImageIcon = (icon?: unknown): icon is string => 
+  typeof icon === 'string' && (
+    icon.startsWith('/') || 
+    icon.startsWith('http://') || 
+    icon.startsWith('https://') || 
+    icon.startsWith('data:image')
+  );\n\n"""
+        # Place before component definition
+        comp_match = re.search(r'(export\s+default\s+function\s+Sidebar|export\s+function\s+Sidebar)', sidebar_code)
+        if comp_match:
+            sidebar_code = sidebar_code[:comp_match.start()] + helper_code + sidebar_code[comp_match.start():]
+        else:
+            sidebar_code = helper_code + sidebar_code
+
+    # Replace all raw text renderings of displayIcon or siteIcon in spans or standalone JSX
+    # Pattern 1: <span className="...">...{displayIcon}...</span>
+    sidebar_code = re.sub(
+        r'<span([^>]*)>\s*\{displayIcon\}\s*</span>',
+        r'{isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span\1>{displayIcon}</span>}',
+        sidebar_code
+    )
+
+    # Pattern 2: Naked {displayIcon} without image check
+    # Avoid replacing if already guarded by isImageIcon
+    naked_display = r'(?<!isImageIcon\(displayIcon\)\s\?\s)<img[^>]*>\s*:\s*\{displayIcon\}|\b(?<!isImageIcon\()\{displayIcon\}'
+    
+    # Simple check for naked occurrences:
+    if '{isImageIcon(displayIcon)' not in sidebar_code:
+        sidebar_code = sidebar_code.replace(
+            '{displayIcon}',
+            '{isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}'
+        )
+
+    with open(sidebar_path, 'w', encoding='utf-8') as f:
+        f.write(sidebar_code)
+    print(f"✓ Patched image icon rendering in {sidebar_path}")
+
+print("\n🚀 Patch successfully applied! Uploads will now save locally into public/uploads/ and render as images.")

@@ -1,4 +1,130 @@
-'use client';
+import os
+import glob
+import re
+
+# 1. Locate active project directories
+app_candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in app_candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/lib/siteConfig.ts', recursive=True)
+    if matches:
+        app_dir = os.path.join(os.path.dirname(os.path.dirname(matches[0])), 'app')
+
+if not app_dir:
+    print("❌ Error: Could not locate App Router directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+lib_dir = os.path.join(base_dir, 'lib')
+components_dir = os.path.join(base_dir, 'components')
+os.makedirs(lib_dir, exist_ok=True)
+
+# 2. Update lib/siteConfig.ts
+site_config_path = os.path.join(lib_dir, 'siteConfig.ts')
+site_config_code = """export const DEFAULT_SITE_NAME = 'Zecratary';
+export const DEFAULT_SITE_ICON = '🥑';
+
+export interface SiteIdentityConfig {
+  siteName: string;
+  titlebarEmoji: string;
+  titlebarImage: string;
+  faviconEmoji: string;
+  faviconImage: string;
+}
+
+const DEFAULT_CONFIG: SiteIdentityConfig = {
+  siteName: DEFAULT_SITE_NAME,
+  titlebarEmoji: DEFAULT_SITE_ICON,
+  titlebarImage: '',
+  faviconEmoji: DEFAULT_SITE_ICON,
+  faviconImage: ''
+};
+
+export function getSiteConfig(): SiteIdentityConfig {
+  if (typeof window === 'undefined') return DEFAULT_CONFIG;
+  try {
+    const raw = localStorage.getItem('zecratary_site_settings');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        siteName: parsed.siteName || parsed.name || DEFAULT_SITE_NAME,
+        titlebarEmoji: parsed.titlebarEmoji || parsed.icon || DEFAULT_SITE_ICON,
+        titlebarImage: parsed.titlebarImage || '',
+        faviconEmoji: parsed.faviconEmoji || parsed.titlebarEmoji || parsed.icon || DEFAULT_SITE_ICON,
+        faviconImage: parsed.faviconImage || ''
+      };
+    }
+  } catch (_) {}
+  return DEFAULT_CONFIG;
+}
+
+export function getSiteName(): string {
+  return getSiteConfig().siteName;
+}
+
+export function getSiteIcon(): string {
+  const cfg = getSiteConfig();
+  return cfg.titlebarImage || cfg.titlebarEmoji || DEFAULT_SITE_ICON;
+}
+
+export function getFavicon(): string {
+  const cfg = getSiteConfig();
+  return cfg.faviconImage || cfg.faviconEmoji || cfg.titlebarImage || cfg.titlebarEmoji || DEFAULT_SITE_ICON;
+}
+
+export function updateFavicon(iconOrUrl?: string) {
+  if (typeof window === 'undefined') return;
+  const target = iconOrUrl || getFavicon();
+  let href = target;
+
+  if (
+    !target.startsWith('data:') && 
+    !target.startsWith('http://') && 
+    !target.startsWith('https://') && 
+    !target.startsWith('/')
+  ) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${target}</text></svg>`;
+    href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  }
+
+  let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = href;
+
+  let shortcut = document.querySelector<HTMLLinkElement>("link[rel~='shortcut icon']");
+  if (shortcut) {
+    shortcut.href = href;
+  }
+}
+
+export function saveSiteConfig(config: Partial<SiteIdentityConfig>) {
+  if (typeof window === 'undefined') return;
+  const current = getSiteConfig();
+  const updated: SiteIdentityConfig = { ...current, ...config };
+  localStorage.setItem('zecratary_site_settings', JSON.stringify(updated));
+  localStorage.setItem('zecratary_site_name', updated.siteName);
+  localStorage.setItem('zecratary_site_icon', updated.titlebarImage || updated.titlebarEmoji);
+  
+  window.dispatchEvent(new Event('zecratary_site_settings_changed'));
+  window.dispatchEvent(new Event('storage'));
+  updateFavicon(updated.faviconImage || updated.faviconEmoji || updated.titlebarEmoji);
+}
+"""
+with open(site_config_path, 'w', encoding='utf-8') as f:
+    f.write(site_config_code)
+print(f"✓ Created / updated {site_config_path}")
+
+# 3. Create / Update /admin/page.tsx (Site Identity & Branding)
+admin_dir = os.path.join(app_dir, 'admin')
+os.makedirs(admin_dir, exist_ok=True)
+admin_page_path = os.path.join(admin_dir, 'page.tsx')
+
+admin_page_code = """'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -9,11 +135,16 @@ import {
   CheckCircle2, 
   RefreshCw, 
   Image as ImageIcon, 
+  Smile, 
+  Globe, 
   Cpu, 
   CreditCard, 
+  Wallet, 
   Users, 
+  Utensils, 
+  Tag, 
   Key,
-  Loader2
+  Languages
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { 
@@ -29,7 +160,6 @@ export default function AdminSettingsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [saved, setSaved] = useState<boolean>(false);
-  const [uploadingTarget, setUploadingTarget] = useState<'titlebar' | 'favicon' | null>(null);
 
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
   const [titlebarEmoji, setTitlebarEmoji] = useState<string>(DEFAULT_SITE_ICON);
@@ -70,42 +200,27 @@ export default function AdminSettingsPage() {
     setFaviconImage(cfg.faviconImage);
   }, []);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, target: 'titlebar' | 'favicon') => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, target: 'titlebar' | 'favicon') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      alert('File size exceeds 5MB limit.');
+    if (file.size > 2 * 1024 * 1024) {
+      alert('File size exceeds the 2MB limit.');
       return;
     }
 
-    setUploadingTarget(target);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('type', target);
-
-      const res = await fetch('/api/admin/upload-branding', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success && data.url) {
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      const result = uploadEvent.target?.result as string;
+      if (result) {
         if (target === 'titlebar') {
-          setTitlebarImage(data.url);
+          setTitlebarImage(result);
         } else {
-          setFaviconImage(data.url);
+          setFaviconImage(result);
         }
-      } else {
-        alert('Upload failed: ' + (data.error || 'Server error'));
       }
-    } catch (err: any) {
-      alert('Error uploading file: ' + (err?.message || 'Network error'));
-    } finally {
-      setUploadingTarget(null);
-      if (e.target) e.target.value = '';
-    }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSave = (e: React.FormEvent) => {
@@ -158,7 +273,7 @@ export default function AdminSettingsPage() {
             </h1>
           </div>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            Images are saved to the local public folder (`/uploads/`) with automatic emoji fallback support.
+            Configure application name, titlebar logo, and browser tab favicon with automatic emoji fallbacks.
           </p>
         </div>
 
@@ -245,7 +360,7 @@ export default function AdminSettingsPage() {
                 Titlebar & Sidebar Brand Icon
               </h2>
               <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                Upload an image to store it into `/public/uploads/`. If removed, the application defaults to the fallback emoji.
+                Upload an image logo. If no image is uploaded or if removed, the system defaults to the emoji below.
               </p>
             </div>
             <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border w-fit ${
@@ -253,7 +368,7 @@ export default function AdminSettingsPage() {
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
                 : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
             }`}>
-              {isTitlebarImageActive ? 'Active: Local Image' : 'Active: Default Emoji'}
+              {isTitlebarImageActive ? 'Active: Uploaded Image' : 'Active: Default Emoji'}
             </span>
           </div>
 
@@ -273,21 +388,15 @@ export default function AdminSettingsPage() {
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  disabled={uploadingTarget === 'titlebar'}
                   onClick={() => titlebarFileRef.current?.click()}
-                  className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80 disabled:opacity-50"
+                  className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80"
                   style={{ 
                     backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d', 
                     borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                 >
-                  {uploadingTarget === 'titlebar' ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />
-                  ) : (
-                    <Upload className="h-4 w-4" />
-                  )}
-                  {uploadingTarget === 'titlebar' ? 'Uploading...' : 'Upload Image'}
+                  <Upload className="h-4 w-4" /> Upload Image
                 </button>
                 {titlebarImage && (
                   <button
@@ -299,11 +408,6 @@ export default function AdminSettingsPage() {
                   </button>
                 )}
               </div>
-              {titlebarImage && (
-                <p className="text-[10px] font-mono opacity-60 truncate">
-                  Path: {titlebarImage}
-                </p>
-              )}
             </div>
 
             {/* Emoji Fallback Box */}
@@ -325,7 +429,7 @@ export default function AdminSettingsPage() {
                   }} 
                 />
                 <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  Used whenever no custom image is present.
+                  Used whenever no custom image is supplied.
                 </span>
               </div>
             </div>
@@ -334,11 +438,11 @@ export default function AdminSettingsPage() {
           {/* Live Preview */}
           <div className="pt-2 border-t" style={{ borderColor: isDayMode ? '#f1f5f9' : '#1e293b' }}>
             <span className="font-bold text-[11px] block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-              Header / Sidebar Live Preview:
+              Sidebar & Header Preview:
             </span>
             <div className="flex items-center gap-2.5 p-3 rounded-2xl border w-fit" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
               {isTitlebarImageActive ? (
-                <img src={titlebarImage} alt="Titlebar Logo" className="w-8 h-8 object-contain rounded shrink-0" />
+                <img src={titlebarImage} alt="Titlebar Logo" className="w-7 h-7 object-contain rounded" />
               ) : (
                 <span className="text-2xl">{titlebarEmoji || DEFAULT_SITE_ICON}</span>
               )}
@@ -360,7 +464,7 @@ export default function AdminSettingsPage() {
                 Browser Favicon
               </h2>
               <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                Upload an icon for browser tabs (saved to `/public/uploads/`). Defaults to emoji SVG if empty.
+                Upload an icon for browser tabs (PNG, ICO, SVG). If no image is uploaded, defaults to emoji.
               </p>
             </div>
             <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border w-fit ${
@@ -368,7 +472,7 @@ export default function AdminSettingsPage() {
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
                 : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
             }`}>
-              {isFaviconImageActive ? 'Active: Local Favicon' : 'Active: Default Emoji'}
+              {isFaviconImageActive ? 'Active: Uploaded Favicon' : 'Active: Default Emoji'}
             </span>
           </div>
 
@@ -388,21 +492,15 @@ export default function AdminSettingsPage() {
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  disabled={uploadingTarget === 'favicon'}
                   onClick={() => faviconFileRef.current?.click()}
-                  className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80 disabled:opacity-50"
+                  className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80"
                   style={{ 
                     backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d', 
                     borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                 >
-                  {uploadingTarget === 'favicon' ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />
-                  ) : (
-                    <Upload className="h-4 w-4" />
-                  )}
-                  {uploadingTarget === 'favicon' ? 'Uploading...' : 'Upload Favicon'}
+                  <Upload className="h-4 w-4" /> Upload Favicon
                 </button>
                 {faviconImage && (
                   <button
@@ -414,11 +512,6 @@ export default function AdminSettingsPage() {
                   </button>
                 )}
               </div>
-              {faviconImage && (
-                <p className="text-[10px] font-mono opacity-60 truncate">
-                  Path: {faviconImage}
-                </p>
-              )}
             </div>
 
             {/* Favicon Emoji Fallback */}
@@ -440,13 +533,13 @@ export default function AdminSettingsPage() {
                   }} 
                 />
                 <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  Converts dynamically into an SVG favicon if no file is uploaded.
+                  Converts dynamically into an SVG favicon if no image is uploaded.
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Browser Tab Preview */}
+          {/* Browser Tab Mockup Preview */}
           <div className="pt-2 border-t" style={{ borderColor: isDayMode ? '#f1f5f9' : '#1e293b' }}>
             <span className="font-bold text-[11px] block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
               Browser Tab Appearance Preview:
@@ -497,3 +590,42 @@ export default function AdminSettingsPage() {
     </div>
   );
 }
+"""
+with open(admin_page_path, 'w', encoding='utf-8') as f:
+    f.write(admin_page_code)
+print(f"✓ Created / updated {admin_page_path}")
+
+# 4. Update Sidebar.tsx to handle both image URLs and emojis
+sidebar_candidates = [
+    os.path.join(components_dir, 'Sidebar.tsx'),
+    'apps/web/src/components/Sidebar.tsx',
+    'src/components/Sidebar.tsx'
+]
+sidebar_path = next((p for p in sidebar_candidates if os.path.exists(p)), None)
+
+if sidebar_path:
+    with open(sidebar_path, 'r', encoding='utf-8') as f:
+        sidebar_code = f.read()
+
+    # Add helper isImageIcon if missing
+    if 'isImageIcon' not in sidebar_code:
+        insert_marker = "const displayName = mounted ? siteName : DEFAULT_SITE_NAME;"
+        helper_def = """  const isImageIcon = (icon: string) => 
+    typeof icon === 'string' && (icon.startsWith('data:image') || icon.startsWith('/') || icon.startsWith('http://') || icon.startsWith('https://'));\n\n  """
+        if insert_marker in sidebar_code:
+            sidebar_code = sidebar_code.replace(insert_marker, helper_def + insert_marker)
+
+        # Replace standard span renderings with image checks
+        # Mobile top bar icon
+        sidebar_code = sidebar_code.replace(
+            '<span className="text-2xl">{displayIcon}</span>',
+            '{isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-8 h-8 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}'
+        )
+
+        with open(sidebar_path, 'w', encoding='utf-8') as f:
+            f.write(sidebar_code)
+        print(f"✓ Updated image rendering support in {sidebar_path}")
+    else:
+        print(f"✓ Sidebar already supports image icons: {sidebar_path}")
+
+print("\n🚀 Patch successfully installed!")
