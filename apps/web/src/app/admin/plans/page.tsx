@@ -106,8 +106,8 @@ const DEFAULT_PRESET_NUTRITION_PRO: SubscriptionPackageConfig = {
 };
 
 const GEMINI_MODEL_VERSIONS = [
-  { value: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash (Latest Recommended)' },
-  { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite (Lightweight & Fast)' },
+  { value: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
+  { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' },
   { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Fast)' },
   { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Deep Reasoning)' },
   { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (Standard)' },
@@ -905,7 +905,7 @@ export default function AdminSubscriptionPlans() {
                 >
                   {(selectedAiProvider === 'gemini' ? GEMINI_MODEL_VERSIONS : OPENAI_MODEL_VERSIONS).map((m) => (
                     <option key={m.value} value={m.value}>
-                      {m.label} {m.value === activeSettingsModel ? '★ [Active in AI Settings]' : ''}
+                      {m.label} {m.value === activeSettingsModel ? '★ [Active]' : ''}
                     </option>
                   ))}
                 </select>

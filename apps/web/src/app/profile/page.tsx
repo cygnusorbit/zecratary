@@ -295,7 +295,7 @@ export default function ProfilePage() {
             const rawSlug = (cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
             if (rawSlug === 'pro-unlimited') return;
 
-            const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
+            const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|Free)$/i, '');
             const isFree = cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0);
             
             let planFeatures = Array.isArray(cfg.features) && cfg.features.length > 0 ? cfg.features : null;
