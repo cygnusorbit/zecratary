@@ -128,6 +128,7 @@ export default function LoginPage() {
         }
 
         setCurrentUser(matched);
+        if (typeof document !== 'undefined') { document.cookie = `zecratary_session=${encodeURIComponent(JSON.stringify(matched))}; path=/; max-age=604800; SameSite=Lax`; }
         window.dispatchEvent(new Event('zecratary_users_updated'));
         window.dispatchEvent(new Event('zecratary_auth_changed'));
         window.dispatchEvent(new Event('storage'));

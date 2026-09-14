@@ -62,7 +62,7 @@ export const setCurrentUser = (user: User | null) => {
     localStorage.setItem('zecratary_user', JSON.stringify(user));
   } else {
     localStorage.removeItem('zecratary_current_user');
-    if (typeof document !== 'undefined') { document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax'; }
+    if (typeof document !== 'undefined') { document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax;'; }
     localStorage.removeItem('zecratary_user');
   }
   window.dispatchEvent(new Event('zecratary_auth_changed'));
@@ -71,7 +71,7 @@ export const setCurrentUser = (user: User | null) => {
 export const logoutUser = () => {
   if (typeof window === 'undefined') return;
   localStorage.removeItem('zecratary_current_user');
-    if (typeof document !== 'undefined') { document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax'; }
+    if (typeof document !== 'undefined') { document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax;'; }
   localStorage.removeItem('zecratary_user');
   window.dispatchEvent(new Event('zecratary_auth_changed'));
   window.location.href = '/login';
