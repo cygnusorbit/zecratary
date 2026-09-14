@@ -57,9 +57,9 @@ export const getCurrentUser = (): User | null => {
 export const setCurrentUser = (user: User | null) => {
   if (typeof window === 'undefined') return;
   if (user) {
-    localStorage.setItem('zecratary_current_user', JSON.stringify(user));
+    // seed removed to prevent auto-login loop);
     if (typeof document !== 'undefined') { document.cookie = `zecratary_session=${encodeURIComponent(JSON.stringify(user))}; path=/; max-age=604800; SameSite=Lax`; }
-    localStorage.setItem('zecratary_user', JSON.stringify(user));
+    // seed removed to prevent auto-login loop);
   } else {
     localStorage.removeItem('zecratary_current_user');
     if (typeof document !== 'undefined') { document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax;'; }
@@ -68,24 +68,33 @@ export const setCurrentUser = (user: User | null) => {
   window.dispatchEvent(new Event('zecratary_auth_changed'));
 };
 
-export const logoutUser = () => {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem('zecratary_current_user');
-    if (typeof document !== 'undefined') { document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax;'; }
-  localStorage.removeItem('zecratary_user');
-  window.dispatchEvent(new Event('zecratary_auth_changed'));
-  window.location.href = '/login';
-};
+export function logoutUser(): void {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem('zecratary_current_user');
+      localStorage.removeItem('zecratary_user');
+      localStorage.removeItem('zecratary_admin_impersonator');
+      sessionStorage.clear();
+      document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax;';
+      document.cookie = 'zecratary_session=; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax;';
+    } catch (_) {}
+    window.dispatchEvent(new Event('zecratary_auth_changed'));
+    window.dispatchEvent(new Event('storage'));
+    window.location.href = '/login';
+  }
+}
 
 // Edge Middleware Cookie Synchronization
-function syncSessionCookie(user: User | null): void {
+export function syncSessionCookie(user: User | null): void {
   if (typeof document === 'undefined') return;
   if (user) {
-    const payload = encodeURIComponent(JSON.stringify({ 
-      id: user.id, 
-      email: user.email, 
-      role: user.role || 'user' 
+    const payload = encodeURIComponent(JSON.stringify({
+      id: user.id,
+      email: user.email,
+      role: user.role || 'user'
     }));
+    document.cookie = `zecratary_session=${payload}; path=/; max-age=604800; SameSite=Lax`;
   } else {
+    document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax';
   }
 }

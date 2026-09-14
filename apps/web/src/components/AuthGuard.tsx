@@ -14,6 +14,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     initAuthStorage();
     const user = getCurrentUser();
+      const hasCookie = typeof document !== 'undefined' && document.cookie.includes('zecratary_session=');
     const isPublicRoute = PUBLIC_ROUTES.includes(pathname);
 
     // 1. Unauthenticated users -> Redirect to /login

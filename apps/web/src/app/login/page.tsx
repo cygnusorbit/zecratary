@@ -55,52 +55,34 @@ export default function LoginPage() {
     setConfig(getSocialLoginConfig());
   }, []);
 
-  useEffect(() => {
-    syncTheme();
-    fetchLiveConfig();
-
-    const handleUpdate = () => fetchLiveConfig();
-    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
-    window.addEventListener('zecratary_social_login_updated', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
-      window.removeEventListener('zecratary_social_login_updated', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
-    };
-  }, [syncTheme, fetchLiveConfig]);
-
-  // Capture backend OAuth redirects
-  useEffect(() => {
+      useEffect(() => {
     initAuthStorage();
-    if (getCurrentUser()) {
-      router.replace('/profile');
-      return;
-    }
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('error') === 'unauthorized_access') {
+        localStorage.removeItem('zecratary_current_user');
+        localStorage.removeItem('zecratary_user');
+        document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax;';
+        window.history.replaceState({}, document.title, '/login');
+        return;
+      }
 
-    const errParam = searchParams.get('error');
-    if (errParam) {
-      setError(decodeURIComponent(errParam));
-      return;
-    }
+      const active = getCurrentUser();
+      const hasCookie = document.cookie.includes('zecratary_session=');
 
-    const isSocialSuccess = searchParams.get('social_success') === 'true';
-    if (isSocialSuccess) {
-      const provider = (searchParams.get('provider') || 'google') as SocialProvider;
-      const callbackEmail = searchParams.get('email') || '';
-      const callbackName = searchParams.get('name') || '';
+      // If user remains in storage but cookie is gone, this was a logout - clear storage
+      if (active && !hasCookie) {
+        localStorage.removeItem('zecratary_current_user');
+        localStorage.removeItem('zecratary_user');
+        return;
+      }
 
-      if (callbackEmail) {
-        setSuccess(`${t('signedInWith') || 'Signed in with'} ${provider.toUpperCase()}! Redirecting...`);
-        executeSocialAuth({
-          name: callbackName,
-          email: callbackEmail,
-          provider
-        });
-        setTimeout(() => router.replace('/profile'), 600);
+      // Only redirect to profile if BOTH storage and session cookie are active
+      if (active && hasCookie) {
+        window.location.href = '/profile';
       }
     }
-  }, [searchParams, router, t]);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
