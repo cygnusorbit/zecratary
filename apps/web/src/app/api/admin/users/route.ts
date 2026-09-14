@@ -140,6 +140,14 @@ export async function DELETE(req: Request) {
     const cleanEmail = (email || '').trim().toLowerCase();
     const cleanId = (id || '').trim().toLowerCase();
 
+    // Guard: Only usr_admin_1 is permanently protected from deletion
+    if (cleanId === 'usr_admin_1' || id === 'usr_admin_1') {
+      return NextResponse.json(
+        { success: false, error: 'The primary system administrator account (usr_admin_1) cannot be deleted.' },
+        { status: 403 }
+      );
+    }
+
     const deletedList = readDeleted();
     if (cleanEmail && !deletedList.includes(cleanEmail)) deletedList.push(cleanEmail);
     if (cleanId && !deletedList.includes(cleanId)) deletedList.push(cleanId);

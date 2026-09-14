@@ -83,28 +83,11 @@ export default function AdminUserManagementPage() {
   const [editSubscriptionPlan, setEditSubscriptionPlan] = useState<string>('taster');
   const [editError, setEditError] = useState('');
 
-  // Helper: Identify Root / Primary First Administrator
+    // Helper: Strictly identify primary root administrator (usr_admin_1)
   const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
     if (!targetUser) return false;
-    
-    if (
-      targetUser.id === 'usr_admin_1' || 
-      targetUser.email.toLowerCase() === 'admin@zecratary.com' ||
-      targetUser.email.toLowerCase() === 'admin@foodieprep.com'
-    ) {
-      return true;
-    }
-
-    const sortedAdmins = users
-      .filter((u) => u.role === 'admin')
-      .sort((a, b) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return dateA - dateB;
-      });
-
-    return sortedAdmins.length > 0 && sortedAdmins[0].id === targetUser.id;
-  }, [users]);
+    return targetUser.id === 'usr_admin_1';
+  }, []);
 
   const isEditingFirstAdmin = useMemo(() => {
     const target = users.find((u) => u.id === editingUserId);
@@ -1235,7 +1218,7 @@ export default function AdminUserManagementPage() {
                               }}
                               title={
                                 isPrimary
-                                  ? 'Cannot delete primary system admin'
+                                  ? 'Cannot delete primary system admin (usr_admin_1)'
                                   : isCurrent
                                     ? 'Cannot delete active session account'
                                     : 'Delete Admin'

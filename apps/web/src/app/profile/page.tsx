@@ -1024,6 +1024,11 @@ export default function ProfilePage() {
                   </span>
                 </div>
                 <p className="text-xs font-mono" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{user.email}</p>
+                {user.id && (
+                  <p className="text-[11px] font-mono tracking-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    ID: {user.id}
+                  </p>
+                )}
               </div>
             </div>
 

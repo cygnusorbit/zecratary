@@ -83,28 +83,11 @@ export default function AdminUserManagementPage() {
   const [editSubscriptionPlan, setEditSubscriptionPlan] = useState<string>('taster');
   const [editError, setEditError] = useState('');
 
-  // Helper: Identify Root / Primary First Administrator
+    // Helper: Strictly identify primary root administrator (usr_admin_1)
   const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
     if (!targetUser) return false;
-    
-    if (
-      targetUser.id === 'usr_admin_1' || 
-      targetUser.email.toLowerCase() === 'admin@zecratary.com' ||
-      targetUser.email.toLowerCase() === 'admin@foodieprep.com'
-    ) {
-      return true;
-    }
-
-    const sortedAdmins = users
-      .filter((u) => u.role === 'admin')
-      .sort((a, b) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return dateA - dateB;
-      });
-
-    return sortedAdmins.length > 0 && sortedAdmins[0].id === targetUser.id;
-  }, [users]);
+    return targetUser.id === 'usr_admin_1';
+  }, []);
 
   const isEditingFirstAdmin = useMemo(() => {
     const target = users.find((u) => u.id === editingUserId);
@@ -908,28 +891,8 @@ export default function AdminUserManagementPage() {
             <UserPlus className="h-4 w-4" /> Add New User
           </button>
           
-          <Link
-            href="/admin/plans"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)',
-              color: '#cbd5e1'
-            }}
-          >
-            <CreditCard className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Manage Plans
-          </Link>
-          <Link
-            href="/admin"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)',
-              color: '#cbd5e1'
-            }}
-          >
-            <Shield className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} /> Admin Settings
-          </Link>
+          
+          
         </div>
       </div>
 
@@ -1235,7 +1198,7 @@ export default function AdminUserManagementPage() {
                               }}
                               title={
                                 isPrimary
-                                  ? 'Cannot delete primary system admin'
+                                  ? 'Cannot delete primary system admin (usr_admin_1)'
                                   : isCurrent
                                     ? 'Cannot delete active session account'
                                     : 'Delete Admin'
