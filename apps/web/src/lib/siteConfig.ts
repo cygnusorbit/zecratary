@@ -89,4 +89,39 @@ export function saveSiteConfig(config: Partial<SiteIdentityConfig>) {
   window.dispatchEvent(new Event('zecratary_site_settings_changed'));
   window.dispatchEvent(new Event('storage'));
   updateFavicon(updated.faviconImage || updated.faviconEmoji || updated.titlebarEmoji);
+
+  // Sync to backend API for cross-browser synchronization
+  try {
+    fetch('/api/system-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteSettings: updated })
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+export async function syncSiteConfigFromServer(): Promise<SiteIdentityConfig | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const res = await fetch('/api/system-settings', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.settings?.siteSettings) {
+        const s = data.settings.siteSettings;
+        const current = getSiteConfig();
+        const merged: SiteIdentityConfig = {
+          siteName: s.siteName || current.siteName,
+          titlebarEmoji: s.titlebarEmoji || current.titlebarEmoji,
+          titlebarImage: s.titlebarImage !== undefined ? s.titlebarImage : current.titlebarImage,
+          faviconEmoji: s.faviconEmoji || current.faviconEmoji,
+          faviconImage: s.faviconImage !== undefined ? s.faviconImage : current.faviconImage
+        };
+        localStorage.setItem('zecratary_site_settings', JSON.stringify(merged));
+        window.dispatchEvent(new Event('zecratary_site_settings_changed'));
+        updateFavicon(merged.faviconImage || merged.faviconEmoji || merged.titlebarEmoji);
+        return merged;
+      }
+    }
+  } catch (_) {}
+  return null;
 }

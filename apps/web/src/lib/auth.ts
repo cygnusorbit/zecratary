@@ -194,6 +194,14 @@ export function setCurrentUser(user: User): void {
     localStorage.setItem('zecratary_current_user', JSON.stringify(user));
     localStorage.setItem('zecratary_user', JSON.stringify(user));
     syncSessionCookie(user);
+  // Synchronize user to server disk storage
+  try {
+    fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(user)
+    }).catch(() => {});
+  } catch (_) {}
     window.dispatchEvent(new CustomEvent('zecratary_auth_changed', { detail: user }));
     window.dispatchEvent(new Event('storage'));
   }

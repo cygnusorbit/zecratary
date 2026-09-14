@@ -1,0 +1,24 @@
+[
+  {
+    "id": "taster",
+    "name": "Taster",
+    "slug": "taster",
+    "isFree": true,
+    "monthlyPriceDollars": 0,
+    "annualPriceDollars": 0,
+    "tokenLimit": 50000,
+    "tokenReimburseFrequency": "monthly",
+    "description": "Free tier with standard features"
+  },
+  {
+    "id": "nutrition-pro",
+    "name": "Nutrition Pro",
+    "slug": "nutrition-pro",
+    "isFree": false,
+    "monthlyPriceDollars": 8.99,
+    "annualPriceDollars": 59.99,
+    "tokenLimit": 1000000,
+    "tokenReimburseFrequency": "monthly",
+    "description": "Full premium access"
+  }
+]

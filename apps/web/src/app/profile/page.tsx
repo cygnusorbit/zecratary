@@ -201,49 +201,42 @@ export default function ProfilePage() {
   const [activeModelName, setActiveModelName] = useState('gemini-1.5-flash');
 
   // Dynamic Theme & Day/Night Mode Synchronization
-  const applySavedTheme = useCallback(() => {
+    // Dynamic Theme & Day/Night Mode Synchronization
+  const applySavedTheme = useCallback(async () => {
     try {
+      // 1. Fetch server-persisted theme and branding configuration
+      try {
+        const res = await fetch('/api/system-settings', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.settings) {
+            const s = data.settings;
+            if (s.themeMode && !localStorage.getItem('zecratary_theme_mode')) {
+              localStorage.setItem('zecratary_theme_mode', s.themeMode);
+            }
+            if (s.themeColors && !localStorage.getItem('zecratary_theme_colors')) {
+              localStorage.setItem('zecratary_theme_colors', JSON.stringify(s.themeColors));
+            }
+            if (s.currency && !localStorage.getItem('zecratary_currency')) {
+              localStorage.setItem('zecratary_currency', s.currency);
+            }
+          }
+        }
+      } catch (_) {}
+
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
       const isDay = mode === 'light';
       setIsDayMode(isDay);
 
       const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
+      if (stored) {
+        const c = JSON.parse(stored);
+        const root = document.documentElement;
+        if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
+        if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
+        if (c.accentEmerald || c.accentColor) {
+          root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
+          root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor);
         }
       }
 
@@ -283,8 +276,24 @@ export default function ProfilePage() {
     };
   }, [applySavedTheme]);
 
-  const syncPlansFromAdmin = useCallback(() => {
+    const syncPlansFromAdmin = useCallback(async () => {
     const plansMap = new Map<string, SubscriptionPlanItem>();
+
+    // 1. Fetch live system plan configuration from server
+    try {
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const serverConfigs = data.configs || data.plans;
+        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
+          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
+          window.dispatchEvent(new Event('zecratary_plans_updated'));
+        }
+        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
+          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
+        }
+      }
+    } catch (_) {}
 
     try {
       const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
@@ -295,7 +304,7 @@ export default function ProfilePage() {
             const rawSlug = (cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
             if (rawSlug === 'pro-unlimited') return;
 
-            const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|Free)$/i, '');
+            const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
             const isFree = cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0);
             
             let planFeatures = Array.isArray(cfg.features) && cfg.features.length > 0 ? cfg.features : null;

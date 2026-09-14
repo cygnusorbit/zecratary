@@ -1,0 +1,15 @@
+{
+  "themeMode": "dark",
+  "themeColors": {
+    "primary": "#E05638",
+    "primaryHover": "#c94529",
+    "accentEmerald": "#10b981",
+    "backgroundColor": "#070b13",
+    "cardBackground": "#0b0f17",
+    "cardBorder": "#1e293b"
+  },
+  "currency": "USD",
+  "currencySymbol": "$",
+  "brandEmoji": "⚡",
+  "aiModel": "gemini-1.5-flash"
+}

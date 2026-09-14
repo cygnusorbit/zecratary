@@ -1405,6 +1405,17 @@ export default function AdminSubscriptionPlans() {
                       <div className="space-y-1.5 min-w-0 flex-1 pr-3">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{pkg.name}</span>
+                          <span 
+                            className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
+                            style={{
+                              backgroundColor: isDayMode ? '#f1f5f9' : 'rgba(15, 23, 42, 0.6)',
+                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                              color: isDayMode ? '#475569' : '#94a3b8'
+                            }}
+                            title={`Plan ID: ${pkg.id || pkg.slug}`}
+                          >
+                            ID: {pkg.id || pkg.slug}
+                          </span>
                           
                           {pkg.isDefault ? (
                             <span 
@@ -1599,9 +1610,16 @@ export default function AdminSubscriptionPlans() {
 
               <div className="space-y-3.5">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-2xl font-black text-[#589c3a]">
+                  <div>
+                    <h3 className="text-2xl font-black text-[#589c3a]">
                     {form.name || t('planNameLabel', 'Plan Name')}
                   </h3>
+                    {(form.id || form.slug) && (
+                      <span className="text-[10px] font-mono text-slate-400 block mt-0.5 font-bold">
+                        ID: {form.id || form.slug}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-[10px] bg-orange-100 text-orange-800 font-bold px-2.5 py-1 rounded-full border border-orange-300 font-mono">
                     {form.tokenLimit === -1 ? 'Unlimited Tokens' : `${(form.tokenLimit || 0).toLocaleString()} tokens`} ({getReimburseLabel(form.tokenReimburseFrequency)})
                   </span>
