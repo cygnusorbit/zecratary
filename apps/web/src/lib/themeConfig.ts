@@ -9,6 +9,7 @@ export interface ThemeColors {
   backgroundDark?: string;
   cardBackground?: string;
   cardBorder?: string;
+  textSecondary?: string;
 }
 
 export function applyThemeToDocument(colors: ThemeColors | null | undefined): void {
@@ -44,6 +45,10 @@ export function applyThemeToDocument(colors: ThemeColors | null | undefined): vo
   }
   if (colors.cardBorder && !isDayMode) {
     root.style.setProperty('--color-border', colors.cardBorder);
+    root.style.setProperty('--color-border-dark', colors.cardBorder);
+  }
+  if (colors.textSecondary && !isDayMode) {
+    root.style.setProperty('--color-text-secondary', colors.textSecondary);
   }
 }
 
