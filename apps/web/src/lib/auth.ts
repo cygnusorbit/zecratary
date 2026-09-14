@@ -58,9 +58,11 @@ export const setCurrentUser = (user: User | null) => {
   if (typeof window === 'undefined') return;
   if (user) {
     localStorage.setItem('zecratary_current_user', JSON.stringify(user));
+    if (typeof document !== 'undefined') { document.cookie = `zecratary_session=${encodeURIComponent(JSON.stringify(user))}; path=/; max-age=604800; SameSite=Lax`; }
     localStorage.setItem('zecratary_user', JSON.stringify(user));
   } else {
     localStorage.removeItem('zecratary_current_user');
+    if (typeof document !== 'undefined') { document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax'; }
     localStorage.removeItem('zecratary_user');
   }
   window.dispatchEvent(new Event('zecratary_auth_changed'));
@@ -69,6 +71,7 @@ export const setCurrentUser = (user: User | null) => {
 export const logoutUser = () => {
   if (typeof window === 'undefined') return;
   localStorage.removeItem('zecratary_current_user');
+    if (typeof document !== 'undefined') { document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax'; }
   localStorage.removeItem('zecratary_user');
   window.dispatchEvent(new Event('zecratary_auth_changed'));
   window.location.href = '/login';
@@ -83,8 +86,6 @@ function syncSessionCookie(user: User | null): void {
       email: user.email, 
       role: user.role || 'user' 
     }));
-    document.cookie = `zecratary_session=${payload}; path=/; max-age=604800; SameSite=Lax`;
   } else {
-    document.cookie = 'zecratary_session=; path=/; max-age=0; SameSite=Lax';
   }
 }

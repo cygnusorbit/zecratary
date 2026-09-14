@@ -8,10 +8,10 @@ export function middleware(req: NextRequest) {
   let session: { email?: string; role?: string; provider?: string } | null = null;
   if (sessionCookie) {
     try {
-      session = JSON.parse(sessionCookie);
+      session = JSON.parse(decodeURIComponent(sessionCookie));
     } catch (_) {
       try {
-        session = JSON.parse(decodeURIComponent(sessionCookie));
+        session = JSON.parse(sessionCookie);
       } catch (_) {}
     }
   }
@@ -21,7 +21,7 @@ export function middleware(req: NextRequest) {
     session && (session.role === 'admin' || session.email?.toLowerCase().includes('admin'))
   );
 
-  // 1. Enforce Admin Only Routes
+  // 1. Enforce Admin Only Protection
   if (pathname.startsWith('/admin')) {
     if (!isAuthenticated) {
       const loginUrl = new URL('/login', req.url);
@@ -33,7 +33,7 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  // 2. Enforce Protected Member Routes
+  // 2. Enforce Authenticated Member Routes
   if (
     pathname.startsWith('/profile') || 
     pathname.startsWith('/planner') || 
@@ -46,7 +46,7 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  // 3. Guest-Only Routes: Bounce authenticated users away from Login and Register
+  // 3. Guest Only Routes
   if ((pathname === '/login' || pathname === '/register') && isAuthenticated) {
     return NextResponse.redirect(new URL('/profile', req.url));
   }
