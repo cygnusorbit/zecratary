@@ -1,29 +1,102 @@
-'use client';
+import os
+import glob
+import re
+
+# 1. Discover active App Router root and lib directory
+candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/lib/auth.ts', recursive=True)
+    if matches:
+        app_dir = os.path.join(os.path.dirname(os.path.dirname(matches[0])), 'app')
+
+if not app_dir:
+    print("❌ Error: Could not locate Next.js app directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+
+# 2. Synchronize globals.css with Day Mode (.light) tokens and body styles
+css_candidates = [
+    os.path.join(app_dir, 'globals.css'),
+    os.path.join(base_dir, 'src', 'app', 'globals.css'),
+    os.path.join(base_dir, 'styles', 'globals.css'),
+    'apps/web/src/app/globals.css',
+    'src/app/globals.css',
+    'styles/globals.css'
+]
+css_files = [p for p in set(css_candidates) if os.path.exists(p)]
+if not css_files:
+    css_files = glob.glob('**/globals.css', recursive=True)
+    css_files = [p for p in css_files if 'node_modules' not in p and '.next' not in p]
+
+light_css_tokens = """
+/* Zecratary Day/Light Mode Global Theme Tokens */
+:root.light, html.light, body.light {
+  --color-bg: #f8fafc;
+  --color-bg-dark: #f8fafc;
+  --color-card: #ffffff;
+  --color-card-dark: #ffffff;
+  --color-inner: #f1f5f9;
+  --color-inner-dark: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-secondary: #64748b;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+body {
+  background-color: var(--color-bg, #070b13);
+  color: var(--color-text, #ffffff);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+"""
+
+for cp in set(css_files):
+    with open(cp, 'r', encoding='utf-8') as f:
+        css_content = f.read()
+
+    if ':root.light' not in css_content:
+        css_content = css_content.rstrip() + "\n\n" + light_css_tokens + "\n"
+        with open(cp, 'w', encoding='utf-8') as f:
+            f.write(css_content)
+        print(f"✓ Injected Day Mode CSS tokens into: {cp}")
+    else:
+        print(f"✓ Day Mode CSS tokens already present in: {cp}")
+
+# 3. Patch /login/page.tsx with Day Mode synchronization and robust auth handlers
+login_files = glob.glob(f'{app_dir}/**/login/page.tsx', recursive=True)
+if not login_files:
+    login_files = glob.glob('**/login/page.tsx', recursive=True)
+login_files = [p for p in login_files if 'node_modules' not in p and '.next' not in p]
+
+if not login_files:
+    login_files = [os.path.join(app_dir, 'login', 'page.tsx')]
+    os.makedirs(os.path.dirname(login_files[0]), exist_ok=True)
+
+login_page_code = """'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  UserPlus, Mail, Lock, User as UserIcon, ArrowLeft, ArrowRight,
-  CheckCircle2, AlertCircle, Eye, EyeOff, Sparkles, RefreshCw
+  LogIn, Mail, Lock, Eye, EyeOff, AlertCircle, RefreshCw, ArrowRight, Sparkles 
 } from 'lucide-react';
 import { 
   initAuthStorage, getCurrentUser, setCurrentUser, 
-  syncSessionCookie, isSessionCookieValid, DEFAULT_USERS, User 
+  syncSessionCookie, isSessionCookieValid, authenticateUser, User 
 } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
-export default function RegisterPage() {
+export default function LoginPage() {
   const router = useRouter();
   const { t } = useTranslation();
 
-  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [agreeTerms, setAgreeTerms] = useState(false);
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isDayMode, setIsDayMode] = useState(false);
@@ -58,12 +131,23 @@ export default function RegisterPage() {
     applySavedTheme();
     initAuthStorage();
 
-    // Prevent redirect loop if already authenticated
+    // Clean up stale unauthorized_access error flags from browser history
     if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('error') === 'unauthorized_access') {
+        localStorage.removeItem('zecratary_current_user');
+        localStorage.removeItem('zecratary_user');
+        window.history.replaceState({}, document.title, '/login');
+        return;
+      }
+
       const active = getCurrentUser();
       const validCookie = isSessionCookieValid();
+
+      // Only redirect if both storage and session cookies are valid
       if (active && validCookie) {
-        window.location.replace(active.role === 'admin' ? '/admin' : '/profile');
+        const dest = active.role === 'admin' ? '/admin' : '/profile';
+        window.location.replace(dest);
         return;
       }
     }
@@ -82,71 +166,23 @@ export default function RegisterPage() {
     };
   }, [applySavedTheme]);
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
-    const cleanName = name.trim();
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPass = password.trim();
-
-    if (!cleanName || !cleanEmail || !cleanPass) {
-      setError('Please fill in all required fields.');
-      return;
-    }
-
-    if (cleanPass.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
-
-    if (cleanPass !== confirmPassword.trim()) {
-      setError('Passwords do not match.');
-      return;
-    }
-
-    if (!agreeTerms) {
-      setError('Please agree to the Terms of Service and Privacy Policy.');
-      return;
-    }
-
     setLoading(true);
 
-    try {
-      initAuthStorage();
-      const rawUsers = localStorage.getItem('zecratary_users');
-      const users: User[] = rawUsers ? JSON.parse(rawUsers) : [...DEFAULT_USERS];
-
-      if (users.some(u => u.email.toLowerCase() === cleanEmail)) {
-        setError('An account with this email already exists.');
-        setLoading(false);
-        return;
-      }
-
-      const newUser: User = {
-        id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        name: cleanName,
-        email: cleanEmail,
-        password: cleanPass,
-        role: 'user',
-        subscriptionPlan: 'taster',
-        subscriptionTier: 'taster',
-        createdAt: new Date().toISOString()
-      };
-
-      users.push(newUser);
-      localStorage.setItem('zecratary_users', JSON.stringify(users));
-      setCurrentUser(newUser);
-      syncSessionCookie(newUser);
-
-      window.location.replace('/profile');
-    } catch (err: any) {
-      setError(err.message || 'Registration failed. Please try again.');
+    const res = authenticateUser(email, password);
+    if (res.success && res.user) {
+      syncSessionCookie(res.user);
+      const dest = res.user.role === 'admin' ? '/admin' : '/profile';
+      window.location.replace(dest);
+    } else {
+      setError(res.error || 'Invalid email address or password.');
       setLoading(false);
     }
   };
 
-  // Color tokens aligned with /manual, /profile and /planner Day Mode
+  // Color tokens aligned with /register, /profile, and /manual Day Mode
   const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
   const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)';
   const cInputBg = isDayMode ? '#f8fafc' : '#070b13';
@@ -176,13 +212,13 @@ export default function RegisterPage() {
               color: 'var(--color-primary, #E05638)'
             }}
           >
-            <UserPlus className="h-6 w-6" />
+            <LogIn className="h-6 w-6" />
           </div>
           <h1 className="text-2xl font-black tracking-tight" style={{ color: cText }}>
-            Create Your Account
+            Welcome Back
           </h1>
           <p className="text-xs" style={{ color: cSubText }}>
-            Join Zecratary to start planning, saving, and organizing recipes.
+            Sign in to access recipes, meal plans, and account preferences.
           </p>
         </div>
 
@@ -197,26 +233,7 @@ export default function RegisterPage() {
           </div>
         )}
 
-        <form onSubmit={handleRegister} className="space-y-4 text-xs">
-          <div>
-            <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
-              Full Name
-            </label>
-            <div className="relative">
-              <UserIcon className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
-              <input 
-                type="text" required value={name} onChange={e => setName(e.target.value)}
-                placeholder="Marcus Vance"
-                className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none font-medium transition shadow-inner"
-                style={{
-                  backgroundColor: cInputBg,
-                  borderColor: cBorder,
-                  color: cText
-                }}
-              />
-            </div>
-          </div>
-
+        <form onSubmit={handleLogin} className="space-y-4 text-xs">
           <div>
             <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
               Email Address
@@ -237,14 +254,23 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
-              Password
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="font-bold" style={{ color: cLabel }}>
+                Password
+              </label>
+              <Link 
+                href="/forgot-password" 
+                className="text-[11px] font-bold hover:underline"
+                style={{ color: 'var(--color-primary, #E05638)' }}
+              >
+                Forgot password?
+              </Link>
+            </div>
             <div className="relative">
               <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
               <input 
                 type={showPassword ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="Min. 6 characters"
+                placeholder="Enter password"
                 className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none transition shadow-inner"
                 style={{
                   backgroundColor: cInputBg,
@@ -262,52 +288,31 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          <div>
-            <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
-              Confirm Password
-            </label>
-            <div className="relative">
-              <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
-              <input 
-                type={showPassword ? 'text' : 'password'} required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
-                placeholder="Repeat password"
-                className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none transition shadow-inner"
-                style={{
-                  backgroundColor: cInputBg,
-                  borderColor: cBorder,
-                  color: cText
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 pt-1">
-            <input 
-              type="checkbox" id="terms" checked={agreeTerms} onChange={e => setAgreeTerms(e.target.checked)}
-              className="w-4 h-4 rounded accent-[var(--color-primary,#E05638)] cursor-pointer"
-            />
-            <label htmlFor="terms" className="text-[11px] cursor-pointer" style={{ color: cSubText }}>
-              I agree to the <span className="underline hover:opacity-80">Terms of Service</span> and <span className="underline hover:opacity-80">Privacy Policy</span>
-            </label>
-          </div>
-
           <button
             type="submit" disabled={loading}
             className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
             {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-            Create Free Account
+            Sign In
           </button>
         </form>
 
         <div className="text-center pt-2 border-t text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-          <span style={{ color: cSubText }}>Already have an account? </span>
-          <Link href="/login" className="font-bold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
-            Sign in
+          <span style={{ color: cSubText }}>Don&apos;t have an account? </span>
+          <Link href="/register" className="font-bold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
+            Create one
           </Link>
         </div>
       </div>
     </div>
   );
 }
+"""
+
+for lp in set(login_files):
+    with open(lp, 'w', encoding='utf-8') as f:
+        f.write(login_page_code)
+    print(f"✓ Provisioned Day Mode compliant Login page at: {lp}")
+
+print("\n🚀 /login day mode and global CSS updated successfully!")

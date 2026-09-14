@@ -1,4 +1,77 @@
-'use client';
+import os
+import glob
+import re
+
+# 1. Discover App Router root and lib directory
+candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/lib/auth.ts', recursive=True)
+    if matches:
+        app_dir = os.path.join(os.path.dirname(os.path.dirname(matches[0])), 'app')
+
+if not app_dir:
+    print("❌ Error: Could not locate Next.js app directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+
+# 2. Patch globals.css to provide global .light Day Mode variables and body binding
+css_candidates = [
+    os.path.join(app_dir, 'globals.css'),
+    os.path.join(base_dir, 'src', 'app', 'globals.css'),
+    os.path.join(base_dir, 'styles', 'globals.css'),
+    'apps/web/src/app/globals.css',
+    'src/app/globals.css',
+    'styles/globals.css'
+]
+css_files = [p for p in set(css_candidates) if os.path.exists(p)]
+if not css_files:
+    css_files = glob.glob('**/globals.css', recursive=True)
+    css_files = [p for p in css_files if 'node_modules' not in p and '.next' not in p]
+
+light_css_tokens = """
+/* Zecratary Day/Light Mode Global Theme Tokens */
+:root.light, html.light, body.light {
+  --color-bg: #f8fafc;
+  --color-bg-dark: #f8fafc;
+  --color-card: #ffffff;
+  --color-card-dark: #ffffff;
+  --color-inner: #f1f5f9;
+  --color-inner-dark: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-secondary: #64748b;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+body {
+  background-color: var(--color-bg, #070b13);
+  color: var(--color-text, #ffffff);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+"""
+
+for cp in set(css_files):
+    with open(cp, 'r', encoding='utf-8') as f:
+        css_content = f.read()
+
+    if ':root.light' not in css_content:
+        css_content = css_content.rstrip() + "\n\n" + light_css_tokens + "\n"
+        with open(cp, 'w', encoding='utf-8') as f:
+            f.write(css_content)
+        print(f"✓ Injected Day Mode CSS tokens into: {cp}")
+    else:
+        print(f"✓ Day Mode CSS tokens already present in: {cp}")
+
+# 3. Patch or provision /register/page.tsx with Day Mode synchronization
+register_dir = os.path.join(app_dir, 'register')
+os.makedirs(register_dir, exist_ok=True)
+register_page_path = os.path.join(register_dir, 'page.tsx')
+
+register_page_code = """'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -311,3 +384,10 @@ export default function RegisterPage() {
     </div>
   );
 }
+"""
+
+with open(register_page_path, 'w', encoding='utf-8') as f:
+    f.write(register_page_code)
+print(f"✓ Provisioned Day Mode compliant Register page at: {register_page_path}")
+
+print("\n🚀 /register day mode and global CSS updated successfully!")

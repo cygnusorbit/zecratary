@@ -50,3 +50,26 @@ body {
   background-color: #0B101D;
   color: #F1F5F9;
 }
+
+
+/* Zecratary Day/Light Mode Global Theme Tokens */
+:root.light, html.light, body.light {
+  --color-bg: #f8fafc;
+  --color-bg-dark: #f8fafc;
+  --color-card: #ffffff;
+  --color-card-dark: #ffffff;
+  --color-inner: #f1f5f9;
+  --color-inner-dark: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-secondary: #64748b;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+body {
+  background-color: var(--color-bg, #070b13);
+  color: var(--color-text, #ffffff);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+

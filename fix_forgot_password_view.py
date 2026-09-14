@@ -1,4 +1,61 @@
-'use client';
+import os
+import glob
+import re
+
+# 1. Discover App Router root and components directory
+candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/lib/auth.ts', recursive=True)
+    if matches:
+        app_dir = os.path.join(os.path.dirname(os.path.dirname(matches[0])), 'app')
+
+if not app_dir:
+    print("❌ Error: Could not locate Next.js app directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+
+# 2. Update Sidebar.tsx to hide sidebar on /forgot-password
+sidebar_candidates = [
+    os.path.join(base_dir, 'components', 'Sidebar.tsx'),
+    os.path.join(base_dir, 'src', 'components', 'Sidebar.tsx'),
+    'apps/web/src/components/Sidebar.tsx',
+    'src/components/Sidebar.tsx'
+]
+sidebar_files = [p for p in set(sidebar_candidates) if os.path.exists(p)]
+if not sidebar_files:
+    sidebar_files = glob.glob('**/Sidebar.tsx', recursive=True)
+    sidebar_files = [p for p in sidebar_files if 'node_modules' not in p and '.next' not in p]
+
+for sp in sidebar_files:
+    with open(sp, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # Expand any existing auth route checks
+    if "pathname === '/forgot-password'" not in content:
+        content = re.sub(
+            r"if\s*\(\s*pathname\s*===\s*['\"]/login['\"]\s*\|\|\s*pathname\s*===\s*['\"]/register['\"]\s*\)",
+            "if (pathname === '/login' || pathname === '/register' || pathname === '/forgot-password')",
+            content
+        )
+        content = re.sub(
+            r"(\['/login',\s*'/register')(\])",
+            r"\1, '/forgot-password'\2",
+            content
+        )
+
+    with open(sp, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print(f"✓ Hid sidebar on /forgot-password in: {sp}")
+
+# 3. Locate all /forgot-password/page.tsx files
+dest_dirs = [os.path.join(app_dir, 'forgot-password')]
+if os.path.exists(os.path.join(app_dir, '(auth)')):
+    dest_dirs.append(os.path.join(app_dir, '(auth)', 'forgot-password'))
+
+forgot_password_code = """'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -371,3 +428,13 @@ export default function ForgotPasswordPage() {
     </div>
   );
 }
+"""
+
+for d in set(dest_dirs):
+    os.makedirs(d, exist_ok=True)
+    target_path = os.path.join(d, 'page.tsx')
+    with open(target_path, 'w', encoding='utf-8') as f:
+        f.write(forgot_password_code)
+    print(f"✓ Provisioned full-width bright Day Mode recovery page at: {target_path}")
+
+print("\n🚀 /forgot-password sidebar removal and bright Day Mode styling completed!")

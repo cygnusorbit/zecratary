@@ -1,4 +1,77 @@
-'use client';
+import os
+import glob
+import re
+
+# 1. Discover active App Router root and lib directory
+candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/lib/auth.ts', recursive=True)
+    if matches:
+        app_dir = os.path.join(os.path.dirname(os.path.dirname(matches[0])), 'app')
+
+if not app_dir:
+    print("❌ Error: Could not locate Next.js app directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+
+# 2. Patch globals.css to guarantee Day Mode (.light) tokens and body styles
+css_candidates = [
+    os.path.join(app_dir, 'globals.css'),
+    os.path.join(base_dir, 'src', 'app', 'globals.css'),
+    os.path.join(base_dir, 'styles', 'globals.css'),
+    'apps/web/src/app/globals.css',
+    'src/app/globals.css',
+    'styles/globals.css'
+]
+css_files = [p for p in set(css_candidates) if os.path.exists(p)]
+if not css_files:
+    css_files = glob.glob('**/globals.css', recursive=True)
+    css_files = [p for p in css_files if 'node_modules' not in p and '.next' not in p]
+
+light_css_tokens = """
+/* Zecratary Day/Light Mode Global Theme Tokens */
+:root.light, html.light, body.light {
+  --color-bg: #f8fafc;
+  --color-bg-dark: #f8fafc;
+  --color-card: #ffffff;
+  --color-card-dark: #ffffff;
+  --color-inner: #f1f5f9;
+  --color-inner-dark: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-secondary: #64748b;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+body {
+  background-color: var(--color-bg, #070b13);
+  color: var(--color-text, #ffffff);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+"""
+
+for cp in set(css_files):
+    with open(cp, 'r', encoding='utf-8') as f:
+        css_content = f.read()
+
+    if ':root.light' not in css_content:
+        css_content = css_content.rstrip() + "\n\n" + light_css_tokens + "\n"
+        with open(cp, 'w', encoding='utf-8') as f:
+            f.write(css_content)
+        print(f"✓ Injected Day Mode CSS tokens into: {cp}")
+    else:
+        print(f"✓ Day Mode CSS tokens already present in: {cp}")
+
+# 3. Locate target forgot-password directories
+dest_dirs = [os.path.join(app_dir, 'forgot-password')]
+if os.path.exists(os.path.join(app_dir, '(auth)')):
+    dest_dirs.append(os.path.join(app_dir, '(auth)', 'forgot-password'))
+
+forgot_password_code = """'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -14,6 +87,7 @@ export default function ForgotPasswordPage() {
   const router = useRouter();
   const { t } = useTranslation();
 
+  // Step state: 1 = Request Code, 2 = Set New Password
   const [step, setStep] = useState<1 | 2>(1);
   const [email, setEmail] = useState('');
   const [tokenInput, setTokenInput] = useState('');
@@ -22,12 +96,13 @@ export default function ForgotPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
+  // UI state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isDayMode, setIsDayMode] = useState(false);
 
-  // Synchronize entire viewport body background to eliminate dark borders
+  // Synchronize entire viewport & body background with Day/Night mode
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -168,6 +243,7 @@ export default function ForgotPasswordPage() {
     }, 600);
   };
 
+  // Color tokens aligned with /login, /register, and /profile Day Mode
   const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
   const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)';
   const cInputBg = isDayMode ? '#f8fafc' : '#070b13';
@@ -178,7 +254,7 @@ export default function ForgotPasswordPage() {
 
   return (
     <div 
-      className="w-full min-h-screen flex items-center justify-center px-4 py-12 font-sans transition-colors duration-200"
+      className="w-full min-h-[90vh] flex items-center justify-center px-4 py-10 font-sans transition-colors duration-200"
       style={{ backgroundColor: cPageBg, color: cText }}
     >
       <div 
@@ -371,3 +447,13 @@ export default function ForgotPasswordPage() {
     </div>
   );
 }
+"""
+
+for d in set(dest_dirs):
+    os.makedirs(d, exist_ok=True)
+    target_path = os.path.join(d, 'page.tsx')
+    with open(target_path, 'w', encoding='utf-8') as f:
+        f.write(forgot_password_code)
+    print(f"✓ Provisioned Day Mode compliant recovery page at: {target_path}")
+
+print("\n🚀 /forgot-password Day Mode and global CSS updated successfully!")
