@@ -73,3 +73,94 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+
+/* Global Day Mode Contrast & Border Normalization */
+:root.light, html.light, body.light {
+  --color-bg: #f8fafc;
+  --color-bg-dark: #f8fafc;
+  --color-card: #ffffff;
+  --color-card-dark: #ffffff;
+  --color-inner: #f1f5f9;
+  --color-inner-dark: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-border-dark: #e2e8f0;
+  --border: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-secondary: #64748b;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+:root.light *, html.light *, body.light * {
+  border-color: var(--color-border, #e2e8f0);
+}
+
+
+/* --- Day Mode Universal Background & Border Reset --- */
+:root.light, html.light, body.light {
+  --color-bg: #f8fafc !important;
+  --color-bg-dark: #f8fafc !important;
+  --color-card: #ffffff !important;
+  --color-card-dark: #ffffff !important;
+  --color-inner: #f1f5f9 !important;
+  --color-inner-dark: #f1f5f9 !important;
+  --color-border: #e2e8f0 !important;
+  --color-border-dark: #e2e8f0 !important;
+  --border: #e2e8f0 !important;
+  --color-text: #0f172a !important;
+  --color-text-secondary: #64748b !important;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html.light,
+html.light body,
+html.light #__next,
+html.light main,
+html.light [class*="bg-[#070b13]"],
+html.light [class*="bg-[#0b0f17]"],
+html.light [class*="bg-[#0B101D]"],
+html.light [class*="bg-[#0e1626]"],
+html.light [class*="bg-[#141b2d]"],
+html.light [class*="bg-slate-950"],
+html.light [class*="bg-slate-900"],
+html.light [class*="bg-black"] {
+  background-color: #f8fafc !important;
+}
+
+html.light [class*="border-[#1e293b]"],
+html.light [class*="border-[#0e1626]"],
+html.light [class*="border-slate-800"],
+html.light [class*="border-slate-900"] {
+  border-color: #e2e8f0 !important;
+}
+
+/* Eliminate layout wrapper borders, paddings, and rounded frames on Auth pages */
+body:has(#login-page-root),
+body:has(#register-page-root),
+body:has(#forgot-password-page-root) {
+  padding: 0 !important;
+  margin: 0 !important;
+  background-color: var(--color-bg, #070b13) !important;
+}
+
+body:has(#login-page-root) main,
+body:has(#register-page-root) main,
+body:has(#forgot-password-page-root) main {
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background-color: transparent !important;
+}
+
+body:has(#login-page-root) > div,
+body:has(#register-page-root) > div,
+body:has(#forgot-password-page-root) > div,
+body:has(#login-page-root) [class*="h-screen"],
+body:has(#register-page-root) [class*="h-screen"] {
+  padding: 0 !important;
+  gap: 0 !important;
+  border: none !important;
+}
+

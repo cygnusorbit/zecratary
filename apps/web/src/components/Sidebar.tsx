@@ -70,6 +70,8 @@ const getLanguageFlag = (code: string): string => {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
+  if (isAuthRoute) return null;
   const { t, locale, setLocale } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
