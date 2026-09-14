@@ -1,4 +1,24 @@
-'use client';
+import os
+import glob
+
+# 1. Locate App Router directory
+candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/lib/siteConfig.ts', recursive=True)
+    if matches:
+        app_dir = os.path.join(os.path.dirname(os.path.dirname(matches[0])), 'app')
+
+if not app_dir:
+    print("❌ Error: Could not locate App Router directory.")
+    exit(1)
+
+admin_page_path = os.path.join(app_dir, 'admin', 'page.tsx')
+if not os.path.exists(os.path.dirname(admin_page_path)):
+    os.makedirs(os.path.dirname(admin_page_path), exist_ok=True)
+
+admin_page_code = """'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -30,15 +50,14 @@ import {
   DEFAULT_SITE_NAME, 
   DEFAULT_SITE_ICON 
 } from '@/lib/siteConfig';
-import { applyThemeToDocument, saveThemeColors } from '@/lib/themeConfig';
 
 const PRESET_PALETTES = [
-  { name: 'Zecratary Coral', primary: '#E05638', primaryHover: '#c94529', accent: '#10b981', background: '#070b13' },
-  { name: 'Emerald Forest', primary: '#10b981', primaryHover: '#059669', accent: '#3b82f6', background: '#06130d' },
-  { name: 'Cyber Blue', primary: '#2563eb', primaryHover: '#1d4ed8', accent: '#10b981', background: '#080d1a' },
-  { name: 'Royal Purple', primary: '#8b5cf6', primaryHover: '#7c3aed', accent: '#ec4899', background: '#0f081c' },
-  { name: 'Amber Gold', primary: '#f59e0b', primaryHover: '#d97706', accent: '#10b981', background: '#120d04' },
-  { name: 'Deep Midnight', primary: '#38bdf8', primaryHover: '#0284c7', accent: '#a855f7', background: '#020617' },
+  { name: 'Zecratary Coral', primary: '#E05638', primaryHover: '#c94529', accent: '#10b981' },
+  { name: 'Emerald Forest', primary: '#10b981', primaryHover: '#059669', accent: '#3b82f6' },
+  { name: 'Cyber Blue', primary: '#2563eb', primaryHover: '#1d4ed8', accent: '#10b981' },
+  { name: 'Royal Purple', primary: '#8b5cf6', primaryHover: '#7c3aed', accent: '#ec4899' },
+  { name: 'Amber Gold', primary: '#f59e0b', primaryHover: '#d97706', accent: '#10b981' },
+  { name: 'Crimson Rose', primary: '#e11d48', primaryHover: '#be123c', accent: '#8b5cf6' },
 ];
 
 export default function AdminSettingsPage() {
@@ -57,20 +76,19 @@ export default function AdminSettingsPage() {
   const [primaryColor, setPrimaryColor] = useState<string>('#E05638');
   const [primaryHoverColor, setPrimaryHoverColor] = useState<string>('#c94529');
   const [accentColor, setAccentColor] = useState<string>('#10b981');
-  const [backgroundColor, setBackgroundColor] = useState<string>('#070b13');
 
   const titlebarFileRef = useRef<HTMLInputElement>(null);
   const faviconFileRef = useRef<HTMLInputElement>(null);
 
-  const applyColorsLocally = (primary: string, hover: string, accent: string, bg: string) => {
-    applyThemeToDocument({
-      primary,
-      primaryHover: hover,
-      accentEmerald: accent,
-      accentColor: accent,
-      backgroundColor: bg,
-      backgroundDark: bg
-    });
+  const applyThemeColorsLocally = (primary: string, hover: string, accent: string) => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    if (primary) root.style.setProperty('--color-primary', primary);
+    if (hover) root.style.setProperty('--color-primary-hover', hover);
+    if (accent) {
+      root.style.setProperty('--color-emerald', accent);
+      root.style.setProperty('--color-accent', accent);
+    }
   };
 
   const syncTheme = useCallback(() => {
@@ -84,7 +102,6 @@ export default function AdminSettingsPage() {
         if (c.primary || c.primaryColor) setPrimaryColor(c.primary || c.primaryColor);
         if (c.primaryHover) setPrimaryHoverColor(c.primaryHover);
         if (c.accentEmerald || c.accentColor || c.accent) setAccentColor(c.accentEmerald || c.accentColor || c.accent);
-        if (c.backgroundColor || c.backgroundDark) setBackgroundColor(c.backgroundColor || c.backgroundDark);
       }
     } catch (_) {}
   }, []);
@@ -115,6 +132,7 @@ export default function AdminSettingsPage() {
     setFaviconEmoji(cfg.faviconEmoji);
     setFaviconImage(cfg.faviconImage);
 
+    // Initial fetch from server system-settings
     fetch('/api/system-settings', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
@@ -123,11 +141,9 @@ export default function AdminSettingsPage() {
           const p = tc.primary || tc.primaryColor || '#E05638';
           const ph = tc.primaryHover || '#c94529';
           const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
-          const bg = tc.backgroundColor || tc.backgroundDark || '#070b13';
           setPrimaryColor(p);
           setPrimaryHoverColor(ph);
           setAccentColor(ac);
-          setBackgroundColor(bg);
         }
       })
       .catch(() => {});
@@ -160,13 +176,13 @@ export default function AdminSettingsPage() {
     setPrimaryColor(preset.primary);
     setPrimaryHoverColor(preset.primaryHover);
     setAccentColor(preset.accent);
-    setBackgroundColor(preset.background);
-    applyColorsLocally(preset.primary, preset.primaryHover, preset.accent, preset.background);
+    applyThemeColorsLocally(preset.primary, preset.primaryHover, preset.accent);
   };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
 
+    // 1. Save Branding Configuration
     const updatedBranding: SiteIdentityConfig = {
       siteName: siteName.trim() || DEFAULT_SITE_NAME,
       titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
@@ -176,6 +192,7 @@ export default function AdminSettingsPage() {
     };
     saveSiteConfig(updatedBranding);
 
+    // 2. Save Theme Colors
     const themeColors = {
       primary: primaryColor,
       primaryColor: primaryColor,
@@ -183,11 +200,27 @@ export default function AdminSettingsPage() {
       accentEmerald: accentColor,
       accentColor: accentColor,
       accent: accentColor,
-      backgroundColor: backgroundColor,
-      backgroundDark: backgroundColor,
     };
 
-    saveThemeColors(themeColors);
+    try {
+      localStorage.setItem('zecratary_theme_colors', JSON.stringify(themeColors));
+      localStorage.setItem('zecratary_theme_config', JSON.stringify(themeColors));
+    } catch (_) {}
+
+    applyThemeColorsLocally(primaryColor, primaryHoverColor, accentColor);
+    window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: themeColors }));
+    window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
+    window.dispatchEvent(new Event('storage'));
+
+    // 3. Persist to server system-settings API
+    fetch('/api/system-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        brandEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
+        themeColors 
+      })
+    }).catch(() => {});
 
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
@@ -205,7 +238,6 @@ export default function AdminSettingsPage() {
     setPrimaryColor('#E05638');
     setPrimaryHoverColor('#c94529');
     setAccentColor('#10b981');
-    setBackgroundColor('#070b13');
 
     saveSiteConfig({
       siteName: DEFAULT_SITE_NAME,
@@ -222,11 +254,26 @@ export default function AdminSettingsPage() {
       accentEmerald: '#10b981',
       accentColor: '#10b981',
       accent: '#10b981',
-      backgroundColor: '#070b13',
-      backgroundDark: '#070b13'
     };
 
-    saveThemeColors(defaultColors);
+    try {
+      localStorage.setItem('zecratary_theme_colors', JSON.stringify(defaultColors));
+      localStorage.setItem('zecratary_theme_config', JSON.stringify(defaultColors));
+    } catch (_) {}
+
+    applyThemeColorsLocally('#E05638', '#c94529', '#10b981');
+    window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: defaultColors }));
+    window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
+    window.dispatchEvent(new Event('storage'));
+
+    fetch('/api/system-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        brandEmoji: DEFAULT_SITE_ICON,
+        themeColors: defaultColors 
+      })
+    }).catch(() => {});
 
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
@@ -250,7 +297,7 @@ export default function AdminSettingsPage() {
             </h1>
           </div>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            Configure application name, color themes, background tones, titlebar logo, and browser tab favicon.
+            Configure application name, color themes, titlebar logo, and browser tab favicon.
           </p>
         </div>
 
@@ -297,6 +344,7 @@ export default function AdminSettingsPage() {
         </Link>
       </div>
 
+      {/* BRANDING & THEME FORM */}
       <form onSubmit={handleSave} className="space-y-6">
         {/* SECTION 1: SITE NAME */}
         <div 
@@ -325,7 +373,7 @@ export default function AdminSettingsPage() {
           </div>
         </div>
 
-        {/* SECTION 2: THEME COLOR & BACKGROUND SETTING */}
+        {/* SECTION 2: THEME COLOR SETTING */}
         <div 
           className="border rounded-3xl p-6 shadow-xl space-y-5 text-xs" 
           style={{ backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
@@ -335,33 +383,27 @@ export default function AdminSettingsPage() {
               <div className="flex items-center gap-2">
                 <Palette className="h-4 w-4 text-[var(--color-primary)]" />
                 <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  Theme Colors & Background Setting
+                  Theme Colors & Palette Setting
                 </h2>
               </div>
               <p className="text-[11px] mt-1" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-                Customize the global primary, hover, accent, and application background colors.
+                Customize the global primary, hover, and accent colors across all pages, buttons, and navigation elements.
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Primary:</span>
-                <div className="w-4 h-4 rounded-full border shadow-sm" style={{ backgroundColor: primaryColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Background:</span>
-                <div className="w-4 h-4 rounded-full border shadow-sm" style={{ backgroundColor: backgroundColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
-              </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Active Primary:</span>
+              <div className="w-5 h-5 rounded-full border shadow-sm" style={{ backgroundColor: primaryColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
             </div>
           </div>
 
           {/* Quick Presets */}
           <div className="space-y-2">
             <label className="block font-bold text-[11px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-              Color & Background Presets
+              Color Presets
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
               {PRESET_PALETTES.map((preset) => {
-                const isSelected = primaryColor.toLowerCase() === preset.primary.toLowerCase() && backgroundColor.toLowerCase() === preset.background.toLowerCase();
+                const isSelected = primaryColor.toLowerCase() === preset.primary.toLowerCase();
                 return (
                   <button
                     key={preset.name}
@@ -378,7 +420,6 @@ export default function AdminSettingsPage() {
                     <div className="flex items-center gap-1">
                       <div className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: preset.primary }} />
                       <div className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: preset.accent }} />
-                      <div className="w-3.5 h-3.5 rounded-full border border-slate-700" style={{ backgroundColor: preset.background }} />
                     </div>
                     <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {preset.name}
@@ -390,7 +431,7 @@ export default function AdminSettingsPage() {
           </div>
 
           {/* Custom Color Pickers */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
             {/* Primary Color */}
             <div className="space-y-1.5">
               <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
@@ -402,7 +443,7 @@ export default function AdminSettingsPage() {
                   value={primaryColor} 
                   onChange={(e) => {
                     setPrimaryColor(e.target.value);
-                    applyColorsLocally(e.target.value, primaryHoverColor, accentColor, backgroundColor);
+                    applyThemeColorsLocally(e.target.value, primaryHoverColor, accentColor);
                   }}
                   className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                   style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -412,7 +453,7 @@ export default function AdminSettingsPage() {
                   value={primaryColor} 
                   onChange={(e) => {
                     setPrimaryColor(e.target.value);
-                    applyColorsLocally(e.target.value, primaryHoverColor, accentColor, backgroundColor);
+                    applyThemeColorsLocally(e.target.value, primaryHoverColor, accentColor);
                   }}
                   placeholder="#E05638"
                   className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
@@ -424,7 +465,7 @@ export default function AdminSettingsPage() {
                 />
               </div>
               <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                Primary buttons and highlights.
+                Used for primary buttons, active icons, and links.
               </span>
             </div>
 
@@ -439,7 +480,7 @@ export default function AdminSettingsPage() {
                   value={primaryHoverColor} 
                   onChange={(e) => {
                     setPrimaryHoverColor(e.target.value);
-                    applyColorsLocally(primaryColor, e.target.value, accentColor, backgroundColor);
+                    applyThemeColorsLocally(primaryColor, e.target.value, accentColor);
                   }}
                   className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                   style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -449,7 +490,7 @@ export default function AdminSettingsPage() {
                   value={primaryHoverColor} 
                   onChange={(e) => {
                     setPrimaryHoverColor(e.target.value);
-                    applyColorsLocally(primaryColor, e.target.value, accentColor, backgroundColor);
+                    applyThemeColorsLocally(primaryColor, e.target.value, accentColor);
                   }}
                   placeholder="#c94529"
                   className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
@@ -461,14 +502,14 @@ export default function AdminSettingsPage() {
                 />
               </div>
               <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                Hover states on primary elements.
+                Used for hover states on primary interactive elements.
               </span>
             </div>
 
             {/* Accent Color */}
             <div className="space-y-1.5">
               <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                Accent Color
+                Accent / Emerald Color
               </label>
               <div className="flex items-center gap-2">
                 <input 
@@ -476,7 +517,7 @@ export default function AdminSettingsPage() {
                   value={accentColor} 
                   onChange={(e) => {
                     setAccentColor(e.target.value);
-                    applyColorsLocally(primaryColor, primaryHoverColor, e.target.value, backgroundColor);
+                    applyThemeColorsLocally(primaryColor, primaryHoverColor, e.target.value);
                   }}
                   className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                   style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -486,7 +527,7 @@ export default function AdminSettingsPage() {
                   value={accentColor} 
                   onChange={(e) => {
                     setAccentColor(e.target.value);
-                    applyColorsLocally(primaryColor, primaryHoverColor, e.target.value, backgroundColor);
+                    applyThemeColorsLocally(primaryColor, primaryHoverColor, e.target.value);
                   }}
                   placeholder="#10b981"
                   className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
@@ -498,44 +539,7 @@ export default function AdminSettingsPage() {
                 />
               </div>
               <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                Badges and secondary accents.
-              </span>
-            </div>
-
-            {/* Background Color */}
-            <div className="space-y-1.5">
-              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                Theme Background Color
-              </label>
-              <div className="flex items-center gap-2">
-                <input 
-                  type="color" 
-                  value={backgroundColor} 
-                  onChange={(e) => {
-                    setBackgroundColor(e.target.value);
-                    applyColorsLocally(primaryColor, primaryHoverColor, accentColor, e.target.value);
-                  }}
-                  className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                  style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
-                />
-                <input 
-                  type="text" 
-                  value={backgroundColor} 
-                  onChange={(e) => {
-                    setBackgroundColor(e.target.value);
-                    applyColorsLocally(primaryColor, primaryHoverColor, accentColor, e.target.value);
-                  }}
-                  placeholder="#070b13"
-                  className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                />
-              </div>
-              <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                Applies to pages and viewport background.
+                Used for success badges, checkmarks, and secondary accents.
               </span>
             </div>
           </div>
@@ -543,12 +547,9 @@ export default function AdminSettingsPage() {
           {/* Interactive Live Preview */}
           <div className="pt-3 border-t space-y-2" style={{ borderColor: isDayMode ? '#f1f5f9' : '#1e293b' }}>
             <span className="font-bold text-[11px] block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-              Preview on Selected Background:
+              Button & Accent Live Preview:
             </span>
-            <div 
-              className="flex flex-wrap items-center gap-3 p-4 rounded-2xl border transition-colors" 
-              style={{ backgroundColor: backgroundColor, borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}
-            >
+            <div className="flex flex-wrap items-center gap-3 p-3 rounded-2xl border" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
               <button 
                 type="button" 
                 className="px-4 py-2 rounded-xl text-white font-extrabold shadow-md transition"
@@ -561,7 +562,7 @@ export default function AdminSettingsPage() {
                 className="px-4 py-2 rounded-xl text-white font-extrabold shadow-md transition"
                 style={{ backgroundColor: primaryHoverColor }}
               >
-                Hover State
+                Primary Hover State
               </button>
               <div 
                 className="px-3 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1.5"
@@ -661,6 +662,7 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
+          {/* Live Preview */}
           <div className="pt-2 border-t" style={{ borderColor: isDayMode ? '#f1f5f9' : '#1e293b' }}>
             <span className="font-bold text-[11px] block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
               Sidebar & Header Preview:
@@ -762,6 +764,7 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
+          {/* Browser Tab Mockup Preview */}
           <div className="pt-2 border-t" style={{ borderColor: isDayMode ? '#f1f5f9' : '#1e293b' }}>
             <span className="font-bold text-[11px] block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
               Browser Tab Appearance Preview:
@@ -812,3 +815,9 @@ export default function AdminSettingsPage() {
     </div>
   );
 }
+"""
+
+with open(admin_page_path, 'w', encoding='utf-8') as f:
+    f.write(admin_page_code)
+
+print(f"✓ Restored theme color settings to: {admin_page_path}")
