@@ -11,5 +11,43 @@
   "currency": "USD",
   "currencySymbol": "$",
   "brandEmoji": "⚡",
-  "aiModel": "gemini-1.5-flash"
+  "aiModel": "gemini-1.5-flash",
+  "plans": [
+    {
+      "id": "taster",
+      "name": "Taster",
+      "slug": "taster",
+      "isFree": true,
+      "monthlyPriceDollars": 0,
+      "annualPriceDollars": 0,
+      "tokenLimit": 500,
+      "tokenReimburseFrequency": "monthly",
+      "description": "Free tier with standard features",
+      "featuresText": "",
+      "allowedAiModels": [
+        "gemini-3.6-flash"
+      ],
+      "isDefault": true,
+      "features": []
+    }
+  ],
+  "subscriptionConfigs": [
+    {
+      "id": "taster",
+      "name": "Taster",
+      "slug": "taster",
+      "isFree": true,
+      "monthlyPriceDollars": 0,
+      "annualPriceDollars": 0,
+      "tokenLimit": 500,
+      "tokenReimburseFrequency": "monthly",
+      "description": "Free tier with standard features",
+      "featuresText": "",
+      "allowedAiModels": [
+        "gemini-3.6-flash"
+      ],
+      "isDefault": true,
+      "features": []
+    }
+  ]
 }

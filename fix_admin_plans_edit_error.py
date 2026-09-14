@@ -1,4 +1,24 @@
-// Generated / Updated by AI Collaborator
+import os
+import glob
+
+# 1. Locate all admin/plans/page.tsx instances
+candidates = [
+    'src/app/admin/plans/page.tsx',
+    'apps/web/src/app/admin/plans/page.tsx',
+    'apps/web/app/admin/plans/page.tsx',
+    'app/admin/plans/page.tsx'
+]
+
+target_files = [p for p in candidates if os.path.exists(p)]
+if not target_files:
+    matches = glob.glob('**/admin/plans/page.tsx', recursive=True)
+    target_files = [p for p in matches if 'node_modules' not in p and '.next' not in p]
+
+if not target_files:
+    print("❌ Error: Could not locate admin/plans/page.tsx")
+    exit(1)
+
+clean_page_code = r'''// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
@@ -1793,3 +1813,11 @@ export default function AdminSubscriptionPlans() {
     </div>
   );
 }
+'''
+
+for target_file in target_files:
+    with open(target_file, 'w', encoding='utf-8') as f:
+        f.write(clean_page_code)
+    print(f"✓ Deployed clean, error-free component in: {target_file}")
+
+print("\n🚀 Edit plan features split error successfully resolved!")
