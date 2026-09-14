@@ -28,17 +28,17 @@ if not target_files:
     print("❌ Error: Could not locate admin/users/page.tsx")
     exit(1)
 
-clean_page_code = """'use client';
+updated_page_code = """'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
   Search, CheckCircle, AlertCircle, X, ShieldAlert, Check,
-  ShieldCheck, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
-  Users, CreditCard, Zap, Sparkles
+  ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
+  Users, CreditCard, Zap, Sparkles, Download
 } from 'lucide-react';
-import { getCurrentUser, initAuthStorage } from '@/lib/auth';
+import { getCurrentUser, logoutUser, initAuthStorage } from '@/lib/auth';
 
 interface AppUser {
   id: string;
@@ -77,7 +77,10 @@ export default function AdminUserManagementPage() {
   const [search, setSearch] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState('');
 
-  // Mutex and debounce refs to prevent recursive fetch storms
+  // Selected User IDs for Export
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+
+  // Prevent recursive fetch storms
   const isFetchingUsersRef = useRef(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -110,7 +113,7 @@ export default function AdminUserManagementPage() {
   const [editSubscriptionPlan, setEditSubscriptionPlan] = useState<string>('taster');
   const [editError, setEditError] = useState('');
 
-  // Identify Primary First Administrator
+  // Helper: Identify Root / Primary First Administrator
   const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
     if (!targetUser) return false;
     
@@ -324,7 +327,6 @@ export default function AdminUserManagementPage() {
           const merged = Array.from(mergedMap.values());
           setUsers(merged);
 
-          // Only write to localStorage if changed to prevent storage event loops
           const newSerialized = JSON.stringify(merged);
           if (raw !== newSerialized) {
             localStorage.setItem('zecratary_users', newSerialized);
@@ -349,7 +351,6 @@ export default function AdminUserManagementPage() {
     loadUsers();
     loadPlans();
 
-    // Debounced and filtered listener
     const handleSync = (e?: Event) => {
       if (e && 'key' in e) {
         const sEvt = e as StorageEvent;
@@ -388,9 +389,64 @@ export default function AdminUserManagementPage() {
     setTimeout(() => setFeedbackMsg(''), 3500);
   };
 
+  // Selection Toggles
+  const toggleSelectUser = (id: string) => {
+    setSelectedUserIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  // Export Selected Users
+  const handleExportSelected = (format: 'csv' | 'json' = 'csv') => {
+    const selectedUsers = users.filter((u) => selectedUserIds.includes(u.id));
+    if (selectedUsers.length === 0) {
+      showToast('Please select at least one user to export.');
+      return;
+    }
+
+    const timestamp = new Date().toISOString().split('T')[0];
+
+    if (format === 'json') {
+      const exportData = selectedUsers.map(({ password, ...rest }) => rest);
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `users_export_${timestamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast(`Exported ${selectedUsers.length} selected user(s) to JSON!`);
+    } else {
+      const headers = ['ID', 'Name', 'Email Address', 'Role', 'Subscription Plan', 'Created At'];
+      const rows = selectedUsers.map((u) => [
+        `"${(u.id || '').replace(/"/g, '""')}"`,
+        `"${(u.name || '').replace(/"/g, '""')}"`,
+        `"${(u.email || '').replace(/"/g, '""')}"`,
+        `"${(u.role || '').replace(/"/g, '""')}"`,
+        `"${(u.subscriptionPlan || '').replace(/"/g, '""')}"`,
+        `"${(u.createdAt || '').replace(/"/g, '""')}"`
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\\r\\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `users_export_${timestamp}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast(`Exported ${selectedUsers.length} selected user(s) to CSV!`);
+    }
+  };
+
+  // Sort Toggles
   const handleAdminSort = (field: SortField) => {
     if (adminSortField === field) {
-      setAdminSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      setAdminSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setAdminSortField(field);
       setAdminSortOrder('asc');
@@ -399,7 +455,7 @@ export default function AdminUserManagementPage() {
 
   const handleUserSort = (field: SortField) => {
     if (userSortField === field) {
-      setUserSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      setUserSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setUserSortField(field);
       setUserSortOrder('asc');
@@ -408,12 +464,13 @@ export default function AdminUserManagementPage() {
 
   // Filter & Sort for Admins
   const processedAdmins = useMemo(() => {
-    const admins = users.filter(u => u.role === 'admin');
-    const filtered = admins.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
+    const admins = users.filter((u) => u.role === 'admin');
+    const filtered = admins.filter(
+      (u) =>
+        !search.trim() ||
+        u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
+        u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
     );
 
     return filtered.sort((a, b) => {
@@ -433,12 +490,13 @@ export default function AdminUserManagementPage() {
 
   // Filter & Sort for Standard Users
   const processedStandardUsers = useMemo(() => {
-    const standardUsers = users.filter(u => u.role === 'user');
-    const filtered = standardUsers.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
+    const standardUsers = users.filter((u) => u.role === 'user');
+    const filtered = standardUsers.filter(
+      (u) =>
+        !search.trim() ||
+        u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
+        u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
     );
 
     return filtered.sort((a, b) => {
@@ -456,6 +514,7 @@ export default function AdminUserManagementPage() {
     });
   }, [users, search, userSortField, userSortOrder]);
 
+  // Pagination Calculations
   const adminTotalPages = Math.max(1, Math.ceil(processedAdmins.length / ITEMS_PER_PAGE));
   const adminStartIndex = (adminCurrentPage - 1) * ITEMS_PER_PAGE;
   const adminEndIndex = Math.min(adminStartIndex + ITEMS_PER_PAGE, processedAdmins.length);
@@ -466,26 +525,51 @@ export default function AdminUserManagementPage() {
   const userEndIndex = Math.min(userStartIndex + ITEMS_PER_PAGE, processedStandardUsers.length);
   const paginatedStandardUsers = processedStandardUsers.slice(userStartIndex, userEndIndex);
 
+  const isAllAdminsOnPageSelected =
+    paginatedAdmins.length > 0 && paginatedAdmins.every((u) => selectedUserIds.includes(u.id));
+
+  const handleToggleSelectAllAdmins = () => {
+    const pageAdminIds = paginatedAdmins.map((u) => u.id);
+    if (isAllAdminsOnPageSelected) {
+      setSelectedUserIds((prev) => prev.filter((id) => !pageAdminIds.includes(id)));
+    } else {
+      setSelectedUserIds((prev) => Array.from(new Set([...prev, ...pageAdminIds])));
+    }
+  };
+
+  const isAllStandardOnPageSelected =
+    paginatedStandardUsers.length > 0 && paginatedStandardUsers.every((u) => selectedUserIds.includes(u.id));
+
+  const handleToggleSelectAllStandardUsers = () => {
+    const pageUserIds = paginatedStandardUsers.map((u) => u.id);
+    if (isAllStandardOnPageSelected) {
+      setSelectedUserIds((prev) => prev.filter((id) => !pageUserIds.includes(id)));
+    } else {
+      setSelectedUserIds((prev) => Array.from(new Set([...prev, ...pageUserIds])));
+    }
+  };
+
   useEffect(() => {
     setAdminCurrentPage(1);
     setUserCurrentPage(1);
   }, [search]);
 
+  // Add User Modal
   const handleOpenAddModal = (presetRole: 'admin' | 'user' = 'user') => {
     setAddName('');
     setAddEmail('');
     setAddPassword('');
     setAddRole(presetRole);
     
-    const defaultAdminPlan = availablePlans.find(p => p.slug.includes('annual') || p.slug.includes('pro'))?.slug || availablePlans[availablePlans.length - 1]?.slug || 'nutrition-pro-annual';
-    const defaultUserPlan = availablePlans.find(p => p.isFree || p.slug === 'taster')?.slug || availablePlans[0]?.slug || 'taster';
+    const defaultAdminPlan = availablePlans.find((p) => p.slug.includes('annual') || p.slug.includes('pro'))?.slug || availablePlans[availablePlans.length - 1]?.slug || 'nutrition-pro-annual';
+    const defaultUserPlan = availablePlans.find((p) => p.isFree || p.slug === 'taster')?.slug || availablePlans[0]?.slug || 'taster';
     
     setAddSubscriptionPlan(presetRole === 'admin' ? defaultAdminPlan : defaultUserPlan);
     setAddError('');
     setShowAddModal(true);
   };
 
-  const handleAddUserSubmit = (e: React.FormEvent) => {
+  const handleAddUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAddError('');
 
@@ -497,7 +581,7 @@ export default function AdminUserManagementPage() {
       return;
     }
 
-    if (users.some(u => u.email.toLowerCase() === cleanEmail)) {
+    if (users.some((u) => u && u.email && u.email.toLowerCase() === cleanEmail)) {
       setAddError('A user with this email address already exists.');
       return;
     }
@@ -519,12 +603,30 @@ export default function AdminUserManagementPage() {
       createdAt: new Date().toISOString()
     };
 
-    const updated = [newUser, ...users];
+    try {
+      const rawDel = localStorage.getItem('zecratary_deleted_users');
+      if (rawDel) {
+        const delList: string[] = JSON.parse(rawDel);
+        const filteredDel = delList.filter((s) => s.toLowerCase().trim() !== cleanEmail && s !== newUser.id);
+        localStorage.setItem('zecratary_deleted_users', JSON.stringify(filteredDel));
+      }
+    } catch (_) {}
+
+    try {
+      await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser),
+      });
+    } catch (_) {}
+
+    const updated = [newUser, ...users.filter((u) => !u.email || u.email.toLowerCase() !== cleanEmail)];
     saveUsersList(updated);
     setShowAddModal(false);
     showToast(`User "${newUser.name}" created with "${getPlanBadge(newUser.subscriptionPlan).label}" plan!`);
   };
 
+  // Edit User Modal
   const handleOpenEditModal = (user: AppUser) => {
     setEditingUserId(user.id);
     setEditName(user.name);
@@ -549,18 +651,18 @@ export default function AdminUserManagementPage() {
       return;
     }
 
-    const emailTaken = users.some(u => u.id !== editingUserId && u.email.toLowerCase() === cleanEmail);
+    const emailTaken = users.some((u) => u.id !== editingUserId && u.email && u.email.toLowerCase() === cleanEmail);
     if (emailTaken) {
       setEditError('Another user is already registered with this email.');
       return;
     }
 
-    const targetUser = users.find(u => u.id === editingUserId);
+    const targetUser = users.find((u) => u.id === editingUserId);
     const isFirstAdmin = isFirstAdminUser(targetUser);
 
     const finalRole: 'admin' | 'user' = isFirstAdmin ? 'admin' : editRole;
 
-    const updated = users.map(u => {
+    const updated = users.map((u) => {
       if (u.id === editingUserId) {
         return {
           ...u,
@@ -575,6 +677,15 @@ export default function AdminUserManagementPage() {
     });
 
     saveUsersList(updated);
+
+    const editedTarget = updated.find((u) => u.id === editingUserId);
+    if (editedTarget) {
+      fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editedTarget),
+      }).catch(() => {});
+    }
 
     if (currentUser?.id === editingUserId) {
       const activeUserUpdated = {
@@ -593,26 +704,26 @@ export default function AdminUserManagementPage() {
     showToast(`User "${cleanName}" updated successfully!`);
   };
 
-  // Safe Non-Looping Deletion Handler
-  const handleDeleteUser = async (id: string, email: string, name?: string) => {
-    if (currentUser && (currentUser.id === id || (currentUser.email && currentUser.email.toLowerCase() === email.toLowerCase()))) {
-      alert('You cannot delete your own active administrator account.');
+  // Safe Deletion Handler
+  const handleDeleteUser = async (id: string, userEmail: string, userName?: string) => {
+    const targetUser = users.find((u) => u.id === id || (u.email && u.email.toLowerCase() === userEmail.toLowerCase()));
+
+    if (currentUser?.email?.toLowerCase() === userEmail.toLowerCase() || currentUser?.id === id) {
+      alert('You cannot delete your own active admin account.');
       return;
     }
 
-    const targetUser = users.find((u) => u.id === id || (u.email && u.email.toLowerCase() === email.toLowerCase()));
-    if (isFirstAdminUser(targetUser)) {
-      alert('You cannot delete the primary system administrator account.');
+    if (isFirstAdminUser && isFirstAdminUser(targetUser)) {
+      alert('The primary system administrator account cannot be deleted.');
       return;
     }
 
-    const displayName = name || (targetUser?.name) || email;
-    if (!confirm(`Are you sure you want to permanently delete ${displayName}?`)) return;
+    const displayName = userName || targetUser?.name || userEmail;
+    if (!confirm(`Are you sure you want to delete "${displayName}" (${userEmail})? This action cannot be undone.`)) return;
 
     try {
-      const cleanEmail = (email || '').toLowerCase().trim();
+      const cleanEmail = userEmail.toLowerCase().trim();
 
-      // 1. Tombstone in deleted list
       try {
         const rawDel = localStorage.getItem('zecratary_deleted_users');
         const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
@@ -621,20 +732,19 @@ export default function AdminUserManagementPage() {
         localStorage.setItem('zecratary_deleted_users', JSON.stringify(delList));
       } catch (_) {}
 
-      // 2. Remove locally from state immediately
       const updated = users.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail));
       setUsers(updated);
+      setSelectedUserIds((prev) => prev.filter((uid) => uid !== id));
       localStorage.setItem('zecratary_users', JSON.stringify(updated));
 
-      // 3. Remove on server
       await fetch('/api/admin/users', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, email: cleanEmail }),
       }).catch(() => {});
 
-      showToast(`User "${displayName}" deleted successfully.`);
-      // Note: Do NOT dispatch synthetic 'storage' event here to prevent ping-pong request loops
+      showToast(`User "${displayName}" has been deleted.`);
+      window.dispatchEvent(new Event('zecratary_users_updated'));
     } catch (err: any) {
       console.error('Failed to delete user:', err);
       showToast('Failed to delete user: ' + (err?.message || 'Server error'));
@@ -652,6 +762,7 @@ export default function AdminUserManagementPage() {
     );
   };
 
+  // Dynamic Subscription Plan Badge Renderer
   const getPlanBadge = (planKey?: string) => {
     if (!planKey) {
       return {
@@ -664,7 +775,7 @@ export default function AdminUserManagementPage() {
     }
 
     const matched = availablePlans.find(
-      p => p.slug === planKey || p.id === planKey || p.slug.toLowerCase() === planKey.toLowerCase()
+      (p) => p.slug === planKey || p.id === planKey || p.slug.toLowerCase() === planKey.toLowerCase()
     );
 
     if (matched) {
@@ -706,7 +817,7 @@ export default function AdminUserManagementPage() {
 
     const formatted = planKey
       .split('-')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
 
     if (planKey.includes('free') || planKey === 'taster') {
@@ -729,7 +840,9 @@ export default function AdminUserManagementPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 text-slate-100 pb-24 px-2 sm:px-4 pt-2">
+    <div className="max-w-6xl mx-auto space-y-6 text-slate-100 pb-24 px-2 sm:px-4 pt-2">
+      
+      {/* ACCESS WARNING FOR NON-ADMINS */}
       {currentUser && currentUser.role !== 'admin' && (
         <div 
           className="rounded-2xl p-4 flex items-center justify-between text-xs border"
@@ -755,6 +868,7 @@ export default function AdminUserManagementPage() {
         </div>
       )}
 
+      {/* FEEDBACK TOAST */}
       {feedbackMsg && (
         <div 
           className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in border"
@@ -769,6 +883,7 @@ export default function AdminUserManagementPage() {
         </div>
       )}
 
+      {/* PAGE HEADER */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
@@ -779,7 +894,40 @@ export default function AdminUserManagementPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* EXPORT ACTION BUTTONS */}
+          <button
+            type="button"
+            onClick={() => handleExportSelected('csv')}
+            disabled={selectedUserIds.length === 0}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+            style={{
+              backgroundColor: 'var(--color-card, #0b0f17)',
+              borderColor: selectedUserIds.length > 0 ? 'var(--color-primary, #E05638)' : 'var(--color-border, #1e293b)',
+              color: selectedUserIds.length > 0 ? '#ffffff' : '#cbd5e1'
+            }}
+            title={selectedUserIds.length === 0 ? 'Select user(s) to export' : `Export ${selectedUserIds.length} user(s) to CSV`}
+          >
+            <Download className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>Export CSV {selectedUserIds.length > 0 ? `(${selectedUserIds.length})` : ''}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleExportSelected('json')}
+            disabled={selectedUserIds.length === 0}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+            style={{
+              backgroundColor: 'var(--color-card, #0b0f17)',
+              borderColor: 'var(--color-border, #1e293b)',
+              color: '#cbd5e1'
+            }}
+            title={selectedUserIds.length === 0 ? 'Select user(s) to export' : `Export ${selectedUserIds.length} user(s) to JSON`}
+          >
+            <Download className="h-4 w-4 text-slate-400" />
+            <span>Export JSON</span>
+          </button>
+
           <button
             onClick={() => handleOpenAddModal('user')}
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer"
@@ -789,6 +937,7 @@ export default function AdminUserManagementPage() {
           >
             <UserPlus className="h-4 w-4" /> Add New User
           </button>
+          
           <Link
             href="/admin/plans"
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
@@ -814,6 +963,49 @@ export default function AdminUserManagementPage() {
         </div>
       </div>
 
+      {/* SELECTION BANNER */}
+      {selectedUserIds.length > 0 && (
+        <div 
+          className="p-3.5 px-5 rounded-2xl flex items-center justify-between text-xs border shadow-lg animate-in fade-in"
+          style={{
+            backgroundColor: 'rgba(224, 86, 56, 0.12)',
+            borderColor: 'var(--color-primary, #E05638)',
+            color: '#ffffff'
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="font-bold">
+              {selectedUserIds.length} of {users.length} user{users.length > 1 ? 's' : ''} selected
+            </span>
+            <button 
+              type="button"
+              onClick={() => setSelectedUserIds([])}
+              className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+            >
+              Clear selection
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleExportSelected('csv')}
+              className="px-3.5 py-1.5 rounded-xl text-white font-bold flex items-center gap-1.5 cursor-pointer transition shadow-sm text-xs"
+              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+            >
+              <Download className="h-3.5 w-3.5" /> Export Selected (CSV)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExportSelected('json')}
+              className="px-3.5 py-1.5 rounded-xl font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5 cursor-pointer transition shadow-sm text-xs"
+            >
+              <Download className="h-3.5 w-3.5" /> JSON
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SEARCH BAR */}
       <div className="relative">
         <Search className="h-4 w-4 text-slate-500 absolute left-4 top-3.5 pointer-events-none" />
         <input
@@ -831,7 +1023,9 @@ export default function AdminUserManagementPage() {
         />
       </div>
 
+      {/* ───────────────────────────────────────────────────────────── */}
       {/* TABLE 1: ADMINISTRATORS */}
+      {/* ───────────────────────────────────────────────────────────── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
@@ -888,6 +1082,15 @@ export default function AdminUserManagementPage() {
                 }}
               >
                 <tr>
+                  <th className="w-10 px-4 py-4 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllAdminsOnPageSelected}
+                      onChange={handleToggleSelectAllAdmins}
+                      className="rounded cursor-pointer accent-[#E05638]"
+                      title="Select all administrators on this page"
+                    />
+                  </th>
                   <th className="px-5 py-4">
                     <button
                       type="button"
@@ -929,7 +1132,7 @@ export default function AdminUserManagementPage() {
               >
                 {paginatedAdmins.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-500">
+                    <td colSpan={7} className="text-center py-10 text-slate-500">
                       No administrators found {search ? `matching "${search}"` : ''}.
                     </td>
                   </tr>
@@ -937,14 +1140,27 @@ export default function AdminUserManagementPage() {
                   paginatedAdmins.map((user) => {
                     const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
                     const isPrimary = isFirstAdminUser(user);
+                    const isSelected = selectedUserIds.includes(user.id);
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
                     return (
                       <tr 
                         key={user.id} 
                         className="transition"
-                        style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                        style={{ 
+                          borderColor: 'var(--color-border, #1e293b)',
+                          backgroundColor: isSelected ? 'rgba(224, 86, 56, 0.08)' : undefined
+                        }}
                       >
+                        <td className="w-10 px-4 py-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectUser(user.id)}
+                            className="rounded cursor-pointer accent-[#E05638]"
+                            title={`Select ${user.name}`}
+                          />
+                        </td>
                         <td className="px-5 py-4 font-bold text-white flex items-center gap-3">
                           <div 
                             className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0"
@@ -1067,6 +1283,7 @@ export default function AdminUserManagementPage() {
             </table>
           </div>
 
+          {/* Admin Pagination */}
           {processedAdmins.length > ITEMS_PER_PAGE && (
             <div 
               className="px-5 py-3.5 border-t flex items-center justify-between text-xs"
@@ -1082,7 +1299,7 @@ export default function AdminUserManagementPage() {
                 <button
                   type="button"
                   disabled={adminCurrentPage <= 1}
-                  onClick={() => setAdminCurrentPage(p => Math.max(1, p - 1))}
+                  onClick={() => setAdminCurrentPage((p) => Math.max(1, p - 1))}
                   className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-card, #0b0f17)',
@@ -1095,7 +1312,7 @@ export default function AdminUserManagementPage() {
                 <button
                   type="button"
                   disabled={adminCurrentPage >= adminTotalPages}
-                  onClick={() => setAdminCurrentPage(p => Math.min(adminTotalPages, p + 1))}
+                  onClick={() => setAdminCurrentPage((p) => Math.min(adminTotalPages, p + 1))}
                   className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-card, #0b0f17)',
@@ -1110,7 +1327,9 @@ export default function AdminUserManagementPage() {
         </div>
       </div>
 
+      {/* ───────────────────────────────────────────────────────────── */}
       {/* TABLE 2: STANDARD USERS */}
+      {/* ───────────────────────────────────────────────────────────── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
@@ -1165,6 +1384,15 @@ export default function AdminUserManagementPage() {
                 }}
               >
                 <tr>
+                  <th className="w-10 px-4 py-4 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllStandardOnPageSelected}
+                      onChange={handleToggleSelectAllStandardUsers}
+                      className="rounded cursor-pointer accent-[#E05638]"
+                      title="Select all standard users on this page"
+                    />
+                  </th>
                   <th className="px-5 py-4">
                     <button
                       type="button"
@@ -1206,21 +1434,34 @@ export default function AdminUserManagementPage() {
               >
                 {paginatedStandardUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-500">
+                    <td colSpan={7} className="text-center py-10 text-slate-500">
                       No standard users found {search ? `matching "${search}"` : ''}.
                     </td>
                   </tr>
                 ) : (
                   paginatedStandardUsers.map((user) => {
                     const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
+                    const isSelected = selectedUserIds.includes(user.id);
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
                     return (
                       <tr 
                         key={user.id} 
                         className="transition"
-                        style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                        style={{ 
+                          borderColor: 'var(--color-border, #1e293b)',
+                          backgroundColor: isSelected ? 'rgba(224, 86, 56, 0.08)' : undefined
+                        }}
                       >
+                        <td className="w-10 px-4 py-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectUser(user.id)}
+                            className="rounded cursor-pointer accent-[#E05638]"
+                            title={`Select ${user.name}`}
+                          />
+                        </td>
                         <td className="px-5 py-4 font-bold text-white flex items-center gap-3">
                           <div 
                             className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0"
@@ -1323,6 +1564,7 @@ export default function AdminUserManagementPage() {
             </table>
           </div>
 
+          {/* Standard User Pagination */}
           <div 
             className="px-5 py-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"
             style={{
@@ -1346,7 +1588,7 @@ export default function AdminUserManagementPage() {
               <button
                 type="button"
                 disabled={userCurrentPage <= 1}
-                onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))}
+                onClick={() => setUserCurrentPage((p) => Math.max(1, p - 1))}
                 className={`p-2 rounded-xl border flex items-center justify-center transition ${
                   userCurrentPage <= 1
                     ? 'opacity-40 cursor-not-allowed'
@@ -1384,7 +1626,7 @@ export default function AdminUserManagementPage() {
               <button
                 type="button"
                 disabled={userCurrentPage >= userTotalPages}
-                onClick={() => setUserCurrentPage(p => Math.min(userTotalPages, p + 1))}
+                onClick={() => setUserCurrentPage((p) => Math.min(userTotalPages, p + 1))}
                 className={`p-2 rounded-xl border flex items-center justify-center transition ${
                   userCurrentPage >= userTotalPages
                     ? 'opacity-40 cursor-not-allowed'
@@ -1403,7 +1645,9 @@ export default function AdminUserManagementPage() {
         </div>
       </div>
 
+      {/* ───────────────────────────────────────────────────────────── */}
       {/* 1. ADD USER MODAL */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
@@ -1617,7 +1861,9 @@ export default function AdminUserManagementPage() {
         </div>
       )}
 
+      {/* ───────────────────────────────────────────────────────────── */}
       {/* 2. EDIT USER MODAL */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {showEditModal && (
         <div 
           onClick={() => setShowEditModal(false)}
@@ -1853,6 +2099,7 @@ export default function AdminUserManagementPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }
@@ -1860,7 +2107,7 @@ export default function AdminUserManagementPage() {
 
 for target_file in target_files:
     with open(target_file, 'w', encoding='utf-8') as f:
-        f.write(clean_page_code)
-    print(f"✓ Deployed loop-guarded admin users page at: {target_file}")
+        f.write(updated_page_code)
+    print(f"✓ Deployed user selection & export updates to: {target_file}")
 
-print("\n🚀 Server request loop terminated successfully!")
+print("\n🚀 User selection and export features successfully installed!")

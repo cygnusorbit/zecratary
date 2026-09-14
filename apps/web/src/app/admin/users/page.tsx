@@ -1,11 +1,12 @@
 'use client';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
   Search, CheckCircle, AlertCircle, X, ShieldAlert, Check,
-  ShieldCheck, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
-  Users, CreditCard, Zap, Sparkles, RefreshCw
+  ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
+  Users, CreditCard, Zap, Sparkles, Download
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, initAuthStorage } from '@/lib/auth';
 
@@ -46,6 +47,13 @@ export default function AdminUserManagementPage() {
   const [search, setSearch] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState('');
 
+  // Selected User IDs for Export
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+
+  // Prevent recursive fetch storms
+  const isFetchingUsersRef = useRef(false);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Admin Table Sorting & Pagination State
   const [adminSortField, setAdminSortField] = useState<SortField>('createdAt');
   const [adminSortOrder, setAdminSortOrder] = useState<SortOrder>('desc');
@@ -79,7 +87,6 @@ export default function AdminUserManagementPage() {
   const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
     if (!targetUser) return false;
     
-    // Explicit System Admin default ID or Email check
     if (
       targetUser.id === 'usr_admin_1' || 
       targetUser.email.toLowerCase() === 'admin@zecratary.com' ||
@@ -88,7 +95,6 @@ export default function AdminUserManagementPage() {
       return true;
     }
 
-    // Earliest created administrator check
     const sortedAdmins = users
       .filter((u) => u.role === 'admin')
       .sort((a, b) => {
@@ -148,11 +154,10 @@ export default function AdminUserManagementPage() {
     };
   }, []);
 
-  // Synchronize System Packages directly from /admin/plans
+  // Synchronize System Packages
   const loadPlans = useCallback(async () => {
     let parsedPlans: PlanOption[] = [];
 
-    // 1. Primary Source: Saved System Packages configurations from /admin/plans
     try {
       const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
       if (rawConfigs) {
@@ -198,7 +203,6 @@ export default function AdminUserManagementPage() {
       }
     } catch (e) {}
 
-    // 2. Secondary Local Fallback: zecratary_subscription_plans
     if (parsedPlans.length === 0) {
       try {
         const rawPlans = localStorage.getItem('zecratary_subscription_plans');
@@ -218,7 +222,6 @@ export default function AdminUserManagementPage() {
       } catch (e) {}
     }
 
-    // 3. API Fallback: /api/admin/plans
     if (parsedPlans.length === 0) {
       try {
         const res = await fetch('/api/admin/plans');
@@ -243,75 +246,71 @@ export default function AdminUserManagementPage() {
     }
   }, []);
 
-      const loadUsers = useCallback(async () => {
-    initAuthStorage();
-    let deletedSet = new Set<string>();
+  // Safe Non-Looping User Fetcher
+  const loadUsers = useCallback(async () => {
+    if (isFetchingUsersRef.current) return;
+    isFetchingUsersRef.current = true;
+
     try {
-      const rawDel = localStorage.getItem('zecratary_deleted_users');
-      if (rawDel) {
-        const parsed: string[] = JSON.parse(rawDel);
-        parsed.forEach((s) => deletedSet.add(s.toLowerCase().trim()));
+      let localList: AppUser[] = [];
+      const raw = localStorage.getItem('zecratary_users');
+      if (raw) {
+        try { localList = JSON.parse(raw); } catch (_) {}
       }
-    } catch (_) {}
 
-    let localList: AppUser[] = [];
-    const raw = localStorage.getItem('zecratary_users');
-    if (raw) {
+      let deletedSet = new Set<string>();
       try {
-        localList = JSON.parse(raw);
-      } catch (e) {}
-    }
+        const rawDel = localStorage.getItem('zecratary_deleted_users');
+        if (rawDel) {
+          const parsed: string[] = JSON.parse(rawDel);
+          deletedSet = new Set(parsed.map((s) => s.toLowerCase().trim()));
+        }
+      } catch (_) {}
 
-    try {
+      localList = localList.filter((u) => {
+        if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
+        if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
+        return true;
+      });
+
       const res = await fetch('/api/admin/users', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
-          if (Array.isArray(data.deletedUsers)) {
-            data.deletedUsers.forEach((s: string) => deletedSet.add(s.toLowerCase().trim()));
-          }
+          const serverUsers: AppUser[] = data.users.filter((u: any) => {
+            if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
+            if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
+            return true;
+          });
 
-          const serverUsers: AppUser[] = data.users;
           const mergedMap = new Map<string, AppUser>();
-          serverUsers.forEach((u: any) => {
+          serverUsers.forEach((u) => {
             if (u && u.email) mergedMap.set(u.email.toLowerCase(), u);
           });
-          localList.forEach((u: any) => {
+          localList.forEach((u) => {
             if (u && u.email) {
               const existing = mergedMap.get(u.email.toLowerCase()) || {};
               mergedMap.set(u.email.toLowerCase(), { ...existing, ...u });
             }
           });
 
-          const merged = Array.from(mergedMap.values())
-            .filter((u: any) => {
-              if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
-              if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
-              return true;
-            })
-            .map((u: any) => ({
-              ...u,
-              subscriptionPlan: u.subscriptionPlan || (u.role === 'admin' ? 'nutrition-pro-annual' : 'taster')
-            }));
-
+          const merged = Array.from(mergedMap.values());
           setUsers(merged);
-          localStorage.setItem('zecratary_users', JSON.stringify(merged));
+
+          const newSerialized = JSON.stringify(merged);
+          if (raw !== newSerialized) {
+            localStorage.setItem('zecratary_users', newSerialized);
+          }
           return;
         }
       }
-    } catch (_) {}
 
-    const filtered = localList
-      .filter((u: any) => {
-        if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
-        if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
-        return true;
-      })
-      .map((u: any) => ({
-        ...u,
-        subscriptionPlan: u.subscriptionPlan || (u.role === 'admin' ? 'nutrition-pro-annual' : 'taster')
-      }));
-    setUsers(filtered);
+      setUsers(localList);
+    } catch (err) {
+      console.error('Failed to load users:', err);
+    } finally {
+      isFetchingUsersRef.current = false;
+    }
   }, []);
 
   useEffect(() => {
@@ -322,21 +321,30 @@ export default function AdminUserManagementPage() {
     loadUsers();
     loadPlans();
 
-    const handleSync = () => {
-      loadUsers();
-      loadPlans();
+    const handleSync = (e?: Event) => {
+      if (e && 'key' in e) {
+        const sEvt = e as StorageEvent;
+        if (sEvt.key && sEvt.key !== 'zecratary_users' && sEvt.key !== 'zecratary_subscription_plans' && sEvt.key !== 'zecratary_deleted_users') {
+          return;
+        }
+      }
+
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = setTimeout(() => {
+        loadUsers();
+        loadPlans();
+      }, 400);
     };
 
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_users_updated', handleSync);
     window.addEventListener('zecratary_plans_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
 
     return () => {
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_users_updated', handleSync);
       window.removeEventListener('zecratary_plans_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
     };
   }, [loadUsers, loadPlans]);
 
@@ -344,7 +352,6 @@ export default function AdminUserManagementPage() {
     setUsers(updated);
     localStorage.setItem('zecratary_users', JSON.stringify(updated));
     window.dispatchEvent(new Event('zecratary_users_updated'));
-    window.dispatchEvent(new Event('storage'));
   };
 
   const showToast = (msg: string) => {
@@ -352,10 +359,64 @@ export default function AdminUserManagementPage() {
     setTimeout(() => setFeedbackMsg(''), 3500);
   };
 
+  // Selection Toggles
+  const toggleSelectUser = (id: string) => {
+    setSelectedUserIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  // Export Selected Users
+  const handleExportSelected = (format: 'csv' | 'json' = 'csv') => {
+    const selectedUsers = users.filter((u) => selectedUserIds.includes(u.id));
+    if (selectedUsers.length === 0) {
+      showToast('Please select at least one user to export.');
+      return;
+    }
+
+    const timestamp = new Date().toISOString().split('T')[0];
+
+    if (format === 'json') {
+      const exportData = selectedUsers.map(({ password, ...rest }) => rest);
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `users_export_${timestamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast(`Exported ${selectedUsers.length} selected user(s) to JSON!`);
+    } else {
+      const headers = ['ID', 'Name', 'Email Address', 'Role', 'Subscription Plan', 'Created At'];
+      const rows = selectedUsers.map((u) => [
+        `"${(u.id || '').replace(/"/g, '""')}"`,
+        `"${(u.name || '').replace(/"/g, '""')}"`,
+        `"${(u.email || '').replace(/"/g, '""')}"`,
+        `"${(u.role || '').replace(/"/g, '""')}"`,
+        `"${(u.subscriptionPlan || '').replace(/"/g, '""')}"`,
+        `"${(u.createdAt || '').replace(/"/g, '""')}"`
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `users_export_${timestamp}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast(`Exported ${selectedUsers.length} selected user(s) to CSV!`);
+    }
+  };
+
   // Sort Toggles
   const handleAdminSort = (field: SortField) => {
     if (adminSortField === field) {
-      setAdminSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      setAdminSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setAdminSortField(field);
       setAdminSortOrder('asc');
@@ -364,7 +425,7 @@ export default function AdminUserManagementPage() {
 
   const handleUserSort = (field: SortField) => {
     if (userSortField === field) {
-      setUserSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      setUserSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setUserSortField(field);
       setUserSortOrder('asc');
@@ -373,12 +434,13 @@ export default function AdminUserManagementPage() {
 
   // Filter & Sort for Admins
   const processedAdmins = useMemo(() => {
-    const admins = users.filter(u => u.role === 'admin');
-    const filtered = admins.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
+    const admins = users.filter((u) => u.role === 'admin');
+    const filtered = admins.filter(
+      (u) =>
+        !search.trim() ||
+        u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
+        u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
     );
 
     return filtered.sort((a, b) => {
@@ -398,12 +460,13 @@ export default function AdminUserManagementPage() {
 
   // Filter & Sort for Standard Users
   const processedStandardUsers = useMemo(() => {
-    const standardUsers = users.filter(u => u.role === 'user');
-    const filtered = standardUsers.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
+    const standardUsers = users.filter((u) => u.role === 'user');
+    const filtered = standardUsers.filter(
+      (u) =>
+        !search.trim() ||
+        u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
+        u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
     );
 
     return filtered.sort((a, b) => {
@@ -432,28 +495,51 @@ export default function AdminUserManagementPage() {
   const userEndIndex = Math.min(userStartIndex + ITEMS_PER_PAGE, processedStandardUsers.length);
   const paginatedStandardUsers = processedStandardUsers.slice(userStartIndex, userEndIndex);
 
+  const isAllAdminsOnPageSelected =
+    paginatedAdmins.length > 0 && paginatedAdmins.every((u) => selectedUserIds.includes(u.id));
+
+  const handleToggleSelectAllAdmins = () => {
+    const pageAdminIds = paginatedAdmins.map((u) => u.id);
+    if (isAllAdminsOnPageSelected) {
+      setSelectedUserIds((prev) => prev.filter((id) => !pageAdminIds.includes(id)));
+    } else {
+      setSelectedUserIds((prev) => Array.from(new Set([...prev, ...pageAdminIds])));
+    }
+  };
+
+  const isAllStandardOnPageSelected =
+    paginatedStandardUsers.length > 0 && paginatedStandardUsers.every((u) => selectedUserIds.includes(u.id));
+
+  const handleToggleSelectAllStandardUsers = () => {
+    const pageUserIds = paginatedStandardUsers.map((u) => u.id);
+    if (isAllStandardOnPageSelected) {
+      setSelectedUserIds((prev) => prev.filter((id) => !pageUserIds.includes(id)));
+    } else {
+      setSelectedUserIds((prev) => Array.from(new Set([...prev, ...pageUserIds])));
+    }
+  };
+
   useEffect(() => {
     setAdminCurrentPage(1);
     setUserCurrentPage(1);
   }, [search]);
 
-  // Add User
+  // Add User Modal
   const handleOpenAddModal = (presetRole: 'admin' | 'user' = 'user') => {
     setAddName('');
     setAddEmail('');
     setAddPassword('');
     setAddRole(presetRole);
     
-    // Auto-select preferred tier from synchronized live plans
-    const defaultAdminPlan = availablePlans.find(p => p.slug.includes('annual') || p.slug.includes('pro'))?.slug || availablePlans[availablePlans.length - 1]?.slug || 'nutrition-pro-annual';
-    const defaultUserPlan = availablePlans.find(p => p.isFree || p.slug === 'taster')?.slug || availablePlans[0]?.slug || 'taster';
+    const defaultAdminPlan = availablePlans.find((p) => p.slug.includes('annual') || p.slug.includes('pro'))?.slug || availablePlans[availablePlans.length - 1]?.slug || 'nutrition-pro-annual';
+    const defaultUserPlan = availablePlans.find((p) => p.isFree || p.slug === 'taster')?.slug || availablePlans[0]?.slug || 'taster';
     
     setAddSubscriptionPlan(presetRole === 'admin' ? defaultAdminPlan : defaultUserPlan);
     setAddError('');
     setShowAddModal(true);
   };
 
-    const handleAddUserSubmit = async (e: React.FormEvent) => {
+  const handleAddUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAddError('');
 
@@ -465,7 +551,7 @@ export default function AdminUserManagementPage() {
       return;
     }
 
-    if (users.some(u => u && u.email && u.email.toLowerCase() === cleanEmail)) {
+    if (users.some((u) => u && u.email && u.email.toLowerCase() === cleanEmail)) {
       setAddError('A user with this email address already exists.');
       return;
     }
@@ -487,44 +573,30 @@ export default function AdminUserManagementPage() {
       createdAt: new Date().toISOString()
     };
 
-    // 1. Un-blacklist email from local tombstone store if previously deleted
     try {
       const rawDel = localStorage.getItem('zecratary_deleted_users');
       if (rawDel) {
         const delList: string[] = JSON.parse(rawDel);
-        const filteredDel = delList.filter(s => s.toLowerCase().trim() !== cleanEmail && s !== newUser.id);
+        const filteredDel = delList.filter((s) => s.toLowerCase().trim() !== cleanEmail && s !== newUser.id);
         localStorage.setItem('zecratary_deleted_users', JSON.stringify(filteredDel));
       }
     } catch (_) {}
 
-    // 2. Persist to server API registry
     try {
       await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newUser),
       });
-    } catch (err) {
-      console.error('Failed to sync new user to backend:', err);
-    }
+    } catch (_) {}
 
-    // 3. Update local state & storage
-    const updated = [newUser, ...users.filter(u => !u.email || u.email.toLowerCase() !== cleanEmail)];
-        saveUsersList(updated);
-
-    const editedTarget = updated.find(u => u.id === editingUserId);
-    if (editedTarget) {
-      fetch('/api/admin/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editedTarget),
-      }).catch(() => {});
-    }
+    const updated = [newUser, ...users.filter((u) => !u.email || u.email.toLowerCase() !== cleanEmail)];
+    saveUsersList(updated);
     setShowAddModal(false);
     showToast(`User "${newUser.name}" created with "${getPlanBadge(newUser.subscriptionPlan).label}" plan!`);
   };
 
-  // Edit User
+  // Edit User Modal
   const handleOpenEditModal = (user: AppUser) => {
     setEditingUserId(user.id);
     setEditName(user.name);
@@ -549,19 +621,18 @@ export default function AdminUserManagementPage() {
       return;
     }
 
-    const emailTaken = users.some(u => u.id !== editingUserId && u.email.toLowerCase() === cleanEmail);
+    const emailTaken = users.some((u) => u.id !== editingUserId && u.email && u.email.toLowerCase() === cleanEmail);
     if (emailTaken) {
       setEditError('Another user is already registered with this email.');
       return;
     }
 
-    const targetUser = users.find(u => u.id === editingUserId);
+    const targetUser = users.find((u) => u.id === editingUserId);
     const isFirstAdmin = isFirstAdminUser(targetUser);
 
-    // Enforce role preservation for first admin
     const finalRole: 'admin' | 'user' = isFirstAdmin ? 'admin' : editRole;
 
-    const updated = users.map(u => {
+    const updated = users.map((u) => {
       if (u.id === editingUserId) {
         return {
           ...u,
@@ -576,6 +647,15 @@ export default function AdminUserManagementPage() {
     });
 
     saveUsersList(updated);
+
+    const editedTarget = updated.find((u) => u.id === editingUserId);
+    if (editedTarget) {
+      fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editedTarget),
+      }).catch(() => {});
+    }
 
     if (currentUser?.id === editingUserId) {
       const activeUserUpdated = {
@@ -594,9 +674,9 @@ export default function AdminUserManagementPage() {
     showToast(`User "${cleanName}" updated successfully!`);
   };
 
-      // Delete User
+  // Safe Deletion Handler
   const handleDeleteUser = async (id: string, userEmail: string, userName?: string) => {
-    const targetUser = users.find(u => u.id === id || (u.email && u.email.toLowerCase() === userEmail.toLowerCase()));
+    const targetUser = users.find((u) => u.id === id || (u.email && u.email.toLowerCase() === userEmail.toLowerCase()));
 
     if (currentUser?.email?.toLowerCase() === userEmail.toLowerCase() || currentUser?.id === id) {
       alert('You cannot delete your own active admin account.');
@@ -614,7 +694,6 @@ export default function AdminUserManagementPage() {
     try {
       const cleanEmail = userEmail.toLowerCase().trim();
 
-      // 1. Record tombstone in localStorage to prevent cache resurrection
       try {
         const rawDel = localStorage.getItem('zecratary_deleted_users');
         const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
@@ -623,12 +702,11 @@ export default function AdminUserManagementPage() {
         localStorage.setItem('zecratary_deleted_users', JSON.stringify(delList));
       } catch (_) {}
 
-      // 2. Remove locally from state and localStorage
-      const updated = users.filter(u => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail));
+      const updated = users.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail));
       setUsers(updated);
+      setSelectedUserIds((prev) => prev.filter((uid) => uid !== id));
       localStorage.setItem('zecratary_users', JSON.stringify(updated));
 
-      // 3. Remove from backend API
       await fetch('/api/admin/users', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -637,7 +715,6 @@ export default function AdminUserManagementPage() {
 
       showToast(`User "${displayName}" has been deleted.`);
       window.dispatchEvent(new Event('zecratary_users_updated'));
-      window.dispatchEvent(new Event('storage'));
     } catch (err: any) {
       console.error('Failed to delete user:', err);
       showToast('Failed to delete user: ' + (err?.message || 'Server error'));
@@ -667,9 +744,8 @@ export default function AdminUserManagementPage() {
       };
     }
 
-    // Match against live system packages list
     const matched = availablePlans.find(
-      p => p.slug === planKey || p.id === planKey || p.slug.toLowerCase() === planKey.toLowerCase()
+      (p) => p.slug === planKey || p.id === planKey || p.slug.toLowerCase() === planKey.toLowerCase()
     );
 
     if (matched) {
@@ -709,10 +785,9 @@ export default function AdminUserManagementPage() {
       };
     }
 
-    // Generic formatting fallback
     const formatted = planKey
       .split('-')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
 
     if (planKey.includes('free') || planKey === 'taster') {
@@ -735,7 +810,7 @@ export default function AdminUserManagementPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 text-slate-100 pb-24 px-2 sm:px-4 pt-2">
+    <div className="max-w-6xl mx-auto space-y-6 text-slate-100 pb-24 px-2 sm:px-4 pt-2">
       
       {/* ACCESS WARNING FOR NON-ADMINS */}
       {currentUser && currentUser.role !== 'admin' && (
@@ -789,7 +864,40 @@ export default function AdminUserManagementPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* EXPORT ACTION BUTTONS */}
+          <button
+            type="button"
+            onClick={() => handleExportSelected('csv')}
+            disabled={selectedUserIds.length === 0}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+            style={{
+              backgroundColor: 'var(--color-card, #0b0f17)',
+              borderColor: selectedUserIds.length > 0 ? 'var(--color-primary, #E05638)' : 'var(--color-border, #1e293b)',
+              color: selectedUserIds.length > 0 ? '#ffffff' : '#cbd5e1'
+            }}
+            title={selectedUserIds.length === 0 ? 'Select user(s) to export' : `Export ${selectedUserIds.length} user(s) to CSV`}
+          >
+            <Download className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>Export CSV {selectedUserIds.length > 0 ? `(${selectedUserIds.length})` : ''}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleExportSelected('json')}
+            disabled={selectedUserIds.length === 0}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+            style={{
+              backgroundColor: 'var(--color-card, #0b0f17)',
+              borderColor: 'var(--color-border, #1e293b)',
+              color: '#cbd5e1'
+            }}
+            title={selectedUserIds.length === 0 ? 'Select user(s) to export' : `Export ${selectedUserIds.length} user(s) to JSON`}
+          >
+            <Download className="h-4 w-4 text-slate-400" />
+            <span>Export JSON</span>
+          </button>
+
           <button
             onClick={() => handleOpenAddModal('user')}
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer"
@@ -799,6 +907,7 @@ export default function AdminUserManagementPage() {
           >
             <UserPlus className="h-4 w-4" /> Add New User
           </button>
+          
           <Link
             href="/admin/plans"
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
@@ -823,6 +932,48 @@ export default function AdminUserManagementPage() {
           </Link>
         </div>
       </div>
+
+      {/* SELECTION BANNER */}
+      {selectedUserIds.length > 0 && (
+        <div 
+          className="p-3.5 px-5 rounded-2xl flex items-center justify-between text-xs border shadow-lg animate-in fade-in"
+          style={{
+            backgroundColor: 'rgba(224, 86, 56, 0.12)',
+            borderColor: 'var(--color-primary, #E05638)',
+            color: '#ffffff'
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="font-bold">
+              {selectedUserIds.length} of {users.length} user{users.length > 1 ? 's' : ''} selected
+            </span>
+            <button 
+              type="button"
+              onClick={() => setSelectedUserIds([])}
+              className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+            >
+              Clear selection
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleExportSelected('csv')}
+              className="px-3.5 py-1.5 rounded-xl text-white font-bold flex items-center gap-1.5 cursor-pointer transition shadow-sm text-xs"
+              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+            >
+              <Download className="h-3.5 w-3.5" /> Export Selected (CSV)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExportSelected('json')}
+              className="px-3.5 py-1.5 rounded-xl font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5 cursor-pointer transition shadow-sm text-xs"
+            >
+              <Download className="h-3.5 w-3.5" /> JSON
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* SEARCH BAR */}
       <div className="relative">
@@ -901,6 +1052,15 @@ export default function AdminUserManagementPage() {
                 }}
               >
                 <tr>
+                  <th className="w-10 px-4 py-4 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllAdminsOnPageSelected}
+                      onChange={handleToggleSelectAllAdmins}
+                      className="rounded cursor-pointer accent-[#E05638]"
+                      title="Select all administrators on this page"
+                    />
+                  </th>
                   <th className="px-5 py-4">
                     <button
                       type="button"
@@ -942,7 +1102,7 @@ export default function AdminUserManagementPage() {
               >
                 {paginatedAdmins.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-500">
+                    <td colSpan={7} className="text-center py-10 text-slate-500">
                       No administrators found {search ? `matching "${search}"` : ''}.
                     </td>
                   </tr>
@@ -950,14 +1110,27 @@ export default function AdminUserManagementPage() {
                   paginatedAdmins.map((user) => {
                     const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
                     const isPrimary = isFirstAdminUser(user);
+                    const isSelected = selectedUserIds.includes(user.id);
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
                     return (
                       <tr 
                         key={user.id} 
                         className="transition"
-                        style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                        style={{ 
+                          borderColor: 'var(--color-border, #1e293b)',
+                          backgroundColor: isSelected ? 'rgba(224, 86, 56, 0.08)' : undefined
+                        }}
                       >
+                        <td className="w-10 px-4 py-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectUser(user.id)}
+                            className="rounded cursor-pointer accent-[#E05638]"
+                            title={`Select ${user.name}`}
+                          />
+                        </td>
                         <td className="px-5 py-4 font-bold text-white flex items-center gap-3">
                           <div 
                             className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0"
@@ -1096,7 +1269,7 @@ export default function AdminUserManagementPage() {
                 <button
                   type="button"
                   disabled={adminCurrentPage <= 1}
-                  onClick={() => setAdminCurrentPage(p => Math.max(1, p - 1))}
+                  onClick={() => setAdminCurrentPage((p) => Math.max(1, p - 1))}
                   className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-card, #0b0f17)',
@@ -1109,7 +1282,7 @@ export default function AdminUserManagementPage() {
                 <button
                   type="button"
                   disabled={adminCurrentPage >= adminTotalPages}
-                  onClick={() => setAdminCurrentPage(p => Math.min(adminTotalPages, p + 1))}
+                  onClick={() => setAdminCurrentPage((p) => Math.min(adminTotalPages, p + 1))}
                   className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-card, #0b0f17)',
@@ -1181,6 +1354,15 @@ export default function AdminUserManagementPage() {
                 }}
               >
                 <tr>
+                  <th className="w-10 px-4 py-4 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllStandardOnPageSelected}
+                      onChange={handleToggleSelectAllStandardUsers}
+                      className="rounded cursor-pointer accent-[#E05638]"
+                      title="Select all standard users on this page"
+                    />
+                  </th>
                   <th className="px-5 py-4">
                     <button
                       type="button"
@@ -1222,21 +1404,34 @@ export default function AdminUserManagementPage() {
               >
                 {paginatedStandardUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-500">
+                    <td colSpan={7} className="text-center py-10 text-slate-500">
                       No standard users found {search ? `matching "${search}"` : ''}.
                     </td>
                   </tr>
                 ) : (
                   paginatedStandardUsers.map((user) => {
                     const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
+                    const isSelected = selectedUserIds.includes(user.id);
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
                     return (
                       <tr 
                         key={user.id} 
                         className="transition"
-                        style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                        style={{ 
+                          borderColor: 'var(--color-border, #1e293b)',
+                          backgroundColor: isSelected ? 'rgba(224, 86, 56, 0.08)' : undefined
+                        }}
                       >
+                        <td className="w-10 px-4 py-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectUser(user.id)}
+                            className="rounded cursor-pointer accent-[#E05638]"
+                            title={`Select ${user.name}`}
+                          />
+                        </td>
                         <td className="px-5 py-4 font-bold text-white flex items-center gap-3">
                           <div 
                             className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0"
@@ -1363,7 +1558,7 @@ export default function AdminUserManagementPage() {
               <button
                 type="button"
                 disabled={userCurrentPage <= 1}
-                onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))}
+                onClick={() => setUserCurrentPage((p) => Math.max(1, p - 1))}
                 className={`p-2 rounded-xl border flex items-center justify-center transition ${
                   userCurrentPage <= 1
                     ? 'opacity-40 cursor-not-allowed'
@@ -1401,7 +1596,7 @@ export default function AdminUserManagementPage() {
               <button
                 type="button"
                 disabled={userCurrentPage >= userTotalPages}
-                onClick={() => setUserCurrentPage(p => Math.min(userTotalPages, p + 1))}
+                onClick={() => setUserCurrentPage((p) => Math.min(userTotalPages, p + 1))}
                 className={`p-2 rounded-xl border flex items-center justify-center transition ${
                   userCurrentPage >= userTotalPages
                     ? 'opacity-40 cursor-not-allowed'
@@ -1421,7 +1616,7 @@ export default function AdminUserManagementPage() {
       </div>
 
       {/* ───────────────────────────────────────────────────────────── */}
-      {/* 1. ADD USER MODAL WITH SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
+      {/* 1. ADD USER MODAL */}
       {/* ───────────────────────────────────────────────────────────── */}
       {showAddModal && (
         <div 
@@ -1525,7 +1720,6 @@ export default function AdminUserManagementPage() {
                 </div>
               </div>
 
-              {/* SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
               <div>
                 <label className="block font-bold text-slate-300 mb-1.5 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
@@ -1638,7 +1832,7 @@ export default function AdminUserManagementPage() {
       )}
 
       {/* ───────────────────────────────────────────────────────────── */}
-      {/* 2. EDIT USER MODAL WITH ROLE LOCK FOR PRIMARY ADMIN */}
+      {/* 2. EDIT USER MODAL */}
       {/* ───────────────────────────────────────────────────────────── */}
       {showEditModal && (
         <div 
@@ -1739,7 +1933,6 @@ export default function AdminUserManagementPage() {
                 </div>
               </div>
 
-              {/* SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
               <div>
                 <label className="block font-bold text-slate-300 mb-1.5 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
@@ -1767,7 +1960,6 @@ export default function AdminUserManagementPage() {
                 </select>
               </div>
 
-              {/* ASSIGNED ROLE WITH PRIMARY ADMIN LOCK */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block font-bold text-slate-300">Assigned Role</label>
