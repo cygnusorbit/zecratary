@@ -1,6 +1,6 @@
 import { User, setCurrentUser, initAuthStorage } from '@/lib/auth';
 
-export type SocialProvider = 'google' | 'facebook' | 'apple';
+export type SocialProvider = 'google' | 'facebook' | 'apple' | 'github';
 
 export interface SocialLoginConfig {
   googleEnabled: boolean;
@@ -39,6 +39,40 @@ export function getSocialLoginConfig(): SocialLoginConfig {
   return DEFAULT_SOCIAL_CONFIG;
 }
 
+export function getDefaultSubscriptionPlan(): string {
+  if (typeof window === 'undefined') return 'taster';
+  try {
+    const explicitDefault = localStorage.getItem('zecratary_default_plan');
+    if (explicitDefault) return explicitDefault;
+
+    const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
+    if (rawConfigs) {
+      const configs = JSON.parse(rawConfigs);
+      if (Array.isArray(configs) && configs.length > 0) {
+        const defaultPlan = configs.find((c: any) => c.isDefault);
+        if (defaultPlan?.slug || defaultPlan?.id) return defaultPlan.slug || defaultPlan.id;
+
+        const freePlan = configs.find(
+          (c: any) => c.isFree || (Number(c.monthlyPriceDollars || 0) === 0 && Number(c.annualPriceDollars || 0) === 0)
+        );
+        if (freePlan?.slug || freePlan?.id) return freePlan.slug || freePlan.id;
+
+        if (configs[0]?.slug || configs[0]?.id) return configs[0].slug || configs[0].id;
+      }
+    }
+
+    const rawPlans = localStorage.getItem('zecratary_subscription_plans');
+    if (rawPlans) {
+      const plans = JSON.parse(rawPlans);
+      if (Array.isArray(plans) && plans.length > 0) {
+        const free = plans.find((p: any) => p.priceCents === 0 || p.isFree);
+        if (free?.slug || free?.id) return free.slug || free.id;
+      }
+    }
+  } catch (_) {}
+  return 'taster';
+}
+
 export interface SocialProfile {
   name: string;
   email: string;
@@ -46,9 +80,6 @@ export interface SocialProfile {
   provider: SocialProvider;
 }
 
-/**
- * Decodes the base64 URL-encoded payload of a Google Identity Services JWT credential.
- */
 export function decodeGoogleCredential(credential: string): { email: string; name: string; avatar?: string } | null {
   try {
     const base64Url = credential.split('.')[1];
@@ -80,20 +111,31 @@ export function executeSocialAuth(profile: SocialProfile): User {
   let matchedUser = users.find((u) => u.email.toLowerCase() === cleanEmail);
 
   if (!matchedUser) {
+    const systemDefaultPlan = getDefaultSubscriptionPlan();
     matchedUser = {
       id: `usr_${profile.provider}_${Date.now().toString(36)}`,
       name: profile.name.trim() || `${profile.provider.toUpperCase()} User`,
       email: cleanEmail,
       role: 'user',
-      subscriptionPlan: 'taster',
-      subscriptionTier: 'taster',
+      subscriptionPlan: systemDefaultPlan,
+      subscriptionTier: systemDefaultPlan,
       createdAt: new Date().toISOString(),
-    };
+      avatar: profile.avatar,
+    } as any;
     users.unshift(matchedUser);
     localStorage.setItem('zecratary_users', JSON.stringify(users));
   }
 
   setCurrentUser(matchedUser);
+
+  try {
+    fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(matchedUser),
+    }).catch(() => {});
+  } catch (_) {}
+
   window.dispatchEvent(new Event('zecratary_users_updated'));
   window.dispatchEvent(new Event('zecratary_auth_changed'));
   window.dispatchEvent(new Event('storage'));

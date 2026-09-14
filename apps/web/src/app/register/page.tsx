@@ -129,8 +129,8 @@ export default function RegisterPage() {
         email: cleanEmail,
         password: cleanPass,
         role: 'user',
-        subscriptionPlan: 'taster',
-        subscriptionTier: 'taster',
+        subscriptionPlan: getDefaultSubscriptionPlan(),
+        subscriptionTier: getDefaultSubscriptionPlan(),
         createdAt: new Date().toISOString()
       };
 

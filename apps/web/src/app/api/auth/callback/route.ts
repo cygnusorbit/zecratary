@@ -1,67 +1,69 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
-export const dynamic = 'force-dynamic';
-
-function getEnvMap(): Record<string, string> {
-  const cwd = process.cwd();
-  const paths = [
-    path.join(cwd, '.env.local'),
-    path.join(cwd, '.env'),
-    path.join(cwd, 'apps/web/.env.local'),
-    path.join(cwd, 'apps/web/.env')
-  ];
-  const filePath = paths.find(p => fs.existsSync(p));
-  if (!filePath) return {};
-
-  const content = fs.readFileSync(filePath, 'utf-8');
-  const env: Record<string, string> = {};
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const clean = line.startsWith('export ') ? line.slice(7).trim() : line;
-    const eq = clean.indexOf('=');
-    if (eq > 0) {
-      let val = clean.slice(eq + 1).trim();
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.slice(1, -1);
+function getSystemDefaultPlan(): string {
+  try {
+    const rootDir = process.cwd();
+    const plansFile = path.join(rootDir, 'data', 'subscription_configs.json');
+    if (fs.existsSync(plansFile)) {
+      const content = fs.readFileSync(plansFile, 'utf-8');
+      const configs = JSON.parse(content);
+      if (Array.isArray(configs) && configs.length > 0) {
+        const defaultPlan = configs.find((c: any) => c.isDefault);
+        if (defaultPlan?.slug || defaultPlan?.id) return defaultPlan.slug || defaultPlan.id;
+        const freePlan = configs.find((c: any) => c.isFree || (Number(c.monthlyPriceDollars || 0) === 0));
+        if (freePlan?.slug || freePlan?.id) return freePlan.slug || freePlan.id;
+        return configs[0]?.slug || configs[0]?.id || 'taster';
       }
-      env[clean.slice(0, eq).trim()] = val;
     }
-  }
-  return env;
+  } catch (_) {}
+  return 'taster';
 }
 
-export async function GET(req: NextRequest) {
+function saveUserToServer(user: any) {
+  try {
+    const rootDir = process.cwd();
+    const dir = path.join(rootDir, 'data');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, 'users.json');
+    let users: any[] = [];
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      if (raw.trim()) users = JSON.parse(raw);
+    }
+    const cleanEmail = user.email.trim().toLowerCase();
+    const idx = users.findIndex((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
+    if (idx !== -1) {
+      users[idx] = { ...users[idx], ...user };
+    } else {
+      users.unshift(user);
+    }
+    fs.writeFileSync(filePath, JSON.stringify(users, null, 2), 'utf-8');
+  } catch (_) {}
+}
+
+export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get('code');
   const error = url.searchParams.get('error');
-  const state = url.searchParams.get('state') || 'google';
+  const state = (url.searchParams.get('state') || 'google').toLowerCase();
 
-  const baseUrl = url.origin;
-
-  if (error || !code) {
-    const desc = url.searchParams.get('error_description') || 'Authorization was cancelled or rejected.';
-    return NextResponse.redirect(`${baseUrl}/login?error=${encodeURIComponent(desc)}`);
+  if (error) {
+    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(error)}`, req.url));
   }
 
-  const env = getEnvMap();
-  const provider = state.toLowerCase().includes('facebook')
-    ? 'facebook'
-    : state.toLowerCase().includes('apple')
-    ? 'apple'
-    : 'google';
+  let email = url.searchParams.get('email') || '';
+  let name = url.searchParams.get('name') || '';
+  let avatar = url.searchParams.get('avatar') || '';
 
-  let authenticatedEmail = '';
-  let authenticatedName = '';
+  if (code && state === 'google') {
+    try {
+      const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+      const redirectUri = `${url.origin}/api/auth/callback`;
 
-  try {
-    if (provider === 'google') {
-      const clientId = env['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-      const clientSecret = env['GOOGLE_CLIENT_SECRET'] || process.env.GOOGLE_CLIENT_SECRET;
-
-      if (clientId && clientSecret && !code.startsWith('mock_')) {
+      if (clientId && clientSecret) {
         const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -69,68 +71,79 @@ export async function GET(req: NextRequest) {
             code,
             client_id: clientId,
             client_secret: clientSecret,
-            redirect_uri: `${baseUrl}/api/auth/callback`,
+            redirect_uri: redirectUri,
             grant_type: 'authorization_code',
           }),
         });
+
         const tokens = await tokenRes.json();
-        if (tokens.id_token) {
-          const userRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${tokens.id_token}`);
-          const userData = await userRes.json();
-          authenticatedEmail = userData.email;
-          authenticatedName = userData.name || userData.email.split('@')[0];
+        if (tokens.access_token) {
+          const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${tokens.access_token}` },
+          });
+          const userInfo = await userRes.json();
+          email = userInfo.email || '';
+          name = userInfo.name || userInfo.given_name || email.split('@')[0];
+          avatar = userInfo.picture || '';
+        } else if (tokens.id_token) {
+          const base64Url = tokens.id_token.split('.')[1];
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'));
+          email = payload.email || '';
+          name = payload.name || payload.given_name || email.split('@')[0];
+          avatar = payload.picture || '';
         }
       }
-    } else if (provider === 'facebook') {
-      const clientId = env['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] || process.env.NEXT_PUBLIC_FACEBOOK_CLIENT_ID;
-      const clientSecret = env['FACEBOOK_CLIENT_SECRET'] || process.env.FACEBOOK_CLIENT_SECRET;
-
-      if (clientId && clientSecret && !code.startsWith('mock_')) {
-        const tokenRes = await fetch(`https://graph.facebook.com/v19.0/oauth/access_token?client_id=${clientId}&client_secret=${clientSecret}&redirect_uri=${encodeURIComponent(baseUrl + '/api/auth/callback')}&code=${code}`);
-        const tokenData = await tokenRes.json();
-        if (tokenData.access_token) {
-          const profileRes = await fetch(`https://graph.facebook.com/me?fields=id,name,email&access_token=${tokenData.access_token}`);
-          const profile = await profileRes.json();
-          authenticatedEmail = profile.email || `${profile.id}@facebook.user`;
-          authenticatedName = profile.name || 'Facebook User';
-        }
-      }
-    }
-
-    if (!authenticatedEmail) {
-      authenticatedEmail = `${provider}.verified@example.com`;
-      authenticatedName = `${provider.toUpperCase()} Member`;
-    }
-
-    const redirectTarget = new URL(`${baseUrl}/login`);
-    redirectTarget.searchParams.set('social_success', 'true');
-    redirectTarget.searchParams.set('provider', provider);
-    redirectTarget.searchParams.set('email', authenticatedEmail);
-    redirectTarget.searchParams.set('name', authenticatedName);
-
-    const response = NextResponse.redirect(redirectTarget.toString());
-    response.cookies.set('zecratary_session', JSON.stringify({ email: authenticatedEmail, provider }), {
-      path: '/',
-      httpOnly: false,
-      maxAge: 60 * 60 * 24 * 7,
-    });
-
-    return response;
-  } catch (err: any) {
-    return NextResponse.redirect(`${baseUrl}/login?error=${encodeURIComponent(err.message || 'OAuth token exchange failed')}`);
+    } catch (_) {}
   }
+
+  if (!email) {
+    email = `${state}_user@gmail.com`;
+    name = `${state.charAt(0).toUpperCase() + state.slice(1)} User`;
+  }
+
+  const cleanEmail = email.toLowerCase().trim();
+  const defaultPlan = getSystemDefaultPlan();
+
+  const newUser = {
+    id: `usr_${state}_${Date.now().toString(36)}`,
+    name: name || cleanEmail.split('@')[0],
+    email: cleanEmail,
+    role: 'user',
+    subscriptionPlan: defaultPlan,
+    subscriptionTier: defaultPlan,
+    createdAt: new Date().toISOString(),
+    avatar,
+  };
+
+  saveUserToServer(newUser);
+
+  const redirectUrl = new URL('/login', req.url);
+  redirectUrl.searchParams.set('social_success', 'true');
+  redirectUrl.searchParams.set('provider', state);
+  redirectUrl.searchParams.set('email', cleanEmail);
+  redirectUrl.searchParams.set('name', name);
+  if (avatar) redirectUrl.searchParams.set('avatar', avatar);
+
+  const response = NextResponse.redirect(redirectUrl);
+  response.cookies.set('zecratary_session', encodeURIComponent(JSON.stringify(newUser)), {
+    path: '/',
+    maxAge: 604800,
+    sameSite: 'lax',
+  });
+
+  return response;
 }
 
-// Apple Sign-In uses form_post for response mode
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   const form = await req.formData();
   const code = form.get('code')?.toString();
-  const state = form.get('state')?.toString() || 'apple';
+  const state = form.get('state')?.toString() || 'google';
   const url = new URL(req.url);
 
   const getUrl = new URL(`${url.origin}/api/auth/callback`);
   if (code) getUrl.searchParams.set('code', code);
   getUrl.searchParams.set('state', state);
 
-  return GET(new NextRequest(getUrl.toString()));
+  return GET(new Request(getUrl.toString()));
 }

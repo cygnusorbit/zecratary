@@ -103,12 +103,28 @@ export function isSessionCookieValid(): boolean {
 export function initAuthStorage(): void {
   if (typeof window === 'undefined') return;
   try {
+    let deletedSet = new Set<string>();
+    try {
+      const rawDel = localStorage.getItem('zecratary_deleted_users');
+      if (rawDel) {
+        const parsed: string[] = JSON.parse(rawDel);
+        deletedSet = new Set(parsed.map((s) => s.toLowerCase().trim()));
+      }
+    } catch (_) {}
+
     const rawUsers = localStorage.getItem('zecratary_users');
     let users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
 
     let modified = false;
 
-    // 1. Repair existing user records that lack a password
+    const initialLen = users.length;
+    users = users.filter((u) => {
+      if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
+      if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
+      return true;
+    });
+    if (users.length !== initialLen) modified = true;
+
     for (const u of users) {
       if (!u.password || u.password.trim() === '') {
         u.password = u.role === 'admin' ? 'admin' : 'password';
@@ -116,9 +132,11 @@ export function initAuthStorage(): void {
       }
     }
 
-    // 2. Ensure all default accounts are present
     for (const def of DEFAULT_USERS) {
-      const idx = users.findIndex(u => u.email.toLowerCase() === def.email.toLowerCase());
+      if (deletedSet.has(def.email.toLowerCase()) || (def.id && deletedSet.has(def.id.toLowerCase()))) {
+        continue;
+      }
+      const idx = users.findIndex((u) => u.email.toLowerCase() === def.email.toLowerCase());
       if (idx === -1) {
         users.push({ ...def });
         modified = true;
