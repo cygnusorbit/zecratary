@@ -7,7 +7,7 @@ import {
   Mail, Lock, CheckCircle2, AlertCircle, ArrowRight, 
   Sparkles, Eye, EyeOff, ShieldCheck, Loader2
 } from 'lucide-react';
-import { getCurrentUser, setCurrentUser, initAuthStorage, User } from '@/lib/auth';
+import {  getCurrentUser, setCurrentUser, initAuthStorage, User , authenticateUser, syncSessionCookie, isSessionCookieValid } from '@/lib/auth';
 import { 
   getSocialLoginConfig, SocialLoginConfig, DEFAULT_SOCIAL_CONFIG, 
   executeSocialAuth, SocialProvider 
@@ -55,73 +55,52 @@ export default function LoginPage() {
     setConfig(getSocialLoginConfig());
   }, []);
 
-      useEffect(() => {
+        useEffect(() => {
     initAuthStorage();
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('error') === 'unauthorized_access') {
-        localStorage.removeItem('zecratary_current_user');
-        localStorage.removeItem('zecratary_user');
-        document.cookie = 'zecratary_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax;';
-        window.history.replaceState({}, document.title, '/login');
-        return;
-      }
+    if (typeof window === 'undefined') return;
 
-      const active = getCurrentUser();
-      const hasCookie = document.cookie.includes('zecratary_session=');
+    const evaluateAuth = () => {
+      const activeUser = getCurrentUser();
+      const validCookie = isSessionCookieValid();
 
-      // If user remains in storage but cookie is gone, this was a logout - clear storage
-      if (active && !hasCookie) {
+      if (!validCookie) {
         localStorage.removeItem('zecratary_current_user');
         localStorage.removeItem('zecratary_user');
         return;
       }
 
-      // Only redirect to profile if BOTH storage and session cookie are active
-      if (active && hasCookie) {
-        window.location.href = '/profile';
+      if (activeUser && validCookie) {
+        if (activeUser.role === 'admin') {
+          window.location.replace('/admin');
+        } else {
+          window.location.replace('/profile');
+        }
       }
-    }
+    };
+
+    evaluateAuth();
+    const handleBfCache = (e: PageTransitionEvent) => { if (e.persisted) evaluateAuth(); };
+    window.addEventListener('pageshow', handleBfCache);
+    return () => window.removeEventListener('pageshow', handleBfCache);
   }, []);
 
-  const handleLogin = async (e: React.FormEvent) => {
+    const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setSuccess('');
-
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail || !password) {
-      setError(t('invalidCredentials') || 'Please enter both email and password.');
-      return;
-    }
-
     setLoading(true);
 
-    setTimeout(() => {
-      try {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
-
-        const matched = users.find(u => u.email.toLowerCase() === cleanEmail && u.password === password);
-        if (!matched) {
-          setError(t('invalidCredentials') || 'Invalid email address or password.');
-          setLoading(false);
-          return;
-        }
-
-        setCurrentUser(matched);
-        if (typeof document !== 'undefined') { document.cookie = `zecratary_session=${encodeURIComponent(JSON.stringify(matched))}; path=/; max-age=604800; SameSite=Lax`; }
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_auth_changed'));
-        window.dispatchEvent(new Event('storage'));
-
-        setSuccess(t('loginSuccess') || 'Login successful! Redirecting...');
-        setTimeout(() => router.replace('/profile'), 500);
-      } catch (err: any) {
-        setError(err.message || 'Login failed.');
-        setLoading(false);
+    const res = authenticateUser(email, password);
+    if (res.success && res.user) {
+      syncSessionCookie(res.user);
+      if (res.user.role === 'admin') {
+        window.location.replace('/admin');
+      } else {
+        window.location.replace('/profile');
       }
-    }, 500);
+    } else {
+      setError(res.error || 'Invalid email address or password.');
+      setLoading(false);
+    }
   };
 
   const handleSocialClick = (provider: SocialProvider) => {
