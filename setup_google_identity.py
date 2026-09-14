@@ -1,4 +1,138 @@
-'use client';
+import os
+import glob
+
+# 1. Locate App Router directory
+candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/lib/auth.ts', recursive=True)
+    if matches:
+        app_dir = os.path.join(os.path.dirname(os.path.dirname(matches[0])), 'app')
+
+if not app_dir:
+    print("❌ Error: Could not locate Next.js app directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+lib_dir = os.path.join(base_dir, 'lib')
+os.makedirs(lib_dir, exist_ok=True)
+
+# 2. Update lib/socialAuth.ts with Google JWT decoder helper
+social_auth_path = os.path.join(lib_dir, 'socialAuth.ts')
+social_auth_code = """import { User, setCurrentUser, initAuthStorage } from '@/lib/auth';
+
+export type SocialProvider = 'google' | 'facebook' | 'apple';
+
+export interface SocialLoginConfig {
+  googleEnabled: boolean;
+  googleClientId: string;
+  facebookEnabled: boolean;
+  facebookClientId: string;
+  appleEnabled: boolean;
+  appleClientId: string;
+}
+
+export const DEFAULT_SOCIAL_CONFIG: SocialLoginConfig = {
+  googleEnabled: true,
+  googleClientId: '',
+  facebookEnabled: false,
+  facebookClientId: '',
+  appleEnabled: false,
+  appleClientId: '',
+};
+
+export function getSocialLoginConfig(): SocialLoginConfig {
+  if (typeof window === 'undefined') return DEFAULT_SOCIAL_CONFIG;
+  try {
+    const raw = localStorage.getItem('zecratary_social_login_config');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        googleEnabled: parsed.googleEnabled ?? true,
+        googleClientId: parsed.googleClientId || '',
+        facebookEnabled: parsed.facebookEnabled ?? false,
+        facebookClientId: parsed.facebookClientId || '',
+        appleEnabled: parsed.appleEnabled ?? false,
+        appleClientId: parsed.appleClientId || '',
+      };
+    }
+  } catch (_) {}
+  return DEFAULT_SOCIAL_CONFIG;
+}
+
+export interface SocialProfile {
+  name: string;
+  email: string;
+  avatar?: string;
+  provider: SocialProvider;
+}
+
+/**
+ * Decodes the base64 URL-encoded payload of a Google Identity Services JWT credential.
+ */
+export function decodeGoogleCredential(credential: string): { email: string; name: string; avatar?: string } | null {
+  try {
+    const base64Url = credential.split('.')[1];
+    if (!base64Url) return null;
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(jsonPayload);
+    return {
+      email: payload.email,
+      name: payload.name || payload.given_name || payload.email.split('@')[0],
+      avatar: payload.picture,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+export function executeSocialAuth(profile: SocialProfile): User {
+  initAuthStorage();
+  const cleanEmail = profile.email.trim().toLowerCase();
+  const rawUsers = localStorage.getItem('zecratary_users');
+  const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
+
+  let matchedUser = users.find((u) => u.email.toLowerCase() === cleanEmail);
+
+  if (!matchedUser) {
+    matchedUser = {
+      id: `usr_${profile.provider}_${Date.now().toString(36)}`,
+      name: profile.name.trim() || `${profile.provider.toUpperCase()} User`,
+      email: cleanEmail,
+      role: 'user',
+      subscriptionPlan: 'taster',
+      subscriptionTier: 'taster',
+      createdAt: new Date().toISOString(),
+    };
+    users.unshift(matchedUser);
+    localStorage.setItem('zecratary_users', JSON.stringify(users));
+  }
+
+  setCurrentUser(matchedUser);
+  window.dispatchEvent(new Event('zecratary_users_updated'));
+  window.dispatchEvent(new Event('zecratary_auth_changed'));
+  window.dispatchEvent(new Event('storage'));
+
+  return matchedUser;
+}
+"""
+with open(social_auth_path, 'w', encoding='utf-8') as f:
+    f.write(social_auth_code)
+print(f"✓ Updated auth engine with Google Identity decoder: {social_auth_path}")
+
+# 3. Patch /login/page.tsx to mount Google Identity Services
+login_dirs = [os.path.join(app_dir, 'login'), os.path.join(app_dir, '(auth)', 'login')]
+login_dir = next((d for d in login_dirs if os.path.exists(d)), login_dirs[0])
+login_page_path = os.path.join(login_dir, 'page.tsx')
+
+login_page_code = """'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -436,3 +570,89 @@ export default function LoginPage() {
     </div>
   );
 }
+"""
+
+with open(login_page_path, 'w', encoding='utf-8') as f:
+    f.write(login_page_code)
+print(f"✓ Patched /login with Google Identity Services: {login_page_path}")
+
+# 4. Patch /register/page.tsx with Google Identity Services
+register_dirs = [os.path.join(app_dir, 'register'), os.path.join(app_dir, '(auth)', 'register')]
+for r_dir in register_dirs:
+    if os.path.exists(r_dir):
+        reg_file = os.path.join(r_dir, 'page.tsx')
+        with open(reg_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Inject SDK hook into register page if not present
+        if 'google-identity-services-sdk' not in content:
+            replacement_target = "  useEffect(() => {\n    syncTheme();\n    fetchLiveConfig();"
+            sdk_hook = """  useEffect(() => {
+    if (typeof window !== 'undefined' && config.googleEnabled) {
+      const scriptId = 'google-identity-services-sdk';
+      if (!document.getElementById(scriptId)) {
+        const script = document.createElement('script');
+        script.id = scriptId;
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        document.body.appendChild(script);
+      }
+    }
+  }, [config.googleEnabled]);
+
+  useEffect(() => {
+    syncTheme();
+    fetchLiveConfig();"""
+
+            content = content.replace(replacement_target, sdk_hook)
+
+            # Inject prompt call into handleSocialClick
+            old_click = "  const handleSocialClick = (provider: SocialProvider) => {\n    setError('');"
+            new_click = """  const handleSocialClick = (provider: SocialProvider) => {
+    setError('');
+
+    if (provider === 'google' && config.googleClientId && typeof window !== 'undefined' && (window as any).google?.accounts?.id) {
+      try {
+        (window as any).google.accounts.id.initialize({
+          client_id: config.googleClientId,
+          callback: (response: { credential?: string }) => {
+            if (response.credential) {
+              const profile = decodeGoogleCredential(response.credential);
+              if (profile && profile.email) {
+                setSocialLoading('google');
+                executeSocialAuth({
+                  name: profile.name,
+                  email: profile.email,
+                  avatar: profile.avatar,
+                  provider: 'google',
+                });
+                setSuccess(`${t('signedInWith') || 'Signed in with'} GOOGLE! Redirecting...`);
+                setTimeout(() => router.replace('/profile'), 500);
+                return;
+              }
+            }
+          },
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
+
+        (window as any).google.accounts.id.prompt((notification: any) => {
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            setSocialModalProvider('google');
+            setSocialCustomName('Google User');
+            setSocialCustomEmail('user@gmail.com');
+          }
+        });
+        return;
+      } catch (err) {
+        console.warn('Google Identity Services prompt fallback', err);
+      }
+    }"""
+            content = content.replace(old_click, new_click)
+
+            with open(reg_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(f"✓ Patched registration route with Google Identity Services: {reg_file}")
+
+print("🚀 Google Identity Services setup complete!")

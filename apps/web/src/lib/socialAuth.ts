@@ -46,6 +46,31 @@ export interface SocialProfile {
   provider: SocialProvider;
 }
 
+/**
+ * Decodes the base64 URL-encoded payload of a Google Identity Services JWT credential.
+ */
+export function decodeGoogleCredential(credential: string): { email: string; name: string; avatar?: string } | null {
+  try {
+    const base64Url = credential.split('.')[1];
+    if (!base64Url) return null;
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(jsonPayload);
+    return {
+      email: payload.email,
+      name: payload.name || payload.given_name || payload.email.split('@')[0],
+      avatar: payload.picture,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
 export function executeSocialAuth(profile: SocialProfile): User {
   initAuthStorage();
   const cleanEmail = profile.email.trim().toLowerCase();
