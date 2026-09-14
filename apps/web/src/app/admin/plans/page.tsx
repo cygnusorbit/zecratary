@@ -1448,7 +1448,8 @@ export default function AdminSubscriptionPlans() {
                   return (
                     <div
                       key={cardIdentifier}
-                      className="p-4 rounded-2xl border flex items-center justify-between transition shadow-xs"
+                      className="p-4 rounded-2xl border flex items-center justify-between transition shadow-xs cursor-pointer hover:border-[var(--color-primary,#E05638)]"
+                      onClick={() => handleEditPackage(pkg)}
                       style={{
                         backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
                         borderColor: editingId === cardIdentifier 
@@ -1550,7 +1551,7 @@ export default function AdminSubscriptionPlans() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
                           disabled={!isTaster}
