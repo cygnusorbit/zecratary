@@ -55,14 +55,15 @@ export default function LoginPage() {
     setConfig(getSocialLoginConfig());
   }, []);
 
-        useEffect(() => {
+          useEffect(() => {
     initAuthStorage();
     if (typeof window === 'undefined') return;
 
-    const evaluateAuth = () => {
+    const checkSessionState = () => {
       const activeUser = getCurrentUser();
       const validCookie = isSessionCookieValid();
 
+      // Clear orphaned storage if cookie was deleted
       if (!validCookie) {
         localStorage.removeItem('zecratary_current_user');
         localStorage.removeItem('zecratary_user');
@@ -70,21 +71,24 @@ export default function LoginPage() {
       }
 
       if (activeUser && validCookie) {
-        if (activeUser.role === 'admin') {
-          window.location.replace('/admin');
-        } else {
-          window.location.replace('/profile');
-        }
+        const dest = activeUser.role === 'admin' ? '/admin' : '/profile';
+        window.location.replace(dest);
       }
     };
 
-    evaluateAuth();
-    const handleBfCache = (e: PageTransitionEvent) => { if (e.persisted) evaluateAuth(); };
-    window.addEventListener('pageshow', handleBfCache);
-    return () => window.removeEventListener('pageshow', handleBfCache);
+    checkSessionState();
+
+    const handlePageshow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        checkSessionState();
+      }
+    };
+
+    window.addEventListener('pageshow', handlePageshow);
+    return () => window.removeEventListener('pageshow', handlePageshow);
   }, []);
 
-    const handleLogin = async (e: React.FormEvent) => {
+        const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -92,11 +96,8 @@ export default function LoginPage() {
     const res = authenticateUser(email, password);
     if (res.success && res.user) {
       syncSessionCookie(res.user);
-      if (res.user.role === 'admin') {
-        window.location.replace('/admin');
-      } else {
-        window.location.replace('/profile');
-      }
+      const target = res.user.role === 'admin' ? '/admin' : '/profile';
+      window.location.replace(target);
     } else {
       setError(res.error || 'Invalid email address or password.');
       setLoading(false);

@@ -5,7 +5,7 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const sessionCookie = req.cookies.get('zecratary_session')?.value;
 
-  let session: { id?: string; email?: string; role?: string; provider?: string } | null = null;
+  let session: { id?: string; email?: string; role?: string; name?: string } | null = null;
   if (sessionCookie && sessionCookie.trim() !== '') {
     try {
       session = JSON.parse(decodeURIComponent(sessionCookie));
@@ -21,7 +21,7 @@ export function middleware(req: NextRequest) {
     session && (session.role === 'admin' || session.email?.toLowerCase().includes('admin'))
   );
 
-  // 1. Enforce Admin Routes
+  // Protected Admin Routes
   if (pathname.startsWith('/admin')) {
     if (!isAuthenticated) {
       return NextResponse.redirect(new URL('/login', req.url));
@@ -31,7 +31,7 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  // 2. Enforce Standard Protected Routes
+  // Protected User Routes
   if (
     pathname.startsWith('/profile') ||
     pathname.startsWith('/planner') ||
@@ -45,7 +45,7 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  // 3. Guest-Only Routes (Bounce logged-in users according to role)
+  // Guest Only Routes
   if ((pathname === '/login' || pathname === '/register') && isAuthenticated) {
     if (isAdmin) {
       return NextResponse.redirect(new URL('/admin', req.url));

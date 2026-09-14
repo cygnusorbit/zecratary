@@ -518,6 +518,14 @@ export default function ProfilePage() {
     syncPlansFromAdmin();
     reloadActiveUser();
 
+    const handleBfCache = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        syncPlansFromAdmin();
+        reloadActiveUser();
+      }
+    };
+    window.addEventListener('pageshow', handleBfCache);
+
     const handleSyncEvent = () => {
       syncPlansFromAdmin();
       reloadActiveUser();
@@ -533,8 +541,9 @@ export default function ProfilePage() {
       window.removeEventListener('zecratary_users_updated', handleSyncEvent);
       window.removeEventListener('zecratary_payment_updated', handleSyncEvent);
       window.removeEventListener('storage', handleSyncEvent);
+      window.removeEventListener('pageshow', handleBfCache);
     };
-  }, [reloadActiveUser, syncPlansFromAdmin, t]);
+  }, []);
 
   // Step 5: Social Account Toggle Functionality
   const handleToggleSocialLink = (provider: SocialProvider) => {
