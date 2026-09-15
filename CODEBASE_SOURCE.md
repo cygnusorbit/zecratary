@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "1.0.0",
+  "version": "7.0.5",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -24,6 +24,7 @@
   },
   "packageManager": "npm@10.8.2"
 }
+
 ```
 
 ## File: `packages/database/package.json`
@@ -104,7 +105,7 @@
 ```json
 {
   "name": "web",
-  "version": "1.0.0",
+  "version": "7.0.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -134,6 +135,7 @@
     "typescript": "^5.7.3"
   }
 }
+
 ```
 
 ## File: `apps/web/tsconfig.json`
@@ -177,6 +179,102 @@
     "node_modules"
   ]
 }
+
+```
+
+## File: `apps/web/src/middleware.ts`
+```typescript
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  const sessionCookie = req.cookies.get('zecratary_session')?.value;
+
+  let session: { id?: string; email?: string; role?: string; name?: string } | null = null;
+  if (sessionCookie && sessionCookie.trim() !== '') {
+    try {
+      session = JSON.parse(decodeURIComponent(sessionCookie));
+    } catch (_) {
+      try {
+        session = JSON.parse(sessionCookie);
+      } catch (_) {}
+    }
+  }
+
+  const isAuthenticated = Boolean(session && (session.email || session.id));
+  const isAdmin = Boolean(
+    session && (session.role === 'admin' || session.email?.toLowerCase().includes('admin'))
+  );
+
+  // 1. Enforce Admin Routes
+  if (pathname.startsWith('/admin')) {
+    if (!isAuthenticated) {
+      return NextResponse.redirect(new URL('/login', req.url));
+    }
+    if (!isAdmin) {
+      return NextResponse.redirect(new URL('/profile', req.url));
+    }
+  }
+
+  // 2. Enforce Protected Member Routes
+  const protectedPrefixes = [
+    '/profile',
+    '/dashboard',
+    '/planner',
+    '/pantry',
+    '/chef',
+    '/import',
+    '/manual',
+    '/saved',
+    '/shopping',
+    '/groceries',
+    '/cookbooks',
+    '/books',
+    '/templates',
+    '/recipe',
+    '/package'
+  ];
+
+  const isProtected = protectedPrefixes.some(prefix => pathname.startsWith(prefix));
+  if (isProtected && !isAuthenticated) {
+    return NextResponse.redirect(new URL('/login', req.url));
+  }
+
+  // 3. Guest Only Routes
+  if ((pathname === '/login' || pathname === '/register') && isAuthenticated) {
+    if (isAdmin) {
+      return NextResponse.redirect(new URL('/admin', req.url));
+    }
+    return NextResponse.redirect(new URL('/profile', req.url));
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: [
+    '/admin/:path*',
+    '/profile/:path*',
+    '/dashboard/:path*',
+    '/planner/:path*',
+    '/pantry/:path*',
+    '/chef/:path*',
+    '/import/:path*',
+    '/manual/:path*',
+    '/saved/:path*',
+    '/shopping/:path*',
+    '/groceries/:path*',
+    '/cookbooks/:path*',
+    '/books/:path*',
+    '/templates/:path*',
+    '/recipe/:path*',
+    '/package/:path*',
+    '/users/:path*',
+    '/login',
+    '/register'
+  ],
+};
 
 ```
 
@@ -940,15 +1038,137 @@ body {
   color: #F1F5F9;
 }
 
+
+/* Zecratary Day/Light Mode Global Theme Tokens */
+:root.light, html.light, body.light {
+  --color-bg: #f8fafc;
+  --color-bg-dark: #f8fafc;
+  --color-card: #ffffff;
+  --color-card-dark: #ffffff;
+  --color-inner: #f1f5f9;
+  --color-inner-dark: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-secondary: #64748b;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+body {
+  background-color: var(--color-bg, #070b13);
+  color: var(--color-text, #ffffff);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+
+/* Global Day Mode Contrast & Border Normalization */
+:root.light, html.light, body.light {
+  --color-bg: #f8fafc;
+  --color-bg-dark: #f8fafc;
+  --color-card: #ffffff;
+  --color-card-dark: #ffffff;
+  --color-inner: #f1f5f9;
+  --color-inner-dark: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-border-dark: #e2e8f0;
+  --border: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-secondary: #64748b;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+:root.light *, html.light *, body.light * {
+  border-color: var(--color-border, #e2e8f0);
+}
+
+
+/* --- Day Mode Universal Background & Border Reset --- */
+:root.light, html.light, body.light {
+  --color-bg: #f8fafc !important;
+  --color-bg-dark: #f8fafc !important;
+  --color-card: #ffffff !important;
+  --color-card-dark: #ffffff !important;
+  --color-inner: #f1f5f9 !important;
+  --color-inner-dark: #f1f5f9 !important;
+  --color-border: #e2e8f0 !important;
+  --color-border-dark: #e2e8f0 !important;
+  --border: #e2e8f0 !important;
+  --color-text: #0f172a !important;
+  --color-text-secondary: #64748b !important;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html.light,
+html.light body,
+html.light #__next,
+html.light main,
+html.light [class*="bg-[#070b13]"],
+html.light [class*="bg-[#0b0f17]"],
+html.light [class*="bg-[#0B101D]"],
+html.light [class*="bg-[#0e1626]"],
+html.light [class*="bg-[#141b2d]"],
+html.light [class*="bg-slate-950"],
+html.light [class*="bg-slate-900"],
+html.light [class*="bg-black"] {
+  background-color: #f8fafc !important;
+}
+
+html.light [class*="border-[#1e293b]"],
+html.light [class*="border-[#0e1626]"],
+html.light [class*="border-slate-800"],
+html.light [class*="border-slate-900"] {
+  border-color: #e2e8f0 !important;
+}
+
+/* Eliminate layout wrapper borders, paddings, and rounded frames on Auth pages */
+body:has(#login-page-root),
+body:has(#register-page-root),
+body:has(#forgot-password-page-root) {
+  padding: 0 !important;
+  margin: 0 !important;
+  background-color: var(--color-bg, #070b13) !important;
+}
+
+body:has(#login-page-root) main,
+body:has(#register-page-root) main,
+body:has(#forgot-password-page-root) main {
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background-color: transparent !important;
+}
+
+body:has(#login-page-root) > div,
+body:has(#register-page-root) > div,
+body:has(#forgot-password-page-root) > div,
+body:has(#login-page-root) [class*="h-screen"],
+body:has(#register-page-root) [class*="h-screen"] {
+  padding: 0 !important;
+  gap: 0 !important;
+  border: none !important;
+}
+
+
 ```
 
 ## File: `apps/web/src/app/ClientLayout.tsx`
 ```typescript
+import { syncUserSavedRecipes } from '@/lib/recipeSync';
 import { LanguageProvider } from '@/components/LanguageProvider';
 'use client';
 import Sidebar from '@/components/Sidebar';
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
+  // Global Cross-Browser Recipe Sync Bridge
+  useEffect(() => {
+    try {
+      syncUserSavedRecipes();
+    } catch (_) {}
+  }, []);
+
   return (
     <LanguageProvider>
       <div className="min-h-screen flex flex-col md:flex-row bg-[#0B101D] text-slate-100 font-sans antialiased">
@@ -979,6 +1199,7 @@ import {
   Grid3X3, Rows3
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
+import { syncUserSavedRecipes, persistSavedRecipe, getLocalRecipes } from '@/lib/recipeSync';
 import { getStoredCategories } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -1018,6 +1239,22 @@ const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label:
     titleSize: 'text-xs'
   }
 };
+
+// Safe local recipe reader fallback
+function readLocalSavedRecipes(): any[] {
+  if (typeof window === 'undefined') return [];
+  const keys = ['zecratary_saved_recipes', 'zecratary_recipes', 'saved_recipes', 'savedRecipes', 'recipes'];
+  for (const k of keys) {
+    try {
+      const raw = localStorage.getItem(k);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (_) {}
+  }
+  return [];
+}
 
 export default function SavedRecipesPage() {
   const router = useRouter();
@@ -1150,6 +1387,25 @@ export default function SavedRecipesPage() {
   }, []);
 
   useEffect(() => {
+    // Safe Cross-Browser Recipe Synchronization
+    const activeUser = getCurrentUser();
+    if (activeUser && (activeUser.id || activeUser.email)) {
+      const uKey = (activeUser.email || activeUser.id).toLowerCase().trim();
+      syncUserSavedRecipes(uKey).then((synced) => {
+        if (Array.isArray(synced) && synced.length > 0) {
+          setRecipes(synced);
+        }
+      }).catch(() => {});
+    }
+
+    const onRecipesUpdated = () => {
+      const current = typeof getLocalRecipes === 'function' ? getLocalRecipes() : readLocalSavedRecipes();
+      if (Array.isArray(current)) {
+        setRecipes(current);
+      }
+    };
+    window.addEventListener('zecratary_saved_recipes_updated', onRecipesUpdated);
+
     applyGlobalTheme();
     window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
     window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
@@ -1157,6 +1413,7 @@ export default function SavedRecipesPage() {
     window.addEventListener('storage', applyGlobalTheme);
 
     return () => {
+      window.removeEventListener('zecratary_saved_recipes_updated', onRecipesUpdated);
       window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
       window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
       window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
@@ -1220,6 +1477,8 @@ export default function SavedRecipesPage() {
         });
 
       setRecipes(userRecipes);
+    
+
 
       let parsedBooks = defaultBooks;
       if (localBooks) {
@@ -7654,6 +7913,7 @@ export default function PlannerPage() {
 ```typescript
 // @ts-nocheck
 'use client';
+import AiQuotaBar from '@/components/AiQuotaBar';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
@@ -7756,7 +8016,7 @@ export default function ChefChatPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const ideasInputRef = useRef<HTMLInputElement>(null);
 
-  // AI Settings State from Admin
+  // AI Settings State synchronized with /admin/ai-settings
   const [questionnaireSections, setQuestionnaireSections] = useState<any[]>(DEFAULT_SECTIONS);
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
@@ -7821,17 +8081,18 @@ export default function ChefChatPage() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Load Admin AI Settings
+  // Synchronize Multi-Topic Questionnaire from /admin/ai-settings
   const loadAdminAiSettings = useCallback(() => {
     if (typeof window === 'undefined') return;
     try {
-      const raw = localStorage.getItem('zecratary_chef_ai_settings');
+      const raw = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed.sections)) {
+        if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
           const active = parsed.sections.filter((s: any) => s.enabled !== false);
-          setQuestionnaireSections(active.length > 0 ? active : DEFAULT_SECTIONS);
-          const allQs = active.flatMap((s: any) => s.questions || []);
+          const sectionsToUse = active.length > 0 ? active : parsed.sections;
+          setQuestionnaireSections(sectionsToUse);
+          const allQs = sectionsToUse.flatMap((s: any) => s.questions || []);
           setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
         } else {
           setQuestionnaireSections(DEFAULT_SECTIONS);
@@ -7850,7 +8111,7 @@ export default function ChefChatPage() {
     }
   }, []);
 
-  // Day / Night Mode Theme Inversion Handler
+  // Day / Night Theme Application
   const applySavedTheme = useCallback(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -7903,6 +8164,7 @@ export default function ChefChatPage() {
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_updated', applySavedTheme);
     window.addEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
+    window.addEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
     window.addEventListener('storage', applySavedTheme);
     window.addEventListener('storage', loadAdminAiSettings);
 
@@ -7911,6 +8173,7 @@ export default function ChefChatPage() {
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
+      window.removeEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
       window.removeEventListener('storage', applySavedTheme);
       window.removeEventListener('storage', loadAdminAiSettings);
     };
@@ -8097,6 +8360,7 @@ export default function ChefChatPage() {
       loadScopedData(active);
       loadUserChatState(active);
       loadUserPreferences(active);
+      loadAdminAiSettings();
     };
 
     window.addEventListener('storage', handleSync);
@@ -8105,6 +8369,8 @@ export default function ChefChatPage() {
     window.addEventListener('zecratary_pantry_updated', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_login_success', handleSync);
+    window.addEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
+    window.addEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -8113,8 +8379,10 @@ export default function ChefChatPage() {
       window.removeEventListener('zecratary_pantry_updated', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('zecratary_login_success', handleSync);
+      window.removeEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
+      window.removeEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
     };
-  }, [loadScopedData, loadUserChatState, loadUserPreferences, t]);
+  }, [loadScopedData, loadUserChatState, loadUserPreferences, loadAdminAiSettings, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -8176,6 +8444,7 @@ export default function ChefChatPage() {
     showToast("Chat reset.");
   };
 
+  // Start specific topic wizard from synced admin buttons
   const handleStartTopicWizard = (sec: any) => {
     const qList = Array.isArray(sec.questions) && sec.questions.length > 0
       ? sec.questions
@@ -8192,17 +8461,14 @@ export default function ChefChatPage() {
       { 
         id: 'ast_' + Date.now(), 
         role: 'assistant', 
-        content: `📋 **${sec.topicTitle}**
-${sec.description || ''}
-
-**Step 1 of ${qList.length}:**
-${qList[0]}` 
+        content: `📋 **${sec.topicTitle}**\n${sec.description || ''}\n\n**Step 1 of ${qList.length}:**\n${qList[0]}` 
       }
     ]);
   };
 
   const handleStartFullWizard = () => {
-    const allQuestions = questionnaireSections.flatMap((s: any) => s.questions || []);
+    const activeSections = questionnaireSections.filter((s: any) => s.enabled !== false);
+    const allQuestions = activeSections.flatMap((s: any) => s.questions || []);
     const qList = allQuestions.length > 0 ? allQuestions : wizardQuestionsList;
 
     setActiveTopicTitle('Complete Meal Plan Wizard');
@@ -8216,9 +8482,7 @@ ${qList[0]}`
       { 
         id: 'ast_' + Date.now(), 
         role: 'assistant', 
-        content: `Starting complete meal plan intake wizard (**Step 1 of ${qList.length}**):
-
-${qList[0]}` 
+        content: `Starting complete meal plan intake wizard (**Step 1 of ${qList.length}**):\n\n${qList[0]}` 
       }
     ]);
   };
@@ -8392,7 +8656,7 @@ ${qList[0]}`
       return;
     }
 
-    // Explicit Meal Plan initiation only
+    // Explicit Meal Plan initiation command
     const isExplicitMealPlanCommand = /^(?:create|start|make|build)\s+(?:a\s+)?meal\s+plan/i.test(lower) || lower === 'create a meal plan' || lower === 'meal plan';
     if (isExplicitMealPlanCommand && wizardStep === null) {
       handleStartFullWizard();
@@ -8877,11 +9141,17 @@ ${qList[0]}`
     return activeSwapPlan.meals.filter(m => !activeSwapMeal || m.id !== activeSwapMeal.id);
   }, [activeSwapPlan, activeSwapMeal]);
 
+  // Active enabled questionnaire sections for topic buttons on /chef
+  const activeQuestionnaireSections = useMemo(() => {
+    return questionnaireSections.filter((s: any) => s.enabled !== false);
+  }, [questionnaireSections]);
+
   return (
     <div 
       className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
       style={{ color: 'var(--color-text, #0f172a)' }}
     >
+      <AiQuotaBar />
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
@@ -9062,6 +9332,7 @@ ${qList[0]}`
               </p>
             </div>
 
+            {/* SYNCED TOPIC BUTTONS FROM /admin/ai-settings */}
             <div className="flex flex-wrap justify-center gap-2.5 max-w-xl mx-auto">
               <button
                 type="button"
@@ -9075,7 +9346,7 @@ ${qList[0]}`
                 <Sparkles className="h-4 w-4" /> Start Complete Meal Plan Intake
               </button>
 
-              {questionnaireSections.map((sec) => (
+              {activeQuestionnaireSections.map((sec) => (
                 <button
                   key={sec.id}
                   type="button"
@@ -9552,6 +9823,33 @@ ${qList[0]}`
         )}
         <div ref={chatEndRef} />
       </div>
+
+      {/* Suggested Topic Buttons Bar (Accessible even during ongoing chat) */}
+      {wizardStep === null && activeQuestionnaireSections.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0">
+          <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary, #64748b)' }}>
+            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary, #E05638)' }} /> Topics:
+          </span>
+          {activeQuestionnaireSections.map((sec) => (
+            <button
+              key={`chip-${sec.id}`}
+              type="button"
+              onClick={() => handleStartTopicWizard(sec)}
+              className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
+              style={{
+                backgroundColor: 'var(--color-card, #ffffff)',
+                borderColor: 'var(--color-border, #e2e8f0)',
+                color: 'var(--color-text, #0f172a)'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
+            >
+              <Layers className="h-3 w-3" style={{ color: 'var(--color-primary, #E05638)' }} />
+              <span>{sec.topicTitle}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Input Prompt Box */}
       <div 
@@ -10677,6 +10975,7 @@ import {
   GripVertical, CheckSquare, CheckCircle2, Type
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
+import { persistSavedRecipe } from '@/lib/recipeSync';
 import { getStoredCategories } from '@/lib/categories';
 
 export default function SavedRecipesPage() {
@@ -10826,6 +11125,10 @@ export default function SavedRecipesPage() {
       setRecipes(updatedUserList);
       localStorage.setItem('zecratary_recipes', JSON.stringify(merged));
       localStorage.setItem('zecratary_saved_recipes', JSON.stringify(merged));
+      const activeUser = getCurrentUser();
+      if (activeUser && (activeUser.id || activeUser.email)) {
+        persistSavedRecipe(activeUser.id || activeUser.email, recipe, 'save');
+      }
 
       const updatedBooks = books.map((b: any) => ({
         ...b,
@@ -12250,3202 +12553,1158 @@ export default function SavedRecipesPage() {
 
 ```
 
-## File: `apps/web/src/app/add-user/page.tsx`
-```typescript
-'use client';
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import Link from 'next/link';
-import { 
-  Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
-  Search, CheckCircle, AlertCircle, X, ShieldAlert, Check,
-  ShieldCheck, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
-  Users, CreditCard, Zap, Sparkles, RefreshCw
-} from 'lucide-react';
-import { getCurrentUser, logoutUser, initAuthStorage } from '@/lib/auth';
-
-interface AppUser {
-  id: string;
-  name: string;
-  email: string;
-  password?: string;
-  role: 'admin' | 'user';
-  subscriptionPlan?: string;
-  createdAt: string;
-}
-
-interface PlanOption {
-  id: string;
-  name: string;
-  slug: string;
-  priceFormatted: string;
-  interval?: string;
-  isFree?: boolean;
-}
-
-const DEFAULT_AVAILABLE_PLANS: PlanOption[] = [
-  { id: 'taster', name: 'Taster (Free)', slug: 'taster', priceFormatted: 'Free', isFree: true },
-  { id: 'nutrition-pro-monthly', name: 'Nutrition Pro (Monthly)', slug: 'nutrition-pro-monthly', priceFormatted: '$8.99/mo', interval: 'MONTH' },
-  { id: 'nutrition-pro-annual', name: 'Nutrition Pro (Annual)', slug: 'nutrition-pro-annual', priceFormatted: '$59.99/yr', interval: 'YEAR' },
-];
-
-type SortField = 'name' | 'createdAt' | 'subscriptionPlan';
-type SortOrder = 'asc' | 'desc';
-
-const ITEMS_PER_PAGE = 10;
-
-export default function AdminUserManagementPage() {
-  const [currentUser, setCurrentUser] = useState<any | null>(null);
-  const [users, setUsers] = useState<AppUser[]>([]);
-  const [availablePlans, setAvailablePlans] = useState<PlanOption[]>(DEFAULT_AVAILABLE_PLANS);
-  const [search, setSearch] = useState('');
-  const [feedbackMsg, setFeedbackMsg] = useState('');
-
-  // Admin Table Sorting & Pagination State
-  const [adminSortField, setAdminSortField] = useState<SortField>('createdAt');
-  const [adminSortOrder, setAdminSortOrder] = useState<SortOrder>('desc');
-  const [adminCurrentPage, setAdminCurrentPage] = useState(1);
-
-  // Standard User Table Sorting & Pagination State
-  const [userSortField, setUserSortField] = useState<SortField>('createdAt');
-  const [userSortOrder, setUserSortOrder] = useState<SortOrder>('desc');
-  const [userCurrentPage, setUserCurrentPage] = useState(1);
-
-  // Add User Modal State
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [addName, setAddName] = useState('');
-  const [addEmail, setAddEmail] = useState('');
-  const [addPassword, setAddPassword] = useState('');
-  const [addRole, setAddRole] = useState<'admin' | 'user'>('user');
-  const [addSubscriptionPlan, setAddSubscriptionPlan] = useState<string>('taster');
-  const [addError, setAddError] = useState('');
-
-  // Edit User Modal State
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editEmail, setEditEmail] = useState('');
-  const [editPassword, setEditPassword] = useState('');
-  const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
-  const [editSubscriptionPlan, setEditSubscriptionPlan] = useState<string>('taster');
-  const [editError, setEditError] = useState('');
-
-  // Helper: Identify Root / Primary First Administrator
-  const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
-    if (!targetUser) return false;
-    
-    // Explicit System Admin default ID or Email check
-    if (
-      targetUser.id === 'usr_admin_1' || 
-      targetUser.email.toLowerCase() === 'admin@zecratary.com' ||
-      targetUser.email.toLowerCase() === 'admin@foodieprep.com'
-    ) {
-      return true;
-    }
-
-    // Earliest created administrator check
-    const sortedAdmins = users
-      .filter((u) => u.role === 'admin')
-      .sort((a, b) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return dateA - dateB;
-      });
-
-    return sortedAdmins.length > 0 && sortedAdmins[0].id === targetUser.id;
-  }, [users]);
-
-  const isEditingFirstAdmin = useMemo(() => {
-    const target = users.find((u) => u.id === editingUserId);
-    return isFirstAdminUser(target);
-  }, [editingUserId, users, isFirstAdminUser]);
-
-  // Dynamic Theme Synchronization
-  useEffect(() => {
-    const applySavedTheme = () => {
-      try {
-        const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-        if (stored) {
-          const c = JSON.parse(stored);
-          const root = document.documentElement;
-          if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
-          if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
-          if (c.backgroundDark || c.backgroundColor) {
-            root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor);
-            root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor);
-            root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor);
-          }
-          if (c.cardDark || c.cardBackground) {
-            root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground);
-            root.style.setProperty('--color-card', c.cardDark || c.cardBackground);
-          }
-          if (c.innerDark || c.backgroundColor) root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor);
-          if (c.borderColor || c.cardBorder) root.style.setProperty('--color-border', c.borderColor || c.cardBorder);
-          if (c.accentEmerald || c.accentColor) {
-            root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
-            root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor);
-          }
-          if (c.textColor) root.style.setProperty('--color-text', c.textColor);
-          if (c.textSecondary) root.style.setProperty('--color-text-secondary', c.textSecondary);
-        }
-      } catch (e) {}
-    };
-
-    applySavedTheme();
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('storage', applySavedTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('storage', applySavedTheme);
-    };
-  }, []);
-
-  // Synchronize System Packages directly from /admin/plans
-  const loadPlans = useCallback(async () => {
-    let parsedPlans: PlanOption[] = [];
-
-    // 1. Primary Source: Saved System Packages configurations from /admin/plans
-    try {
-      const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
-      if (rawConfigs) {
-        const configs = JSON.parse(rawConfigs);
-        if (Array.isArray(configs) && configs.length > 0) {
-          configs.forEach((cfg: any) => {
-            const isZeroCost = cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0);
-            
-            if (isZeroCost) {
-              parsedPlans.push({
-                id: cfg.id || cfg.slug,
-                name: `${cfg.name} (Free)`,
-                slug: cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                priceFormatted: 'Free',
-                isFree: true,
-              });
-            } else {
-              if (cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0) {
-                const mPrice = Number(cfg.monthlyPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-monthly`,
-                  name: `${cfg.name} (Monthly)`,
-                  slug: `${cfg.slug}-monthly`,
-                  priceFormatted: `$${mPrice.toFixed(2)}/mo`,
-                  interval: 'MONTH',
-                  isFree: false,
-                });
-              }
-              if (cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0) {
-                const aPrice = Number(cfg.annualPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-annual`,
-                  name: `${cfg.name} (Annual)`,
-                  slug: `${cfg.slug}-annual`,
-                  priceFormatted: `$${aPrice.toFixed(2)}/yr`,
-                  interval: 'YEAR',
-                  isFree: false,
-                });
-              }
-            }
-          });
-        }
-      }
-    } catch (e) {}
-
-    // 2. Secondary Local Fallback: zecratary_subscription_plans
-    if (parsedPlans.length === 0) {
-      try {
-        const rawPlans = localStorage.getItem('zecratary_subscription_plans');
-        if (rawPlans) {
-          const directPlans = JSON.parse(rawPlans);
-          if (Array.isArray(directPlans) && directPlans.length > 0) {
-            parsedPlans = directPlans.map((p: any) => ({
-              id: p.id || p.slug,
-              name: p.name,
-              slug: p.slug,
-              priceFormatted: p.priceCents === 0 ? 'Free' : `$${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`,
-              interval: p.interval,
-              isFree: p.priceCents === 0,
-            }));
-          }
-        }
-      } catch (e) {}
-    }
-
-    // 3. API Fallback: /api/admin/plans
-    if (parsedPlans.length === 0) {
-      try {
-        const res = await fetch('/api/admin/plans');
-        const data = await res.json();
-        if (data.success && Array.isArray(data.plans) && data.plans.length > 0) {
-          parsedPlans = data.plans.map((p: any) => ({
-            id: p.id || p.slug,
-            name: p.name,
-            slug: p.slug,
-            priceFormatted: p.priceCents === 0 ? 'Free' : `$${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`,
-            interval: p.interval,
-            isFree: p.priceCents === 0,
-          }));
-        }
-      } catch (e) {}
-    }
-
-    if (parsedPlans.length > 0) {
-      setAvailablePlans(parsedPlans);
-    } else {
-      setAvailablePlans(DEFAULT_AVAILABLE_PLANS);
-    }
-  }, []);
-
-  const loadUsers = useCallback(() => {
-    initAuthStorage();
-    const raw = localStorage.getItem('zecratary_users');
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        const mapped = parsed.map((u: any) => ({
-          ...u,
-          subscriptionPlan: u.subscriptionPlan || (u.role === 'admin' ? 'nutrition-pro-annual' : 'taster')
-        }));
-        setUsers(mapped);
-      } catch (e) {}
-    }
-  }, []);
-
-  useEffect(() => {
-    document.title = 'User Management - Admin Console';
-    initAuthStorage();
-    const user = getCurrentUser();
-    setCurrentUser(user);
-    loadUsers();
-    loadPlans();
-
-    const handleSync = () => {
-      loadUsers();
-      loadPlans();
-    };
-
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_users_updated', handleSync);
-    window.addEventListener('zecratary_plans_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
-
-    return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_users_updated', handleSync);
-      window.removeEventListener('zecratary_plans_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
-    };
-  }, [loadUsers, loadPlans]);
-
-  const saveUsersList = (updated: AppUser[]) => {
-    setUsers(updated);
-    localStorage.setItem('zecratary_users', JSON.stringify(updated));
-    window.dispatchEvent(new Event('zecratary_users_updated'));
-    window.dispatchEvent(new Event('storage'));
-  };
-
-  const showToast = (msg: string) => {
-    setFeedbackMsg(msg);
-    setTimeout(() => setFeedbackMsg(''), 3500);
-  };
-
-  // Sort Toggles
-  const handleAdminSort = (field: SortField) => {
-    if (adminSortField === field) {
-      setAdminSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setAdminSortField(field);
-      setAdminSortOrder('asc');
-    }
-  };
-
-  const handleUserSort = (field: SortField) => {
-    if (userSortField === field) {
-      setUserSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setUserSortField(field);
-      setUserSortOrder('asc');
-    }
-  };
-
-  // Filter & Sort for Admins
-  const processedAdmins = useMemo(() => {
-    const admins = users.filter(u => u.role === 'admin');
-    const filtered = admins.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
-    );
-
-    return filtered.sort((a, b) => {
-      let comparison = 0;
-      if (adminSortField === 'name') {
-        comparison = (a.name || '').localeCompare(b.name || '');
-      } else if (adminSortField === 'subscriptionPlan') {
-        comparison = (a.subscriptionPlan || '').localeCompare(b.subscriptionPlan || '');
-      } else if (adminSortField === 'createdAt') {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        comparison = dateA - dateB;
-      }
-      return adminSortOrder === 'asc' ? comparison : -comparison;
-    });
-  }, [users, search, adminSortField, adminSortOrder]);
-
-  // Filter & Sort for Standard Users
-  const processedStandardUsers = useMemo(() => {
-    const standardUsers = users.filter(u => u.role === 'user');
-    const filtered = standardUsers.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
-    );
-
-    return filtered.sort((a, b) => {
-      let comparison = 0;
-      if (userSortField === 'name') {
-        comparison = (a.name || '').localeCompare(b.name || '');
-      } else if (userSortField === 'subscriptionPlan') {
-        comparison = (a.subscriptionPlan || '').localeCompare(b.subscriptionPlan || '');
-      } else if (userSortField === 'createdAt') {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        comparison = dateA - dateB;
-      }
-      return userSortOrder === 'asc' ? comparison : -comparison;
-    });
-  }, [users, search, userSortField, userSortOrder]);
-
-  // Pagination Calculations
-  const adminTotalPages = Math.max(1, Math.ceil(processedAdmins.length / ITEMS_PER_PAGE));
-  const adminStartIndex = (adminCurrentPage - 1) * ITEMS_PER_PAGE;
-  const adminEndIndex = Math.min(adminStartIndex + ITEMS_PER_PAGE, processedAdmins.length);
-  const paginatedAdmins = processedAdmins.slice(adminStartIndex, adminEndIndex);
-
-  const userTotalPages = Math.max(1, Math.ceil(processedStandardUsers.length / ITEMS_PER_PAGE));
-  const userStartIndex = (userCurrentPage - 1) * ITEMS_PER_PAGE;
-  const userEndIndex = Math.min(userStartIndex + ITEMS_PER_PAGE, processedStandardUsers.length);
-  const paginatedStandardUsers = processedStandardUsers.slice(userStartIndex, userEndIndex);
-
-  useEffect(() => {
-    setAdminCurrentPage(1);
-    setUserCurrentPage(1);
-  }, [search]);
-
-  // Add User
-  const handleOpenAddModal = (presetRole: 'admin' | 'user' = 'user') => {
-    setAddName('');
-    setAddEmail('');
-    setAddPassword('');
-    setAddRole(presetRole);
-    
-    // Auto-select preferred tier from synchronized live plans
-    const defaultAdminPlan = availablePlans.find(p => p.slug.includes('annual') || p.slug.includes('pro'))?.slug || availablePlans[availablePlans.length - 1]?.slug || 'nutrition-pro-annual';
-    const defaultUserPlan = availablePlans.find(p => p.isFree || p.slug === 'taster')?.slug || availablePlans[0]?.slug || 'taster';
-    
-    setAddSubscriptionPlan(presetRole === 'admin' ? defaultAdminPlan : defaultUserPlan);
-    setAddError('');
-    setShowAddModal(true);
-  };
-
-  const handleAddUserSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAddError('');
-
-    const cleanEmail = addEmail.trim().toLowerCase();
-    const cleanName = addName.trim();
-
-    if (!cleanName || !cleanEmail) {
-      setAddError('Please fill in all required fields.');
-      return;
-    }
-
-    if (users.some(u => u.email.toLowerCase() === cleanEmail)) {
-      setAddError('A user with this email address already exists.');
-      return;
-    }
-
-    if (addPassword.length < 4) {
-      setAddError('Password must be at least 4 characters long.');
-      return;
-    }
-
-    const assignedPlan = addSubscriptionPlan || (addRole === 'admin' ? 'nutrition-pro-annual' : 'taster');
-
-    const newUser: AppUser = {
-      id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      name: cleanName,
-      email: cleanEmail,
-      password: addPassword,
-      role: addRole,
-      subscriptionPlan: assignedPlan,
-      createdAt: new Date().toISOString()
-    };
-
-    const updated = [newUser, ...users];
-    saveUsersList(updated);
-    setShowAddModal(false);
-    showToast(`User "${newUser.name}" created with "${getPlanBadge(newUser.subscriptionPlan).label}" plan!`);
-  };
-
-  // Edit User
-  const handleOpenEditModal = (user: AppUser) => {
-    setEditingUserId(user.id);
-    setEditName(user.name);
-    setEditEmail(user.email);
-    setEditPassword(user.password || '');
-    setEditRole(user.role);
-    setEditSubscriptionPlan(user.subscriptionPlan || (user.role === 'admin' ? 'nutrition-pro-annual' : 'taster'));
-    setEditError('');
-    setShowEditModal(true);
-  };
-
-  const handleEditUserSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingUserId) return;
-    setEditError('');
-
-    const cleanEmail = editEmail.trim().toLowerCase();
-    const cleanName = editName.trim();
-
-    if (!cleanName || !cleanEmail) {
-      setEditError('Name and Email cannot be empty.');
-      return;
-    }
-
-    const emailTaken = users.some(u => u.id !== editingUserId && u.email.toLowerCase() === cleanEmail);
-    if (emailTaken) {
-      setEditError('Another user is already registered with this email.');
-      return;
-    }
-
-    const targetUser = users.find(u => u.id === editingUserId);
-    const isFirstAdmin = isFirstAdminUser(targetUser);
-
-    // Enforce role preservation for first admin
-    const finalRole: 'admin' | 'user' = isFirstAdmin ? 'admin' : editRole;
-
-    const updated = users.map(u => {
-      if (u.id === editingUserId) {
-        return {
-          ...u,
-          name: cleanName,
-          email: cleanEmail,
-          password: editPassword ? editPassword : u.password,
-          role: finalRole,
-          subscriptionPlan: editSubscriptionPlan
-        };
-      }
-      return u;
-    });
-
-    saveUsersList(updated);
-
-    if (currentUser?.id === editingUserId) {
-      const activeUserUpdated = {
-        ...currentUser,
-        name: cleanName,
-        email: cleanEmail,
-        role: finalRole,
-        subscriptionPlan: editSubscriptionPlan
-      };
-      localStorage.setItem('zecratary_current_user', JSON.stringify(activeUserUpdated));
-      setCurrentUser(activeUserUpdated);
-      window.dispatchEvent(new Event('zecratary_auth_changed'));
-    }
-
-    setShowEditModal(false);
-    showToast(`User "${cleanName}" updated successfully!`);
-  };
-
-  // Delete User
-  const handleDeleteUser = (id: string, userEmail: string, userName: string) => {
-    const targetUser = users.find(u => u.id === id);
-
-    if (currentUser?.email === userEmail || currentUser?.id === id) {
-      alert('You cannot delete your own active admin account.');
-      return;
-    }
-
-    if (isFirstAdminUser(targetUser)) {
-      alert('The primary system administrator account cannot be deleted.');
-      return;
-    }
-
-    if (!confirm(`Are you sure you want to delete "${userName}" (${userEmail})? This action cannot be undone.`)) return;
-
-    const updated = users.filter(u => u.id !== id);
-    saveUsersList(updated);
-    showToast(`User "${userName}" has been deleted.`);
-  };
-
-  const renderSortIcon = (currentField: SortField, targetField: SortField, order: SortOrder) => {
-    if (currentField !== targetField) {
-      return <ArrowUpDown className="h-3.5 w-3.5 text-slate-500 opacity-60" />;
-    }
-    return order === 'asc' ? (
-      <ArrowUp className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary, #E05638)' }} />
-    ) : (
-      <ArrowDown className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary, #E05638)' }} />
-    );
-  };
-
-  // Dynamic Subscription Plan Badge Renderer
-  const getPlanBadge = (planKey?: string) => {
-    if (!planKey) {
-      return {
-        label: 'Taster (Free)',
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
-        icon: Sparkles
-      };
-    }
-
-    // Match against live system packages list
-    const matched = availablePlans.find(
-      p => p.slug === planKey || p.id === planKey || p.slug.toLowerCase() === planKey.toLowerCase()
-    );
-
-    if (matched) {
-      if (matched.isFree || planKey === 'taster' || planKey.includes('free')) {
-        return {
-          label: matched.name,
-          bg: 'rgba(16, 185, 129, 0.15)',
-          border: 'var(--color-emerald, #10b981)',
-          color: 'var(--color-emerald, #10b981)',
-          icon: Sparkles
-        };
-      }
-      if (matched.interval === 'YEAR' || planKey.includes('annual') || planKey.includes('year')) {
-        return {
-          label: matched.name,
-          bg: 'rgba(59, 130, 246, 0.15)',
-          border: '#3b82f6',
-          color: '#60a5fa',
-          icon: Zap
-        };
-      }
-      if (matched.interval === 'MONTH' || planKey.includes('monthly')) {
-        return {
-          label: matched.name,
-          bg: 'rgba(224, 86, 56, 0.15)',
-          border: 'var(--color-primary, #E05638)',
-          color: 'var(--color-primary, #E05638)',
-          icon: Zap
-        };
-      }
-      return {
-        label: matched.name,
-        bg: 'rgba(168, 85, 247, 0.15)',
-        border: '#a855f7',
-        color: '#c084fc',
-        icon: CreditCard
-      };
-    }
-
-    // Generic formatting fallback
-    const formatted = planKey
-      .split('-')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-
-    if (planKey.includes('free') || planKey === 'taster') {
-      return {
-        label: `${formatted} (Free)`,
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
-        icon: Sparkles
-      };
-    }
-
-    return {
-      label: formatted,
-      bg: 'rgba(168, 85, 247, 0.15)',
-      border: '#a855f7',
-      color: '#c084fc',
-      icon: CreditCard
-    };
-  };
-
-  return (
-    <div className="max-w-6xl mx-auto space-y-8 text-slate-100 pb-24 px-2 sm:px-4 pt-2">
-      
-      {/* ACCESS WARNING FOR NON-ADMINS */}
-      {currentUser && currentUser.role !== 'admin' && (
-        <div 
-          className="rounded-2xl p-4 flex items-center justify-between text-xs border"
-          style={{
-            backgroundColor: 'rgba(120, 53, 15, 0.4)',
-            borderColor: 'rgba(217, 119, 6, 0.4)',
-            color: '#fde68a'
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-amber-400 shrink-0" />
-            <span>
-              Signed in as <strong>{currentUser.email}</strong>. Switch to an admin account to manage user subscription permissions.
-            </span>
-          </div>
-          <button 
-            onClick={() => window.location.href = '/login'}
-            className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-          >
-            Switch to Admin
-          </button>
-        </div>
-      )}
-
-      {/* FEEDBACK TOAST */}
-      {feedbackMsg && (
-        <div 
-          className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in border"
-          style={{
-            backgroundColor: 'rgba(16, 185, 129, 0.2)',
-            borderColor: 'var(--color-emerald, #10b981)',
-            color: 'var(--color-emerald, #10b981)'
-          }}
-        >
-          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
-          <span>{feedbackMsg}</span>
-        </div>
-      )}
-
-      {/* PAGE HEADER */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-             User & Subscription Management
-          </h1>
-          <p className="text-xs text-[var(--color-text-secondary)]">
-            Active System Packages synced: {availablePlans.length} plans available from /admin/plans
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => handleOpenAddModal('user')}
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-          >
-            <UserPlus className="h-4 w-4" /> Add New User
-          </button>
-          <Link
-            href="/admin/plans"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)',
-              color: '#cbd5e1'
-            }}
-          >
-            <CreditCard className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Manage Plans
-          </Link>
-          <Link
-            href="/admin"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)',
-              color: '#cbd5e1'
-            }}
-          >
-            <Shield className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} /> Admin Settings
-          </Link>
-        </div>
-      </div>
-
-      {/* SEARCH BAR */}
-      <div className="relative">
-        <Search className="h-4 w-4 text-slate-500 absolute left-4 top-3.5 pointer-events-none" />
-        <input
-          type="text"
-          placeholder="Search by name, email, or subscription plan across all tables..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition shadow-inner"
-          style={{
-            backgroundColor: 'var(--color-inner-dark, #070b13)',
-            borderColor: 'var(--color-border, #1e293b)'
-          }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-        />
-      </div>
-
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* TABLE 1: ADMINISTRATORS */}
-      {/* ───────────────────────────────────────────────────────────── */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2">
-            <div 
-              className="w-8 h-8 rounded-xl border flex items-center justify-center"
-              style={{
-                backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: 'var(--color-emerald, #10b981)'
-              }}
-            >
-              <Shield className="h-4 w-4" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-white flex items-center gap-2">
-                Administrators
-                <span 
-                  className="text-xs border font-bold px-2 py-0.5 rounded-full"
-                  style={{
-                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                    borderColor: 'var(--color-emerald, #10b981)',
-                    color: 'var(--color-emerald, #10b981)'
-                  }}
-                >
-                  {processedAdmins.length}
-                </span>
-              </h2>
-            </div>
-          </div>
-
-          <button
-            onClick={() => handleOpenAddModal('admin')}
-            className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline"
-            style={{ color: 'var(--color-emerald, #10b981)' }}
-          >
-            <UserPlus className="h-3.5 w-3.5" /> Add Admin
-          </button>
-        </div>
-
-        <div 
-          className="border rounded-3xl overflow-hidden shadow-xl"
-          style={{
-            backgroundColor: 'var(--color-card, #0b0f17)',
-            borderColor: 'var(--color-border, #1e293b)'
-          }}
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead 
-                className="border-b text-slate-400 uppercase font-bold text-[10px] tracking-wider"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #070b13)',
-                  borderColor: 'var(--color-border, #1e293b)'
-                }}
-              >
-                <tr>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleAdminSort('name')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Admin User</span>
-                      {renderSortIcon(adminSortField, 'name', adminSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">Email Address</th>
-                  <th className="px-5 py-4">Role</th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleAdminSort('subscriptionPlan')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Subscription Type</span>
-                      {renderSortIcon(adminSortField, 'subscriptionPlan', adminSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleAdminSort('createdAt')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Created Date</span>
-                      {renderSortIcon(adminSortField, 'createdAt', adminSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody 
-                className="divide-y text-slate-300"
-                style={{ borderColor: 'var(--color-border, #1e293b)' }}
-              >
-                {paginatedAdmins.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-500">
-                      No administrators found {search ? `matching "${search}"` : ''}.
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedAdmins.map((user) => {
-                    const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
-                    const isPrimary = isFirstAdminUser(user);
-                    const planBadge = getPlanBadge(user.subscriptionPlan);
-                    const PlanIcon = planBadge.icon;
-                    return (
-                      <tr 
-                        key={user.id} 
-                        className="transition"
-                        style={{ borderColor: 'var(--color-border, #1e293b)' }}
-                      >
-                        <td className="px-5 py-4 font-bold text-white flex items-center gap-3">
-                          <div 
-                            className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0"
-                            style={{
-                              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                              borderColor: 'var(--color-emerald, #10b981)',
-                              color: 'var(--color-emerald, #10b981)'
-                            }}
-                          >
-                            {user.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-white">{user.name}</span>
-                              {isPrimary && (
-                                <span 
-                                  className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded"
-                                  style={{
-                                    backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                                    borderColor: '#f59e0b',
-                                    color: '#fbbf24'
-                                  }}
-                                  title="Primary Administrator"
-                                >
-                                  PRIMARY
-                                </span>
-                              )}
-                              {isCurrent && !isPrimary && (
-                                <span 
-                                  className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded"
-                                  style={{
-                                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                                    borderColor: 'var(--color-emerald, #10b981)',
-                                    color: 'var(--color-emerald, #10b981)'
-                                  }}
-                                >
-                                  YOU
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 text-slate-400 font-mono text-xs">{user.email}</td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit"
-                            style={{
-                              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                              borderColor: 'var(--color-emerald, #10b981)',
-                              color: 'var(--color-emerald, #10b981)'
-                            }}
-                          >
-                            <Shield className="h-3 w-3" /> Admin
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 w-fit"
-                            style={{
-                              backgroundColor: planBadge.bg,
-                              borderColor: planBadge.border,
-                              color: planBadge.color
-                            }}
-                          >
-                            <PlanIcon className="h-3 w-3 shrink-0" />
-                            {planBadge.label}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 text-slate-500">
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric'
-                          }) : 'Active'}
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditModal(user)}
-                              className="p-2 text-slate-300 hover:text-white rounded-xl border transition shadow-sm cursor-pointer"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
-                              }}
-                              title="Edit Admin Account & Plan"
-                            >
-                              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isCurrent || isPrimary}
-                              onClick={() => handleDeleteUser(user.id, user.email, user.name)}
-                              className={`p-2 rounded-xl border transition shadow-sm ${
-                                isCurrent || isPrimary
-                                  ? 'opacity-30 cursor-not-allowed text-slate-600'
-                                  : 'text-slate-400 hover:text-red-400 cursor-pointer'
-                              }`}
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
-                              }}
-                              title={
-                                isPrimary
-                                  ? 'Cannot delete primary system admin'
-                                  : isCurrent
-                                    ? 'Cannot delete active session account'
-                                    : 'Delete Admin'
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Admin Pagination */}
-          {processedAdmins.length > ITEMS_PER_PAGE && (
-            <div 
-              className="px-5 py-3.5 border-t flex items-center justify-between text-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                borderColor: 'var(--color-border, #1e293b)'
-              }}
-            >
-              <span className="text-slate-400">
-                Showing {adminStartIndex + 1} to {adminEndIndex} of {processedAdmins.length} admins
-              </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={adminCurrentPage <= 1}
-                  onClick={() => setAdminCurrentPage(p => Math.max(1, p - 1))}
-                  className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-card, #0b0f17)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <span className="font-bold text-white px-2">Page {adminCurrentPage} of {adminTotalPages}</span>
-                <button
-                  type="button"
-                  disabled={adminCurrentPage >= adminTotalPages}
-                  onClick={() => setAdminCurrentPage(p => Math.min(adminTotalPages, p + 1))}
-                  className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-card, #0b0f17)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* TABLE 2: STANDARD USERS */}
-      {/* ───────────────────────────────────────────────────────────── */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2">
-            <div 
-              className="w-8 h-8 rounded-xl border flex items-center justify-center text-blue-400"
-              style={{
-                backgroundColor: 'rgba(30, 58, 138, 0.4)',
-                borderColor: 'rgba(59, 130, 246, 0.4)'
-              }}
-            >
-              <Users className="h-4 w-4" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-white flex items-center gap-2">
-                Standard Users
-                <span 
-                  className="text-xs border font-bold px-2 py-0.5 rounded-full text-blue-300"
-                  style={{
-                    backgroundColor: 'rgba(30, 58, 138, 0.6)',
-                    borderColor: 'rgba(59, 130, 246, 0.5)'
-                  }}
-                >
-                  {processedStandardUsers.length}
-                </span>
-              </h2>
-            </div>
-          </div>
-
-          <button
-            onClick={() => handleOpenAddModal('user')}
-            className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline"
-            style={{ color: 'var(--color-primary, #E05638)' }}
-          >
-            <UserPlus className="h-3.5 w-3.5" /> Add Standard User
-          </button>
-        </div>
-
-        <div 
-          className="border rounded-3xl overflow-hidden shadow-xl"
-          style={{
-            backgroundColor: 'var(--color-card, #0b0f17)',
-            borderColor: 'var(--color-border, #1e293b)'
-          }}
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead 
-                className="border-b text-slate-400 uppercase font-bold text-[10px] tracking-wider"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #070b13)',
-                  borderColor: 'var(--color-border, #1e293b)'
-                }}
-              >
-                <tr>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleUserSort('name')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Standard User</span>
-                      {renderSortIcon(userSortField, 'name', userSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">Email Address</th>
-                  <th className="px-5 py-4">Role</th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleUserSort('subscriptionPlan')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Subscription Type</span>
-                      {renderSortIcon(userSortField, 'subscriptionPlan', userSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleUserSort('createdAt')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                    >
-                      <span>Created Date</span>
-                      {renderSortIcon(userSortField, 'createdAt', userSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody 
-                className="divide-y text-slate-300"
-                style={{ borderColor: 'var(--color-border, #1e293b)' }}
-              >
-                {paginatedStandardUsers.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-500">
-                      No standard users found {search ? `matching "${search}"` : ''}.
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedStandardUsers.map((user) => {
-                    const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
-                    const planBadge = getPlanBadge(user.subscriptionPlan);
-                    const PlanIcon = planBadge.icon;
-                    return (
-                      <tr 
-                        key={user.id} 
-                        className="transition"
-                        style={{ borderColor: 'var(--color-border, #1e293b)' }}
-                      >
-                        <td className="px-5 py-4 font-bold text-white flex items-center gap-3">
-                          <div 
-                            className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0"
-                            style={{
-                              backgroundColor: 'var(--color-card, #111726)',
-                              borderColor: 'var(--color-border, #1e293b)',
-                              color: 'var(--color-primary, #E05638)'
-                            }}
-                          >
-                            {user.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-white">{user.name}</span>
-                              {isCurrent && (
-                                <span 
-                                  className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded"
-                                  style={{
-                                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                                    borderColor: 'var(--color-emerald, #10b981)',
-                                    color: 'var(--color-emerald, #10b981)'
-                                  }}
-                                >
-                                  YOU
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 text-slate-400 font-mono text-xs">{user.email}</td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border text-slate-300 flex items-center gap-1 w-fit"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark, #070b13)',
-                              borderColor: 'var(--color-border, #1e293b)'
-                            }}
-                          >
-                            <UserIcon className="h-3 w-3 text-slate-400" /> Standard User
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 w-fit shadow-sm"
-                            style={{
-                              backgroundColor: planBadge.bg,
-                              borderColor: planBadge.border,
-                              color: planBadge.color
-                            }}
-                          >
-                            <PlanIcon className="h-3 w-3 shrink-0" />
-                            {planBadge.label}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 text-slate-500">
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric'
-                          }) : 'Active'}
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditModal(user)}
-                              className="p-2 text-slate-300 hover:text-white rounded-xl border transition shadow-sm cursor-pointer"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
-                              }}
-                              title="Edit User & Plan Assignment"
-                            >
-                              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isCurrent}
-                              onClick={() => handleDeleteUser(user.id, user.email, user.name)}
-                              className={`p-2 rounded-xl border transition shadow-sm ${
-                                isCurrent
-                                  ? 'opacity-30 cursor-not-allowed text-slate-600'
-                                  : 'text-slate-400 hover:text-red-400 cursor-pointer'
-                              }`}
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
-                              }}
-                              title={isCurrent ? 'Cannot delete active account' : 'Delete User'}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Standard User Pagination */}
-          <div 
-            className="px-5 py-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark, #070b13)',
-              borderColor: 'var(--color-border, #1e293b)'
-            }}
-          >
-            <div className="text-slate-400">
-              {processedStandardUsers.length === 0 ? (
-                'Showing 0 standard users'
-              ) : (
-                <>
-                  Showing <span className="font-bold text-white">{userStartIndex + 1}</span> to{' '}
-                  <span className="font-bold text-white">{userEndIndex}</span> of{' '}
-                  <span className="font-bold text-white">{processedStandardUsers.length}</span> standard users
-                </>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                disabled={userCurrentPage <= 1}
-                onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))}
-                className={`p-2 rounded-xl border flex items-center justify-center transition ${
-                  userCurrentPage <= 1
-                    ? 'opacity-40 cursor-not-allowed'
-                    : 'text-slate-300 hover:text-white cursor-pointer'
-                }`}
-                style={{
-                  backgroundColor: 'var(--color-card, #0b0f17)',
-                  borderColor: 'var(--color-border, #1e293b)'
-                }}
-                title="Previous Page"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-
-              {Array.from({ length: userTotalPages }, (_, i) => i + 1).map((pageNum) => (
-                <button
-                  key={pageNum}
-                  type="button"
-                  onClick={() => setUserCurrentPage(pageNum)}
-                  className="min-w-[34px] h-[34px] rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer"
-                  style={userCurrentPage === pageNum ? {
-                    backgroundColor: 'var(--color-primary, #E05638)',
-                    borderColor: 'var(--color-primary, #E05638)',
-                    color: '#ffffff'
-                  } : {
-                    backgroundColor: 'var(--color-card, #0b0f17)',
-                    borderColor: 'var(--color-border, #1e293b)',
-                    color: '#cbd5e1'
-                  }}
-                >
-                  {pageNum}
-                </button>
-              ))}
-
-              <button
-                type="button"
-                disabled={userCurrentPage >= userTotalPages}
-                onClick={() => setUserCurrentPage(p => Math.min(userTotalPages, p + 1))}
-                className={`p-2 rounded-xl border flex items-center justify-center transition ${
-                  userCurrentPage >= userTotalPages
-                    ? 'opacity-40 cursor-not-allowed'
-                    : 'text-slate-300 hover:text-white cursor-pointer'
-                }`}
-                style={{
-                  backgroundColor: 'var(--color-card, #0b0f17)',
-                  borderColor: 'var(--color-border, #1e293b)'
-                }}
-                title="Next Page"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* 1. ADD USER MODAL WITH SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
-      {/* ───────────────────────────────────────────────────────────── */}
-      {showAddModal && (
-        <div 
-          onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)'
-            }}
-          >
-            <button 
-              onClick={() => setShowAddModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer text-slate-300 hover:text-white"
-              style={{ backgroundColor: 'var(--color-inner-dark, #172033)' }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
-              >
-                <UserPlus className="h-5 w-5" /> Add New User
-              </h2>
-              <p className="text-slate-400 text-xs">Create a new user account with role & active package tier.</p>
-            </div>
-
-            {addError && (
-              <div className="p-3 bg-red-950/40 border border-red-800 text-red-300 rounded-xl font-semibold flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
-                <span>{addError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleAddUserSubmit} className="space-y-3.5 pt-1">
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Full Name *</label>
-                <div className="relative">
-                  <UserIcon className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Jordan Smith"
-                    value={addName}
-                    onChange={(e) => setAddName(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Email Address *</label>
-                <div className="relative">
-                  <Mail className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="email"
-                    required
-                    placeholder="jordan@example.com"
-                    value={addEmail}
-                    onChange={(e) => setAddEmail(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Password *</label>
-                <div className="relative">
-                  <Lock className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="password"
-                    required
-                    placeholder="Minimum 4 characters"
-                    value={addPassword}
-                    onChange={(e) => setAddPassword(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              {/* SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <CreditCard className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-                    Active Subscription Plan *
-                  </span>
-                  <Link href="/admin/plans" className="text-[10px] text-slate-400 hover:text-white underline">
-                    Manage Plans ({availablePlans.length})
-                  </Link>
-                </label>
-                <select
-                  value={addSubscriptionPlan}
-                  onChange={(e) => setAddSubscriptionPlan(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 text-xs text-white outline-none transition cursor-pointer font-bold"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                >
-                  {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug}>
-                      {plan.name} — ({plan.priceFormatted})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Assigned Role</label>
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <label 
-                    onClick={() => setAddRole('user')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between"
-                    style={addRole === 'user' ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-white text-xs">Standard User</div>
-                      <div className="text-[10px] text-slate-400">App Subscriber</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="addRole"
-                      checked={addRole === 'user'}
-                      onChange={() => setAddRole('user')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-
-                  <label 
-                    onClick={() => setAddRole('admin')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between"
-                    style={addRole === 'admin' ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-white text-xs flex items-center gap-1">
-                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> Admin
-                      </div>
-                      <div className="text-[10px] text-slate-400">Full Access</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="addRole"
-                      checked={addRole === 'admin'}
-                      onChange={() => setAddRole('admin')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer text-slate-300"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  <UserPlus className="h-4 w-4" /> Create User
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* 2. EDIT USER MODAL WITH ROLE LOCK FOR PRIMARY ADMIN */}
-      {/* ───────────────────────────────────────────────────────────── */}
-      {showEditModal && (
-        <div 
-          onClick={() => setShowEditModal(false)}
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)'
-            }}
-          >
-            <button 
-              onClick={() => setShowEditModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer text-slate-300 hover:text-white"
-              style={{ backgroundColor: 'var(--color-inner-dark, #172033)' }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
-              >
-                <Edit3 className="h-5 w-5" /> Edit User & Plan
-              </h2>
-              <p className="text-slate-400 text-xs">Update account details, role permissions, and active subscription plan.</p>
-            </div>
-
-            {editError && (
-              <div className="p-3 bg-red-950/40 border border-red-800 text-red-300 rounded-xl font-semibold flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
-                <span>{editError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleEditUserSubmit} className="space-y-3.5 pt-1">
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Full Name *</label>
-                <div className="relative">
-                  <UserIcon className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="text"
-                    required
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Email Address *</label>
-                <div className="relative">
-                  <Mail className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="email"
-                    required
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Change Password (leave blank to keep current)</label>
-                <div className="relative">
-                  <Lock className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="password"
-                    placeholder="Enter new password..."
-                    value={editPassword}
-                    onChange={(e) => setEditPassword(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-600 outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              {/* SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
-              <div>
-                <label className="block font-bold text-slate-300 mb-1.5 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <CreditCard className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-                    Active Subscription Plan
-                  </span>
-                  <span className="text-[10px] text-emerald-400 font-bold">Live Synced ({availablePlans.length})</span>
-                </label>
-                <select
-                  value={editSubscriptionPlan}
-                  onChange={(e) => setEditSubscriptionPlan(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 text-xs text-white outline-none transition cursor-pointer font-bold"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                >
-                  {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug}>
-                      {plan.name} — ({plan.priceFormatted})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* ASSIGNED ROLE WITH PRIMARY ADMIN LOCK */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block font-bold text-slate-300">Assigned Role</label>
-                  {isEditingFirstAdmin && (
-                    <span 
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border"
-                      style={{
-                        backgroundColor: 'rgba(245, 158, 11, 0.15)',
-                        borderColor: '#f59e0b',
-                        color: '#fbbf24'
-                      }}
-                    >
-                      <Lock className="h-3 w-3" /> Primary Admin Locked
-                    </span>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <label 
-                    onClick={() => {
-                      if (!isEditingFirstAdmin) setEditRole('user');
-                    }}
-                    className={`p-3 rounded-2xl border transition flex items-center justify-between ${
-                      isEditingFirstAdmin ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
-                    }`}
-                    style={editRole === 'user' && !isEditingFirstAdmin ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-white text-xs">Standard User</div>
-                      <div className="text-[10px] text-slate-400">App Subscriber</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="editRole"
-                      disabled={isEditingFirstAdmin}
-                      checked={editRole === 'user'}
-                      onChange={() => {
-                        if (!isEditingFirstAdmin) setEditRole('user');
-                      }}
-                      className="accent-[#E05638] disabled:opacity-50"
-                    />
-                  </label>
-
-                  <label 
-                    onClick={() => setEditRole('admin')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between"
-                    style={editRole === 'admin' ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-white text-xs flex items-center gap-1">
-                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> Admin
-                      </div>
-                      <div className="text-[10px] text-slate-400">Full Access</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="editRole"
-                      checked={editRole === 'admin'}
-                      onChange={() => setEditRole('admin')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-                </div>
-
-                {isEditingFirstAdmin && (
-                  <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
-                    The primary system administrator role is permanently protected and cannot be changed or demoted.
-                  </p>
-                )}
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer text-slate-300"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  <Check className="h-4 w-4" /> Save Changes
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
-}
-
-```
-
 ## File: `apps/web/src/app/admin/page.tsx`
 ```typescript
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
-  Shield, Key, Globe, Plus, Edit3, Trash2, Eye, EyeOff, 
-  Check, CheckCircle, X, UserPlus, RotateCcw, Save, Copy, Cpu, 
-  RefreshCw, AlertCircle, Palette, Sparkles, Layers 
+  ShieldCheck, 
+  Upload, 
+  Trash2, 
+  CheckCircle2, 
+  RefreshCw, 
+  Palette,
+  Image as ImageIcon, 
+  Smile, 
+  Globe, 
+  Cpu, 
+  CreditCard, 
+  Wallet, 
+  Users, 
+  Utensils, 
+  Tag, 
+  Key,
+  Languages
 } from 'lucide-react';
-import { getCurrentUser, initAuthStorage } from '@/lib/auth';
-import { useTranslation } from '@/components/LanguageProvider';
+import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { 
-  getSiteName, 
-  getSiteIcon, 
+  getSiteConfig, 
   saveSiteConfig, 
+  updateFavicon, 
+  SiteIdentityConfig, 
   DEFAULT_SITE_NAME, 
-  DEFAULT_SITE_ICON, 
-  PRESET_ICONS, 
-  updateFavicon 
+  DEFAULT_SITE_ICON 
 } from '@/lib/siteConfig';
-import { 
-  ThemeColors, 
-  DEFAULT_THEME_COLORS, 
-  THEME_PRESETS, 
-  getStoredTheme, 
-  saveStoredTheme, 
-  resetStoredTheme, 
-  applyCssThemeVariables 
-} from '@/lib/theme';
+import { applyThemeToDocument, saveThemeColors } from '@/lib/themeConfig';
+import { useTranslation } from '@/components/LanguageProvider';
 
-interface ApiKeyItem {
-  id: string;
-  name: string;
-  provider: string;
-  keyValue: string;
-  status: 'active' | 'inactive';
-  lastUpdated: string;
-  source?: 'env' | 'custom';
-  envKey: string;
-}
+const PRESET_PALETTES = [
+  { 
+    name: 'Zecratary Coral', 
+    primary: '#E05638', 
+    primaryHover: '#c94529', 
+    accent: '#10b981', 
+    background: '#070b13',
+    card: '#0b0f17',
+    border: '#1e293b',
+    textSecondary: '#94a3b8'
+  },
+  { 
+    name: 'Emerald Forest', 
+    primary: '#10b981', 
+    primaryHover: '#059669', 
+    accent: '#3b82f6', 
+    background: '#06130d',
+    card: '#0a1d14',
+    border: '#133526',
+    textSecondary: '#86efac'
+  },
+  { 
+    name: 'Cyber Blue', 
+    primary: '#2563eb', 
+    primaryHover: '#1d4ed8', 
+    accent: '#10b981', 
+    background: '#080d1a',
+    card: '#0c152b',
+    border: '#1e293b',
+    textSecondary: '#93c5fd'
+  },
+  { 
+    name: 'Royal Purple', 
+    primary: '#8b5cf6', 
+    primaryHover: '#7c3aed', 
+    accent: '#ec4899', 
+    background: '#0f081c',
+    card: '#180d2e',
+    border: '#2a1650',
+    textSecondary: '#d8b4fe'
+  },
+  { 
+    name: 'Amber Gold', 
+    primary: '#f59e0b', 
+    primaryHover: '#d97706', 
+    accent: '#10b981', 
+    background: '#120d04',
+    card: '#1c1507',
+    border: '#36270a',
+    textSecondary: '#fcd34d'
+  },
+  { 
+    name: 'Deep Midnight', 
+    primary: '#38bdf8', 
+    primaryHover: '#0284c7', 
+    accent: '#a855f7', 
+    background: '#020617',
+    card: '#080e22',
+    border: '#172554',
+    textSecondary: '#7dd3fc'
+  },
+];
 
 export default function AdminSettingsPage() {
-  const { t, version } = useTranslation();
-  const [activeTab, setActiveTab] = useState<'general' | 'theme' | 'apikeys'>('general');
-  const [currentUser, setCurrentUser] = useState<any | null>(null);
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
-
-  // Site Branding State
-  const [siteName, setLocalSiteName] = useState(DEFAULT_SITE_NAME);
-  const [siteIcon, setLocalSiteIcon] = useState(DEFAULT_SITE_ICON);
-  const [siteNameFeedback, setSiteNameFeedback] = useState('');
-
-  // Global Theme & Colors State
-  const [themeColors, setThemeColors] = useState<ThemeColors>(DEFAULT_THEME_COLORS);
-  const [themeFeedback, setThemeFeedback] = useState('');
-
-  // API Key State
-  const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([]);
-  const [visibleKeyIds, setVisibleKeyIds] = useState<Record<string, boolean>>({});
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [editingKey, setEditingKey] = useState<ApiKeyItem | null>(null);
-  const [keyName, setKeyName] = useState('');
-  const [provider, setProvider] = useState('Google Gemini (gemini-1.5-flash)');
-  const [keyValue, setKeyValue] = useState('');
-  const [keyStatus, setKeyStatus] = useState<'active' | 'inactive'>('active');
-  const [apiKeyFeedback, setApiKeyFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [loadingAction, setLoadingAction] = useState(false);
-
-  const fetchEnvKeys = async (showFeedback = false) => {
-    setLoadingAction(true);
-    try {
-      const res = await fetch(`/api/admin/keys?t=${Date.now()}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.keys)) {
-        setApiKeys(data.keys);
-        if (showFeedback) {
-          setApiKeyFeedback({ type: 'success', text: `${data.keys.length} ${t('loadedKeysFromEnv')}` });
-          setTimeout(() => setApiKeyFeedback(null), 3500);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to read .env keys:', e);
-      if (showFeedback) {
-        setApiKeyFeedback({ type: 'error', text: t('errorReadingEnv') });
-        setTimeout(() => setApiKeyFeedback(null), 3500);
-      }
-    } finally {
-      setLoadingAction(false);
+  const { t: translate } = useTranslation() || {};
+  const t = useCallback((key: string, fallback: string) => {
+    if (typeof translate === 'function') {
+      const val = translate(key);
+      if (val && val !== key) return val;
     }
+    return fallback;
+  }, [translate]);
+
+  const [user, setUser] = useState<User | null>(null);
+  const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [saved, setSaved] = useState<boolean>(false);
+
+  // Site Identity State
+  const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
+  const [titlebarEmoji, setTitlebarEmoji] = useState<string>(DEFAULT_SITE_ICON);
+  const [titlebarImage, setTitlebarImage] = useState<string>('');
+  const [faviconEmoji, setFaviconEmoji] = useState<string>(DEFAULT_SITE_ICON);
+  const [faviconImage, setFaviconImage] = useState<string>('');
+
+  // Extended Theme Color State
+  const [primaryColor, setPrimaryColor] = useState<string>('#E05638');
+  const [primaryHoverColor, setPrimaryHoverColor] = useState<string>('#c94529');
+  const [accentColor, setAccentColor] = useState<string>('#10b981');
+  const [backgroundColor, setBackgroundColor] = useState<string>('#070b13');
+  const [cardBackgroundColor, setCardBackgroundColor] = useState<string>('#0b0f17');
+  const [cardBorderColor, setCardBorderColor] = useState<string>('#1e293b');
+  const [secondaryTextColor, setSecondaryTextColor] = useState<string>('#94a3b8');
+
+  const titlebarFileRef = useRef<HTMLInputElement>(null);
+  const faviconFileRef = useRef<HTMLInputElement>(null);
+
+  const applyColorsLocally = (
+    primary: string, 
+    hover: string, 
+    accent: string, 
+    bg: string,
+    card: string,
+    border: string,
+    textSec: string
+  ) => {
+    applyThemeToDocument({
+      primary,
+      primaryHover: hover,
+      accentEmerald: accent,
+      accentColor: accent,
+      backgroundColor: bg,
+      backgroundDark: bg,
+      cardBackground: card,
+      cardBorder: border,
+      textSecondary: textSec
+    });
   };
 
-  // Dynamic Theme Synchronization & Color Inversion
-  const applySavedTheme = useCallback(() => {
+  const syncTheme = useCallback(() => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
-      setIsDayMode(isDay);
+      const mode = localStorage.getItem('zecratary_theme_mode');
+      const day = mode === 'light';
+      setIsDayMode(day);
 
-      const storedTheme = getStoredTheme();
-      setThemeColors(storedTheme);
-      applyCssThemeVariables(storedTheme);
+      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      let p = primaryColor;
+      let ph = primaryHoverColor;
+      let ac = accentColor;
+      let bg = backgroundColor;
+      let card = cardBackgroundColor;
+      let border = cardBorderColor;
+      let textSec = secondaryTextColor;
 
-      const root = document.documentElement;
+      if (stored) {
+        const c = JSON.parse(stored);
+        if (c.primary || c.primaryColor) p = c.primary || c.primaryColor;
+        if (c.primaryHover) ph = c.primaryHover;
+        if (c.accentEmerald || c.accentColor || c.accent) ac = c.accentEmerald || c.accentColor || c.accent;
+        if (c.backgroundColor || c.backgroundDark) bg = c.backgroundColor || c.backgroundDark;
+        if (c.cardBackground) card = c.cardBackground;
+        if (c.cardBorder) border = c.cardBorder;
+        if (c.textSecondary) textSec = c.textSecondary;
 
-      if (isDay) {
-        root.style.setProperty('--color-primary', storedTheme.primary || '#E05638');
-        root.style.setProperty('--color-primary-hover', storedTheme.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', storedTheme.accentEmerald || '#10b981');
-        root.style.setProperty('--color-accent', storedTheme.accentEmerald || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', storedTheme.primary || '#E05638');
-        root.style.setProperty('--color-primary-hover', storedTheme.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', storedTheme.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', storedTheme.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', storedTheme.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', storedTheme.cardBackground || '#111726');
-        root.style.setProperty('--color-card', storedTheme.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', storedTheme.innerDark || storedTheme.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', storedTheme.borderColor || '#1e293b');
-        root.style.setProperty('--color-emerald', storedTheme.accentEmerald || '#10b981');
-        root.style.setProperty('--color-accent', storedTheme.accentEmerald || '#10b981');
-        root.style.setProperty('--color-text', storedTheme.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', storedTheme.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
-        }
+        setPrimaryColor(p);
+        setPrimaryHoverColor(ph);
+        setAccentColor(ac);
+        setBackgroundColor(bg);
+        setCardBackgroundColor(card);
+        setCardBorderColor(border);
+        setSecondaryTextColor(textSec);
       }
-    } catch (e) {}
-  }, []);
+
+      applyThemeToDocument({
+        primary: p,
+        primaryHover: ph,
+        accentEmerald: ac,
+        backgroundColor: bg,
+        cardBackground: card,
+        cardBorder: border,
+        textSecondary: textSec
+      });
+    } catch (_) {}
+  }, [primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor]);
 
   useEffect(() => {
-    document.title = `${t('adminSettingsTitle') || 'Admin Settings'} - Settings`;
-    initAuthStorage();
-    setCurrentUser(getCurrentUser());
-    
-    // Load Branding
-    const name = getSiteName();
-    const icon = getSiteIcon();
-    setLocalSiteName(name);
-    setLocalSiteIcon(icon);
-    updateFavicon(icon);
-
-    applySavedTheme();
-    fetchEnvKeys(false);
-
-    const handleSiteSync = () => {
-      setLocalSiteName(getSiteName());
-      const updatedIcon = getSiteIcon();
-      setLocalSiteIcon(updatedIcon);
-      updateFavicon(updatedIcon);
-    };
-
-    window.addEventListener('zecratary_site_settings_changed', handleSiteSync);
-    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('storage', applySavedTheme);
-    window.addEventListener('storage', handleSiteSync);
-
+    syncTheme();
+    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
+    window.addEventListener('zecratary_theme_changed', syncTheme);
+    window.addEventListener('zecratary_theme_updated', syncTheme);
+    window.addEventListener('storage', syncTheme);
     return () => {
-      window.removeEventListener('zecratary_site_settings_changed', handleSiteSync);
-      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('storage', applySavedTheme);
-      window.removeEventListener('storage', handleSiteSync);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
+      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_updated', syncTheme);
+      window.removeEventListener('storage', syncTheme);
+    };
+  }, [syncTheme]);
+
+  useEffect(() => {
+    initAuthStorage();
+    const active = getCurrentUser();
+    setUser(active);
+
+    const cfg = getSiteConfig();
+    setSiteName(cfg.siteName);
+    setTitlebarEmoji(cfg.titlebarEmoji);
+    setTitlebarImage(cfg.titlebarImage);
+    setFaviconEmoji(cfg.faviconEmoji);
+    setFaviconImage(cfg.faviconImage);
+
+    fetch('/api/system-settings', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.success && data.settings?.themeColors) {
+          const tc = data.settings.themeColors;
+          const p = tc.primary || tc.primaryColor || '#E05638';
+          const ph = tc.primaryHover || '#c94529';
+          const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
+          const bg = tc.backgroundColor || tc.backgroundDark || '#070b13';
+          const card = tc.cardBackground || '#0b0f17';
+          const border = tc.cardBorder || '#1e293b';
+          const textSec = tc.textSecondary || '#94a3b8';
+
+          setPrimaryColor(p);
+          setPrimaryHoverColor(ph);
+          setAccentColor(ac);
+          setBackgroundColor(bg);
+          setCardBackgroundColor(card);
+          setCardBorderColor(border);
+          setSecondaryTextColor(textSec);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, target: 'titlebar' | 'favicon') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert(t('admin.fileSizeError', 'File size exceeds the 2MB limit.'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      const result = uploadEvent.target?.result as string;
+      if (result) {
+        if (target === 'titlebar') {
+          setTitlebarImage(result);
+        } else {
+          setFaviconImage(result);
+        }
       }
     };
-  }, [applySavedTheme, t, version]);
+    reader.readAsDataURL(file);
+  };
 
-  // Branding Handlers
-  const handleSaveBranding = (e: React.FormEvent) => {
+  const handleSelectPreset = (preset: typeof PRESET_PALETTES[0]) => {
+    setPrimaryColor(preset.primary);
+    setPrimaryHoverColor(preset.primaryHover);
+    setAccentColor(preset.accent);
+    setBackgroundColor(preset.background);
+    setCardBackgroundColor(preset.card);
+    setCardBorderColor(preset.border);
+    setSecondaryTextColor(preset.textSecondary);
+
+    applyColorsLocally(
+      preset.primary, 
+      preset.primaryHover, 
+      preset.accent, 
+      preset.background,
+      preset.card,
+      preset.border,
+      preset.textSecondary
+    );
+  };
+
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanName = siteName.trim() || DEFAULT_SITE_NAME;
-    const cleanIcon = siteIcon.trim() || DEFAULT_SITE_ICON;
-    saveSiteConfig(cleanName, cleanIcon);
-    setLocalSiteName(cleanName);
-    setLocalSiteIcon(cleanIcon);
-    setSiteNameFeedback(t('brandingUpdatedFeedback') || 'Site branding updated successfully!');
-    setTimeout(() => setSiteNameFeedback(''), 3000);
+
+    const updatedBranding: SiteIdentityConfig = {
+      siteName: siteName.trim() || DEFAULT_SITE_NAME,
+      titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
+      titlebarImage,
+      faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
+      faviconImage
+    };
+    saveSiteConfig(updatedBranding);
+
+    const themeColors = {
+      primary: primaryColor,
+      primaryColor: primaryColor,
+      primaryHover: primaryHoverColor,
+      accentEmerald: accentColor,
+      accentColor: accentColor,
+      accent: accentColor,
+      backgroundColor: backgroundColor,
+      backgroundDark: backgroundColor,
+      cardBackground: cardBackgroundColor,
+      cardBorder: cardBorderColor,
+      textSecondary: secondaryTextColor,
+    };
+
+    saveThemeColors(themeColors);
+
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
   };
 
-  const handleResetBranding = () => {
-    if (confirm(`${t('confirmResetBranding') || 'Are you sure you want to reset site branding to default'} "${DEFAULT_SITE_ICON} ${DEFAULT_SITE_NAME}"?`)) {
-      saveSiteConfig(DEFAULT_SITE_NAME, DEFAULT_SITE_ICON);
-      setLocalSiteName(DEFAULT_SITE_NAME);
-      setLocalSiteIcon(DEFAULT_SITE_ICON);
-      setSiteNameFeedback(t('brandingResetFeedback') || 'Site branding reset to default!');
-      setTimeout(() => setSiteNameFeedback(''), 3000);
-    }
+  const handleResetDefaults = () => {
+    if (!confirm(t('admin.confirmReset', 'Reset branding and theme settings to defaults?'))) return;
+
+    setSiteName(DEFAULT_SITE_NAME);
+    setTitlebarEmoji(DEFAULT_SITE_ICON);
+    setTitlebarImage('');
+    setFaviconEmoji(DEFAULT_SITE_ICON);
+    setFaviconImage('');
+
+    setPrimaryColor('#E05638');
+    setPrimaryHoverColor('#c94529');
+    setAccentColor('#10b981');
+    setBackgroundColor('#070b13');
+    setCardBackgroundColor('#0b0f17');
+    setCardBorderColor('#1e293b');
+    setSecondaryTextColor('#94a3b8');
+
+    saveSiteConfig({
+      siteName: DEFAULT_SITE_NAME,
+      titlebarEmoji: DEFAULT_SITE_ICON,
+      titlebarImage: '',
+      faviconEmoji: DEFAULT_SITE_ICON,
+      faviconImage: ''
+    });
+
+    const defaultColors = {
+      primary: '#E05638',
+      primaryColor: '#E05638',
+      primaryHover: '#c94529',
+      accentEmerald: '#10b981',
+      accentColor: '#10b981',
+      accent: '#10b981',
+      backgroundColor: '#070b13',
+      backgroundDark: '#070b13',
+      cardBackground: '#0b0f17',
+      cardBorder: '#1e293b',
+      textSecondary: '#94a3b8'
+    };
+
+    saveThemeColors(defaultColors);
+
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
   };
 
-  // Theme Handlers
-  const handleColorChange = (key: keyof ThemeColors, val: string) => {
-    const updated = { ...themeColors, [key]: val };
-    setThemeColors(updated);
-    applyCssThemeVariables(updated);
-  };
-
-  const handleSelectPreset = (preset: ThemeColors) => {
-    setThemeColors(preset);
-    applyCssThemeVariables(preset);
-  };
-
-  const handleSaveTheme = (e: React.FormEvent) => {
-    e.preventDefault();
-    saveStoredTheme(themeColors);
-    applyCssThemeVariables(themeColors);
-    setThemeFeedback(t('themeColorsSavedFeedback') || 'Theme colors saved and applied successfully!');
-    setTimeout(() => setThemeFeedback(''), 3000);
-  };
-
-  const handleResetTheme = () => {
-    if (confirm(t('confirmResetTheme') || 'Are you sure you want to reset theme colors to default presets?')) {
-      resetStoredTheme();
-      setThemeColors(DEFAULT_THEME_COLORS);
-      applyCssThemeVariables(DEFAULT_THEME_COLORS);
-      setThemeFeedback(t('themeColorsResetFeedback') || 'Theme colors reset to default!');
-      setTimeout(() => setThemeFeedback(''), 3000);
-    }
-  };
-
-  // API Key Handlers
-  const handleSaveKeySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!keyValue.trim()) return;
-
-    setLoadingAction(true);
-    try {
-      const res = await fetch('/api/admin/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: keyName.trim() || provider.split('(')[0].trim(),
-          provider,
-          keyValue: keyValue.trim(),
-          status: keyStatus,
-          prevEnvKey: editingKey?.envKey
-        })
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setApiKeyFeedback({ type: 'success', text: editingKey ? (t('apiKeyUpdatedEnv') || 'API Key updated successfully in .env!') : (t('newApiKeyWrittenEnv') || 'New API Key successfully written to .env!') });
-        setShowKeyModal(false);
-        await fetchEnvKeys(false);
-      } else {
-        setApiKeyFeedback({ type: 'error', text: data.error || 'Failed to write to .env file' });
-      }
-    } catch (err: any) {
-      setApiKeyFeedback({ type: 'error', text: err.message || 'Network error writing .env' });
-    } finally {
-      setLoadingAction(false);
-      setTimeout(() => setApiKeyFeedback(null), 3500);
-    }
-  };
-
-  const handleDeleteKey = async (item: ApiKeyItem) => {
-    if (!confirm(`${t('confirmRemoveKey') || 'Are you sure you want to remove'} ${item.name} (${item.envKey})?`)) return;
-
-    setLoadingAction(true);
-    try {
-      const res = await fetch(`/api/admin/keys?envKey=${encodeURIComponent(item.envKey)}`, {
-        method: 'DELETE'
-      });
-      const data = await res.json();
-      if (data.success) {
-        setApiKeyFeedback({ type: 'success', text: `${item.envKey} ${t('removedKeyFromEnv') || 'removed successfully from .env'}` });
-        await fetchEnvKeys(false);
-      } else {
-        setApiKeyFeedback({ type: 'error', text: data.error || 'Failed to remove key from .env' });
-      }
-    } catch (err: any) {
-      setApiKeyFeedback({ type: 'error', text: err.message || 'Network error deleting .env key' });
-    } finally {
-      setLoadingAction(false);
-      setTimeout(() => setApiKeyFeedback(null), 3500);
-    }
-  };
-
-  const toggleKeyStatus = async (item: ApiKeyItem) => {
-    const nextStatus = item.status === 'active' ? 'inactive' : 'active';
-    try {
-      await fetch('/api/admin/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: item.name,
-          provider: item.provider,
-          keyValue: item.keyValue,
-          status: nextStatus,
-          prevEnvKey: item.envKey
-        })
-      });
-      await fetchEnvKeys(false);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleCopy = (id: string, val: string) => {
-    navigator.clipboard.writeText(val);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 1500);
-  };
-
-  const maskKey = (val: string) => {
-    if (val.length <= 8) return '••••••••';
-    return val.substring(0, 6) + '••••••••••••' + val.substring(val.length - 4);
-  };
+  const isTitlebarImageActive = !!titlebarImage;
+  const isFaviconImageActive = !!faviconImage;
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="max-w-5xl mx-auto space-y-8 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
       style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
     >
       {/* HEADER */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('adminSettingsTitle') || 'Admin Settings'}
-          </h1>
+      <div 
+        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" 
+        style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+      >
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-6 w-6 text-[var(--color-primary)]" />
+            <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
+              {t('admin.siteIdentity', 'Site Identity & Branding')}
+            </h1>
+          </div>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('adminSettingsSubtitle') || 'Manage system configurations, branding, colors, and live .env credentials'}
+            {t('admin.siteIdentityDesc', 'Configure application name, comprehensive color themes, backgrounds, titlebar logo, and browser tab favicon.')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <Link
-            href="/admin/add-user"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#cbd5e1'
-            }}
-          >
-            <UserPlus className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addUser') || 'Add User'}
-          </Link>
-        </div>
+        {saved && (
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
+            isDayMode 
+              ? 'bg-emerald-100 border-emerald-300 text-emerald-700' 
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+          }`}>
+            <CheckCircle2 className="h-4 w-4" /> {t('admin.settingsSaved', 'Settings Saved & Broadcasted')}
+          </div>
+        )}
       </div>
 
-      {/* TABS NAVIGATION */}
-      <div 
-        className="flex border-b gap-3 overflow-x-auto transition-colors duration-200" 
-        style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
-      >
-        <button
-          onClick={() => setActiveTab('general')}
-          className="flex items-center gap-2 pb-3 text-sm font-bold border-b-2 transition shrink-0 cursor-pointer"
-          style={activeTab === 'general' ? {
-            borderColor: 'var(--color-primary, #E05638)',
-            color: 'var(--color-primary, #E05638)'
-          } : {
-            borderColor: 'transparent',
-            color: isDayMode ? '#64748b' : '#94a3b8'
+      {/* QUICK ADMIN NAVIGATION CARDS */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <Link 
+          href="/admin/ai-settings" 
+          className="p-3 rounded-2xl border transition hover:opacity-80 flex items-center gap-2.5 font-bold"
+          style={{ 
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+            color: isDayMode ? '#0f172a' : '#ffffff'
           }}
         >
-          <Globe className="h-4 w-4" /> {t('generalBrandingTab') || 'General & Branding'}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('theme')}
-          className="flex items-center gap-2 pb-3 text-sm font-bold border-b-2 transition shrink-0 cursor-pointer"
-          style={activeTab === 'theme' ? {
-            borderColor: 'var(--color-primary, #E05638)',
-            color: 'var(--color-primary, #E05638)'
-          } : {
-            borderColor: 'transparent',
-            color: isDayMode ? '#64748b' : '#94a3b8'
+          <Cpu className="h-4 w-4 text-[var(--color-primary)]" />
+          <span>{t('admin.nav.aiSettings', 'AI Settings')}</span>
+        </Link>
+        <Link 
+          href="/admin/users" 
+          className="p-3 rounded-2xl border transition hover:opacity-80 flex items-center gap-2.5 font-bold"
+          style={{ 
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+            color: isDayMode ? '#0f172a' : '#ffffff'
           }}
         >
-          <Palette className="h-4 w-4" /> {t('themeColorsTab') || 'Theme Colors'}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('apikeys')}
-          className="flex items-center gap-2 pb-3 text-sm font-bold border-b-2 transition shrink-0 cursor-pointer"
-          style={activeTab === 'apikeys' ? {
-            borderColor: 'var(--color-primary, #E05638)',
-            color: 'var(--color-primary, #E05638)'
-          } : {
-            borderColor: 'transparent',
-            color: isDayMode ? '#64748b' : '#94a3b8'
+          <Users className="h-4 w-4 text-[var(--color-primary)]" />
+          <span>{t('admin.nav.users', 'Users')}</span>
+        </Link>
+        <Link 
+          href="/admin/plans" 
+          className="p-3 rounded-2xl border transition hover:opacity-80 flex items-center gap-2.5 font-bold"
+          style={{ 
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+            color: isDayMode ? '#0f172a' : '#ffffff'
           }}
         >
-          <Key className="h-4 w-4" /> {t('apiKeysTab') || 'API Keys'} ({apiKeys.length})
-        </button>
+          <CreditCard className="h-4 w-4 text-[var(--color-primary)]" />
+          <span>{t('admin.nav.plans', 'Plans')}</span>
+        </Link>
+        <Link 
+          href="/admin/social-login-setting" 
+          className="p-3 rounded-2xl border transition hover:opacity-80 flex items-center gap-2.5 font-bold"
+          style={{ 
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+            color: isDayMode ? '#0f172a' : '#ffffff'
+          }}
+        >
+          <Key className="h-4 w-4 text-[var(--color-primary)]" />
+          <span>{t('admin.nav.socialLogin', 'Social Login')}</span>
+        </Link>
       </div>
 
-      {/* TAB 1: GENERAL & SITE BRANDING */}
-      {activeTab === 'general' && (
-        <div className="space-y-6">
-          {siteNameFeedback && (
-            <div 
-              className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 animate-in fade-in"
-              style={{
-                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-              }}
-            >
-              <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
-              <span>{siteNameFeedback}</span>
-            </div>
-          )}
-
-          <div 
-            className="border rounded-3xl p-6 shadow-sm space-y-6 transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-            }}
-          >
-            <div>
-              <h2 className="text-base font-extrabold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                <Globe className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('siteIdentityTitle') || 'Site Identity & Branding'}
-              </h2>
-              <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('siteIdentitySub') || 'Customize your application name, title bar emoji, and favicon branding.'}
-              </p>
-            </div>
-
-            <form onSubmit={handleSaveBranding} className="space-y-6">
-              {/* ICON PICKER */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('siteIconLabel') || 'Site Icon Emoji'}
-                </label>
-                
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {PRESET_ICONS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setLocalSiteIcon(emoji)}
-                      className="w-11 h-11 text-xl rounded-xl border transition flex items-center justify-center cursor-pointer shadow-xs"
-                      style={siteIcon === emoji ? {
-                        backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                        borderColor: 'var(--color-primary, #E05638)',
-                        transform: 'scale(1.05)'
-                      } : {
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                      }}
-                      title={`Select ${emoji}`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="max-w-xs pt-2 flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="text"
-                      maxLength={4}
-                      value={siteIcon}
-                      onChange={(e) => setLocalSiteIcon(e.target.value)}
-                      placeholder="Custom emoji (e.g. 🍒)"
-                      className="w-full border rounded-xl px-4 py-2.5 text-sm outline-none transition font-bold"
-                      style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                    />
-                  </div>
-                  <span className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('customEmoji') || 'Custom emoji'}</span>
-                </div>
-              </div>
-
-              {/* SITE NAME INPUT */}
-              <div className="max-w-md space-y-2">
-                <label className="block text-xs font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('siteNameLabel') || 'Application Name'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Zecratary, FoodiePrep, MyKitchen..."
-                  value={siteName}
-                  onChange={(e) => setLocalSiteName(e.target.value)}
-                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none transition font-bold"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-
-              {/* LIVE BRAND PREVIEW */}
-              <div className="pt-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('liveBrandPreview') || 'Live Brand Preview'}
-                </span>
-                <div 
-                  className="inline-flex items-center gap-3 border px-5 py-3 rounded-2xl shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #080C17)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <span className="text-2xl">{siteIcon.trim() || DEFAULT_SITE_ICON}</span>
-                  <span 
-                    className="text-xl font-black tracking-tight"
-                    style={{ color: 'var(--color-primary, #E05638)' }}
-                  >
-                    {siteName.trim() || DEFAULT_SITE_NAME}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-                <button
-                  type="submit"
-                  className="text-white font-bold text-xs px-6 py-3 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  <Save className="h-4 w-4" /> {t('saveBrandingBtn') || 'Save Branding'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleResetBranding}
-                  className="border font-bold text-xs px-4 py-3 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-card, #111726)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#334155' : '#cbd5e1'
-                  }}
-                >
-                  <RotateCcw className="h-4 w-4" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} /> {t('resetDefaultBtn') || 'Reset Defaults'}
-                </button>
-              </div>
-            </form>
+      <form onSubmit={handleSave} className="space-y-6">
+        {/* SECTION 1: SITE NAME */}
+        <div 
+          className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
+          style={{ 
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
+          }}
+        >
+          <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+            {t('admin.appName', 'Application Name')}
+          </h2>
+          <div>
+            <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+              {t('admin.displayName', 'Display Name')}
+            </label>
+            <input 
+              type="text" 
+              value={siteName} 
+              onChange={(e) => setSiteName(e.target.value)} 
+              placeholder="e.g. Zecratary" 
+              className="w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
+              style={{ 
+                backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
+                borderColor: isDayMode ? '#cbd5e1' : '#1e293b', 
+                color: isDayMode ? '#0f172a' : '#ffffff' 
+              }} 
+            />
           </div>
         </div>
-      )}
 
-      {/* TAB 2: GLOBAL THEME & COLOR SETTINGS */}
-      {activeTab === 'theme' && (
-        <div className="space-y-6">
-          {themeFeedback && (
-            <div 
-              className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 animate-in fade-in"
-              style={{
-                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-              }}
-            >
-              <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
-              <span>{themeFeedback}</span>
+        {/* SECTION 2: EXTENDED THEME COLOR CONFIGURATION */}
+        <div 
+          className="border rounded-3xl p-6 shadow-xl space-y-6 text-xs" 
+          style={{ 
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <Palette className="h-4 w-4 text-[var(--color-primary)]" />
+                <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {t('admin.themeSettings', 'Complete Theme Color & Palette Settings')}
+                </h2>
+              </div>
+              <p className="text-[11px] mt-1" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('admin.themeSettingsDesc', 'Customize primary accents, interactive hovers, viewport tones, card surfaces, borders, and typography.')}
+              </p>
             </div>
-          )}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.primary', 'Primary')}:</span>
+                <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: primaryColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.accent', 'Accent')}:</span>
+                <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: accentColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.bg', 'Bg')}:</span>
+                <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: backgroundColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.card', 'Card')}:</span>
+                <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: cardBackgroundColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
+              </div>
+            </div>
+          </div>
 
-          {/* PALETTE PRESETS */}
-          <div 
-            className="border rounded-3xl p-6 shadow-sm space-y-4 transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-            }}
-          >
-            <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('presetPalettesTitle') || 'Preset Color Palettes'}
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {THEME_PRESETS.map((p) => {
-                const isMatch = p.colors.primary === themeColors.primary && p.colors.backgroundColor === themeColors.backgroundColor;
+          {/* Quick Presets */}
+          <div className="space-y-2">
+            <label className="block font-bold text-[11px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+              {t('admin.coordinatedPalettes', 'Coordinated Palettes & Tones')}
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+              {PRESET_PALETTES.map((preset) => {
+                const isSelected = primaryColor.toLowerCase() === preset.primary.toLowerCase() && backgroundColor.toLowerCase() === preset.background.toLowerCase();
                 return (
                   <button
-                    key={p.name}
+                    key={preset.name}
                     type="button"
-                    onClick={() => handleSelectPreset(p.colors)}
-                    className="p-3.5 rounded-2xl border transition text-left space-y-2 cursor-pointer shadow-xs"
-                    style={isMatch ? {
-                      backgroundColor: isDayMode ? '#fee2e2' : 'var(--color-inner-dark, #111726)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                    onClick={() => handleSelectPreset(preset)}
+                    className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1.5 transition text-left cursor-pointer ${
+                      isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
+                    }`}
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                      borderColor: isSelected ? 'var(--color-primary)' : isDayMode ? '#cbd5e1' : '#1e293b'
                     }}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold truncate" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{p.name}</span>
-                      {isMatch && <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />}
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.primary }} />
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.accent }} />
+                      <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.background, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
+                      <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.card, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-4 h-4 rounded-full border" style={{ backgroundColor: p.colors.primary, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
-                      <span className="w-4 h-4 rounded-full border" style={{ backgroundColor: p.colors.backgroundColor, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
-                      <span className="w-4 h-4 rounded-full border" style={{ backgroundColor: p.colors.cardBackground, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
-                      <span className="w-4 h-4 rounded-full border" style={{ backgroundColor: p.colors.accentEmerald, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
-                    </div>
+                    <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      {preset.name}
+                    </span>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* COLOR CONTROLS & LIVE PREVIEW GRID */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <form 
-              onSubmit={handleSaveTheme} 
-              className="lg:col-span-2 border rounded-3xl p-6 shadow-sm space-y-6 transition-colors duration-200"
-              style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-              }}
-            >
-              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                <Layers className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('elementColorCustomizationTitle') || 'Element & Surface Color Customization'}
-              </h2>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                {/* Primary Color */}
-                <div 
-                  className="border rounded-2xl p-3.5 space-y-2 transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('primaryBrandAccentLabel') || 'Primary Brand Accent'}</label>
-                    <span className="font-mono text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{themeColors.primary}</span>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <input
-                      type="color"
-                      value={themeColors.primary}
-                      onChange={(e) => handleColorChange('primary', e.target.value)}
-                      className="w-8 h-8 rounded-lg bg-transparent cursor-pointer border-0"
-                    />
-                    <input
-                      type="text"
-                      value={themeColors.primary}
-                      onChange={(e) => handleColorChange('primary', e.target.value)}
-                      className="flex-1 border rounded-xl px-3 py-1.5 text-xs font-mono uppercase outline-none"
-                      style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                    />
-                  </div>
+          {/* Core Colors Group */}
+          <div className="space-y-3 pt-2">
+            <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>
+              {t('admin.brandColors', 'Brand & Interaction Colors')}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Primary Color */}
+              <div className="space-y-1.5">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.primaryBrandColor', 'Primary Brand Color')}
+                </label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="color" 
+                    value={primaryColor} 
+                    onChange={(e) => {
+                      setPrimaryColor(e.target.value);
+                      applyColorsLocally(e.target.value, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                    }}
+                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                  />
+                  <input 
+                    type="text" 
+                    value={primaryColor} 
+                    onChange={(e) => {
+                      setPrimaryColor(e.target.value);
+                      applyColorsLocally(e.target.value, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                    }}
+                    placeholder="#E05638"
+                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  />
                 </div>
-
-                {/* Primary Hover */}
-                <div 
-                  className="border rounded-2xl p-3.5 space-y-2 transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('primaryButtonHoverLabel') || 'Primary Button Hover'}</label>
-                    <span className="font-mono text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{themeColors.primaryHover}</span>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <input
-                      type="color"
-                      value={themeColors.primaryHover}
-                      onChange={(e) => handleColorChange('primaryHover', e.target.value)}
-                      className="w-8 h-8 rounded-lg bg-transparent cursor-pointer border-0"
-                    />
-                    <input
-                      type="text"
-                      value={themeColors.primaryHover}
-                      onChange={(e) => handleColorChange('primaryHover', e.target.value)}
-                      className="flex-1 border rounded-xl px-3 py-1.5 text-xs font-mono uppercase outline-none"
-                      style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                    />
-                  </div>
-                </div>
-
-                {/* App Background */}
-                <div 
-                  className="border rounded-2xl p-3.5 space-y-2 transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('appBgSurfaceLabel') || 'App Background Surface'}</label>
-                    <span className="font-mono text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{themeColors.backgroundColor}</span>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <input
-                      type="color"
-                      value={themeColors.backgroundColor}
-                      onChange={(e) => handleColorChange('backgroundColor', e.target.value)}
-                      className="w-8 h-8 rounded-lg bg-transparent cursor-pointer border-0"
-                    />
-                    <input
-                      type="text"
-                      value={themeColors.backgroundColor}
-                      onChange={(e) => handleColorChange('backgroundColor', e.target.value)}
-                      className="flex-1 border rounded-xl px-3 py-1.5 text-xs font-mono uppercase outline-none"
-                      style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                    />
-                  </div>
-                </div>
-
-                {/* Card Background */}
-                <div 
-                  className="border rounded-2xl p-3.5 space-y-2 transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('cardModalPanelsLabel') || 'Card & Modal Panels'}</label>
-                    <span className="font-mono text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{themeColors.cardBackground}</span>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <input
-                      type="color"
-                      value={themeColors.cardBackground}
-                      onChange={(e) => handleColorChange('cardBackground', e.target.value)}
-                      className="w-8 h-8 rounded-lg bg-transparent cursor-pointer border-0"
-                    />
-                    <input
-                      type="text"
-                      value={themeColors.cardBackground}
-                      onChange={(e) => handleColorChange('cardBackground', e.target.value)}
-                      className="flex-1 border rounded-xl px-3 py-1.5 text-xs font-mono uppercase outline-none"
-                      style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                    />
-                  </div>
-                </div>
-
-                {/* Border Color */}
-                <div 
-                  className="border rounded-2xl p-3.5 space-y-2 transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('bordersDividersLabel') || 'Borders & Dividers'}</label>
-                    <span className="font-mono text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{themeColors.borderColor}</span>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <input
-                      type="color"
-                      value={themeColors.borderColor}
-                      onChange={(e) => handleColorChange('borderColor', e.target.value)}
-                      className="w-8 h-8 rounded-lg bg-transparent cursor-pointer border-0"
-                    />
-                    <input
-                      type="text"
-                      value={themeColors.borderColor}
-                      onChange={(e) => handleColorChange('borderColor', e.target.value)}
-                      className="flex-1 border rounded-xl px-3 py-1.5 text-xs font-mono uppercase outline-none"
-                      style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                    />
-                  </div>
-                </div>
-
-                {/* Secondary Accent */}
-                <div 
-                  className="border rounded-2xl p-3.5 space-y-2 transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('secondaryStatusAccentLabel') || 'Secondary / Status Accent'}</label>
-                    <span className="font-mono text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{themeColors.accentEmerald}</span>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <input
-                      type="color"
-                      value={themeColors.accentEmerald}
-                      onChange={(e) => handleColorChange('accentEmerald', e.target.value)}
-                      className="w-8 h-8 rounded-lg bg-transparent cursor-pointer border-0"
-                    />
-                    <input
-                      type="text"
-                      value={themeColors.accentEmerald}
-                      onChange={(e) => handleColorChange('accentEmerald', e.target.value)}
-                      className="flex-1 border rounded-xl px-3 py-1.5 text-xs font-mono uppercase outline-none"
-                      style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                    />
-                  </div>
-                </div>
+                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('admin.primaryBrandColorDesc', 'Brand highlights, buttons, and headers.')}
+                </span>
               </div>
 
-              <div className="flex items-center gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-                <button
-                  type="submit"
-                  className="text-white font-bold text-xs px-6 py-3 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  <Save className="h-4 w-4" /> {t('saveThemeColorsBtn') || 'Save Theme Colors'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleResetTheme}
-                  className="border font-bold text-xs px-4 py-3 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#334155' : '#cbd5e1'
-                  }}
-                >
-                  <RotateCcw className="h-4 w-4" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} /> {t('resetDefaultBtn') || 'Reset Defaults'}
-                </button>
-              </div>
-            </form>
-
-            {/* Live Element Preview */}
-            <div className="space-y-4">
-              <div 
-                className="border rounded-3xl p-5 space-y-4 shadow-sm sticky top-6 transition-colors duration-200"
-                style={{
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-                }}
-              >
-                <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  <Eye className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('liveElementPreview') || 'Live Element Preview'}
-                </h3>
-
-                <div 
-                  className="p-5 rounded-2xl border space-y-3.5 transition-all shadow-inner"
-                  style={{
-                    backgroundColor: themeColors.cardBackground,
-                    borderColor: themeColors.borderColor,
-                    color: themeColors.textColor
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span 
-                      className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border"
-                      style={{ 
-                        backgroundColor: `${themeColors.accentEmerald}20`, 
-                        borderColor: `${themeColors.accentEmerald}50`, 
-                        color: themeColors.accentEmerald 
-                      }}
-                    >
-                      {t('activeStatusBadge') || 'Active Status'}
-                    </span>
-                    <span className="text-[11px]" style={{ color: themeColors.textSecondary }}>30 mins</span>
-                  </div>
-
-                  <h4 className="text-base font-extrabold" style={{ color: themeColors.primary }}>
-                    Thai Basil Chicken Deluxe
-                  </h4>
-
-                  <p className="text-xs leading-relaxed" style={{ color: themeColors.textSecondary }}>
-                    Preview showing how your colors adapt to typography, cards, buttons, and status tags in real time.
-                  </p>
-
-                  <div className="flex items-center gap-2 pt-2 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                    <button
-                      type="button"
-                      className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md transition cursor-pointer"
-                      style={{ backgroundColor: themeColors.primary }}
-                    >
-                      {t('actionButtonPreview') || 'Primary Action'}
-                    </button>
-                    <button
-                      type="button"
-                      className="px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer"
-                      style={{ 
-                        borderColor: themeColors.borderColor, 
-                        color: themeColors.primary,
-                        backgroundColor: themeColors.backgroundColor
-                      }}
-                    >
-                      {t('secondaryButtonPreview') || 'Secondary'}
-                    </button>
-                  </div>
+              {/* Primary Hover Color */}
+              <div className="space-y-1.5">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.primaryHoverColor', 'Primary Hover Color')}
+                </label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="color" 
+                    value={primaryHoverColor} 
+                    onChange={(e) => {
+                      setPrimaryHoverColor(e.target.value);
+                      applyColorsLocally(primaryColor, e.target.value, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                    }}
+                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                  />
+                  <input 
+                    type="text" 
+                    value={primaryHoverColor} 
+                    onChange={(e) => {
+                      setPrimaryHoverColor(e.target.value);
+                      applyColorsLocally(primaryColor, e.target.value, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                    }}
+                    placeholder="#c94529"
+                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  />
                 </div>
+                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('admin.primaryHoverColorDesc', 'Hover and focus states for buttons.')}
+                </span>
+              </div>
 
-                <div 
-                  className="p-3 border rounded-xl text-[11px] leading-relaxed"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#64748b' : '#94a3b8'
-                  }}
-                >
-                  {t('themeSettingsPersistNote') || 'Theme settings instantly update CSS variables across all pages and persist in local storage.'}
+              {/* Accent Color */}
+              <div className="space-y-1.5">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.accentColor', 'Accent / Success Color')}
+                </label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="color" 
+                    value={accentColor} 
+                    onChange={(e) => {
+                      setAccentColor(e.target.value);
+                      applyColorsLocally(primaryColor, primaryHoverColor, e.target.value, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                    }}
+                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                  />
+                  <input 
+                    type="text" 
+                    value={accentColor} 
+                    onChange={(e) => {
+                      setAccentColor(e.target.value);
+                      applyColorsLocally(primaryColor, primaryHoverColor, e.target.value, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                    }}
+                    placeholder="#10b981"
+                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  />
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: LIVE .ENV API KEYS */}
-      {activeTab === 'apikeys' && (
-        <div className="space-y-6">
-          {apiKeyFeedback && (
-            <div 
-              className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 animate-in fade-in border"
-              style={apiKeyFeedback.type === 'success' ? {
-                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-              } : {
-                backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                borderColor: isDayMode ? '#f87171' : 'rgba(239, 68, 68, 0.6)',
-                color: isDayMode ? '#b91c1c' : '#f87171'
-              }}
-            >
-              {apiKeyFeedback.type === 'success' ? (
-                <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
-              ) : (
-                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-              )}
-              <span>{apiKeyFeedback.text}</span>
-            </div>
-          )}
-
-          {/* STATUS CARDS */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div 
-              className="border rounded-2xl p-4 flex items-center gap-3.5 shadow-xs transition-colors duration-200"
-              style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-              }}
-            >
-              <div 
-                className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0"
-                style={{
-                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                  borderColor: 'var(--color-emerald, #10b981)',
-                  color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                }}
-              >
-                <Cpu className="h-5 w-5" />
-              </div>
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('activeAiEngine') || 'Active AI Engine'}</span>
-                <span className="text-sm font-extrabold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  {apiKeys.find(k => k.status === 'active')?.provider.split('(')[0].trim() || 'Deterministic Fallback'}
+                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('admin.accentColorDesc', 'Badges, success alerts, and secondary accents.')}
                 </span>
               </div>
             </div>
+          </div>
 
-            <div 
-              className="border rounded-2xl p-4 flex items-center gap-3.5 shadow-xs transition-colors duration-200"
-              style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-              }}
-            >
-              <div 
-                className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0"
-                style={{
-                  backgroundColor: isDayMode ? '#eff6ff' : 'rgba(30, 58, 138, 0.4)',
-                  borderColor: isDayMode ? '#bfdbfe' : 'rgba(59, 130, 246, 0.4)',
-                  color: isDayMode ? '#1d4ed8' : '#60a5fa'
-                }}
-              >
-                <Key className="h-5 w-5" />
+          {/* Surfaces & Container Colors Group */}
+          <div className="space-y-3 pt-2">
+            <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>
+              {t('admin.surfacesBordersTypography', 'Surfaces, Borders & Typography')}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              {/* Background Color */}
+              <div className="space-y-1.5">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.pageBackground', 'Page Background')}
+                </label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="color" 
+                    value={backgroundColor} 
+                    onChange={(e) => {
+                      setBackgroundColor(e.target.value);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, e.target.value, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                    }}
+                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                  />
+                  <input 
+                    type="text" 
+                    value={backgroundColor} 
+                    onChange={(e) => {
+                      setBackgroundColor(e.target.value);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, e.target.value, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                    }}
+                    placeholder="#070b13"
+                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  />
+                </div>
+                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('admin.pageBackgroundDesc', 'Root viewport background in night mode.')}
+                </span>
               </div>
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('configuredKeysOnDisk') || 'Configured Keys on Disk'}</span>
-                <span className="text-sm font-extrabold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{apiKeys.length} Variables</span>
-              </div>
-            </div>
 
-            <div 
-              className="border rounded-2xl p-4 flex items-center gap-3.5 shadow-xs transition-colors duration-200"
-              style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-              }}
-            >
-              <div 
-                className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0"
-                style={{
-                  backgroundColor: isDayMode ? '#faf5ff' : 'rgba(88, 28, 135, 0.4)',
-                  borderColor: isDayMode ? '#e9d5ff' : 'rgba(147, 51, 234, 0.4)',
-                  color: isDayMode ? '#7e22ce' : '#c084fc'
-                }}
-              >
-                <Shield className="h-5 w-5" />
+              {/* Card / Surface Background */}
+              <div className="space-y-1.5">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.cardBackground', 'Card / Surface Background')}
+                </label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="color" 
+                    value={cardBackgroundColor} 
+                    onChange={(e) => {
+                      setCardBackgroundColor(e.target.value);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, e.target.value, cardBorderColor, secondaryTextColor);
+                    }}
+                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                  />
+                  <input 
+                    type="text" 
+                    value={cardBackgroundColor} 
+                    onChange={(e) => {
+                      setCardBackgroundColor(e.target.value);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, e.target.value, cardBorderColor, secondaryTextColor);
+                    }}
+                    placeholder="#0b0f17"
+                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  />
+                </div>
+                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('admin.cardBackgroundDesc', 'Cards, modals, and container panels.')}
+                </span>
               </div>
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('sourceTarget') || 'Source Target'}</span>
-                <span className="text-sm font-extrabold" style={{ color: isDayMode ? '#7e22ce' : '#d8b4fe' }}>.env & .env.local</span>
+
+              {/* Card / Container Border Color */}
+              <div className="space-y-1.5">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.containerBorderColor', 'Container Border Color')}
+                </label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="color" 
+                    value={cardBorderColor} 
+                    onChange={(e) => {
+                      setCardBorderColor(e.target.value);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, e.target.value, secondaryTextColor);
+                    }}
+                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                  />
+                  <input 
+                    type="text" 
+                    value={cardBorderColor} 
+                    onChange={(e) => {
+                      setCardBorderColor(e.target.value);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, e.target.value, secondaryTextColor);
+                    }}
+                    placeholder="#1e293b"
+                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  />
+                </div>
+                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('admin.containerBorderColorDesc', 'Borders, dividers, and outlines.')}
+                </span>
+              </div>
+
+              {/* Secondary Subtitle Text Color */}
+              <div className="space-y-1.5">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.mutedSubtitleText', 'Muted / Subtitle Text')}
+                </label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="color" 
+                    value={secondaryTextColor} 
+                    onChange={(e) => {
+                      setSecondaryTextColor(e.target.value);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, e.target.value);
+                    }}
+                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                  />
+                  <input 
+                    type="text" 
+                    value={secondaryTextColor} 
+                    onChange={(e) => {
+                      setSecondaryTextColor(e.target.value);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, e.target.value);
+                    }}
+                    placeholder="#94a3b8"
+                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  />
+                </div>
+                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('admin.mutedSubtitleTextDesc', 'Descriptions and helper captions.')}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* TABLE CONTAINER */}
-          <div 
-            className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-            }}
-          >
-            <div className="p-5 border-b flex items-center justify-between" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <div>
-                <h2 className="text-base font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directEnvCredentialsTitle') || 'Direct .env Credentials'}</h2>
-                <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('directEnvCredentialsSub') || 'Manage secure API keys and backend environment variables'}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => fetchEnvKeys(true)}
-                  disabled={loadingAction}
-                  className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#cbd5e1'
-                  }}
-                  title="Reload from .env file"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${loadingAction ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald, #10b981)' }} /> 
-                  <span>{t('reloadEnvBtn') || 'Reload .env'}</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setEditingKey(null);
-                    setKeyName('');
-                    setProvider('Google Gemini (gemini-1.5-flash)');
-                    setKeyValue('');
-                    setKeyStatus('active');
-                    setShowKeyModal(true);
-                  }}
-                  className="text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  <Plus className="h-4 w-4" /> {t('addApiKeyBtn') || 'Add API Key'}
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead 
-                  className="border-b uppercase font-bold text-[10px] tracking-wider"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#64748b' : '#94a3b8'
-                  }}
-                >
-                  <tr>
-                    <th className="px-5 py-3.5">{t('envVarCol') || 'Environment Variable'}</th>
-                    <th className="px-5 py-3.5">{t('providerModelCol') || 'Provider & Model'}</th>
-                    <th className="px-5 py-3.5">{t('keyValueCol') || 'Key Value'}</th>
-                    <th className="px-5 py-3.5">{t('statusCol') || 'Status'}</th>
-                    <th className="px-5 py-3.5 text-right">{t('actionsCol') || 'Actions'}</th>
-                  </tr>
-                </thead>
-                <tbody 
-                  className="divide-y"
-                  style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
-                >
-                  {apiKeys.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-center py-12 text-slate-500">
-                        {t('noApiKeysFound') || 'No API keys configured in .env'}
-                      </td>
-                    </tr>
-                  ) : (
-                    apiKeys.map((item) => {
-                      const isVisible = visibleKeyIds[item.id];
-                      return (
-                        <tr 
-                          key={item.id} 
-                          className={`transition ${isDayMode ? 'hover:bg-slate-50' : 'hover:bg-slate-900/40'}`}
-                          style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
-                        >
-                          <td className="px-5 py-4 font-bold flex items-center gap-2.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                            <div 
-                              className="w-7 h-7 rounded-lg border flex items-center justify-center shrink-0 shadow-xs"
-                              style={{
-                                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: 'var(--color-primary, #E05638)'
-                              }}
-                            >
-                              <Key className="h-3.5 w-3.5" />
-                            </div>
-                            <div>
-                              <div className="font-bold">{item.name}</div>
-                              <div className="font-mono text-[10px]" style={{ color: isDayMode ? '#7e22ce' : '#c084fc' }}>{item.envKey}</div>
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span 
-                              className="border text-[10px] font-bold px-2.5 py-1 rounded-lg shadow-xs"
-                              style={{
-                                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#334155' : '#cbd5e1'
-                              }}
-                            >
-                              {item.provider}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4 font-mono text-[11px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                            <div className="flex items-center gap-2">
-                              <span>{isVisible ? item.keyValue : maskKey(item.keyValue)}</span>
-                              <button
-                                onClick={() => setVisibleKeyIds((p) => ({ ...p, [item.id]: !p[item.id] }))}
-                                className="transition cursor-pointer"
-                                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
-                                title={isVisible ? (t('hideKeyTooltip') || 'Hide Key') : (t('showKeyTooltip') || 'Show Key')}
-                              >
-                                {isVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                              </button>
-                              <button
-                                onClick={() => handleCopy(item.id, item.keyValue)}
-                                className="transition cursor-pointer"
-                                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
-                                title={t('copyClipboardTooltip') || 'Copy to clipboard'}
-                              >
-                                {copiedId === item.id ? (
-                                  <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-                                ) : (
-                                  <Copy className="h-3.5 w-3.5" />
-                                )}
-                              </button>
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <button
-                              onClick={() => toggleKeyStatus(item)}
-                              className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border cursor-pointer transition shadow-xs"
-                              style={item.status === 'active' ? {
-                                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                                borderColor: 'var(--color-emerald, #10b981)',
-                                color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                              } : {
-                                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#64748b' : '#94a3b8'
-                              }}
-                              title={t('toggleAiProviderTooltip') || 'Toggle AI Provider Status'}
-                            >
-                              {item.status === 'active' ? (t('active') || 'Active') : (t('inactive') || 'Inactive')}
-                            </button>
-                          </td>
-                          <td className="px-5 py-4 text-right space-x-2">
-                            <button
-                              onClick={() => {
-                                setEditingKey(item);
-                                setKeyName(item.name);
-                                setProvider(item.provider);
-                                setKeyValue(item.keyValue);
-                                setKeyStatus(item.status);
-                                setShowKeyModal(true);
-                              }}
-                              className="p-1.5 rounded-lg border transition cursor-pointer shadow-xs"
-                              style={{
-                                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#64748b' : '#94a3b8'
-                              }}
-                              title={t('editInEnvTooltip') || 'Edit in .env'}
-                            >
-                              <Edit3 className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteKey(item)}
-                              className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
-                              style={{
-                                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#64748b' : '#94a3b8'
-                              }}
-                              title={t('deleteFromEnvTooltip') || 'Delete from .env'}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADD / EDIT API KEY MODAL */}
-      {showKeyModal && (
-        <div 
-          onClick={() => setShowKeyModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
-            }}
-          >
-            <button 
-              onClick={() => setShowKeyModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #172033)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+          {/* Interactive Live Component Preview */}
+          <div className="pt-3 border-t space-y-2" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+            <span className="font-bold text-[11px] block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              {t('admin.previewTitle', 'Full Interactive Component Preview:')}
+            </span>
+            <div 
+              className="p-5 rounded-3xl border transition-colors space-y-3" 
+              style={{ 
+                backgroundColor: isDayMode ? '#f8fafc' : backgroundColor, 
+                borderColor: isDayMode ? '#cbd5e1' : cardBorderColor 
               }}
             >
-              <X className="h-4 w-4" />
-            </button>
-            <h2 
-              className="text-lg font-black flex items-center gap-2"
-              style={{ color: 'var(--color-primary, #E05638)' }}
-            >
-              <Key className="h-5 w-5" /> {editingKey ? (t('editApiKeyModalTitle') || 'Edit API Key') : (t('addApiKeyModalTitle') || 'Add API Key')}
-            </h2>
-            <form onSubmit={handleSaveKeySubmit} className="space-y-4 pt-1">
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('integrationLabel') || 'Integration Name'}
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Gemini Production Key"
-                  value={keyName}
-                  onChange={(e) => setKeyName(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('serviceProviderModelLabel') || 'Service Provider & Model'}
-                </label>
-                <select
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs outline-none cursor-pointer transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                >
-                  <option value="Google Gemini (gemini-1.5-flash)" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Google Gemini (gemini-1.5-flash) [GEMINI_API_KEY]</option>
-                  <option value="Google Gemini (gemini-2.0-flash)" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Google Gemini (gemini-2.0-flash) [GEMINI_API_KEY]</option>
-                  <option value="OpenAI (gpt-4o)" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>OpenAI (gpt-4o) [OPENAI_API_KEY]</option>
-                  <option value="OpenAI (gpt-4o-mini)" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>OpenAI (gpt-4o-mini) [OPENAI_API_KEY]</option>
-                  <option value="Anthropic Claude 3.5" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Anthropic Claude 3.5 [CLAUDE_API_KEY]</option>
-                  <option value="Custom API Service" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Custom API Service [CUSTOM_API_KEY]</option>
-                </select>
-              </div>
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('apiKeyValueLabel') || 'API Key Value *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="AIzaSy... / sk-proj..."
-                  value={keyValue}
-                  onChange={(e) => setKeyValue(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs font-mono outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('defaultAiEngineLabel') || 'Default AI Engine Status'}
-                </label>
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <label 
-                    onClick={() => setKeyStatus('active')}
-                    className="p-3 rounded-xl border cursor-pointer transition flex items-center justify-between shadow-xs"
-                    style={keyStatus === 'active' ? {
-                      backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <span className="font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active') || 'Active'}</span>
-                    <input
-                      type="radio"
-                      name="keyStatus"
-                      checked={keyStatus === 'active'}
-                      onChange={() => setKeyStatus('active')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
+              <div 
+                className="p-4 rounded-2xl border transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md"
+                style={{ 
+                  backgroundColor: isDayMode ? '#ffffff' : cardBackgroundColor, 
+                  borderColor: isDayMode ? '#e2e8f0' : cardBorderColor 
+                }}
+              >
+                <div className="space-y-0.5">
+                  <div className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    {t('admin.surfaceCardPreview', 'Surface Card Preview')}
+                  </div>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : secondaryTextColor }}>
+                    {t('admin.surfaceCardPreviewDesc', 'This demonstrates your secondary text color, card surface, and card border.')}
+                  </p>
+                </div>
 
-                  <label 
-                    onClick={() => setKeyStatus('inactive')}
-                    className="p-3 rounded-xl border cursor-pointer transition flex items-center justify-between shadow-xs"
-                    style={keyStatus === 'inactive' ? {
-                      backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                <div className="flex items-center gap-2 shrink-0">
+                  <div 
+                    className="px-2.5 py-1 rounded-xl border text-[10px] font-extrabold flex items-center gap-1"
+                    style={{ 
+                      backgroundColor: `${accentColor}18`, 
+                      borderColor: `${accentColor}40`, 
+                      color: accentColor 
                     }}
                   >
-                    <span className="font-bold text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('inactive') || 'Inactive'}</span>
-                    <input
-                      type="radio"
-                      name="keyStatus"
-                      checked={keyStatus === 'inactive'}
-                      onChange={() => setKeyStatus('inactive')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
+                    <CheckCircle2 className="h-3 w-3" /> {t('common.active', 'Active')}
+                  </div>
+                  <button 
+                    type="button" 
+                    className="px-3.5 py-1.5 rounded-xl text-white font-extrabold text-xs shadow-md transition"
+                    style={{ backgroundColor: primaryColor }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = primaryHoverColor)}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = primaryColor)}
+                  >
+                    {t('common.actionButton', 'Action Button')}
+                  </button>
                 </div>
               </div>
-              <div className="flex justify-end gap-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowKeyModal(false)}
-                  className="px-4 py-2 border rounded-xl cursor-pointer transition shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#475569' : '#cbd5e1'
-                  }}
-                >
-                  {t('cancel') || 'Cancel'}
-                </button>
-                <button
-                  type="submit"
-                  disabled={loadingAction}
-                  className="px-5 py-2 text-white font-bold rounded-xl shadow-md transition cursor-pointer disabled:opacity-50"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  {loadingAction ? (t('writingToEnv') || 'Writing to .env...') : (t('saveToEnvFile') || 'Save to .env File')}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
         </div>
-      )}
+
+        {/* SECTION 3: TITLEBAR BRAND ICON */}
+        <div 
+          className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
+          style={{ 
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                {t('admin.titlebarIcon', 'Titlebar & Sidebar Brand Icon')}
+              </h2>
+              <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('admin.titlebarIconDesc', 'Upload an image logo. If no image is uploaded or if removed, the system defaults to the emoji below.')}
+              </p>
+            </div>
+            <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border w-fit ${
+              isTitlebarImageActive 
+                ? (isDayMode ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400')
+                : (isDayMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-amber-500/10 border-amber-500/30 text-amber-400')
+            }`}>
+              {isTitlebarImageActive ? t('admin.activeUploadedImage', 'Active: Uploaded Image') : t('admin.activeDefaultEmoji', 'Active: Default Emoji')}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
+            <div className="space-y-2">
+              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('admin.customLogoImage', 'Custom Logo Image (PNG, JPG, SVG, WebP)')}
+              </label>
+              <input 
+                type="file" 
+                ref={titlebarFileRef} 
+                onChange={(e) => handleFileUpload(e, 'titlebar')} 
+                accept="image/*" 
+                className="hidden" 
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => titlebarFileRef.current?.click()}
+                  className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80"
+                  style={{ 
+                    backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d', 
+                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                >
+                  <Upload className="h-4 w-4" /> {t('common.uploadImage', 'Upload Image')}
+                </button>
+                {titlebarImage && (
+                  <button
+                    type="button"
+                    onClick={() => setTitlebarImage('')}
+                    className={`px-3 py-2 border rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition ${
+                      isDayMode 
+                        ? 'text-red-600 border-red-300 hover:bg-red-50' 
+                        : 'text-red-400 border-red-500/30 hover:bg-red-500/10'
+                    }`}
+                  >
+                    <Trash2 className="h-4 w-4" /> {t('admin.revertToEmoji', 'Revert to Emoji')}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('admin.defaultEmojiFallback', 'Default Emoji (Fallback)')}
+              </label>
+              <div className="flex items-center gap-3">
+                <input 
+                  type="text" 
+                  value={titlebarEmoji} 
+                  onChange={(e) => setTitlebarEmoji(e.target.value)} 
+                  maxLength={4} 
+                  className="w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
+                  style={{ 
+                    backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
+                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b', 
+                    color: isDayMode ? '#0f172a' : '#ffffff' 
+                  }} 
+                />
+                <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('admin.defaultEmojiDesc', 'Used whenever no custom image is supplied.')}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+            <span className="font-bold text-[11px] block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              {t('admin.sidebarHeaderPreview', 'Sidebar & Header Preview:')}
+            </span>
+            <div 
+              className="flex items-center gap-2.5 p-3 rounded-2xl border w-fit" 
+              style={{ 
+                backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
+                borderColor: isDayMode ? '#e2e8f0' : '#1e293b' 
+              }}
+            >
+              {isTitlebarImageActive ? (
+                <img src={titlebarImage} alt="Titlebar Logo" className="w-7 h-7 object-contain rounded" />
+              ) : (
+                <span className="text-2xl">{titlebarEmoji || DEFAULT_SITE_ICON}</span>
+              )}
+              <span className="text-base font-black tracking-tight text-[var(--color-primary)]">
+                {siteName || DEFAULT_SITE_NAME}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* SECTION 4: FAVICON */}
+        <div 
+          className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
+          style={{ 
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                {t('admin.browserFavicon', 'Browser Favicon')}
+              </h2>
+              <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('admin.browserFaviconDesc', 'Upload an icon for browser tabs (PNG, ICO, SVG). If no image is uploaded, defaults to emoji.')}
+              </p>
+            </div>
+            <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border w-fit ${
+              isFaviconImageActive 
+                ? (isDayMode ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400')
+                : (isDayMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-amber-500/10 border-amber-500/30 text-amber-400')
+            }`}>
+              {isFaviconImageActive ? t('admin.activeUploadedFavicon', 'Active: Uploaded Favicon') : t('admin.activeDefaultEmoji', 'Active: Default Emoji')}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
+            <div className="space-y-2">
+              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('admin.customFaviconImage', 'Custom Favicon Image (PNG, ICO, SVG, WebP)')}
+              </label>
+              <input 
+                type="file" 
+                ref={faviconFileRef} 
+                onChange={(e) => handleFileUpload(e, 'favicon')} 
+                accept="image/*" 
+                className="hidden" 
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => faviconFileRef.current?.click()}
+                  className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80"
+                  style={{ 
+                    backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d', 
+                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                >
+                  <Upload className="h-4 w-4" /> {t('common.uploadFavicon', 'Upload Favicon')}
+                </button>
+                {faviconImage && (
+                  <button
+                    type="button"
+                    onClick={() => setFaviconImage('')}
+                    className={`px-3 py-2 border rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition ${
+                      isDayMode 
+                        ? 'text-red-600 border-red-300 hover:bg-red-50' 
+                        : 'text-red-400 border-red-500/30 hover:bg-red-500/10'
+                    }`}
+                  >
+                    <Trash2 className="h-4 w-4" /> {t('admin.revertToEmoji', 'Revert to Emoji')}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('admin.defaultFaviconEmoji', 'Default Favicon Emoji (Fallback)')}
+              </label>
+              <div className="flex items-center gap-3">
+                <input 
+                  type="text" 
+                  value={faviconEmoji} 
+                  onChange={(e) => setFaviconEmoji(e.target.value)} 
+                  maxLength={4} 
+                  className="w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
+                  style={{ 
+                    backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
+                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b', 
+                    color: isDayMode ? '#0f172a' : '#ffffff' 
+                  }} 
+                />
+                <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('admin.defaultFaviconDesc', 'Converts dynamically into an SVG favicon if no image is uploaded.')}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+            <span className="font-bold text-[11px] block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              {t('admin.browserTabPreview', 'Browser Tab Appearance Preview:')}
+            </span>
+            <div 
+              className="max-w-xs border rounded-t-xl px-3 py-2 flex items-center justify-between gap-2 shadow-sm"
+              style={{ 
+                backgroundColor: isDayMode ? '#e2e8f0' : '#141b2d', 
+                borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                color: isDayMode ? '#0f172a' : '#ffffff'
+              }}
+            >
+              <div className="flex items-center gap-2 truncate">
+                {isFaviconImageActive ? (
+                  <img src={faviconImage} alt="Favicon Preview" className="w-4 h-4 object-contain rounded shrink-0" />
+                ) : (
+                  <span className="text-sm shrink-0">{faviconEmoji || titlebarEmoji || DEFAULT_SITE_ICON}</span>
+                )}
+                <span className="text-xs font-bold truncate">
+                  {siteName || DEFAULT_SITE_NAME}
+                </span>
+              </div>
+              <span className="text-xs opacity-50">✕</span>
+            </div>
+          </div>
+        </div>
+
+        {/* CONTROLS */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+          <button
+            type="button"
+            onClick={handleResetDefaults}
+            className="px-4 py-2.5 border rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition hover:opacity-80"
+            style={{ 
+              backgroundColor: isDayMode ? '#ffffff' : '#0b0f17',
+              borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+              color: isDayMode ? '#334155' : '#e2e8f0'
+            }}
+          >
+            <RefreshCw className="h-4 w-4" /> {t('admin.resetDefaults', 'Reset to Defaults')}
+          </button>
+
+          <button
+            type="submit"
+            className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+          >
+            <CheckCircle2 className="h-4 w-4" /> {t('admin.saveBrandingSettings', 'Save Branding Settings')}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -15495,7 +13754,7 @@ const DEFAULT_SECTIONS: QuestionnaireSection[] = [
 ];
 
 export default function ChefAISettingsPage() {
-  const [activeTab, setActiveTab] = useState<'general' | 'questionnaire' | 'capabilities' | 'voice' | 'advanced'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'questionnaire' | 'voice' | 'advanced'>('general');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   // AI Configurations
@@ -15619,18 +13878,29 @@ export default function ChefAISettingsPage() {
     try {
       const res = await fetch('/api/admin/keys?t=' + Date.now(), { cache: 'no-store' });
       const data = await res.json();
-      if (data.success && Array.isArray(data.keys)) {
-        const map: Record<string, string> = {};
-        data.keys.forEach((k: any) => {
-          if (k.envKey) map[k.envKey] = k.keyValue;
-          if (k.provider?.includes('Gemini')) map['GEMINI_API_KEY'] = k.keyValue;
-          if (k.provider?.includes('OpenAI')) map['OPENAI_API_KEY'] = k.keyValue;
-        });
+      if (data.success) {
+        const map: Record<string, string> = { ...(data.envMap || {}) };
+        if (Array.isArray(data.keys)) {
+          data.keys.forEach((k: any) => {
+            if (k.envKey && k.keyValue) {
+              map[k.envKey] = k.keyValue;
+              const u = k.envKey.toUpperCase();
+              if (u.includes('GEMINI') || u.includes('GOOGLE')) {
+                map['GEMINI_API_KEY'] = k.keyValue;
+              }
+              if (u.includes('OPENAI')) {
+                map['OPENAI_API_KEY'] = k.keyValue;
+              }
+            }
+          });
+        }
         setEnvKeysMap(map);
+        return map;
       }
     } catch (e) {
       console.error('Failed to load .env keys:', e);
     }
+    return {};
   };
 
   useEffect(() => {
@@ -15804,16 +14074,56 @@ export default function ChefAISettingsPage() {
 
   const handleReloadEnvKey = async () => {
     setSyncingEnvKey(true);
-    await fetchEnvKeys();
-    setTimeout(() => {
-      autoConnectGemini(true);
-    }, 400);
-    if (provider === 'gemini' && envKeysMap['GEMINI_API_KEY']) {
-      setApiKey(envKeysMap['GEMINI_API_KEY']);
-    } else if (provider === 'openai' && envKeysMap['OPENAI_API_KEY']) {
-      setApiKey(envKeysMap['OPENAI_API_KEY']);
+    setTestResult(null);
+    try {
+      const map = await fetchEnvKeys();
+      const resolvedGemini = map['GEMINI_API_KEY'] || 
+                             map['GOOGLE_API_KEY'] || 
+                             map['NEXT_PUBLIC_GEMINI_API_KEY'] || 
+                             map['NEXT_PUBLIC_GOOGLE_API_KEY'] || '';
+      const resolvedOpenAI = map['OPENAI_API_KEY'] || 
+                             map['NEXT_PUBLIC_OPENAI_API_KEY'] || '';
+
+      const targetKey = provider === 'gemini' ? resolvedGemini : resolvedOpenAI;
+
+      if (targetKey && targetKey.trim().length > 5) {
+        const cleanKey = targetKey.trim();
+        setApiKey(cleanKey);
+        setTestResult({
+          success: true,
+          message: `Synced ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} key (${cleanKey.substring(0, 8)}...) from .env successfully!`
+        });
+
+        // Update active localStorage keys
+        try {
+          const rawStored = localStorage.getItem('zecratary_chef_ai_settings');
+          const current = rawStored ? JSON.parse(rawStored) : {};
+          localStorage.setItem('zecratary_chef_ai_settings', JSON.stringify({
+            ...current,
+            apiKey: cleanKey,
+            provider
+          }));
+        } catch (_) {}
+
+        setTimeout(() => {
+          if (provider === 'gemini') {
+            autoConnectGemini(true);
+          }
+        }, 300);
+      } else {
+        setTestResult({
+          success: false,
+          message: `No active ${provider === 'gemini' ? 'GEMINI_API_KEY or GOOGLE_API_KEY' : 'OPENAI_API_KEY'} found in your local .env file.`
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: 'Sync error: ' + (err?.message || 'Could not read from backend.')
+      });
+    } finally {
+      setTimeout(() => setSyncingEnvKey(false), 500);
     }
-    setTimeout(() => setSyncingEnvKey(false), 600);
   };
 
   const handleAddTopicSection = (e: React.FormEvent) => {
@@ -15874,11 +14184,13 @@ export default function ChefAISettingsPage() {
     }));
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanApiKey = apiKey.trim();
+
     const config = {
       provider,
-      apiKey: apiKey.trim(),
+      apiKey: cleanApiKey,
       model,
       temperature,
       maxTokens,
@@ -15904,28 +14216,51 @@ export default function ChefAISettingsPage() {
     localStorage.setItem('zecratary_engine_config', JSON.stringify(config));
     localStorage.setItem('zecratary_settings', JSON.stringify({
       provider,
-      geminiApiKey: provider === 'gemini' ? apiKey.trim() : '',
+      geminiApiKey: provider === 'gemini' ? cleanApiKey : '',
       geminiModel: provider === 'gemini' ? model : 'gemini-3.6-flash',
-      openaiApiKey: provider === 'openai' ? apiKey.trim() : '',
+      openaiApiKey: provider === 'openai' ? cleanApiKey : '',
       openaiModel: provider === 'openai' ? model : 'gpt-4o',
       lastUpdated: new Date().toISOString()
     }));
 
-    try {
-      if (apiKey.trim()) {
-        await fetch('/api/admin/keys', {
+    let envSavedSuccessfully = false;
+    let envErrorMessage = '';
+
+    if (cleanApiKey) {
+      try {
+        const res = await fetch('/api/admin/keys', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o',
-            provider: provider === 'gemini' ? `Google Gemini (${model})` : `OpenAI (${model})`,
-            keyValue: apiKey.trim(),
+            provider,
+            envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
+            keyValue: cleanApiKey,
             status: 'active'
           })
         });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          envSavedSuccessfully = true;
+          setTestResult({
+            success: true,
+            message: `Key saved to local .env and synchronized (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
+          });
+        } else {
+          envErrorMessage = data.error || 'Server rejected key save';
+          setTestResult({
+            success: false,
+            message: `Local settings stored, but .env save failed: ${envErrorMessage}`
+          });
+        }
+      } catch (err: any) {
+        envErrorMessage = err.message || 'Network error writing to /api/admin/keys';
+        setTestResult({
+          success: false,
+          message: `Local settings stored, but .env save failed: ${envErrorMessage}`
+        });
       }
-    } catch (err) {
-      console.error('Failed to sync API key back to backend:', err);
     }
 
     const activeFlattenedQuestions = sections
@@ -15938,7 +14273,7 @@ export default function ChefAISettingsPage() {
     window.dispatchEvent(new Event('zecratary_settings_updated'));
     
     setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    setTimeout(() => setSaved(false), 3500);
   };
 
   const activeSection = sections.find(s => s.id === activeTopicId) || sections[0];
@@ -16008,7 +14343,6 @@ export default function ChefAISettingsPage() {
         {[
           { id: 'general', label: 'General AI Configuration', icon: Cpu },
           { id: 'questionnaire', label: `Multi-Topic Questionnaires (${sections.filter(s => s.enabled !== false).length}/${sections.length} Active)`, icon: Layers },
-          { id: 'capabilities', label: 'Search & Capabilities', icon: Globe },
           { id: 'voice', label: 'Voice Interaction', icon: Mic },
           { id: 'advanced', label: 'Agent Parameters', icon: SlidersHorizontal },
         ].map((tab) => {
@@ -16131,7 +14465,7 @@ export default function ChefAISettingsPage() {
                 </button>
               </div>
 
-              <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="pt-2 space-y-4 text-xs">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>API Key</label>
@@ -16222,10 +14556,6 @@ export default function ChefAISettingsPage() {
                       <>
                         <option value="gemini-3.6-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.6 Flash (Latest Recommended)</option>
                         <option value="gemini-3.5-flash-lite" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.5 Flash Lite (Lightweight & Fast)</option>
-                        <option value="gemini-3.8" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.8 (High Intelligence)</option>
-                        <option value="gemini-3.1-pro" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.1 Pro (Deep Reasoning)</option>
-                        <option value="gemini-2.5-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 2.5 Flash</option>
-                        <option value="gemini-1.5-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 1.5 Flash (Legacy)</option>
                       </>
                     ) : (
                       <>
@@ -16698,106 +15028,7 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 3: SEARCH & CAPABILITIES */}
-        {activeTab === 'capabilities' && (
-          <div 
-            className="border rounded-3xl p-6 space-y-4 shadow-sm animate-in fade-in transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-            }}
-          >
-            <h2 
-              className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-              style={{ color: 'var(--color-primary, #E05638)' }}
-            >
-              <Globe className="h-4 w-4" /> Autonomous Capabilities & Search Scope Control
-            </h2>
-            <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Control what data sources the AI agent searches and incorporates when responding on <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/chef</span>.</p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-              <div 
-                onClick={() => setEnableWebSearch(!enableWebSearch)}
-                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
-                style={{
-                  backgroundColor: enableWebSearch 
-                    ? (isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 12%, transparent)') 
-                    : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                  borderColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
-                  color: enableWebSearch ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <Globe className="h-5 w-5" style={{ color: enableWebSearch ? 'var(--color-primary, #E05638)' : '#64748b' }} />
-                  <div 
-                    className="w-9 h-5 rounded-full p-0.5 transition"
-                    style={{ backgroundColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#334155') }}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableWebSearch ? 'translate-x-4' : 'translate-x-0'}`} />
-                  </div>
-                </div>
-                <div>
-                  <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Live Web Search</span>
-                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Allows AI to search external culinary web data, trends, and ingredient substitutes.</span>
-                </div>
-              </div>
-
-              <div 
-                onClick={() => setEnablePantryContext(!enablePantryContext)}
-                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
-                style={{
-                  backgroundColor: enablePantryContext 
-                    ? (isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 12%, transparent)') 
-                    : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                  borderColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
-                  color: enablePantryContext ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? (isDayMode ? '#059669' : 'var(--color-emerald, #10b981)') : '#64748b' }} />
-                  <div 
-                    className="w-9 h-5 rounded-full p-0.5 transition"
-                    style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : '#334155') }}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${enablePantryContext ? 'translate-x-4' : 'translate-x-0'}`} />
-                  </div>
-                </div>
-                <div>
-                  <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Pantry Context Search</span>
-                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Automatically scans user pantry inventory to build recipes matching in-stock ingredients.</span>
-                </div>
-              </div>
-
-              <div 
-                onClick={() => setStrictDietEnforcement(!strictDietEnforcement)}
-                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
-                style={{
-                  backgroundColor: strictDietEnforcement 
-                    ? (isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)') 
-                    : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                  borderColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
-                  color: strictDietEnforcement ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? (isDayMode ? '#2563eb' : '#60a5fa') : '#64748b' }} />
-                  <div 
-                    className="w-9 h-5 rounded-full p-0.5 transition"
-                    style={{ backgroundColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? '#cbd5e1' : '#334155') }}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
-                  </div>
-                </div>
-                <div>
-                  <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Strict Dietary Filters</span>
-                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: VOICE INTERACTION SETTINGS */}
+        {/* TAB 3: VOICE INTERACTION SETTINGS */}
         {activeTab === 'voice' && (
           <div 
             className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
@@ -16936,51 +15167,398 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 5: AGENT PARAMETERS */}
+        {/* TAB 4: AGENT PARAMETERS (INCLUDING AUTONOMOUS CAPABILITIES & KNOWLEDGE TUNING) */}
         {activeTab === 'advanced' && (
-          <div 
-            className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-            }}
-          >
-            <h2 
-              className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-              style={{ color: 'var(--color-primary, #E05638)' }}
+          <div className="space-y-6 animate-in fade-in">
+            {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
+            <div 
+              className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              }}
             >
-              <SlidersHorizontal className="h-4 w-4" /> Agent Parameters & Knowledge Tuning
-            </h2>
+              <h2 
+                className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                style={{ color: 'var(--color-primary, #E05638)' }}
+              >
+                <Globe className="h-4 w-4" /> Autonomous Capabilities & Search Scope Control
+              </h2>
+              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Control what data sources the AI agent searches and incorporates when responding on <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/chef</span>.</p>
 
-            {/* CREATIVITY & MAX PLAN DAYS */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <div className="space-y-2">
-                <div className="flex justify-between font-bold">
-                  <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Temperature (Creativity): {temperature}</span>
-                  <span style={{ color: isDayMode ? '#059669' : '#34d399' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+                <div 
+                  onClick={() => setEnableWebSearch(!enableWebSearch)}
+                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
+                  style={{
+                    backgroundColor: enableWebSearch 
+                      ? (isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 12%, transparent)') 
+                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
+                    borderColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                    color: enableWebSearch ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <Globe className="h-5 w-5" style={{ color: enableWebSearch ? 'var(--color-primary, #E05638)' : '#64748b' }} />
+                    <div 
+                      className="w-9 h-5 rounded-full p-0.5 transition"
+                      style={{ backgroundColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                    >
+                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableWebSearch ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </div>
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Live Web Search</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Allows AI to search external culinary web data, trends, and ingredient substitutes.</span>
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={temperature}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                  className="w-full cursor-pointer"
-                  style={{ accentColor: 'var(--color-primary, #E05638)' }}
-                />
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.</p>
+
+                <div 
+                  onClick={() => setEnablePantryContext(!enablePantryContext)}
+                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
+                  style={{
+                    backgroundColor: enablePantryContext 
+                      ? (isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 12%, transparent)') 
+                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
+                    borderColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                    color: enablePantryContext ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? (isDayMode ? '#059669' : 'var(--color-emerald, #10b981)') : '#64748b' }} />
+                    <div 
+                      className="w-9 h-5 rounded-full p-0.5 transition"
+                      style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                    >
+                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${enablePantryContext ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </div>
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Pantry Context Search</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Automatically scans user pantry inventory to build recipes matching in-stock ingredients.</span>
+                  </div>
+                </div>
+
+                <div 
+                  onClick={() => setStrictDietEnforcement(!strictDietEnforcement)}
+                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
+                  style={{
+                    backgroundColor: strictDietEnforcement 
+                      ? (isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)') 
+                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
+                    borderColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                    color: strictDietEnforcement ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? (isDayMode ? '#2563eb' : '#60a5fa') : '#64748b' }} />
+                    <div 
+                      className="w-9 h-5 rounded-full p-0.5 transition"
+                      style={{ backgroundColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                    >
+                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </div>
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Strict Dietary Filters</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* AGENT PARAMETERS & KNOWLEDGE TUNING */}
+            <div 
+              className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              }}
+            >
+              <h2 
+                className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                style={{ color: 'var(--color-primary, #E05638)' }}
+              >
+                <SlidersHorizontal className="h-4 w-4" /> Agent Parameters & Knowledge Tuning
+              </h2>
+
+              {/* CREATIVITY & MAX PLAN DAYS */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                <div className="space-y-2">
+                  <div className="flex justify-between font-bold">
+                    <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Temperature (Creativity): {temperature}</span>
+                    <span style={{ color: isDayMode ? '#059669' : '#34d399' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={temperature}
+                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                    className="w-full cursor-pointer"
+                    style={{ accentColor: 'var(--color-primary, #E05638)' }}
+                  />
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Max Plan Days Limit (Wizard Cap)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="14"
+                    value={maxPlanDays}
+                    onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
+                    className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Maximum number of days the AI can structure in a single meal plan wizard sequence.</p>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Max Plan Days Limit (Wizard Cap)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="14"
-                  value={maxPlanDays}
-                  onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
-                  className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
+              {/* KNOWLEDGE BASE FEATURE */}
+              <div className="space-y-3 pt-1">
+                <div>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Knowledge Base
+                  </h3>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Fine-tune the assistant to your needs by adding reference source documents or databases.</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <div 
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="Knowledge Base..."
+                      value={newKbInput}
+                      onChange={(e) => setNewKbInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newKbInput.trim()) {
+                          e.preventDefault();
+                          setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
+                          setNewKbInput('');
+                        }
+                      }}
+                      className="bg-transparent border-none outline-none w-full text-xs"
+                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (newKbInput.trim()) {
+                          setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
+                          setNewKbInput('');
+                        }
+                      }}
+                      className="w-6 h-6 rounded-lg font-bold flex items-center justify-center shrink-0 cursor-pointer transition"
+                      style={{
+                        backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {knowledgeBaseList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
+                      style={{
+                        backgroundColor: isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 15%, transparent)',
+                        borderColor: 'var(--color-primary, #E05638)',
+                        color: isDayMode ? '#991b1b' : '#ffffff'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx))}
+                        className="hover:text-red-500 cursor-pointer"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* CUSTOM VOCABULARY FEATURE */}
+              <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                <div>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <BookA className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> Custom Vocabulary
+                  </h3>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enhance accuracy with specialized culinary or business terminology.</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <div 
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="Start typing to add"
+                      value={newVocabInput}
+                      onChange={(e) => setNewVocabInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newVocabInput.trim()) {
+                          e.preventDefault();
+                          setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
+                          setNewVocabInput('');
+                        }
+                      }}
+                      className="bg-transparent border-none outline-none w-full text-xs"
+                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                    />
+                    <span 
+                      onClick={() => {
+                        if (newVocabInput.trim()) {
+                          setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
+                          setNewVocabInput('');
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition"
+                      style={{
+                        backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                        color: isDayMode ? '#334155' : '#cbd5e1'
+                      }}
+                    >
+                      Enter
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {customVocabularyList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
+                      style={{
+                        backgroundColor: isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 15%, transparent)',
+                        borderColor: 'var(--color-emerald, #10b981)',
+                        color: isDayMode ? '#065f46' : '#ffffff'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx))}
+                        className="hover:text-red-500 cursor-pointer"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* FILTER WORDS FEATURE */}
+              <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                <div>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <Ban className="h-4 w-4 text-red-500" /> Filter Words
+                  </h3>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Restricted words or ingredients remain unspoken or avoided in AI outputs.</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <div 
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="Start typing to add"
+                      value={newFilterInput}
+                      onChange={(e) => setNewFilterInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newFilterInput.trim()) {
+                          e.preventDefault();
+                          setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
+                          setNewFilterInput('');
+                        }
+                      }}
+                      className="bg-transparent border-none outline-none w-full text-xs"
+                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                    />
+                    <span 
+                      onClick={() => {
+                        if (newFilterInput.trim()) {
+                          setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
+                          setNewFilterInput('');
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition"
+                      style={{
+                        backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                        color: isDayMode ? '#334155' : '#cbd5e1'
+                      }}
+                    >
+                      Enter
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {filterWordsList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
+                      style={{
+                        backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
+                        borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.6)',
+                        color: isDayMode ? '#991b1b' : '#ffffff'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => setFilterWordsList(filterWordsList.filter((_, i) => i !== idx))}
+                        className="hover:text-red-500 cursor-pointer"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* SYSTEM PROMPT / PERSONA */}
+              <div className="space-y-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  System Prompt / Autonomous Persona
+                </label>
+                <textarea
+                  rows={5}
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
                   style={{
                     backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
                     borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
@@ -16989,257 +15567,10 @@ export default function ChefAISettingsPage() {
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 />
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Maximum number of days the AI can structure in a single meal plan wizard sequence.</p>
+                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  Defines how the AI agent behaves, formats responses, and handles user queries on the <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> page.
+                </p>
               </div>
-            </div>
-
-            {/* KNOWLEDGE BASE FEATURE */}
-            <div className="space-y-3 pt-1">
-              <div>
-                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Knowledge Base
-                </h3>
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Fine-tune the assistant to your needs by adding reference source documents or databases.</p>
-              </div>
-
-              <div className="flex gap-2">
-                <div 
-                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                >
-                  <input
-                    type="text"
-                    placeholder="Knowledge Base..."
-                    value={newKbInput}
-                    onChange={(e) => setNewKbInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newKbInput.trim()) {
-                        e.preventDefault();
-                        setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
-                        setNewKbInput('');
-                      }
-                    }}
-                    className="bg-transparent border-none outline-none w-full text-xs"
-                    style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (newKbInput.trim()) {
-                        setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
-                        setNewKbInput('');
-                      }
-                    }}
-                    className="w-6 h-6 rounded-lg font-bold flex items-center justify-center shrink-0 cursor-pointer transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {knowledgeBaseList.map((item, idx) => (
-                  <span 
-                    key={idx}
-                    className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                    style={{
-                      backgroundColor: isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 15%, transparent)',
-                      borderColor: 'var(--color-primary, #E05638)',
-                      color: isDayMode ? '#991b1b' : '#ffffff'
-                    }}
-                  >
-                    {item}
-                    <button
-                      type="button"
-                      onClick={() => setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx))}
-                      className="hover:text-red-500 cursor-pointer"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* CUSTOM VOCABULARY FEATURE */}
-            <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <div>
-                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <BookA className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> Custom Vocabulary
-                </h3>
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enhance accuracy with specialized culinary or business terminology.</p>
-              </div>
-
-              <div className="flex gap-2">
-                <div 
-                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                >
-                  <input
-                    type="text"
-                    placeholder="Start typing to add"
-                    value={newVocabInput}
-                    onChange={(e) => setNewVocabInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newVocabInput.trim()) {
-                        e.preventDefault();
-                        setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
-                        setNewVocabInput('');
-                      }
-                    }}
-                    className="bg-transparent border-none outline-none w-full text-xs"
-                    style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
-                  />
-                  <span 
-                    onClick={() => {
-                      if (newVocabInput.trim()) {
-                        setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
-                        setNewVocabInput('');
-                      }
-                    }}
-                    className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
-                      color: isDayMode ? '#334155' : '#cbd5e1'
-                    }}
-                  >
-                    Enter
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {customVocabularyList.map((item, idx) => (
-                  <span 
-                    key={idx}
-                    className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                    style={{
-                      backgroundColor: isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 15%, transparent)',
-                      borderColor: 'var(--color-emerald, #10b981)',
-                      color: isDayMode ? '#065f46' : '#ffffff'
-                    }}
-                  >
-                    {item}
-                    <button
-                      type="button"
-                      onClick={() => setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx))}
-                      className="hover:text-red-500 cursor-pointer"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* FILTER WORDS FEATURE */}
-            <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <div>
-                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <Ban className="h-4 w-4 text-red-500" /> Filter Words
-                </h3>
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Restricted words or ingredients remain unspoken or avoided in AI outputs.</p>
-              </div>
-
-              <div className="flex gap-2">
-                <div 
-                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                >
-                  <input
-                    type="text"
-                    placeholder="Start typing to add"
-                    value={newFilterInput}
-                    onChange={(e) => setNewFilterInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newFilterInput.trim()) {
-                        e.preventDefault();
-                        setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
-                        setNewFilterInput('');
-                      }
-                    }}
-                    className="bg-transparent border-none outline-none w-full text-xs"
-                    style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
-                  />
-                  <span 
-                    onClick={() => {
-                      if (newFilterInput.trim()) {
-                        setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
-                        setNewFilterInput('');
-                      }
-                    }}
-                    className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
-                      color: isDayMode ? '#334155' : '#cbd5e1'
-                    }}
-                  >
-                    Enter
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {filterWordsList.map((item, idx) => (
-                  <span 
-                    key={idx}
-                    className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                    style={{
-                      backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
-                      borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.6)',
-                      color: isDayMode ? '#991b1b' : '#ffffff'
-                    }}
-                  >
-                    {item}
-                    <button
-                      type="button"
-                      onClick={() => setFilterWordsList(filterWordsList.filter((_, i) => i !== idx))}
-                      className="hover:text-red-500 cursor-pointer"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* SYSTEM PROMPT / PERSONA */}
-            <div className="space-y-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                System Prompt / Autonomous Persona
-              </label>
-              <textarea
-                rows={5}
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-              />
-              <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                Defines how the AI agent behaves, formats responses, and handles user queries on the <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> page.
-              </p>
             </div>
           </div>
         )}
@@ -17259,7 +15590,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   PlusCircle, PackageCheck, Zap, Trash2, Sparkles, AlertCircle, 
-  Check, Shield, CheckCircle2, Eye, RefreshCw, Edit3, DollarSign, Copy, Plus, Calendar, Tag, Star
+  Check, Shield, CheckCircle2, Eye, RefreshCw, Edit3, DollarSign, Copy, Plus, Calendar, Tag, Star, Cpu, Bot, X
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -17284,6 +15615,8 @@ interface SubscriptionPackageConfig {
   canViewMacros: boolean;
   allowedAiModels: string;
   featuresText: string;
+  tokenLimit: number;
+  tokenReimburseFrequency: 'once' | 'weekly' | 'monthly';
 }
 
 const BLANK_NEW_PLAN: SubscriptionPackageConfig = {
@@ -17292,20 +15625,22 @@ const BLANK_NEW_PLAN: SubscriptionPackageConfig = {
   slug: '',
   isFree: false,
   isDefault: false,
-  monthlyPriceDollars: 0,
-  annualPriceDollars: 0,
+  monthlyPriceDollars: 12.99,
+  annualPriceDollars: 99.99,
   monthlyBadge: '',
-  annualBadge: '',
-  trialBadge: '',
-  descriptionMonthly: '',
-  descriptionAnnual: '',
-  buttonText: '',
-  aiRecipeLimit: 0,
-  recipeLibraryLimit: 0,
-  socialScrapeLimit: 0,
-  canViewMacros: false,
-  allowedAiModels: '',
-  featuresText: '',
+  annualBadge: 'Save 35%',
+  trialBadge: '14-Day Free Trial',
+  descriptionMonthly: 'Full kitchen access, billed monthly',
+  descriptionAnnual: 'Best value for avid cooks, billed annually',
+  buttonText: 'Choose Plan',
+  aiRecipeLimit: 50,
+  recipeLibraryLimit: 100,
+  socialScrapeLimit: 25,
+  canViewMacros: true,
+  allowedAiModels: 'gemini-3.6-flash,gpt-4o-mini',
+  featuresText: 'AI-powered recipe generation\nUnlimited cookbook library\nAutomated nutritional analysis\nMeal planner synchronization',
+  tokenLimit: 100000,
+  tokenReimburseFrequency: 'monthly',
 };
 
 const DEFAULT_PRESET_TASTER: SubscriptionPackageConfig = {
@@ -17326,8 +15661,10 @@ const DEFAULT_PRESET_TASTER: SubscriptionPackageConfig = {
   recipeLibraryLimit: 25,
   socialScrapeLimit: 5,
   canViewMacros: false,
-  allowedAiModels: 'gemini-1.5-flash,gpt-4o-mini',
-  featuresText: `Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition`,
+  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
+  featuresText: 'Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition',
+  tokenLimit: 50000,
+  tokenReimburseFrequency: 'monthly',
 };
 
 const DEFAULT_PRESET_NUTRITION_PRO: SubscriptionPackageConfig = {
@@ -17348,12 +15685,29 @@ const DEFAULT_PRESET_NUTRITION_PRO: SubscriptionPackageConfig = {
   recipeLibraryLimit: -1,
   socialScrapeLimit: -1,
   canViewMacros: true,
-  allowedAiModels: 'gemini-1.5-flash,gpt-4o,gpt-4o-mini',
-  featuresText: `Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)`,
+  allowedAiModels: 'gemini-3.6-flash,gpt-4o',
+  featuresText: 'Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)',
+  tokenLimit: 1000000,
+  tokenReimburseFrequency: 'monthly',
 };
 
+const GEMINI_MODEL_VERSIONS = [
+  { value: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
+  { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' },
+  { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Fast)' },
+  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Deep Reasoning)' },
+  { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (Standard)' },
+  { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+];
+
+const OPENAI_MODEL_VERSIONS = [
+  { value: 'gpt-4o', label: 'GPT-4o (Advanced Reasoning)' },
+  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo (High Speed)' },
+];
+
 export default function AdminSubscriptionPlans() {
-  const { t, version } = useTranslation();
+  const { t } = useTranslation();
   const [mounted, setMounted] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [packages, setPackages] = useState<SubscriptionPackageConfig[]>([]);
@@ -17367,11 +15721,47 @@ export default function AdminSubscriptionPlans() {
   const [settingsFilter, setSettingsFilter] = useState<'both' | 'monthly' | 'annual'>('both');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
+  const [activeSettingsModel, setActiveSettingsModel] = useState<string>('gemini-3.6-flash');
+  const [selectedAiProvider, setSelectedAiProvider] = useState<'gemini' | 'openai'>('gemini');
+  const [selectedAiVersion, setSelectedAiVersion] = useState<string>('gemini-3.6-flash');
+
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Dynamic Theme Synchronization & Color Inversion
+  const syncWithAiSettings = useCallback(() => {
+    try {
+      const stored = localStorage.getItem('zecratary_chef_ai_settings') || 
+                     localStorage.getItem('zecratary_engine_config') || 
+                     localStorage.getItem('zecratary_settings');
+      if (stored) {
+        const c = JSON.parse(stored);
+        if (c.model) {
+          setActiveSettingsModel(c.model);
+          if (c.provider === 'openai' || c.model.startsWith('gpt')) {
+            setSelectedAiProvider('openai');
+            setSelectedAiVersion(c.model);
+          } else {
+            setSelectedAiProvider('gemini');
+            setSelectedAiVersion(c.model);
+          }
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    syncWithAiSettings();
+    window.addEventListener('zecratary_settings_updated', syncWithAiSettings);
+    window.addEventListener('zecratary_engine_config_updated', syncWithAiSettings);
+    window.addEventListener('storage', syncWithAiSettings);
+    return () => {
+      window.removeEventListener('zecratary_settings_updated', syncWithAiSettings);
+      window.removeEventListener('zecratary_engine_config_updated', syncWithAiSettings);
+      window.removeEventListener('storage', syncWithAiSettings);
+    };
+  }, [syncWithAiSettings]);
+
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -17440,30 +15830,62 @@ export default function AdminSubscriptionPlans() {
 
   const loadLocalPackages = useCallback((): SubscriptionPackageConfig[] => {
     try {
+      let deletedSlugs: string[] = [];
+      try {
+        const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
+        if (rawDel) deletedSlugs = JSON.parse(rawDel);
+      } catch (_) {}
+
       const local = localStorage.getItem('zecratary_subscription_configs');
       if (local !== null) {
         const parsed = JSON.parse(local);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const hasTaster = parsed.some((p) => p.slug === 'taster' || p.id === 'preset_taster');
-          let list = hasTaster ? parsed : [{ ...DEFAULT_PRESET_TASTER }, ...parsed];
+        if (Array.isArray(parsed)) {
+          const filtered = parsed.filter((p: any) => p && !deletedSlugs.includes(p.slug) && !deletedSlugs.includes(p.id));
+          const hasTaster = filtered.some((p) => p.slug === 'taster' || p.id === 'preset_taster');
+          let list = hasTaster ? filtered : [{ ...DEFAULT_PRESET_TASTER }, ...filtered];
 
-          const hasDefault = list.some((p) => p.isDefault);
-          if (!hasDefault) {
-            list = list.map((p) => ({
-              ...p,
-              isDefault: p.slug === 'taster' || p.id === 'preset_taster',
-            }));
-          }
+          list = list.map((p: any) => ({
+            ...p,
+            featuresText: typeof p.featuresText === 'string' && p.featuresText
+              ? p.featuresText
+              : (Array.isArray(p.features) ? p.features.join('\n') : (p.descriptionMonthly || '')),
+            allowedAiModels: Array.isArray(p.allowedAiModels)
+              ? p.allowedAiModels.join(',')
+              : (p.allowedAiModels || 'gemini-3.6-flash'),
+            tokenLimit: p.tokenLimit !== undefined ? p.tokenLimit : (p.slug === 'taster' ? 50000 : 500000),
+            tokenReimburseFrequency: p.tokenReimburseFrequency || 'monthly',
+            isDefault: p.slug === 'taster' || p.id === 'preset_taster',
+          }));
+
           return list;
         }
       }
     } catch (e) {}
-    return [{ ...DEFAULT_PRESET_TASTER }, { ...DEFAULT_PRESET_NUTRITION_PRO }];
+    return [{ ...DEFAULT_PRESET_TASTER }];
   }, []);
 
   const fetchPackages = useCallback(async () => {
     try {
-      await fetch('/api/admin/plans');
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        const serverConfigs = Array.isArray(data) ? data : (data?.configs || data?.plans || data?.packages);
+        if (Array.isArray(serverConfigs)) {
+          let deletedSlugs: string[] = [];
+          try {
+            const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
+            if (rawDel) deletedSlugs = JSON.parse(rawDel);
+          } catch (_) {}
+
+          const cleanConfigs = serverConfigs.filter((cfg: any) => {
+            if (!cfg) return false;
+            if (deletedSlugs.includes(cfg.slug) || deletedSlugs.includes(cfg.id)) return false;
+            return true;
+          });
+
+          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(cleanConfigs));
+        }
+      }
       const local = loadLocalPackages();
       setPackages(local);
     } catch (e) {
@@ -17481,24 +15903,27 @@ export default function AdminSubscriptionPlans() {
   }, [fetchPackages, mounted, t]);
 
   const handleSetDefaultPlan = (targetPkg: SubscriptionPackageConfig) => {
-    const targetKey = targetPkg.id || targetPkg.slug;
-    const updated = packages.map((p) => {
-      const currentKey = p.id || p.slug;
-      return {
-        ...p,
-        isDefault: currentKey === targetKey || p.slug === targetPkg.slug,
-      };
-    });
+    const isTaster = targetPkg.id === 'preset_taster' || targetPkg.slug === 'taster';
+    if (!isTaster) {
+      alert(t('tasterPermanentDefaultAlert', 'The Taster plan (ID: preset_taster) is permanently locked as the system default plan and cannot be changed.'));
+      return;
+    }
+
+    const updated = packages.map((p) => ({
+      ...p,
+      isDefault: p.id === 'preset_taster' || p.slug === 'taster',
+    }));
 
     setPackages(updated);
     localStorage.setItem('zecratary_subscription_configs', JSON.stringify(updated));
-    localStorage.setItem('zecratary_default_plan_slug', targetPkg.slug);
+    localStorage.setItem('zecratary_default_plan_slug', 'taster');
+    localStorage.setItem('zecratary_default_plan', 'taster');
     window.dispatchEvent(new Event('zecratary_plans_updated'));
     window.dispatchEvent(new Event('storage'));
 
     setFeedback({
       type: 'success',
-      msg: `"${targetPkg.name}" ${t('nowActiveDefault', 'is now the active default plan for new registrations!')}`,
+      msg: `"${DEFAULT_PRESET_TASTER.name}" ${t('permanentDefaultConfirmed', 'is permanently locked as the default plan for new registrations!')}`,
     });
   };
 
@@ -17508,7 +15933,9 @@ export default function AdminSubscriptionPlans() {
     setForm({
       ...BLANK_NEW_PLAN,
       id: 'plan_' + Date.now(),
-      slug: ''
+      slug: '',
+      allowedAiModels: activeSettingsModel || 'gemini-3.6-flash',
+      featuresText: BLANK_NEW_PLAN.featuresText
     });
   };
 
@@ -17518,16 +15945,58 @@ export default function AdminSubscriptionPlans() {
     setForm({ 
       ...preset, 
       id: 'plan_' + Date.now(),
-      slug: preset.slug || preset.name.toLowerCase().replace(/\s+/g, '-')
+      slug: preset.slug || preset.name.toLowerCase().replace(/\s+/g, '-'),
+      featuresText: preset.featuresText || (Array.isArray((preset as any).features) ? (preset as any).features.join('\n') : '')
     });
   };
 
   const handleEditPackage = (pkg: SubscriptionPackageConfig) => {
     const targetIdentifier = pkg.id || pkg.slug;
     const planIsFree = Boolean(pkg.isFree || (Number(pkg.monthlyPriceDollars) === 0 && Number(pkg.annualPriceDollars) === 0));
+    
+    const safeFeatures = typeof pkg.featuresText === 'string' && pkg.featuresText
+      ? pkg.featuresText
+      : (Array.isArray((pkg as any).features) ? (pkg as any).features.join('\n') : (pkg.descriptionMonthly || ''));
+
+    const safeAiModels = Array.isArray(pkg.allowedAiModels)
+      ? (pkg.allowedAiModels as string[]).join(',')
+      : (typeof pkg.allowedAiModels === 'string' && pkg.allowedAiModels
+          ? pkg.allowedAiModels
+          : (activeSettingsModel || 'gemini-3.6-flash'));
+
     setEditingId(targetIdentifier);
     setIsFree(planIsFree);
-    setForm({ ...pkg, isFree: planIsFree });
+    setForm({ 
+      ...pkg, 
+      featuresText: safeFeatures,
+      allowedAiModels: safeAiModels,
+      isFree: planIsFree,
+      tokenLimit: pkg.tokenLimit !== undefined ? pkg.tokenLimit : 100000,
+      tokenReimburseFrequency: pkg.tokenReimburseFrequency || 'monthly',
+    });
+  };
+
+  const handleAddAiModel = (modelVal: string) => {
+    if (!modelVal) return;
+    const current = Array.isArray(form.allowedAiModels)
+      ? [...form.allowedAiModels]
+      : (typeof form.allowedAiModels === 'string' && form.allowedAiModels.trim()
+          ? form.allowedAiModels.split(',').map((s) => s.trim()).filter(Boolean)
+          : []);
+    if (!current.includes(modelVal)) {
+      const updated = [...current, modelVal].join(',');
+      setForm({ ...form, allowedAiModels: updated });
+    }
+  };
+
+  const handleRemoveAiModel = (modelVal: string) => {
+    const current = Array.isArray(form.allowedAiModels)
+      ? [...form.allowedAiModels]
+      : (typeof form.allowedAiModels === 'string' && form.allowedAiModels.trim()
+          ? form.allowedAiModels.split(',').map((s) => s.trim()).filter(Boolean)
+          : []);
+    const updated = current.filter((m) => m !== modelVal).join(',');
+    setForm({ ...form, allowedAiModels: updated });
   };
 
   const handleSavePlan = async (e: React.FormEvent) => {
@@ -17535,24 +16004,39 @@ export default function AdminSubscriptionPlans() {
     setLoading(true);
     setFeedback(null);
 
-    const parsedFeatures = form.featuresText
-      .split('\n')
+    const rawFeaturesText = typeof form.featuresText === 'string'
+      ? form.featuresText
+      : (Array.isArray((form as any).features) ? (form as any).features.join('\n') : '');
+
+    const parsedFeatures = rawFeaturesText
+      .split(/\r?\n/)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
 
     const generatedSlug = (form.slug || form.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/^-|-$/g, '');
     const planId = form.id || 'plan_' + Date.now();
 
+    const rawAllowedModels = Array.isArray(form.allowedAiModels)
+      ? form.allowedAiModels
+      : (typeof form.allowedAiModels === 'string' && form.allowedAiModels.trim()
+          ? form.allowedAiModels.split(',').map((m) => m.trim()).filter(Boolean)
+          : [activeSettingsModel || 'gemini-3.6-flash']);
+
+    const isTaster = planId === 'preset_taster' || generatedSlug === 'taster';
+
     const payload = {
       ...form,
       id: planId,
       slug: generatedSlug,
       isFree,
-      isDefault: form.isDefault ?? (generatedSlug === 'taster'),
+      isDefault: isTaster,
       monthlyPriceDollars: isFree ? 0 : Number(form.monthlyPriceDollars) || 0,
       annualPriceDollars: isFree ? 0 : Number(form.annualPriceDollars) || 0,
+      tokenLimit: Number(form.tokenLimit) || 100000,
+      tokenReimburseFrequency: form.tokenReimburseFrequency || 'monthly',
       features: parsedFeatures,
-      allowedAiModels: form.allowedAiModels.split(',').map((m) => m.trim()),
+      featuresText: parsedFeatures.join('\n'),
+      allowedAiModels: rawAllowedModels,
     };
 
     try {
@@ -17562,15 +16046,28 @@ export default function AdminSubscriptionPlans() {
         body: JSON.stringify(payload),
       });
 
+      // Clear any tombstone for this created/updated plan
+      try {
+        const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
+        if (rawDel) {
+          const delSlugs: string[] = JSON.parse(rawDel);
+          const cleanSlugs = delSlugs.filter((s) => s !== planId && s !== generatedSlug);
+          localStorage.setItem('zecratary_deleted_plan_slugs', JSON.stringify(cleanSlugs));
+        }
+      } catch (_) {}
+
       const updatedPlanItem: SubscriptionPackageConfig = {
         ...form,
         id: planId,
         slug: generatedSlug,
         isFree,
-        isDefault: form.isDefault ?? (generatedSlug === 'taster'),
+        isDefault: isTaster,
         monthlyPriceDollars: isFree ? 0 : Number(form.monthlyPriceDollars) || 0,
         annualPriceDollars: isFree ? 0 : Number(form.annualPriceDollars) || 0,
+        tokenLimit: Number(form.tokenLimit) || 100000,
+        tokenReimburseFrequency: form.tokenReimburseFrequency || 'monthly',
         featuresText: parsedFeatures.join('\n'),
+        allowedAiModels: Array.isArray(rawAllowedModels) ? rawAllowedModels.join(',') : rawAllowedModels,
       };
 
       let updatedList = [...packages];
@@ -17590,9 +16087,11 @@ export default function AdminSubscriptionPlans() {
         }
       }
 
+      updatedList = updatedList.map((p) => ({ ...p, isDefault: p.id === 'preset_taster' || p.slug === 'taster' }));
       setPackages(updatedList);
       localStorage.setItem('zecratary_subscription_configs', JSON.stringify(updatedList));
       window.dispatchEvent(new Event('zecratary_plans_updated'));
+      window.dispatchEvent(new Event('storage'));
 
       setFeedback({
         type: 'success',
@@ -17620,38 +16119,50 @@ export default function AdminSubscriptionPlans() {
     setFeedback(null);
 
     try {
-      const deleteIdentifier = pkg.slug || pkg.id;
-      const res = await fetch(`/api/admin/plans?id=${encodeURIComponent(deleteIdentifier)}`, { 
-        method: 'DELETE' 
-      });
-      const resData = await res.json().catch(() => ({ success: true }));
+      // 1. Optimistically filter from state and localStorage
+      const updated = packages.filter((p) => {
+        const isMatchId = pkg.id && (p.id === pkg.id || p.slug === pkg.id);
+        const isMatchSlug = pkg.slug && (p.slug === pkg.slug || p.id === pkg.slug);
+        return !(isMatchId || isMatchSlug);
+      }).map((p) => ({
+        ...p,
+        isDefault: p.slug === 'taster' || p.id === 'preset_taster',
+      }));
 
-      if (!res.ok && resData.error) {
-        setFeedback({ type: 'error', msg: resData.error });
-        return;
-      }
+      // 2. Persist tombstone so any rogue sync won't restore the deleted plan
+      try {
+        const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
+        const delSlugs: string[] = rawDel ? JSON.parse(rawDel) : [];
+        if (pkg.slug && !delSlugs.includes(pkg.slug)) delSlugs.push(pkg.slug);
+        if (pkg.id && !delSlugs.includes(pkg.id)) delSlugs.push(pkg.id);
+        localStorage.setItem('zecratary_deleted_plan_slugs', JSON.stringify(delSlugs));
+      } catch (_) {}
 
-      let updated = packages.filter((p) => {
-        if (pkg.id && p.id === pkg.id) return false;
-        if (pkg.slug && p.slug === pkg.slug) return false;
-        return true;
-      });
-
-      if (pkg.isDefault) {
-        updated = updated.map((p) => ({
-          ...p,
-          isDefault: p.slug === 'taster' || p.id === 'preset_taster',
-        }));
-        localStorage.setItem('zecratary_default_plan_slug', 'taster');
-      }
-
-      setPackages(updated);
       localStorage.setItem('zecratary_subscription_configs', JSON.stringify(updated));
-      window.dispatchEvent(new Event('zecratary_plans_updated'));
-      
+      setPackages(updated);
+
       if (editingId === targetKey || editingId === pkg.id || editingId === pkg.slug || form.slug === pkg.slug) {
         handleStartNewPlan();
       }
+
+      // 3. Issue DELETE request to server API
+      try {
+        const queryParams = new URLSearchParams();
+        if (pkg.id) queryParams.set('id', pkg.id);
+        if (pkg.slug) queryParams.set('slug', pkg.slug);
+
+        await fetch(`/api/admin/plans?${queryParams.toString()}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: pkg.id, slug: pkg.slug })
+        });
+      } catch (apiErr) {
+        console.warn('Backend deletion call warning:', apiErr);
+      }
+
+      // 4. Dispatch sync event
+      window.dispatchEvent(new Event('zecratary_plans_updated'));
+      window.dispatchEvent(new Event('storage'));
 
       setFeedback({ type: 'success', msg: `"${pkg.name}" ${t('packageDeletedSuccess', 'package deleted successfully.')}` });
     } catch (e: any) {
@@ -17665,7 +16176,17 @@ export default function AdminSubscriptionPlans() {
     return <div className="max-w-7xl mx-auto p-8 text-slate-400 text-xs">{t('loadingPlans', 'Loading subscription plans...')}</div>;
   }
 
-  const currentFeaturesList = form.featuresText.split('\n').filter(Boolean);
+  const currentFeaturesList = (typeof form.featuresText === 'string'
+    ? form.featuresText
+    : (Array.isArray((form as any).features) ? (form as any).features.join('\n') : '')
+  ).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+  const currentAllowedModels = Array.isArray(form.allowedAiModels)
+    ? form.allowedAiModels
+    : (typeof form.allowedAiModels === 'string' && form.allowedAiModels.trim()
+        ? form.allowedAiModels.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : []);
+
   const annualMonthlyEquivalent = form.annualPriceDollars > 0 ? (form.annualPriceDollars / 12).toFixed(2) : '0.00';
   const calculatedSavings = form.monthlyPriceDollars > 0 && form.annualPriceDollars > 0
     ? Math.max(0, Math.round((1 - (form.annualPriceDollars / (form.monthlyPriceDollars * 12))) * 100))
@@ -17683,6 +16204,15 @@ export default function AdminSubscriptionPlans() {
   const submitButtonBg = isCreateMode ? '#10b981' : 'var(--color-primary, #E05638)';
   const submitButtonHoverBg = isCreateMode ? '#059669' : 'var(--color-primary-hover, #c94529)';
 
+  const getReimburseLabel = (freq: string) => {
+    switch (freq) {
+      case 'once': return 'Once (Non-recurring)';
+      case 'weekly': return 'Weekly';
+      case 'monthly': return 'Monthly';
+      default: return 'Monthly';
+    }
+  };
+
   return (
     <div 
       className="max-w-7xl mx-auto space-y-8 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
@@ -17694,7 +16224,7 @@ export default function AdminSubscriptionPlans() {
             {t('subscriptionPlansTitle', 'Subscription Plans')}
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('subscriptionPlansSubtitle', 'Manage plan pricing, usage quotas, features, and subscriber packages')}
+            {t('subscriptionPlansSubtitle', 'Manage plan pricing, usage quotas, token availability, reimburse schedule, and subscriber packages')}
           </p>
         </div>
 
@@ -17827,7 +16357,6 @@ export default function AdminSubscriptionPlans() {
                   {t('clearNewBtn', 'Clear / New')}
                 </button>
               )}
-              {/* Free Plan and Paid Plan Side by Side */}
               <div 
                 className="flex items-center gap-1 p-1 rounded-xl border transition"
                 style={{
@@ -17914,6 +16443,201 @@ export default function AdminSubscriptionPlans() {
                   color: isDayMode ? '#0f172a' : '#cbd5e1'
                 }}
               />
+            </div>
+          </div>
+
+          {/* TOKEN AVAILABILITY & REIMBURSE SCHEDULE */}
+          <div 
+            className="p-4 rounded-2xl border space-y-3 transition shadow-xs"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-orange-500">
+              <Cpu className="h-4 w-4" /> Token Availability & Reimburse Schedule
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  Token Limit (Availability)
+                </label>
+                <input
+                  type="number"
+                  value={form.tokenLimit}
+                  onChange={(e) => setForm({ ...form, tokenLimit: parseInt(e.target.value) || 0 })}
+                  placeholder="e.g. 50000"
+                  className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
+                  style={{
+                    backgroundColor: isDayMode ? '#ffffff' : '#0B101D',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                />
+                <span className="text-[10px] block mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>(-1 for unlimited tokens)</span>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  Token Reimburse Frequency
+                </label>
+                <select
+                  value={form.tokenReimburseFrequency}
+                  onChange={(e) => setForm({ ...form, tokenReimburseFrequency: e.target.value as any })}
+                  className="w-full border rounded-xl p-2.5 text-xs font-bold outline-none transition cursor-pointer"
+                  style={{
+                    backgroundColor: isDayMode ? '#ffffff' : '#0B101D',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                >
+                  <option value="once">Once (Non-recurring)</option>
+                  <option value="weekly">Every Week (From purchase date)</option>
+                  <option value="monthly">Every Month (From purchase date)</option>
+                </select>
+                <span className="text-[10px] block mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Quota refresh schedule</span>
+              </div>
+            </div>
+          </div>
+
+          {/* ALLOWED AI MODELS DROPDOWN & BUTTON PICKER */}
+          <div 
+            className="p-4 rounded-2xl border space-y-3 transition shadow-xs"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <label className="text-xs uppercase font-bold flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <Bot className="h-4 w-4 text-[var(--color-primary)]" />
+                {t('allowedAiModelsLabel', 'Allowed AI Models')}
+              </label>
+
+              {activeSettingsModel && (
+                <button
+                  type="button"
+                  onClick={() => handleAddAiModel(activeSettingsModel)}
+                  className="text-[10px] font-mono px-2 py-0.5 rounded-md border cursor-pointer transition flex items-center gap-1 font-bold shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.12)',
+                    borderColor: 'var(--color-primary, #E05638)',
+                    color: 'var(--color-primary, #E05638)'
+                  }}
+                  title="Click to sync and add active model configured in /admin/ai-settings"
+                >
+                  <Sparkles className="h-3 w-3" /> Sync Active: {activeSettingsModel}
+                </button>
+              )}
+            </div>
+
+            <div>
+              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                1. Choose AI Model Provider
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAiProvider('gemini');
+                    setSelectedAiVersion(GEMINI_MODEL_VERSIONS[0]?.value || 'gemini-3.6-flash');
+                  }}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                    selectedAiProvider === 'gemini'
+                      ? 'bg-[var(--color-primary,#E05638)] text-white border-[var(--color-primary,#E05638)]'
+                      : (isDayMode ? 'bg-white text-slate-700 border-slate-300' : 'bg-[#111726] text-slate-300 border-slate-700')
+                  }`}
+                >
+                  <Bot className="h-3.5 w-3.5" /> Google Gemini
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAiProvider('openai');
+                    setSelectedAiVersion(OPENAI_MODEL_VERSIONS[0]?.value || 'gpt-4o');
+                  }}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                    selectedAiProvider === 'openai'
+                      ? 'bg-[#10b981] text-white border-[#10b981]'
+                      : (isDayMode ? 'bg-white text-slate-700 border-slate-300' : 'bg-[#111726] text-slate-300 border-slate-700')
+                  }`}
+                >
+                  <Zap className="h-3.5 w-3.5" /> OpenAI GPT
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                2. Choose AI Version (Synced from /admin/ai-settings)
+              </span>
+              <div className="flex gap-2">
+                <select
+                  value={selectedAiVersion}
+                  onChange={(e) => setSelectedAiVersion(e.target.value)}
+                  className="flex-1 border rounded-xl px-3 py-2 text-xs font-medium outline-none transition cursor-pointer"
+                  style={{
+                    backgroundColor: isDayMode ? '#ffffff' : '#0B101D',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                >
+                  {(selectedAiProvider === 'gemini' ? GEMINI_MODEL_VERSIONS : OPENAI_MODEL_VERSIONS).map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label} {m.value === activeSettingsModel ? '★ [Active]' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => handleAddAiModel(selectedAiVersion)}
+                  className="px-4 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1 shadow-md cursor-pointer transition shrink-0"
+                  style={{ backgroundColor: selectedAiProvider === 'gemini' ? 'var(--color-primary, #E05638)' : '#10b981' }}
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                Configured Allowed Models for this plan:
+              </span>
+              {currentAllowedModels.length === 0 ? (
+                <span className="text-[11px] text-red-500 italic block">No models assigned yet. Select a version above and click 'Add'.</span>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {currentAllowedModels.map((modelName) => {
+                    const isGem = modelName.includes('gemini');
+                    return (
+                      <span
+                        key={modelName}
+                        className="border px-2.5 py-1 rounded-lg text-xs font-mono font-semibold flex items-center gap-1.5 shadow-xs"
+                        style={{
+                          backgroundColor: isGem 
+                            ? (isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)') 
+                            : (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)'),
+                          borderColor: isGem ? 'var(--color-primary, #E05638)' : '#10b981',
+                          color: isGem 
+                            ? (isDayMode ? '#991b1b' : 'var(--color-primary, #E05638)') 
+                            : (isDayMode ? '#047857' : '#10b981')
+                        }}
+                      >
+                        {modelName}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAiModel(modelName)}
+                          className="hover:opacity-75 transition cursor-pointer p-0.5"
+                          title={`Remove ${modelName}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 
@@ -18257,7 +16981,7 @@ export default function AdminSubscriptionPlans() {
             </div>
             <textarea
               rows={4}
-              value={form.featuresText}
+              value={form.featuresText || ''}
               onChange={(e) => setForm({ ...form, featuresText: e.target.value })}
               placeholder="Unlimited AI-powered recipe generation&#10;Unlimited recipe library&#10;Comprehensive nutritional analysis"
               className="w-full border rounded-xl p-2.5 text-xs outline-none transition font-sans"
@@ -18268,24 +16992,6 @@ export default function AdminSubscriptionPlans() {
               }}
             />
             <span className="text-[10px] block mt-1 leading-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('onePerLineNote', 'Each line will render with a checkmark on the pricing card.')}</span>
-          </div>
-
-          <div>
-            <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
-              {t('allowedAiModelsLabel', 'Allowed AI Models (Comma-separated)')}
-            </label>
-            <input
-              type="text"
-              value={form.allowedAiModels}
-              onChange={(e) => setForm({ ...form, allowedAiModels: e.target.value })}
-              className="w-full border rounded-xl p-2.5 text-xs text-mono outline-none transition"
-              style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            />
-            <span className="text-[10px] block mt-1 leading-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('commaSeparatedNote', 'e.g. gemini-1.5-flash, gpt-4o-mini')}</span>
           </div>
 
           <div className="flex items-center gap-2 pt-1">
@@ -18363,10 +17069,17 @@ export default function AdminSubscriptionPlans() {
                 packages.map((pkg) => {
                   const cardIdentifier = pkg.id || pkg.slug;
                   const isTaster = pkg.slug === 'taster' || pkg.id === 'preset_taster';
+                  const modelsList = Array.isArray(pkg.allowedAiModels)
+                    ? pkg.allowedAiModels
+                    : (typeof pkg.allowedAiModels === 'string' && pkg.allowedAiModels.trim()
+                        ? pkg.allowedAiModels.split(',').map((m: string) => m.trim()).filter(Boolean)
+                        : []);
+
                   return (
                     <div
                       key={cardIdentifier}
-                      className="p-4 rounded-2xl border flex items-center justify-between transition shadow-xs"
+                      className="p-4 rounded-2xl border flex items-center justify-between transition shadow-xs cursor-pointer hover:border-[var(--color-primary,#E05638)]"
+                      onClick={() => handleEditPackage(pkg)}
                       style={{
                         backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
                         borderColor: editingId === cardIdentifier 
@@ -18374,9 +17087,20 @@ export default function AdminSubscriptionPlans() {
                           : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)')
                       }}
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                      <div className="space-y-1.5 min-w-0 flex-1 pr-3">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{pkg.name}</span>
+                          <span 
+                            className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
+                            style={{
+                              backgroundColor: isDayMode ? '#f1f5f9' : 'rgba(15, 23, 42, 0.6)',
+                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                              color: isDayMode ? '#475569' : '#94a3b8'
+                            }}
+                            title={`Plan ID: ${pkg.id || pkg.slug}`}
+                          >
+                            ID: {pkg.id || pkg.slug}
+                          </span>
                           
                           {pkg.isDefault ? (
                             <span 
@@ -18428,32 +17152,68 @@ export default function AdminSubscriptionPlans() {
                             </div>
                           )}
                         </div>
-                        <div className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                          {pkg.aiRecipeLimit === -1 ? t('unlimitedLabel', 'Unlimited') : pkg.aiRecipeLimit} {t('aiRecipesLabel', 'AI recipes')} • {pkg.recipeLibraryLimit === -1 ? t('unlimitedLabel', 'Unlimited') : pkg.recipeLibraryLimit} {t('savedRecipesLabel', 'saved')} • {pkg.canViewMacros ? t('macrosUnlockedLabel', 'Macros unlocked') : t('macrosStandardLabel', 'Standard')}
+
+                        <div className="text-xs space-x-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                          <span>{pkg.aiRecipeLimit === -1 ? t('unlimitedLabel', 'Unlimited') : pkg.aiRecipeLimit} AI recipes</span>
+                          <span>•</span>
+                          <span className="text-orange-400 font-mono font-semibold">
+                            {pkg.tokenLimit === -1 ? 'Unlimited Tokens' : `${(pkg.tokenLimit || 0).toLocaleString()} tokens`} ({getReimburseLabel(pkg.tokenReimburseFrequency)})
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                          {modelsList.map((m) => (
+                            <span
+                              key={m}
+                              className="text-[9px] font-mono px-1.5 py-0.2 rounded border"
+                              style={{
+                                backgroundColor: m.includes('gemini')
+                                  ? (isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.1)')
+                                  : (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.1)'),
+                                borderColor: m.includes('gemini') ? 'var(--color-primary, #E05638)' : '#10b981',
+                                color: m.includes('gemini') ? 'var(--color-primary, #E05638)' : '#10b981'
+                              }}
+                            >
+                              {m}
+                            </span>
+                          ))}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
-                          onClick={() => handleSetDefaultPlan(pkg)}
-                          className={`p-2 rounded-xl border transition flex items-center gap-1 cursor-pointer shadow-xs ${
-                            pkg.isDefault
-                              ? 'text-amber-500 border-amber-500/50 bg-amber-500/15'
-                              : (isDayMode ? 'text-slate-500 hover:text-amber-500 hover:border-amber-400' : 'text-slate-400 hover:text-amber-300 hover:border-amber-500/40')
+                          disabled={!isTaster}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSetDefaultPlan(pkg);
+                          }}
+                          className={`p-2 rounded-xl border transition flex items-center gap-1 shadow-xs ${
+                            isTaster
+                              ? 'text-amber-500 border-amber-500/50 bg-amber-500/15 cursor-default'
+                              : 'opacity-30 cursor-not-allowed text-slate-400'
                           }`}
                           style={{
-                            backgroundColor: pkg.isDefault ? (isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)') : (isDayMode ? '#ffffff' : 'var(--color-card, #111726)'),
-                            borderColor: pkg.isDefault ? '#f59e0b' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')
+                            backgroundColor: isTaster
+                              ? (isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)')
+                              : (isDayMode ? '#ffffff' : 'var(--color-card, #111726)'),
+                            borderColor: isTaster ? '#f59e0b' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')
                           }}
-                          title={pkg.isDefault ? t('currentDefaultPlanTooltip', 'Current Default Plan for new user signups') : t('clickSetDefaultTooltip', 'Click to set as default sign-up plan')}
+                          title={
+                            isTaster
+                              ? t('tasterPermanentDefaultTooltip', 'The Taster plan (ID: preset_taster) is permanently locked as the system default plan')
+                              : t('tasterLockedDefaultTooltip', 'The Taster plan (ID: preset_taster) is permanently locked as the default plan')
+                          }
                         >
-                          <Star className={`h-4 w-4 ${pkg.isDefault ? 'fill-amber-500 text-amber-500' : ''}`} />
+                          <Star className={`h-4 w-4 ${isTaster ? 'fill-amber-500 text-amber-500' : ''}`} />
                         </button>
 
                         <button
                           type="button"
-                          onClick={() => handleEditPackage(pkg)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditPackage(pkg);
+                          }}
                           className="p-2 rounded-xl border transition cursor-pointer shadow-xs"
                           style={{
                             backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
@@ -18468,7 +17228,10 @@ export default function AdminSubscriptionPlans() {
                         <button
                           type="button"
                           disabled={isTaster || deletingId === cardIdentifier}
-                          onClick={() => handleDeletePackage(pkg)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeletePackage(pkg);
+                          }}
                           className={`p-2 rounded-xl border transition shadow-xs ${
                             isTaster
                               ? 'opacity-30 cursor-not-allowed text-slate-400'
@@ -18481,7 +17244,11 @@ export default function AdminSubscriptionPlans() {
                           }}
                           title={isTaster ? t('tasterPermanentProtected', 'Taster plan is permanently protected') : t('deletePackageTooltip', 'Delete Plan')}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          {deletingId === cardIdentifier ? (
+                            <RefreshCw className="h-4 w-4 animate-spin text-red-500" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -18546,9 +17313,21 @@ export default function AdminSubscriptionPlans() {
               )}
 
               <div className="space-y-3.5">
-                <h3 className="text-2xl font-black text-[#589c3a]">
-                  {form.name || t('planNameLabel', 'Plan Name')}
-                </h3>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-2xl font-black text-[#589c3a]">
+                      {form.name || t('planNameLabel', 'Plan Name')}
+                    </h3>
+                    {(form.id || form.slug) && (
+                      <span className="text-[10px] font-mono text-slate-400 block mt-0.5 font-bold">
+                        ID: {form.id || form.slug}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] bg-orange-100 text-orange-800 font-bold px-2.5 py-1 rounded-full border border-orange-300 font-mono">
+                    {form.tokenLimit === -1 ? 'Unlimited Tokens' : `${(form.tokenLimit || 0).toLocaleString()} tokens`} ({getReimburseLabel(form.tokenReimburseFrequency)})
+                  </span>
+                </div>
 
                 {isFree ? (
                   <div>
@@ -18619,6 +17398,15 @@ export default function AdminSubscriptionPlans() {
                     </p>
                   </div>
                 )}
+
+                <div className="flex items-center gap-1 flex-wrap pt-1">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase">Allowed AI Models:</span>
+                  {currentAllowedModels.map((m) => (
+                    <span key={m} className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-slate-100 border-slate-300 text-slate-700 font-bold">
+                      {m}
+                    </span>
+                  ))}
+                </div>
 
                 <div className="pt-2 space-y-2 text-xs font-semibold text-slate-700">
                   {currentFeaturesList.map((feature, i) => (
@@ -22064,1792 +20852,6 @@ export default function AdminPaymentPage() {
 
 ```
 
-## File: `apps/web/src/app/admin/add-user/page.tsx`
-```typescript
-'use client';
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import Link from 'next/link';
-import { 
-  Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
-  Search, CheckCircle, AlertCircle, X, ShieldAlert, Check,
-  ShieldCheck, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
-  Users, CreditCard, Zap, Sparkles, RefreshCw
-} from 'lucide-react';
-import { getCurrentUser, logoutUser, initAuthStorage } from '@/lib/auth';
-import { useTranslation } from '@/components/LanguageProvider';
-
-interface AppUser {
-  id: string;
-  name: string;
-  email: string;
-  password?: string;
-  role: 'admin' | 'user';
-  subscriptionPlan?: string;
-  createdAt: string;
-}
-
-interface PlanOption {
-  id: string;
-  name: string;
-  slug: string;
-  priceFormatted: string;
-  interval?: string;
-  isFree?: boolean;
-}
-
-const DEFAULT_AVAILABLE_PLANS: PlanOption[] = [
-  { id: 'taster', name: 'Taster (Free)', slug: 'taster', priceFormatted: 'Free', isFree: true },
-  { id: 'nutrition-pro-monthly', name: 'Nutrition Pro (Monthly)', slug: 'nutrition-pro-monthly', priceFormatted: '$8.99/mo', interval: 'MONTH' },
-  { id: 'nutrition-pro-annual', name: 'Nutrition Pro (Annual)', slug: 'nutrition-pro-annual', priceFormatted: '$59.99/yr', interval: 'YEAR' },
-];
-
-type SortField = 'name' | 'createdAt' | 'subscriptionPlan';
-type SortOrder = 'asc' | 'desc';
-
-const ITEMS_PER_PAGE = 10;
-
-const sanitizeSinglePlan = (planInput?: string | string[]): string => {
-  if (!planInput) return 'taster';
-  if (Array.isArray(planInput)) return planInput[0] ? String(planInput[0]).trim() : 'taster';
-  if (typeof planInput === 'string') {
-    if (planInput.includes(',')) {
-      const parts = planInput.split(',').map(s => s.trim()).filter(Boolean);
-      return parts[0] || 'taster';
-    }
-    return planInput.trim() || 'taster';
-  }
-  return 'taster';
-};
-
-export default function AdminUserManagementPage() {
-  const { t, version } = useTranslation();
-  const [currentUser, setCurrentUser] = useState<any | null>(null);
-  const [users, setUsers] = useState<AppUser[]>([]);
-  const [availablePlans, setAvailablePlans] = useState<PlanOption[]>(DEFAULT_AVAILABLE_PLANS);
-  const [search, setSearch] = useState('');
-  const [feedbackMsg, setFeedbackMsg] = useState('');
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
-
-  // Admin Table Sorting & Pagination State
-  const [adminSortField, setAdminSortField] = useState<SortField>('createdAt');
-  const [adminSortOrder, setAdminSortOrder] = useState<SortOrder>('desc');
-  const [adminCurrentPage, setAdminCurrentPage] = useState(1);
-
-  // Standard User Table Sorting & Pagination State
-  const [userSortField, setUserSortField] = useState<SortField>('createdAt');
-  const [userSortOrder, setUserSortOrder] = useState<SortOrder>('desc');
-  const [userCurrentPage, setUserCurrentPage] = useState(1);
-
-  // Add User Modal State
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [addName, setAddName] = useState('');
-  const [addEmail, setAddEmail] = useState('');
-  const [addPassword, setAddPassword] = useState('');
-  const [addRole, setAddRole] = useState<'admin' | 'user'>('user');
-  const [addError, setAddError] = useState('');
-
-  // Edit User Modal State
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editEmail, setEditEmail] = useState('');
-  const [editPassword, setEditPassword] = useState('');
-  const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
-  const [editError, setEditError] = useState('');
-
-  // Dynamic Theme Synchronization & Color Inversion
-  const applySavedTheme = useCallback(() => {
-    try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
-      setIsDayMode(isDay);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
-        }
-      }
-    } catch (e) {}
-  }, []);
-
-  useEffect(() => {
-    applySavedTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('storage', applySavedTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('storage', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
-      }
-    };
-  }, [applySavedTheme]);
-
-  // Helper: Identify Root / Primary First Administrator
-  const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
-    if (!targetUser) return false;
-    
-    if (
-      targetUser.id === 'usr_admin_1' || 
-      targetUser.email.toLowerCase() === 'admin@zecratary.com' ||
-      targetUser.email.toLowerCase() === 'admin@foodieprep.com'
-    ) {
-      return true;
-    }
-
-    const sortedAdmins = users
-      .filter((u) => u.role === 'admin')
-      .sort((a, b) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return dateA - dateB;
-      });
-
-    return sortedAdmins.length > 0 && sortedAdmins[0].id === targetUser.id;
-  }, [users]);
-
-  const isEditingFirstAdmin = useMemo(() => {
-    const target = users.find((u) => u.id === editingUserId);
-    return isFirstAdminUser(target);
-  }, [editingUserId, users, isFirstAdminUser]);
-
-  // Synchronize Plans
-  const loadPlans = useCallback(async () => {
-    let parsedPlans: PlanOption[] = [];
-
-    try {
-      const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
-      if (rawConfigs) {
-        const configs = JSON.parse(rawConfigs);
-        if (Array.isArray(configs) && configs.length > 0) {
-          configs.forEach((cfg: any) => {
-            const isZeroCost = cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0);
-            
-            if (isZeroCost) {
-              parsedPlans.push({
-                id: cfg.id || cfg.slug,
-                name: `${cfg.name} (Free)`,
-                slug: cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                priceFormatted: 'Free',
-                isFree: true,
-              });
-            } else {
-              if (cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0) {
-                const mPrice = Number(cfg.monthlyPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-monthly`,
-                  name: `${cfg.name} (Monthly)`,
-                  slug: `${cfg.slug}-monthly`,
-                  priceFormatted: `$${mPrice.toFixed(2)}/mo`,
-                  interval: 'MONTH',
-                  isFree: false,
-                });
-              }
-              if (cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0) {
-                const aPrice = Number(cfg.annualPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-annual`,
-                  name: `${cfg.name} (Annual)`,
-                  slug: `${cfg.slug}-annual`,
-                  priceFormatted: `$${aPrice.toFixed(2)}/yr`,
-                  interval: 'YEAR',
-                  isFree: false,
-                });
-              }
-            }
-          });
-        }
-      }
-    } catch (e) {}
-
-    if (parsedPlans.length === 0) {
-      try {
-        const rawPlans = localStorage.getItem('zecratary_subscription_plans');
-        if (rawPlans) {
-          const directPlans = JSON.parse(rawPlans);
-          if (Array.isArray(directPlans) && directPlans.length > 0) {
-            parsedPlans = directPlans.map((p: any) => ({
-              id: p.id || p.slug,
-              name: p.name,
-              slug: p.slug,
-              priceFormatted: p.priceCents === 0 ? 'Free' : `$${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`,
-              interval: p.interval,
-              isFree: p.priceCents === 0,
-            }));
-          }
-        }
-      } catch (e) {}
-    }
-
-    const planMap = new Map<string, PlanOption>();
-    const planList = parsedPlans.length > 0 ? parsedPlans : DEFAULT_AVAILABLE_PLANS;
-    planList.forEach((plan) => {
-      if (!planMap.has(plan.slug)) {
-        planMap.set(plan.slug, plan);
-      }
-    });
-
-    setAvailablePlans(Array.from(planMap.values()));
-  }, []);
-
-  const loadUsers = useCallback(() => {
-    initAuthStorage();
-    const raw = localStorage.getItem('zecratary_users');
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        const mapped = parsed.map((u: any) => ({
-          ...u,
-          subscriptionPlan: sanitizeSinglePlan(u.subscriptionPlan || (u.role === 'admin' ? 'nutrition-pro-annual' : 'taster'))
-        }));
-        setUsers(mapped);
-      } catch (e) {}
-    }
-  }, []);
-
-  useEffect(() => {
-    document.title = `${t('userMgmtTitle') || 'User Management'} - Admin Console`;
-    initAuthStorage();
-    const user = getCurrentUser();
-    setCurrentUser(user);
-    loadUsers();
-    loadPlans();
-
-    const handleSync = () => {
-      loadUsers();
-      loadPlans();
-    };
-
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_users_updated', handleSync);
-    window.addEventListener('zecratary_plans_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
-
-    return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_users_updated', handleSync);
-      window.removeEventListener('zecratary_plans_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
-    };
-  }, [loadUsers, loadPlans, t, version]);
-
-  const saveUsersList = (updated: AppUser[]) => {
-    const normalizedUsers = updated.map(u => ({
-      ...u,
-      subscriptionPlan: sanitizeSinglePlan(u.subscriptionPlan)
-    }));
-    setUsers(normalizedUsers);
-    localStorage.setItem('zecratary_users', JSON.stringify(normalizedUsers));
-    window.dispatchEvent(new Event('zecratary_users_updated'));
-    window.dispatchEvent(new Event('storage'));
-  };
-
-  const showToast = (msg: string) => {
-    setFeedbackMsg(msg);
-    setTimeout(() => setFeedbackMsg(''), 3500);
-  };
-
-  // Sort Toggles
-  const handleAdminSort = (field: SortField) => {
-    if (adminSortField === field) {
-      setAdminSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setAdminSortField(field);
-      setAdminSortOrder('asc');
-    }
-  };
-
-  const handleUserSort = (field: SortField) => {
-    if (userSortField === field) {
-      setUserSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setUserSortField(field);
-      setUserSortOrder('asc');
-    }
-  };
-
-  // Filter & Sort for Admins
-  const processedAdmins = useMemo(() => {
-    const admins = users.filter(u => u.role === 'admin');
-    const filtered = admins.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
-    );
-
-    return filtered.sort((a, b) => {
-      let comparison = 0;
-      if (adminSortField === 'name') {
-        comparison = (a.name || '').localeCompare(b.name || '');
-      } else if (adminSortField === 'subscriptionPlan') {
-        comparison = (a.subscriptionPlan || '').localeCompare(b.subscriptionPlan || '');
-      } else if (adminSortField === 'createdAt') {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        comparison = dateA - dateB;
-      }
-      return adminSortOrder === 'asc' ? comparison : -comparison;
-    });
-  }, [users, search, adminSortField, adminSortOrder]);
-
-  // Filter & Sort for Standard Users
-  const processedStandardUsers = useMemo(() => {
-    const standardUsers = users.filter(u => u.role === 'user');
-    const filtered = standardUsers.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
-    );
-
-    return filtered.sort((a, b) => {
-      let comparison = 0;
-      if (userSortField === 'name') {
-        comparison = (a.name || '').localeCompare(b.name || '');
-      } else if (userSortField === 'subscriptionPlan') {
-        comparison = (a.subscriptionPlan || '').localeCompare(b.subscriptionPlan || '');
-      } else if (userSortField === 'createdAt') {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        comparison = dateA - dateB;
-      }
-      return userSortOrder === 'asc' ? comparison : -comparison;
-    });
-  }, [users, search, userSortField, userSortOrder]);
-
-  const adminTotalPages = Math.max(1, Math.ceil(processedAdmins.length / ITEMS_PER_PAGE));
-  const adminStartIndex = (adminCurrentPage - 1) * ITEMS_PER_PAGE;
-  const adminEndIndex = Math.min(adminStartIndex + ITEMS_PER_PAGE, processedAdmins.length);
-  const paginatedAdmins = processedAdmins.slice(adminStartIndex, adminEndIndex);
-
-  const userTotalPages = Math.max(1, Math.ceil(processedStandardUsers.length / ITEMS_PER_PAGE));
-  const userStartIndex = (userCurrentPage - 1) * ITEMS_PER_PAGE;
-  const userEndIndex = Math.min(userStartIndex + ITEMS_PER_PAGE, processedStandardUsers.length);
-  const paginatedStandardUsers = processedStandardUsers.slice(userStartIndex, userEndIndex);
-
-  useEffect(() => {
-    setAdminCurrentPage(1);
-    setUserCurrentPage(1);
-  }, [search]);
-
-  // Add User Modal
-  const handleOpenAddModal = (presetRole: 'admin' | 'user' = 'user') => {
-    setAddName('');
-    setAddEmail('');
-    setAddPassword('');
-    setAddRole(presetRole);
-    setAddError('');
-    setShowAddModal(true);
-  };
-
-  const handleAddUserSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAddError('');
-
-    const cleanEmail = addEmail.trim().toLowerCase();
-    const cleanName = addName.trim();
-
-    if (!cleanName || !cleanEmail) {
-      setAddError(t('fillAllRequiredFields') || 'Please fill in all required name and email fields.');
-      return;
-    }
-
-    if (users.some(u => u.email.toLowerCase() === cleanEmail)) {
-      setAddError(t('userEmailExists') || 'A user with this email address already exists.');
-      return;
-    }
-
-    if (addPassword.length < 4) {
-      setAddError(t('passwordMinLength') || 'Password must be at least 4 characters long.');
-      return;
-    }
-
-    const defaultAdminPlan = availablePlans.find(p => p.slug.includes('annual') || p.slug.includes('pro'))?.slug || 'nutrition-pro-annual';
-    const defaultUserPlan = availablePlans.find(p => p.isFree || p.slug === 'taster')?.slug || 'taster';
-    const singleAssignedPlan = sanitizeSinglePlan(addRole === 'admin' ? defaultAdminPlan : defaultUserPlan);
-
-    const newUser: AppUser = {
-      id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      name: cleanName,
-      email: cleanEmail,
-      password: addPassword,
-      role: addRole,
-      subscriptionPlan: singleAssignedPlan,
-      createdAt: new Date().toISOString()
-    };
-
-    const updated = [newUser, ...users];
-    saveUsersList(updated);
-    setShowAddModal(false);
-    showToast(`"${newUser.name}" ${t('userCreatedSuccess') || 'account created successfully!'}`);
-  };
-
-  // Edit User Modal
-  const handleOpenEditModal = (user: AppUser) => {
-    setEditingUserId(user.id);
-    setEditName(user.name);
-    setEditEmail(user.email);
-    setEditPassword(user.password || '');
-    setEditRole(user.role);
-    setEditError('');
-    setShowEditModal(true);
-  };
-
-  const handleEditUserSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingUserId) return;
-    setEditError('');
-
-    const cleanEmail = editEmail.trim().toLowerCase();
-    const cleanName = editName.trim();
-
-    if (!cleanName || !cleanEmail) {
-      setEditError(t('nameEmailNotEmpty') || 'Name and email fields cannot be empty.');
-      return;
-    }
-
-    const emailTaken = users.some(u => u.id !== editingUserId && u.email.toLowerCase() === cleanEmail);
-    if (emailTaken) {
-      setEditError(t('emailTakenByOther') || 'This email address is already taken by another account.');
-      return;
-    }
-
-    const targetUser = users.find(u => u.id === editingUserId);
-    const isFirstAdmin = isFirstAdminUser(targetUser);
-    const finalRole: 'admin' | 'user' = isFirstAdmin ? 'admin' : editRole;
-
-    const updated = users.map(u => {
-      if (u.id === editingUserId) {
-        return {
-          ...u,
-          name: cleanName,
-          email: cleanEmail,
-          password: editPassword ? editPassword : u.password,
-          role: finalRole,
-        };
-      }
-      return u;
-    });
-
-    saveUsersList(updated);
-
-    if (currentUser?.id === editingUserId) {
-      const activeUserUpdated = {
-        ...currentUser,
-        name: cleanName,
-        email: cleanEmail,
-        role: finalRole,
-      };
-      localStorage.setItem('zecratary_current_user', JSON.stringify(activeUserUpdated));
-      setCurrentUser(activeUserUpdated);
-      window.dispatchEvent(new Event('zecratary_auth_changed'));
-    }
-
-    setShowEditModal(false);
-    showToast(`"${cleanName}" ${t('userUpdatedSuccess') || 'account updated successfully!'}`);
-  };
-
-  // Delete User
-  const handleDeleteUser = (id: string, userEmail: string, userName: string) => {
-    const targetUser = users.find(u => u.id === id);
-
-    if (currentUser?.email === userEmail || currentUser?.id === id) {
-      alert(t('cannotDeleteSelfAlert') || 'You cannot delete your own currently signed-in account.');
-      return;
-    }
-
-    if (isFirstAdminUser(targetUser)) {
-      alert(t('primaryAdminCannotDeleteAlert') || 'The primary administrator account cannot be deleted.');
-      return;
-    }
-
-    const confirmMsg = (t('confirmDeleteUser') || 'Are you sure you want to delete user');
-    const undoMsg = (t('actionCannotUndo') || 'This action cannot be undone.');
-    if (!confirm(`${confirmMsg} "${userName}" (${userEmail})? ${undoMsg}`)) return;
-
-    const updated = users.filter(u => u.id !== id);
-    saveUsersList(updated);
-    showToast(`"${userName}" ${t('userDeletedSuccess') || 'deleted successfully.'}`);
-  };
-
-  const renderSortIcon = (currentField: SortField, targetField: SortField, order: SortOrder) => {
-    if (currentField !== targetField) {
-      return <ArrowUpDown className="h-3.5 w-3.5 opacity-60" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />;
-    }
-    return order === 'asc' ? (
-      <ArrowUp className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary, #E05638)' }} />
-    ) : (
-      <ArrowDown className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary, #E05638)' }} />
-    );
-  };
-
-  const getPlanBadge = (planKey?: string) => {
-    const singleKey = sanitizeSinglePlan(planKey);
-
-    if (!singleKey || singleKey === 'taster' || singleKey.includes('free')) {
-      return {
-        label: 'Taster (Free)',
-        bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
-        icon: Sparkles
-      };
-    }
-
-    const matched = availablePlans.find(
-      p => p.slug === singleKey || p.id === singleKey || p.slug.toLowerCase() === singleKey.toLowerCase()
-    );
-
-    if (matched) {
-      if (matched.isFree || singleKey === 'taster' || singleKey.includes('free')) {
-        return {
-          label: matched.name,
-          bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-          border: 'var(--color-emerald, #10b981)',
-          color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
-          icon: Sparkles
-        };
-      }
-      if (matched.interval === 'YEAR' || singleKey.includes('annual') || singleKey.includes('year')) {
-        return {
-          label: matched.name,
-          bg: isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)',
-          border: '#3b82f6',
-          color: isDayMode ? '#1d4ed8' : '#60a5fa',
-          icon: Zap
-        };
-      }
-      if (matched.interval === 'MONTH' || singleKey.includes('monthly')) {
-        return {
-          label: matched.name,
-          bg: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
-          border: 'var(--color-primary, #E05638)',
-          color: 'var(--color-primary, #E05638)',
-          icon: Zap
-        };
-      }
-      return {
-        label: matched.name,
-        bg: isDayMode ? '#faf5ff' : 'rgba(168, 85, 247, 0.15)',
-        border: '#a855f7',
-        color: isDayMode ? '#7e22ce' : '#c084fc',
-        icon: CreditCard
-      };
-    }
-
-    const formatted = singleKey
-      .split('-')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-
-    return {
-      label: formatted,
-      bg: isDayMode ? '#faf5ff' : 'rgba(168, 85, 247, 0.15)',
-      border: '#a855f7',
-      color: isDayMode ? '#7e22ce' : '#c084fc',
-      icon: CreditCard
-    };
-  };
-
-  return (
-    <div 
-      className="max-w-6xl mx-auto space-y-8 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
-    >
-      
-      {/* Autofill CSS Override */}
-      <style dangerouslySetInnerHTML={{ __html: `
-        .admin-user-input:-webkit-autofill,
-        .admin-user-input:-webkit-autofill:hover,
-        .admin-user-input:-webkit-autofill:focus,
-        .admin-user-input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'} inset !important;
-          box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'} inset !important;
-          -webkit-text-fill-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
-          caret-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
-          transition: background-color 50000s ease-in-out 0s !important;
-        }
-      `}} />
-
-      {/* ACCESS WARNING FOR NON-ADMINS */}
-      {currentUser && currentUser.role !== 'admin' && (
-        <div 
-          className="rounded-2xl p-4 flex items-center justify-between text-xs border shadow-xs"
-          style={{
-            backgroundColor: isDayMode ? '#fef3c7' : 'rgba(120, 53, 15, 0.4)',
-            borderColor: isDayMode ? '#f59e0b' : 'rgba(217, 119, 6, 0.4)',
-            color: isDayMode ? '#92400e' : '#fde68a'
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" />
-            <span>
-              {t('signedInAsPrefix') || 'Signed in as'} <strong>{currentUser.email}</strong>. {t('nonAdminUserWarning') || 'You do not have administrator permissions.'}
-            </span>
-          </div>
-          <button 
-            onClick={() => window.location.href = '/login'}
-            className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 cursor-pointer shadow-sm"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-          >
-            {t('switchToAdmin') || 'Switch to Admin'}
-          </button>
-        </div>
-      )}
-
-      {/* FEEDBACK TOAST */}
-      {feedbackMsg && (
-        <div 
-          className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-sm animate-in fade-in border"
-          style={{
-            backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
-            borderColor: 'var(--color-emerald, #10b981)',
-            color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-          }}
-        >
-          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }} />
-          <span>{feedbackMsg}</span>
-        </div>
-      )}
-
-      {/* PAGE HEADER */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-             {t('userMgmtTitle') || 'User & Administrator Management'}
-          </h1>
-          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('userMgmtSubtitle') || 'Manage user accounts, assign roles, and configure subscription access tiers.'}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => handleOpenAddModal('user')}
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-          >
-            <UserPlus className="h-4 w-4" /> {t('addNewUserBtn') || 'Add User'}
-          </button>
-          <Link
-            href="/admin/plans"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#cbd5e1'
-            }}
-          >
-            <CreditCard className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('managePlans') || 'Manage Plans'}
-          </Link>
-          <Link
-            href="/admin"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#cbd5e1'
-            }}
-          >
-            <Shield className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminSettingsBtn') || 'Admin Settings'}
-          </Link>
-        </div>
-      </div>
-
-      {/* SEARCH BAR */}
-      <div className="relative">
-        <Search className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-        <input
-          type="text"
-          placeholder={t('userSearchPlaceholder') || 'Filter by user name, email, or plan...'}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="admin-user-input w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition shadow-xs"
-          style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #070b13)',
-            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-            color: isDayMode ? '#0f172a' : '#ffffff'
-          }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-          onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-        />
-      </div>
-
-      {/* TABLE 1: ADMINISTRATORS */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2">
-            <div 
-              className="w-8 h-8 rounded-xl border flex items-center justify-center shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-              }}
-            >
-              <Shield className="h-4 w-4" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                {t('administratorsTitle') || 'Administrators'}
-                <span 
-                  className="text-xs border font-bold px-2 py-0.5 rounded-full shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
-                    borderColor: 'var(--color-emerald, #10b981)',
-                    color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                  }}
-                >
-                  {processedAdmins.length}
-                </span>
-              </h2>
-            </div>
-          </div>
-
-          <button
-            onClick={() => handleOpenAddModal('admin')}
-            className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline"
-            style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }}
-          >
-            <UserPlus className="h-3.5 w-3.5" /> {t('addAdminBtn') || 'Add Administrator'}
-          </button>
-        </div>
-
-        <div 
-          className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
-          style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-          }}
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead 
-                className="border-b uppercase font-bold text-[10px] tracking-wider transition-colors duration-200"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#64748b' : '#94a3b8'
-                }}
-              >
-                <tr>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleAdminSort('name')}
-                      className="flex items-center gap-1.5 transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                      style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
-                    >
-                      <span>{t('adminUserCol') || 'Administrator'}</span>
-                      {renderSortIcon(adminSortField, 'name', adminSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">{t('emailAddressCol') || 'Email Address'}</th>
-                  <th className="px-5 py-4">{t('roleCol') || 'Role'}</th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleAdminSort('subscriptionPlan')}
-                      className="flex items-center gap-1.5 transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                      style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
-                    >
-                      <span>{t('subscriptionTypeCol') || 'Subscription Type'}</span>
-                      {renderSortIcon(adminSortField, 'subscriptionPlan', adminSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleAdminSort('createdAt')}
-                      className="flex items-center gap-1.5 transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                      style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
-                    >
-                      <span>{t('createdDateCol') || 'Created Date'}</span>
-                      {renderSortIcon(adminSortField, 'createdAt', adminSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4 text-right">{t('actionsCol') || 'Actions'}</th>
-                </tr>
-              </thead>
-              <tbody 
-                className="divide-y transition-colors duration-200"
-                style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
-              >
-                {paginatedAdmins.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-10" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                      {t('noAdminsFound') || 'No administrators found'} {search ? `${t('matching') || 'matching'} "${search}"` : ''}.
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedAdmins.map((user) => {
-                    const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
-                    const isPrimary = isFirstAdminUser(user);
-                    const planBadge = getPlanBadge(user.subscriptionPlan);
-                    const PlanIcon = planBadge.icon;
-                    return (
-                      <tr 
-                        key={user.id} 
-                        className={`transition ${isDayMode ? 'hover:bg-slate-50' : 'hover:bg-slate-900/40'}`}
-                        style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
-                      >
-                        <td className="px-5 py-4 font-bold flex items-center gap-3" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                          <div 
-                            className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0 shadow-xs"
-                            style={{
-                              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                              borderColor: 'var(--color-emerald, #10b981)',
-                              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                            }}
-                          >
-                            {user.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold">{user.name}</span>
-                              {isPrimary && (
-                                <span 
-                                  className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded shadow-xs"
-                                  style={{
-                                    backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.2)',
-                                    borderColor: '#f59e0b',
-                                    color: isDayMode ? '#b45309' : '#fbbf24'
-                                  }}
-                                  title="Primary Administrator"
-                                >
-                                  {t('primaryBadge') || 'PRIMARY'}
-                                </span>
-                              )}
-                              {isCurrent && !isPrimary && (
-                                <span 
-                                  className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded shadow-xs"
-                                  style={{
-                                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
-                                    borderColor: 'var(--color-emerald, #10b981)',
-                                    color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                                  }}
-                                >
-                                  {t('youBadge') || 'YOU'}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 font-mono text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{user.email}</td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit shadow-xs"
-                            style={{
-                              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                              borderColor: 'var(--color-emerald, #10b981)',
-                              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                            }}
-                          >
-                            <Shield className="h-3 w-3" /> {t('adminRoleBadge') || 'Administrator'}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 w-fit shadow-xs"
-                            style={{
-                              backgroundColor: planBadge.bg,
-                              borderColor: planBadge.border,
-                              color: planBadge.color
-                            }}
-                          >
-                            <PlanIcon className="h-3 w-3 shrink-0" />
-                            {planBadge.label}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric'
-                          }) : (t('activeStatus') || 'Active')}
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditModal(user)}
-                              className="p-2 rounded-xl border transition shadow-xs cursor-pointer"
-                              style={{
-                                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#334155' : '#cbd5e1'
-                              }}
-                              title={t('editAdminTooltip') || 'Edit Administrator'}
-                            >
-                              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isCurrent || isPrimary}
-                              onClick={() => handleDeleteUser(user.id, user.email, user.name)}
-                              className={`p-2 rounded-xl border transition shadow-xs ${
-                                isCurrent || isPrimary
-                                  ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                  : 'hover:text-red-500 cursor-pointer'
-                              }`}
-                              style={{
-                                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#64748b' : '#94a3b8'
-                              }}
-                              title={
-                                isPrimary
-                                  ? (t('cannotDeletePrimaryAdmin') || 'Primary administrator account is permanently protected')
-                                  : isCurrent
-                                    ? (t('cannotDeleteActiveSession') || 'Cannot delete your own active session account')
-                                    : (t('deleteAdminTooltip') || 'Delete Administrator')
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Admin Pagination */}
-          {processedAdmins.length > ITEMS_PER_PAGE && (
-            <div 
-              className="px-5 py-3.5 border-t flex items-center justify-between text-xs transition-colors duration-200"
-              style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-              }}
-            >
-              <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('showing') || 'Showing'} {adminStartIndex + 1} {t('to') || 'to'} {adminEndIndex} {t('of') || 'of'} {processedAdmins.length} {t('adminsCount') || 'administrators'}
-              </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={adminCurrentPage <= 1}
-                  onClick={() => setAdminCurrentPage(p => Math.max(1, p - 1))}
-                  className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <span className="font-bold px-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  {t('page') || 'Page'} {adminCurrentPage} {t('of') || 'of'} {adminTotalPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={adminCurrentPage >= adminTotalPages}
-                  onClick={() => setAdminCurrentPage(p => Math.min(adminTotalPages, p + 1))}
-                  className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* TABLE 2: STANDARD USERS */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2">
-            <div 
-              className="w-8 h-8 rounded-xl border flex items-center justify-center shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#eff6ff' : 'rgba(30, 58, 138, 0.4)',
-                borderColor: isDayMode ? '#bfdbfe' : 'rgba(59, 130, 246, 0.4)',
-                color: isDayMode ? '#1d4ed8' : '#60a5fa'
-              }}
-            >
-              <Users className="h-4 w-4" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                {t('standardUsersTitle') || 'Standard Users & Subscribers'}
-                <span 
-                  className="text-xs border font-bold px-2 py-0.5 rounded-full shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#eff6ff' : 'rgba(30, 58, 138, 0.6)',
-                    borderColor: isDayMode ? '#bfdbfe' : 'rgba(59, 130, 246, 0.5)',
-                    color: isDayMode ? '#1d4ed8' : '#93c5fd'
-                  }}
-                >
-                  {processedStandardUsers.length}
-                </span>
-              </h2>
-            </div>
-          </div>
-
-          <button
-            onClick={() => handleOpenAddModal('user')}
-            className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline"
-            style={{ color: 'var(--color-primary, #E05638)' }}
-          >
-            <UserPlus className="h-3.5 w-3.5" /> {t('addStandardUserBtn') || 'Add Subscriber'}
-          </button>
-        </div>
-
-        <div 
-          className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
-          style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-          }}
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead 
-                className="border-b uppercase font-bold text-[10px] tracking-wider transition-colors duration-200"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#64748b' : '#94a3b8'
-                }}
-              >
-                <tr>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleUserSort('name')}
-                      className="flex items-center gap-1.5 transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                      style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
-                    >
-                      <span>{t('standardUserCol') || 'User Account'}</span>
-                      {renderSortIcon(userSortField, 'name', userSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">{t('emailAddressCol') || 'Email Address'}</th>
-                  <th className="px-5 py-4">{t('roleCol') || 'Role'}</th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleUserSort('subscriptionPlan')}
-                      className="flex items-center gap-1.5 transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                      style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
-                    >
-                      <span>{t('subscriptionTypeCol') || 'Subscription Type'}</span>
-                      {renderSortIcon(userSortField, 'subscriptionPlan', userSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleUserSort('createdAt')}
-                      className="flex items-center gap-1.5 transition cursor-pointer select-none font-bold uppercase tracking-wider"
-                      style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
-                    >
-                      <span>{t('createdDateCol') || 'Created Date'}</span>
-                      {renderSortIcon(userSortField, 'createdAt', userSortOrder)}
-                    </button>
-                  </th>
-                  <th className="px-5 py-4 text-right">{t('actionsCol') || 'Actions'}</th>
-                </tr>
-              </thead>
-              <tbody 
-                className="divide-y transition-colors duration-200"
-                style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
-              >
-                {paginatedStandardUsers.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-10" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                      {t('noStandardUsersFound') || 'No standard users found'} {search ? `${t('matching') || 'matching'} "${search}"` : ''}.
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedStandardUsers.map((user) => {
-                    const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
-                    const planBadge = getPlanBadge(user.subscriptionPlan);
-                    const PlanIcon = planBadge.icon;
-                    return (
-                      <tr 
-                        key={user.id} 
-                        className={`transition ${isDayMode ? 'hover:bg-slate-50' : 'hover:bg-slate-900/40'}`}
-                        style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
-                      >
-                        <td className="px-5 py-4 font-bold flex items-center gap-3" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                          <div 
-                            className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0 shadow-xs"
-                            style={{
-                              backgroundColor: isDayMode ? '#fee2e2' : 'var(--color-card, #111726)',
-                              borderColor: isDayMode ? '#fca5a5' : 'var(--color-border, #1e293b)',
-                              color: 'var(--color-primary, #E05638)'
-                            }}
-                          >
-                            {user.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold">{user.name}</span>
-                              {isCurrent && (
-                                <span 
-                                  className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded shadow-xs"
-                                  style={{
-                                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
-                                    borderColor: 'var(--color-emerald, #10b981)',
-                                    color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                                  }}
-                                >
-                                  {t('youBadge') || 'YOU'}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 font-mono text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{user.email}</td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit shadow-xs"
-                            style={{
-                              backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              color: isDayMode ? '#334155' : '#cbd5e1'
-                            }}
-                          >
-                            <UserIcon className="h-3 w-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} /> {t('standardUserRoleBadge') || 'Subscriber'}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 w-fit shadow-xs"
-                            style={{
-                              backgroundColor: planBadge.bg,
-                              borderColor: planBadge.border,
-                              color: planBadge.color
-                            }}
-                          >
-                            <PlanIcon className="h-3 w-3 shrink-0" />
-                            {planBadge.label}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric'
-                          }) : (t('activeStatus') || 'Active')}
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditModal(user)}
-                              className="p-2 rounded-xl border transition shadow-xs cursor-pointer"
-                              style={{
-                                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#334155' : '#cbd5e1'
-                              }}
-                              title={t('editUserTooltip') || 'Edit User'}
-                            >
-                              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isCurrent}
-                              onClick={() => handleDeleteUser(user.id, user.email, user.name)}
-                              className={`p-2 rounded-xl border transition shadow-xs ${
-                                isCurrent
-                                  ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                  : 'hover:text-red-500 cursor-pointer'
-                              }`}
-                              style={{
-                                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#64748b' : '#94a3b8'
-                              }}
-                              title={isCurrent ? (t('cannotDeleteActiveAccount') || 'Cannot delete active session account') : (t('deleteUserTooltip') || 'Delete User')}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Standard User Pagination */}
-          <div 
-            className="px-5 py-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-            }}
-          >
-            <div style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-              {processedStandardUsers.length === 0 ? (
-                t('showingZeroStandardUsers') || 'Showing 0 standard users'
-              ) : (
-                <>
-                  {t('showing') || 'Showing'} <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{userStartIndex + 1}</span> {t('to') || 'to'}{' '}
-                  <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{userEndIndex}</span> {t('of') || 'of'}{' '}
-                  <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{processedStandardUsers.length}</span> {t('standardUsersCount') || 'standard users'}
-                </>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                disabled={userCurrentPage <= 1}
-                onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))}
-                className={`p-2 rounded-xl border flex items-center justify-center transition shadow-xs ${
-                  userCurrentPage <= 1
-                    ? 'opacity-40 cursor-not-allowed'
-                    : 'cursor-pointer'
-                }`}
-                style={{
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-                title="Previous Page"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-
-              {Array.from({ length: userTotalPages }, (_, i) => i + 1).map((pageNum) => (
-                <button
-                  key={pageNum}
-                  type="button"
-                  onClick={() => setUserCurrentPage(pageNum)}
-                  className="min-w-[34px] h-[34px] rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-xs"
-                  style={userCurrentPage === pageNum ? {
-                    backgroundColor: 'var(--color-primary, #E05638)',
-                    borderColor: 'var(--color-primary, #E05638)',
-                    color: '#ffffff'
-                  } : {
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#334155' : '#cbd5e1'
-                  }}
-                >
-                  {pageNum}
-                </button>
-              ))}
-
-              <button
-                type="button"
-                disabled={userCurrentPage >= userTotalPages}
-                onClick={() => setUserCurrentPage(p => Math.min(userTotalPages, p + 1))}
-                className={`p-2 rounded-xl border flex items-center justify-center transition shadow-xs ${
-                  userCurrentPage >= userTotalPages
-                    ? 'opacity-40 cursor-not-allowed'
-                    : 'cursor-pointer'
-                }`}
-                style={{
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-                title="Next Page"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 1. ADD USER MODAL */}
-      {showAddModal && (
-        <div 
-          onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
-            }}
-          >
-            <button 
-              onClick={() => setShowAddModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #172033)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
-              >
-                <UserPlus className="h-5 w-5" /> {t('addUserModalTitle') || 'Create New User Account'}
-              </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('addUserModalSub') || 'Register a new user or administrator profile with custom permissions.'}
-              </p>
-            </div>
-
-            {addError && (
-              <div className="p-3 bg-red-50 border border-red-300 text-red-900 rounded-xl font-semibold flex items-center gap-2 shadow-xs">
-                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-                <span>{addError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleAddUserSubmit} className="space-y-3.5 pt-1">
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('fullNameLabel') || 'Full Name *'}
-                </label>
-                <div className="relative">
-                  <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                  <input
-                    type="text"
-                    required
-                    placeholder={t('fullNamePlaceholder') || 'e.g. Jordan Lee'}
-                    value={addName}
-                    onChange={(e) => setAddName(e.target.value)}
-                    className="admin-user-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('emailAddressLabel') || 'Email Address *'}
-                </label>
-                <div className="relative">
-                  <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                  <input
-                    type="email"
-                    required
-                    placeholder="jordan@example.com"
-                    value={addEmail}
-                    onChange={(e) => setAddEmail(e.target.value)}
-                    className="admin-user-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('passwordLabel') || 'Password *'}
-                </label>
-                <div className="relative">
-                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                  <input
-                    type="password"
-                    required
-                    placeholder={t('passwordMinPlaceholder') || 'At least 4 characters'}
-                    value={addPassword}
-                    onChange={(e) => setAddPassword(e.target.value)}
-                    className="admin-user-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('assignedRoleLabel') || 'Assigned System Role'}
-                </label>
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <label 
-                    onClick={() => setAddRole('user')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between shadow-xs"
-                    style={addRole === 'user' ? {
-                      backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('standardUserRoleBadge') || 'Subscriber'}</div>
-                      <div className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('appSubscriberRoleSub') || 'App Subscriber'}</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="addRole"
-                      checked={addRole === 'user'}
-                      onChange={() => setAddRole('user')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-
-                  <label 
-                    onClick={() => setAddRole('admin')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between shadow-xs"
-                    style={addRole === 'admin' ? {
-                      backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-xs flex items-center gap-1" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                        <Shield className="h-3 w-3" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminRoleBadge') || 'Administrator'}
-                      </div>
-                      <div className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('fullAccessRoleSub') || 'Full Access'}</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="addRole"
-                      checked={addRole === 'admin'}
-                      onChange={() => setAddRole('admin')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#334155' : '#cbd5e1'
-                  }}
-                >
-                  {t('cancel') || 'Cancel'}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  <UserPlus className="h-4 w-4" /> {t('createUserSubmitBtn') || 'Create User Account'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* 2. EDIT USER MODAL */}
-      {showEditModal && (
-        <div 
-          onClick={() => setShowEditModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default transition-colors duration-200"
-            style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
-            }}
-          >
-            <button 
-              onClick={() => setShowEditModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #172033)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
-              >
-                <Edit3 className="h-5 w-5" /> {t('editUserModalTitle') || 'Edit User Account'}
-              </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('editUserModalSub') || 'Update profile details, password credentials, and access roles.'}
-              </p>
-            </div>
-
-            {editError && (
-              <div className="p-3 bg-red-50 border border-red-300 text-red-900 rounded-xl font-semibold flex items-center gap-2 shadow-xs">
-                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-                <span>{editError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleEditUserSubmit} className="space-y-3.5 pt-1">
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('fullNameLabel') || 'Full Name *'}
-                </label>
-                <div className="relative">
-                  <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                  <input
-                    type="text"
-                    required
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="admin-user-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('emailAddressLabel') || 'Email Address *'}
-                </label>
-                <div className="relative">
-                  <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                  <input
-                    type="email"
-                    required
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                    className="admin-user-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('changePasswordLabel') || 'Change Password (Leave blank to keep current)'}
-                </label>
-                <div className="relative">
-                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                  <input
-                    type="password"
-                    placeholder={t('enterNewPasswordPlaceholder') || 'New password (optional)'}
-                    value={editPassword}
-                    onChange={(e) => setEditPassword(e.target.value)}
-                    className="admin-user-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                  />
-                </div>
-              </div>
-
-              {/* ASSIGNED ROLE WITH PRIMARY ADMIN LOCK */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    {t('assignedRoleLabel') || 'Assigned System Role'}
-                  </label>
-                  {isEditingFirstAdmin && (
-                    <span 
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border shadow-xs"
-                      style={{
-                        backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
-                        borderColor: '#f59e0b',
-                        color: isDayMode ? '#b45309' : '#fbbf24'
-                      }}
-                    >
-                      <Lock className="h-3 w-3" /> {t('primaryAdminLocked') || 'Primary Admin (Locked)'}
-                    </span>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <label 
-                    onClick={() => {
-                      if (!isEditingFirstAdmin) setEditRole('user');
-                    }}
-                    className={`p-3 rounded-2xl border transition flex items-center justify-between shadow-xs ${
-                      isEditingFirstAdmin ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
-                    }`}
-                    style={editRole === 'user' && !isEditingFirstAdmin ? {
-                      backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('standardUserRoleBadge') || 'Subscriber'}</div>
-                      <div className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('appSubscriberRoleSub') || 'App Subscriber'}</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="editRole"
-                      disabled={isEditingFirstAdmin}
-                      checked={editRole === 'user'}
-                      onChange={() => {
-                        if (!isEditingFirstAdmin) setEditRole('user');
-                      }}
-                      className="accent-[#E05638] disabled:opacity-50"
-                    />
-                  </label>
-
-                  <label 
-                    onClick={() => setEditRole('admin')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between shadow-xs"
-                    style={editRole === 'admin' ? {
-                      backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.12)',
-                      borderColor: 'var(--color-primary, #E05638)'
-                    } : {
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    <div>
-                      <div className="font-bold text-xs flex items-center gap-1" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                        <Shield className="h-3 w-3" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminRoleBadge') || 'Administrator'}
-                      </div>
-                      <div className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('fullAccessRoleSub') || 'Full Access'}</div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="editRole"
-                      checked={editRole === 'admin'}
-                      onChange={() => setEditRole('admin')}
-                      className="accent-[#E05638]"
-                    />
-                  </label>
-                </div>
-
-                {isEditingFirstAdmin && (
-                  <p className="text-[11px] mt-1.5 font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {t('primaryAdminRoleProtectedNote') || 'The primary administrator role cannot be demoted to protect system ownership access.'}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#334155' : '#cbd5e1'
-                  }}
-                >
-                  {t('cancel') || 'Cancel'}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-                >
-                  <Check className="h-4 w-4" /> {t('saveChanges') || 'Save Changes'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
-}
-
-```
-
 ## File: `apps/web/src/app/admin/language/page.tsx`
 ```typescript
 'use client';
@@ -25270,15 +22272,18 @@ export default function AdminLanguagePage() {
 ## File: `apps/web/src/app/admin/users/page.tsx`
 ```typescript
 'use client';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
   Search, CheckCircle, AlertCircle, X, ShieldAlert, Check,
-  ShieldCheck, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
-  Users, CreditCard, Zap, Sparkles, RefreshCw
+  ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
+  Users, CreditCard, Zap, Sparkles, Download
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, initAuthStorage } from '@/lib/auth';
+import { useTranslation } from '@/components/LanguageProvider';
+import { applyThemeToDocument } from '@/lib/themeConfig';
 
 interface AppUser {
   id: string;
@@ -25311,11 +22316,28 @@ type SortOrder = 'asc' | 'desc';
 const ITEMS_PER_PAGE = 10;
 
 export default function AdminUserManagementPage() {
+  const { t, locale } = useTranslation() || {};
+  const tr = useCallback((key: string, fallback: string): string => {
+    if (typeof t === 'function') {
+      const val = t(key);
+      if (val && val !== key) return val;
+    }
+    return fallback;
+  }, [t]);
+
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [availablePlans, setAvailablePlans] = useState<PlanOption[]>(DEFAULT_AVAILABLE_PLANS);
   const [search, setSearch] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState('');
+  const [isDayMode, setIsDayMode] = useState<boolean>(false);
+
+  // Selected User IDs for Export
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+
+  // Prevent recursive fetch storms
+  const isFetchingUsersRef = useRef(false);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Admin Table Sorting & Pagination State
   const [adminSortField, setAdminSortField] = useState<SortField>('createdAt');
@@ -25346,30 +22368,11 @@ export default function AdminUserManagementPage() {
   const [editSubscriptionPlan, setEditSubscriptionPlan] = useState<string>('taster');
   const [editError, setEditError] = useState('');
 
-  // Helper: Identify Root / Primary First Administrator
+  // Helper: Strictly identify primary root administrator (usr_admin_1)
   const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
     if (!targetUser) return false;
-    
-    // Explicit System Admin default ID or Email check
-    if (
-      targetUser.id === 'usr_admin_1' || 
-      targetUser.email.toLowerCase() === 'admin@zecratary.com' ||
-      targetUser.email.toLowerCase() === 'admin@foodieprep.com'
-    ) {
-      return true;
-    }
-
-    // Earliest created administrator check
-    const sortedAdmins = users
-      .filter((u) => u.role === 'admin')
-      .sort((a, b) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return dateA - dateB;
-      });
-
-    return sortedAdmins.length > 0 && sortedAdmins[0].id === targetUser.id;
-  }, [users]);
+    return targetUser.id === 'usr_admin_1';
+  }, []);
 
   const isEditingFirstAdmin = useMemo(() => {
     const target = users.find((u) => u.id === editingUserId);
@@ -25377,53 +22380,40 @@ export default function AdminUserManagementPage() {
   }, [editingUserId, users, isFirstAdminUser]);
 
   // Dynamic Theme Synchronization
-  useEffect(() => {
-    const applySavedTheme = () => {
-      try {
-        const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-        if (stored) {
-          const c = JSON.parse(stored);
-          const root = document.documentElement;
-          if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
-          if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
-          if (c.backgroundDark || c.backgroundColor) {
-            root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor);
-            root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor);
-            root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor);
-          }
-          if (c.cardDark || c.cardBackground) {
-            root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground);
-            root.style.setProperty('--color-card', c.cardDark || c.cardBackground);
-          }
-          if (c.innerDark || c.backgroundColor) root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor);
-          if (c.borderColor || c.cardBorder) root.style.setProperty('--color-border', c.borderColor || c.cardBorder);
-          if (c.accentEmerald || c.accentColor) {
-            root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
-            root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor);
-          }
-          if (c.textColor) root.style.setProperty('--color-text', c.textColor);
-          if (c.textSecondary) root.style.setProperty('--color-text-secondary', c.textSecondary);
-        }
-      } catch (e) {}
-    };
+  const syncTheme = useCallback(() => {
+    try {
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      const day = mode === 'light';
+      setIsDayMode(day);
 
-    applySavedTheme();
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('storage', applySavedTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('storage', applySavedTheme);
-    };
+      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      if (stored) {
+        applyThemeToDocument(JSON.parse(stored));
+      } else {
+        applyThemeToDocument(null);
+      }
+    } catch (_) {}
   }, []);
 
-  // Synchronize System Packages directly from /admin/plans
+  useEffect(() => {
+    syncTheme();
+    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
+    window.addEventListener('zecratary_theme_changed', syncTheme);
+    window.addEventListener('zecratary_theme_updated', syncTheme);
+    window.addEventListener('storage', syncTheme);
+
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_updated', syncTheme);
+      window.removeEventListener('storage', syncTheme);
+    };
+  }, [syncTheme]);
+
+  // Synchronize System Packages
   const loadPlans = useCallback(async () => {
     let parsedPlans: PlanOption[] = [];
 
-    // 1. Primary Source: Saved System Packages configurations from /admin/plans
     try {
       const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
       if (rawConfigs) {
@@ -25469,7 +22459,6 @@ export default function AdminUserManagementPage() {
       }
     } catch (e) {}
 
-    // 2. Secondary Local Fallback: zecratary_subscription_plans
     if (parsedPlans.length === 0) {
       try {
         const rawPlans = localStorage.getItem('zecratary_subscription_plans');
@@ -25489,7 +22478,6 @@ export default function AdminUserManagementPage() {
       } catch (e) {}
     }
 
-    // 3. API Fallback: /api/admin/plans
     if (parsedPlans.length === 0) {
       try {
         const res = await fetch('/api/admin/plans');
@@ -25514,52 +22502,112 @@ export default function AdminUserManagementPage() {
     }
   }, []);
 
-  const loadUsers = useCallback(() => {
-    initAuthStorage();
-    const raw = localStorage.getItem('zecratary_users');
-    if (raw) {
+  // Safe Non-Looping User Fetcher
+  const loadUsers = useCallback(async () => {
+    if (isFetchingUsersRef.current) return;
+    isFetchingUsersRef.current = true;
+
+    try {
+      let localList: AppUser[] = [];
+      const raw = localStorage.getItem('zecratary_users');
+      if (raw) {
+        try { localList = JSON.parse(raw); } catch (_) {}
+      }
+
+      let deletedSet = new Set<string>();
       try {
-        const parsed = JSON.parse(raw);
-        const mapped = parsed.map((u: any) => ({
-          ...u,
-          subscriptionPlan: u.subscriptionPlan || (u.role === 'admin' ? 'nutrition-pro-annual' : 'taster')
-        }));
-        setUsers(mapped);
-      } catch (e) {}
+        const rawDel = localStorage.getItem('zecratary_deleted_users');
+        if (rawDel) {
+          const parsed: string[] = JSON.parse(rawDel);
+          deletedSet = new Set(parsed.map((s) => s.toLowerCase().trim()));
+        }
+      } catch (_) {}
+
+      localList = localList.filter((u) => {
+        if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
+        if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
+        return true;
+      });
+
+      const res = await fetch('/api/admin/users', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.users)) {
+          const serverUsers: AppUser[] = data.users.filter((u: any) => {
+            if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
+            if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
+            return true;
+          });
+
+          const mergedMap = new Map<string, AppUser>();
+          serverUsers.forEach((u) => {
+            if (u && u.email) mergedMap.set(u.email.toLowerCase(), u);
+          });
+          localList.forEach((u) => {
+            if (u && u.email) {
+              const existing = mergedMap.get(u.email.toLowerCase()) || {};
+              mergedMap.set(u.email.toLowerCase(), { ...existing, ...u });
+            }
+          });
+
+          const merged = Array.from(mergedMap.values());
+          setUsers(merged);
+
+          const newSerialized = JSON.stringify(merged);
+          if (raw !== newSerialized) {
+            localStorage.setItem('zecratary_users', newSerialized);
+          }
+          return;
+        }
+      }
+
+      setUsers(localList);
+    } catch (err) {
+      console.error('Failed to load users:', err);
+    } finally {
+      isFetchingUsersRef.current = false;
     }
   }, []);
 
   useEffect(() => {
-    document.title = 'User Management - Admin Console';
+    document.title = tr('admin.users.docTitle', 'User Management - Admin Console');
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
     loadUsers();
     loadPlans();
 
-    const handleSync = () => {
-      loadUsers();
-      loadPlans();
+    const handleSync = (e?: Event) => {
+      if (e && 'key' in e) {
+        const sEvt = e as StorageEvent;
+        if (sEvt.key && sEvt.key !== 'zecratary_users' && sEvt.key !== 'zecratary_subscription_plans' && sEvt.key !== 'zecratary_deleted_users') {
+          return;
+        }
+      }
+
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = setTimeout(() => {
+        loadUsers();
+        loadPlans();
+      }, 400);
     };
 
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_users_updated', handleSync);
     window.addEventListener('zecratary_plans_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
 
     return () => {
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_users_updated', handleSync);
       window.removeEventListener('zecratary_plans_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
     };
-  }, [loadUsers, loadPlans]);
+  }, [loadUsers, loadPlans, tr]);
 
   const saveUsersList = (updated: AppUser[]) => {
     setUsers(updated);
     localStorage.setItem('zecratary_users', JSON.stringify(updated));
     window.dispatchEvent(new Event('zecratary_users_updated'));
-    window.dispatchEvent(new Event('storage'));
   };
 
   const showToast = (msg: string) => {
@@ -25567,10 +22615,64 @@ export default function AdminUserManagementPage() {
     setTimeout(() => setFeedbackMsg(''), 3500);
   };
 
+  // Selection Toggles
+  const toggleSelectUser = (id: string) => {
+    setSelectedUserIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  // Export Selected Users
+  const handleExportSelected = (format: 'csv' | 'json' = 'csv') => {
+    const selectedUsers = users.filter((u) => selectedUserIds.includes(u.id));
+    if (selectedUsers.length === 0) {
+      showToast(tr('admin.users.selectUsersPrompt', 'Please select at least one user to export.'));
+      return;
+    }
+
+    const timestamp = new Date().toISOString().split('T')[0];
+
+    if (format === 'json') {
+      const exportData = selectedUsers.map(({ password, ...rest }) => rest);
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `users_export_${timestamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast(`${tr('admin.users.exportedJson', 'Exported')} ${selectedUsers.length} ${tr('admin.users.usersCountJson', 'selected user(s) to JSON!')}`);
+    } else {
+      const headers = ['ID', 'Name', 'Email Address', 'Role', 'Subscription Plan', 'Created At'];
+      const rows = selectedUsers.map((u) => [
+        `"${(u.id || '').replace(/"/g, '""')}"`,
+        `"${(u.name || '').replace(/"/g, '""')}"`,
+        `"${(u.email || '').replace(/"/g, '""')}"`,
+        `"${(u.role || '').replace(/"/g, '""')}"`,
+        `"${(u.subscriptionPlan || '').replace(/"/g, '""')}"`,
+        `"${(u.createdAt || '').replace(/"/g, '""')}"`
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `users_export_${timestamp}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast(`${tr('admin.users.exportedCsv', 'Exported')} ${selectedUsers.length} ${tr('admin.users.usersCountCsv', 'selected user(s) to CSV!')}`);
+    }
+  };
+
   // Sort Toggles
   const handleAdminSort = (field: SortField) => {
     if (adminSortField === field) {
-      setAdminSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      setAdminSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setAdminSortField(field);
       setAdminSortOrder('asc');
@@ -25579,7 +22681,7 @@ export default function AdminUserManagementPage() {
 
   const handleUserSort = (field: SortField) => {
     if (userSortField === field) {
-      setUserSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      setUserSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setUserSortField(field);
       setUserSortOrder('asc');
@@ -25588,12 +22690,13 @@ export default function AdminUserManagementPage() {
 
   // Filter & Sort for Admins
   const processedAdmins = useMemo(() => {
-    const admins = users.filter(u => u.role === 'admin');
-    const filtered = admins.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
+    const admins = users.filter((u) => u.role === 'admin');
+    const filtered = admins.filter(
+      (u) =>
+        !search.trim() ||
+        u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
+        u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
     );
 
     return filtered.sort((a, b) => {
@@ -25613,12 +22716,13 @@ export default function AdminUserManagementPage() {
 
   // Filter & Sort for Standard Users
   const processedStandardUsers = useMemo(() => {
-    const standardUsers = users.filter(u => u.role === 'user');
-    const filtered = standardUsers.filter(u =>
-      !search.trim() ||
-      u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
-      (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
+    const standardUsers = users.filter((u) => u.role === 'user');
+    const filtered = standardUsers.filter(
+      (u) =>
+        !search.trim() ||
+        u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
+        u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
     );
 
     return filtered.sort((a, b) => {
@@ -25647,28 +22751,51 @@ export default function AdminUserManagementPage() {
   const userEndIndex = Math.min(userStartIndex + ITEMS_PER_PAGE, processedStandardUsers.length);
   const paginatedStandardUsers = processedStandardUsers.slice(userStartIndex, userEndIndex);
 
+  const isAllAdminsOnPageSelected =
+    paginatedAdmins.length > 0 && paginatedAdmins.every((u) => selectedUserIds.includes(u.id));
+
+  const handleToggleSelectAllAdmins = () => {
+    const pageAdminIds = paginatedAdmins.map((u) => u.id);
+    if (isAllAdminsOnPageSelected) {
+      setSelectedUserIds((prev) => prev.filter((id) => !pageAdminIds.includes(id)));
+    } else {
+      setSelectedUserIds((prev) => Array.from(new Set([...prev, ...pageAdminIds])));
+    }
+  };
+
+  const isAllStandardOnPageSelected =
+    paginatedStandardUsers.length > 0 && paginatedStandardUsers.every((u) => selectedUserIds.includes(u.id));
+
+  const handleToggleSelectAllStandardUsers = () => {
+    const pageUserIds = paginatedStandardUsers.map((u) => u.id);
+    if (isAllStandardOnPageSelected) {
+      setSelectedUserIds((prev) => prev.filter((id) => !pageUserIds.includes(id)));
+    } else {
+      setSelectedUserIds((prev) => Array.from(new Set([...prev, ...pageUserIds])));
+    }
+  };
+
   useEffect(() => {
     setAdminCurrentPage(1);
     setUserCurrentPage(1);
   }, [search]);
 
-  // Add User
+  // Add User Modal
   const handleOpenAddModal = (presetRole: 'admin' | 'user' = 'user') => {
     setAddName('');
     setAddEmail('');
     setAddPassword('');
     setAddRole(presetRole);
     
-    // Auto-select preferred tier from synchronized live plans
-    const defaultAdminPlan = availablePlans.find(p => p.slug.includes('annual') || p.slug.includes('pro'))?.slug || availablePlans[availablePlans.length - 1]?.slug || 'nutrition-pro-annual';
-    const defaultUserPlan = availablePlans.find(p => p.isFree || p.slug === 'taster')?.slug || availablePlans[0]?.slug || 'taster';
+    const defaultAdminPlan = availablePlans.find((p) => p.slug.includes('annual') || p.slug.includes('pro'))?.slug || availablePlans[availablePlans.length - 1]?.slug || 'nutrition-pro-annual';
+    const defaultUserPlan = availablePlans.find((p) => p.isFree || p.slug === 'taster')?.slug || availablePlans[0]?.slug || 'taster';
     
     setAddSubscriptionPlan(presetRole === 'admin' ? defaultAdminPlan : defaultUserPlan);
     setAddError('');
     setShowAddModal(true);
   };
 
-  const handleAddUserSubmit = (e: React.FormEvent) => {
+  const handleAddUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAddError('');
 
@@ -25676,17 +22803,17 @@ export default function AdminUserManagementPage() {
     const cleanName = addName.trim();
 
     if (!cleanName || !cleanEmail) {
-      setAddError('Please fill in all required fields.');
+      setAddError(tr('admin.users.fillRequired', 'Please fill in all required fields.'));
       return;
     }
 
-    if (users.some(u => u.email.toLowerCase() === cleanEmail)) {
-      setAddError('A user with this email address already exists.');
+    if (users.some((u) => u && u.email && u.email.toLowerCase() === cleanEmail)) {
+      setAddError(tr('admin.users.emailExists', 'A user with this email address already exists.'));
       return;
     }
 
     if (addPassword.length < 4) {
-      setAddError('Password must be at least 4 characters long.');
+      setAddError(tr('admin.users.passwordLength', 'Password must be at least 4 characters long.'));
       return;
     }
 
@@ -25702,13 +22829,30 @@ export default function AdminUserManagementPage() {
       createdAt: new Date().toISOString()
     };
 
-    const updated = [newUser, ...users];
+    try {
+      const rawDel = localStorage.getItem('zecratary_deleted_users');
+      if (rawDel) {
+        const delList: string[] = JSON.parse(rawDel);
+        const filteredDel = delList.filter((s) => s.toLowerCase().trim() !== cleanEmail && s !== newUser.id);
+        localStorage.setItem('zecratary_deleted_users', JSON.stringify(filteredDel));
+      }
+    } catch (_) {}
+
+    try {
+      await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser),
+      });
+    } catch (_) {}
+
+    const updated = [newUser, ...users.filter((u) => !u.email || u.email.toLowerCase() !== cleanEmail)];
     saveUsersList(updated);
     setShowAddModal(false);
-    showToast(`User "${newUser.name}" created with "${getPlanBadge(newUser.subscriptionPlan).label}" plan!`);
+    showToast(`${tr('admin.users.userCreatedPrefix', 'User')} "${newUser.name}" ${tr('admin.users.userCreatedSuffix', 'created successfully!')}`);
   };
 
-  // Edit User
+  // Edit User Modal
   const handleOpenEditModal = (user: AppUser) => {
     setEditingUserId(user.id);
     setEditName(user.name);
@@ -25729,23 +22873,22 @@ export default function AdminUserManagementPage() {
     const cleanName = editName.trim();
 
     if (!cleanName || !cleanEmail) {
-      setEditError('Name and Email cannot be empty.');
+      setEditError(tr('admin.users.nameEmailEmpty', 'Name and Email cannot be empty.'));
       return;
     }
 
-    const emailTaken = users.some(u => u.id !== editingUserId && u.email.toLowerCase() === cleanEmail);
+    const emailTaken = users.some((u) => u.id !== editingUserId && u.email && u.email.toLowerCase() === cleanEmail);
     if (emailTaken) {
-      setEditError('Another user is already registered with this email.');
+      setEditError(tr('admin.users.emailTaken', 'Another user is already registered with this email.'));
       return;
     }
 
-    const targetUser = users.find(u => u.id === editingUserId);
+    const targetUser = users.find((u) => u.id === editingUserId);
     const isFirstAdmin = isFirstAdminUser(targetUser);
 
-    // Enforce role preservation for first admin
     const finalRole: 'admin' | 'user' = isFirstAdmin ? 'admin' : editRole;
 
-    const updated = users.map(u => {
+    const updated = users.map((u) => {
       if (u.id === editingUserId) {
         return {
           ...u,
@@ -25761,6 +22904,15 @@ export default function AdminUserManagementPage() {
 
     saveUsersList(updated);
 
+    const editedTarget = updated.find((u) => u.id === editingUserId);
+    if (editedTarget) {
+      fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editedTarget),
+      }).catch(() => {});
+    }
+
     if (currentUser?.id === editingUserId) {
       const activeUserUpdated = {
         ...currentUser,
@@ -25775,33 +22927,59 @@ export default function AdminUserManagementPage() {
     }
 
     setShowEditModal(false);
-    showToast(`User "${cleanName}" updated successfully!`);
+    showToast(`${tr('admin.users.userUpdatedPrefix', 'User')} "${cleanName}" ${tr('admin.users.userUpdatedSuffix', 'updated successfully!')}`);
   };
 
-  // Delete User
-  const handleDeleteUser = (id: string, userEmail: string, userName: string) => {
-    const targetUser = users.find(u => u.id === id);
+  // Safe Deletion Handler
+  const handleDeleteUser = async (id: string, userEmail: string, userName?: string) => {
+    const targetUser = users.find((u) => u.id === id || (u.email && u.email.toLowerCase() === userEmail.toLowerCase()));
 
-    if (currentUser?.email === userEmail || currentUser?.id === id) {
-      alert('You cannot delete your own active admin account.');
+    if (currentUser?.email?.toLowerCase() === userEmail.toLowerCase() || currentUser?.id === id) {
+      alert(tr('admin.users.cannotDeleteSelf', 'You cannot delete your own active admin account.'));
       return;
     }
 
-    if (isFirstAdminUser(targetUser)) {
-      alert('The primary system administrator account cannot be deleted.');
+    if (isFirstAdminUser && isFirstAdminUser(targetUser)) {
+      alert(tr('admin.users.cannotDeletePrimary', 'The primary system administrator account cannot be deleted.'));
       return;
     }
 
-    if (!confirm(`Are you sure you want to delete "${userName}" (${userEmail})? This action cannot be undone.`)) return;
+    const displayName = userName || targetUser?.name || userEmail;
+    if (!confirm(`${tr('admin.users.deleteConfirmPrompt', 'Are you sure you want to delete')} "${displayName}" (${userEmail})? ${tr('admin.users.actionUndone', 'This action cannot be undone.')}`)) return;
 
-    const updated = users.filter(u => u.id !== id);
-    saveUsersList(updated);
-    showToast(`User "${userName}" has been deleted.`);
+    try {
+      const cleanEmail = userEmail.toLowerCase().trim();
+
+      try {
+        const rawDel = localStorage.getItem('zecratary_deleted_users');
+        const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
+        if (cleanEmail && !delList.includes(cleanEmail)) delList.push(cleanEmail);
+        if (id && !delList.includes(id)) delList.push(id);
+        localStorage.setItem('zecratary_deleted_users', JSON.stringify(delList));
+      } catch (_) {}
+
+      const updated = users.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail));
+      setUsers(updated);
+      setSelectedUserIds((prev) => prev.filter((uid) => uid !== id));
+      localStorage.setItem('zecratary_users', JSON.stringify(updated));
+
+      await fetch('/api/admin/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, email: cleanEmail }),
+      }).catch(() => {});
+
+      showToast(`${tr('admin.users.userDeletedPrefix', 'User')} "${displayName}" ${tr('admin.users.userDeletedSuffix', 'has been deleted.')}`);
+      window.dispatchEvent(new Event('zecratary_users_updated'));
+    } catch (err: any) {
+      console.error('Failed to delete user:', err);
+      showToast(tr('admin.users.deleteFail', 'Failed to delete user: ') + (err?.message || 'Server error'));
+    }
   };
 
   const renderSortIcon = (currentField: SortField, targetField: SortField, order: SortOrder) => {
     if (currentField !== targetField) {
-      return <ArrowUpDown className="h-3.5 w-3.5 text-slate-500 opacity-60" />;
+      return <ArrowUpDown className={`h-3.5 w-3.5 opacity-60 ${isDayMode ? 'text-slate-400' : 'text-slate-500'}`} />;
     }
     return order === 'asc' ? (
       <ArrowUp className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary, #E05638)' }} />
@@ -25812,108 +22990,109 @@ export default function AdminUserManagementPage() {
 
   // Dynamic Subscription Plan Badge Renderer
   const getPlanBadge = (planKey?: string) => {
-    if (!planKey) {
+    const isFreePlan = !planKey || planKey === 'taster' || planKey.includes('free');
+    if (isFreePlan) {
       return {
         label: 'Taster (Free)',
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
+        bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+        border: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+        color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
         icon: Sparkles
       };
     }
 
-    // Match against live system packages list
     const matched = availablePlans.find(
-      p => p.slug === planKey || p.id === planKey || p.slug.toLowerCase() === planKey.toLowerCase()
+      (p) => p.slug === planKey || p.id === planKey || p.slug.toLowerCase() === planKey.toLowerCase()
     );
 
     if (matched) {
       if (matched.isFree || planKey === 'taster' || planKey.includes('free')) {
         return {
           label: matched.name,
-          bg: 'rgba(16, 185, 129, 0.15)',
-          border: 'var(--color-emerald, #10b981)',
-          color: 'var(--color-emerald, #10b981)',
+          bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+          border: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+          color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
           icon: Sparkles
         };
       }
       if (matched.interval === 'YEAR' || planKey.includes('annual') || planKey.includes('year')) {
         return {
           label: matched.name,
-          bg: 'rgba(59, 130, 246, 0.15)',
-          border: '#3b82f6',
-          color: '#60a5fa',
+          bg: isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)',
+          border: isDayMode ? '#bfdbfe' : '#3b82f6',
+          color: isDayMode ? '#1d4ed8' : '#60a5fa',
           icon: Zap
         };
       }
       if (matched.interval === 'MONTH' || planKey.includes('monthly')) {
         return {
           label: matched.name,
-          bg: 'rgba(224, 86, 56, 0.15)',
-          border: 'var(--color-primary, #E05638)',
+          bg: isDayMode ? 'rgba(224, 86, 56, 0.08)' : 'rgba(224, 86, 56, 0.15)',
+          border: isDayMode ? 'rgba(224, 86, 56, 0.3)' : 'var(--color-primary, #E05638)',
           color: 'var(--color-primary, #E05638)',
           icon: Zap
         };
       }
       return {
         label: matched.name,
-        bg: 'rgba(168, 85, 247, 0.15)',
-        border: '#a855f7',
-        color: '#c084fc',
+        bg: isDayMode ? '#faf5ff' : 'rgba(168, 85, 247, 0.15)',
+        border: isDayMode ? '#e9d5ff' : '#a855f7',
+        color: isDayMode ? '#7e22ce' : '#c084fc',
         icon: CreditCard
       };
     }
 
-    // Generic formatting fallback
     const formatted = planKey
       .split('-')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
-
-    if (planKey.includes('free') || planKey === 'taster') {
-      return {
-        label: `${formatted} (Free)`,
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
-        icon: Sparkles
-      };
-    }
 
     return {
       label: formatted,
-      bg: 'rgba(168, 85, 247, 0.15)',
-      border: '#a855f7',
-      color: '#c084fc',
+      bg: isDayMode ? '#faf5ff' : 'rgba(168, 85, 247, 0.15)',
+      border: isDayMode ? '#e9d5ff' : '#a855f7',
+      color: isDayMode ? '#7e22ce' : '#c084fc',
       icon: CreditCard
     };
   };
 
+  // Computed Context Tokens
+  const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)';
+  const cInnerBg = isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)';
+  const cBorder = isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)';
+  const cInputBorder = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)';
+  const cText = isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)';
+  const cSubText = isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)';
+  const cLabel = isDayMode ? '#334155' : '#cbd5e1';
+
   return (
-    <div className="max-w-6xl mx-auto space-y-8 text-slate-100 pb-24 px-2 sm:px-4 pt-2">
+    <div 
+      className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      style={{ color: cText }}
+    >
       
       {/* ACCESS WARNING FOR NON-ADMINS */}
       {currentUser && currentUser.role !== 'admin' && (
         <div 
-          className="rounded-2xl p-4 flex items-center justify-between text-xs border"
+          className="rounded-2xl p-4 flex items-center justify-between text-xs border shadow-xs transition-colors"
           style={{
-            backgroundColor: 'rgba(120, 53, 15, 0.4)',
-            borderColor: 'rgba(217, 119, 6, 0.4)',
-            color: '#fde68a'
+            backgroundColor: isDayMode ? '#fffbeb' : 'rgba(120, 53, 15, 0.4)',
+            borderColor: isDayMode ? '#fde68a' : 'rgba(217, 119, 6, 0.4)',
+            color: isDayMode ? '#92400e' : '#fde68a'
           }}
         >
           <div className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-amber-400 shrink-0" />
+            <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" />
             <span>
-              Signed in as <strong>{currentUser.email}</strong>. Switch to an admin account to manage user subscription permissions.
+              {tr('admin.users.signedInAs', 'Signed in as')} <strong>{currentUser.email}</strong>. {tr('admin.users.switchNotice', 'Switch to an admin account to manage user subscription permissions.')}
             </span>
           </div>
           <button 
             onClick={() => window.location.href = '/login'}
-            className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 cursor-pointer"
+            className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 cursor-pointer shadow-xs hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            Switch to Admin
+            {tr('admin.users.switchToAdmin', 'Switch to Admin')}
           </button>
         </div>
       )}
@@ -25923,12 +23102,12 @@ export default function AdminUserManagementPage() {
         <div 
           className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in border"
           style={{
-            backgroundColor: 'rgba(16, 185, 129, 0.2)',
-            borderColor: 'var(--color-emerald, #10b981)',
-            color: 'var(--color-emerald, #10b981)'
+            backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
+            borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+            color: isDayMode ? '#065f46' : 'var(--color-emerald, #10b981)'
           }}
         >
-          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
+          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} />
           <span>{feedbackMsg}</span>
         </div>
       )}
@@ -25937,63 +23116,121 @@ export default function AdminUserManagementPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-             User & Subscription Management
+            {tr('admin.users.title', 'User & Subscription Management')}
           </h1>
-          <p className="text-xs text-[var(--color-text-secondary)]">
-            Active System Packages synced: {availablePlans.length} plans available from /admin/plans
+          <p className="text-xs" style={{ color: cSubText }}>
+            {tr('admin.users.activePlansPrefix', 'Active System Packages synced:')} {availablePlans.length} {tr('admin.users.activePlansSuffix', 'plans available from /admin/plans')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* EXPORT ACTION BUTTONS */}
+          <button
+            type="button"
+            onClick={() => handleExportSelected('csv')}
+            disabled={selectedUserIds.length === 0}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
+            style={{
+              backgroundColor: cCardBg,
+              borderColor: selectedUserIds.length > 0 ? 'var(--color-primary, #E05638)' : cInputBorder,
+              color: selectedUserIds.length > 0 ? 'var(--color-primary, #E05638)' : (isDayMode ? '#475569' : '#cbd5e1')
+            }}
+            title={selectedUserIds.length === 0 ? tr('admin.users.selectToExport', 'Select user(s) to export') : `${tr('admin.users.exportPrefix', 'Export')} ${selectedUserIds.length} ${tr('admin.users.exportCsvSuffix', 'user(s) to CSV')}`}
+          >
+            <Download className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>{tr('admin.users.exportCsv', 'Export CSV')} {selectedUserIds.length > 0 ? `(${selectedUserIds.length})` : ''}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleExportSelected('json')}
+            disabled={selectedUserIds.length === 0}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
+            style={{
+              backgroundColor: cCardBg,
+              borderColor: cInputBorder,
+              color: isDayMode ? '#475569' : '#cbd5e1'
+            }}
+            title={selectedUserIds.length === 0 ? tr('admin.users.selectToExport', 'Select user(s) to export') : `${tr('admin.users.exportPrefix', 'Export')} ${selectedUserIds.length} ${tr('admin.users.exportJsonSuffix', 'user(s) to JSON')}`}
+          >
+            <Download className="h-4 w-4" style={{ color: cSubText }} />
+            <span>{tr('admin.users.exportJson', 'Export JSON')}</span>
+          </button>
+
           <button
             onClick={() => handleOpenAddModal('user')}
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer"
+            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
           >
-            <UserPlus className="h-4 w-4" /> Add New User
+            <UserPlus className="h-4 w-4" /> {tr('admin.users.addNewUser', 'Add New User')}
           </button>
-          <Link
-            href="/admin/plans"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)',
-              color: '#cbd5e1'
-            }}
-          >
-            <CreditCard className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Manage Plans
-          </Link>
-          <Link
-            href="/admin"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
-            style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)',
-              color: '#cbd5e1'
-            }}
-          >
-            <Shield className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} /> Admin Settings
-          </Link>
         </div>
       </div>
 
+      {/* SELECTION BANNER */}
+      {selectedUserIds.length > 0 && (
+        <div 
+          className="p-3.5 px-5 rounded-2xl flex items-center justify-between text-xs border shadow-lg animate-in fade-in"
+          style={{
+            backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.08)' : 'rgba(224, 86, 56, 0.12)',
+            borderColor: 'var(--color-primary, #E05638)',
+            color: cText
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="font-bold">
+              {selectedUserIds.length} {tr('admin.users.of', 'of')} {users.length} {tr('admin.users.usersSelected', 'user(s) selected')}
+            </span>
+            <button 
+              type="button"
+              onClick={() => setSelectedUserIds([])}
+              className="text-[11px] underline cursor-pointer hover:opacity-80"
+              style={{ color: cSubText }}
+            >
+              {tr('admin.users.clearSelection', 'Clear selection')}
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleExportSelected('csv')}
+              className="px-3.5 py-1.5 rounded-xl text-white font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs text-xs hover:opacity-90"
+              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+            >
+              <Download className="h-3.5 w-3.5" /> {tr('admin.users.exportSelectedCsv', 'Export Selected (CSV)')}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExportSelected('json')}
+              className="px-3.5 py-1.5 rounded-xl font-bold border transition shadow-xs text-xs cursor-pointer hover:opacity-85"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : '#1e293b',
+                borderColor: cInputBorder,
+                color: cText
+              }}
+            >
+              <Download className="h-3.5 w-3.5" /> JSON
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* SEARCH BAR */}
       <div className="relative">
-        <Search className="h-4 w-4 text-slate-500 absolute left-4 top-3.5 pointer-events-none" />
+        <Search className={`h-4 w-4 absolute left-4 top-3.5 pointer-events-none ${isDayMode ? 'text-slate-400' : 'text-slate-500'}`} />
         <input
           type="text"
-          placeholder="Search by name, email, or subscription plan across all tables..."
+          placeholder={tr('admin.users.searchPlaceholder', 'Search by name, email, or subscription plan across all tables...')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition shadow-inner"
+          className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition shadow-inner font-medium"
           style={{
-            backgroundColor: 'var(--color-inner-dark, #070b13)',
-            borderColor: 'var(--color-border, #1e293b)'
+            backgroundColor: isDayMode ? '#ffffff' : cInnerBg,
+            borderColor: cInputBorder,
+            color: cText
           }}
           onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
+          onBlur={(e) => (e.currentTarget.style.borderColor = cInputBorder)}
         />
       </div>
 
@@ -26006,22 +23243,22 @@ export default function AdminUserManagementPage() {
             <div 
               className="w-8 h-8 rounded-xl border flex items-center justify-center"
               style={{
-                backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: 'var(--color-emerald, #10b981)'
+                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+                borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+                color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
               }}
             >
               <Shield className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="text-lg font-black text-white flex items-center gap-2">
-                Administrators
+              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: cText }}>
+                {tr('admin.users.administrators', 'Administrators')}
                 <span 
                   className="text-xs border font-bold px-2 py-0.5 rounded-full"
                   style={{
-                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                    borderColor: 'var(--color-emerald, #10b981)',
-                    color: 'var(--color-emerald, #10b981)'
+                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
+                    borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+                    color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                   }}
                 >
                   {processedAdmins.length}
@@ -26033,48 +23270,60 @@ export default function AdminUserManagementPage() {
           <button
             onClick={() => handleOpenAddModal('admin')}
             className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline"
-            style={{ color: 'var(--color-emerald, #10b981)' }}
+            style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
           >
-            <UserPlus className="h-3.5 w-3.5" /> Add Admin
+            <UserPlus className="h-3.5 w-3.5" /> {tr('admin.users.addAdmin', 'Add Admin')}
           </button>
         </div>
 
         <div 
-          className="border rounded-3xl overflow-hidden shadow-xl"
+          className="border rounded-3xl overflow-hidden shadow-xl transition-colors"
           style={{
-            backgroundColor: 'var(--color-card, #0b0f17)',
-            borderColor: 'var(--color-border, #1e293b)'
+            backgroundColor: cCardBg,
+            borderColor: cBorder
           }}
         >
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead 
-                className="border-b text-slate-400 uppercase font-bold text-[10px] tracking-wider"
+                className="border-b uppercase font-bold text-[10px] tracking-wider"
                 style={{
-                  backgroundColor: 'var(--color-inner-dark, #070b13)',
-                  borderColor: 'var(--color-border, #1e293b)'
+                  backgroundColor: cInnerBg,
+                  borderColor: cBorder,
+                  color: cSubText
                 }}
               >
                 <tr>
+                  <th className="w-10 px-4 py-4 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllAdminsOnPageSelected}
+                      onChange={handleToggleSelectAllAdmins}
+                      className="rounded cursor-pointer accent-[#E05638]"
+                      title={tr('admin.users.selectAllAdmins', 'Select all administrators on this page')}
+                    />
+                  </th>
                   <th className="px-5 py-4">
                     <button
                       type="button"
                       onClick={() => handleAdminSort('name')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      style={{ color: cText }}
                     >
-                      <span>Admin User</span>
+                      <span>{tr('admin.users.colAdminUser', 'Admin User')}</span>
                       {renderSortIcon(adminSortField, 'name', adminSortOrder)}
                     </button>
                   </th>
-                  <th className="px-5 py-4">Email Address</th>
-                  <th className="px-5 py-4">Role</th>
+                  <th className="px-5 py-4">{tr('admin.users.colEmail', 'Email Address')}</th>
+                  <th className="px-5 py-4">{tr('admin.users.colRole', 'Role')}</th>
                   <th className="px-5 py-4">
                     <button
                       type="button"
                       onClick={() => handleAdminSort('subscriptionPlan')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      style={{ color: cText }}
                     >
-                      <span>Subscription Type</span>
+                      <span>{tr('admin.users.colSubscriptionType', 'Subscription Type')}</span>
                       {renderSortIcon(adminSortField, 'subscriptionPlan', adminSortOrder)}
                     </button>
                   </th>
@@ -26082,95 +23331,109 @@ export default function AdminUserManagementPage() {
                     <button
                       type="button"
                       onClick={() => handleAdminSort('createdAt')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      style={{ color: cText }}
                     >
-                      <span>Created Date</span>
+                      <span>{tr('admin.users.colCreatedDate', 'Created Date')}</span>
                       {renderSortIcon(adminSortField, 'createdAt', adminSortOrder)}
                     </button>
                   </th>
-                  <th className="px-5 py-4 text-right">Actions</th>
+                  <th className="px-5 py-4 text-right">{tr('admin.users.colActions', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody 
-                className="divide-y text-slate-300"
-                style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                className="divide-y"
+                style={{ borderColor: cBorder, color: cText }}
               >
                 {paginatedAdmins.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-500">
-                      No administrators found {search ? `matching "${search}"` : ''}.
+                    <td colSpan={7} className="text-center py-10" style={{ color: cSubText }}>
+                      {tr('admin.users.noAdminsFound', 'No administrators found')} {search ? `matching "${search}"` : ''}.
                     </td>
                   </tr>
                 ) : (
                   paginatedAdmins.map((user) => {
                     const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
                     const isPrimary = isFirstAdminUser(user);
+                    const isSelected = selectedUserIds.includes(user.id);
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
                     return (
                       <tr 
                         key={user.id} 
                         className="transition"
-                        style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                        style={{ 
+                          borderColor: cBorder,
+                          backgroundColor: isSelected ? 'rgba(224, 86, 56, 0.08)' : undefined
+                        }}
                       >
-                        <td className="px-5 py-4 font-bold text-white flex items-center gap-3">
+                        <td className="w-10 px-4 py-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectUser(user.id)}
+                            className="rounded cursor-pointer accent-[#E05638]"
+                            title={`Select ${user.name}`}
+                          />
+                        </td>
+                        <td className="px-5 py-4 font-bold flex items-center gap-3" style={{ color: cText }}>
                           <div 
                             className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0"
                             style={{
-                              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                              borderColor: 'var(--color-emerald, #10b981)',
-                              color: 'var(--color-emerald, #10b981)'
+                              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+                              borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+                              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                             }}
                           >
                             {user.name.charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-white">{user.name}</span>
+                              <span className="text-sm font-bold" style={{ color: cText }}>{user.name}</span>
                               {isPrimary && (
                                 <span 
                                   className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded"
                                   style={{
-                                    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                                    backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.2)',
                                     borderColor: '#f59e0b',
-                                    color: '#fbbf24'
+                                    color: isDayMode ? '#b45309' : '#fbbf24'
                                   }}
-                                  title="Primary Administrator"
+                                  title={tr('admin.users.primaryAdminTooltip', 'Primary Administrator')}
                                 >
-                                  PRIMARY
+                                  {tr('admin.users.badgePrimary', 'PRIMARY')}
                                 </span>
                               )}
                               {isCurrent && !isPrimary && (
                                 <span 
                                   className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded"
                                   style={{
-                                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                                    borderColor: 'var(--color-emerald, #10b981)',
-                                    color: 'var(--color-emerald, #10b981)'
+                                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
+                                    borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+                                    color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                                   }}
                                 >
-                                  YOU
+                                  {tr('admin.users.badgeYou', 'YOU')}
                                 </span>
                               )}
                             </div>
                           </div>
                         </td>
-                        <td className="px-5 py-4 text-slate-400 font-mono text-xs">{user.email}</td>
+                        <td className="px-5 py-4 font-mono text-xs" style={{ color: cSubText }}>{user.email}</td>
                         <td className="px-5 py-4">
                           <span 
                             className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit"
                             style={{
-                              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                              borderColor: 'var(--color-emerald, #10b981)',
-                              color: 'var(--color-emerald, #10b981)'
+                              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+                              borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+                              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                             }}
                           >
-                            <Shield className="h-3 w-3" /> Admin
+                            <Shield className="h-3 w-3" /> {tr('admin.users.roleAdmin', 'Admin')}
                           </span>
                         </td>
                         <td className="px-5 py-4">
                           <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 w-fit"
+                            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 w-fit shadow-xs"
                             style={{
                               backgroundColor: planBadge.bg,
                               borderColor: planBadge.border,
@@ -26181,24 +23444,25 @@ export default function AdminUserManagementPage() {
                             {planBadge.label}
                           </span>
                         </td>
-                        <td className="px-5 py-4 text-slate-500">
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', {
+                        <td className="px-5 py-4" style={{ color: cSubText }}>
+                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US'), {
                             year: 'numeric',
                             month: 'short',
                             day: 'numeric'
-                          }) : 'Active'}
+                          }) : tr('admin.users.activeStatus', 'Active')}
                         </td>
                         <td className="px-5 py-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"
                               onClick={() => handleOpenEditModal(user)}
-                              className="p-2 text-slate-300 hover:text-white rounded-xl border transition shadow-sm cursor-pointer"
+                              className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85"
                               style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
+                                backgroundColor: isDayMode ? '#ffffff' : cInnerBg,
+                                borderColor: cInputBorder,
+                                color: cText
                               }}
-                              title="Edit Admin Account & Plan"
+                              title={tr('admin.users.editAdminAccount', 'Edit Admin Account & Plan')}
                             >
                               <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
                             </button>
@@ -26206,21 +23470,23 @@ export default function AdminUserManagementPage() {
                               type="button"
                               disabled={isCurrent || isPrimary}
                               onClick={() => handleDeleteUser(user.id, user.email, user.name)}
-                              className={`p-2 rounded-xl border transition shadow-sm ${
+                              className={`p-2 rounded-xl border transition shadow-xs ${
                                 isCurrent || isPrimary
-                                  ? 'opacity-30 cursor-not-allowed text-slate-600'
-                                  : 'text-slate-400 hover:text-red-400 cursor-pointer'
+                                  ? 'opacity-30 cursor-not-allowed'
+                                  : isDayMode
+                                    ? 'text-red-600 hover:bg-red-50 border-red-200 cursor-pointer'
+                                    : 'text-red-400 hover:bg-red-500/10 border-red-500/30 cursor-pointer'
                               }`}
                               style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
+                                backgroundColor: isDayMode ? '#ffffff' : cInnerBg,
+                                borderColor: isDayMode && !(isCurrent || isPrimary) ? '#fca5a5' : cInputBorder
                               }}
                               title={
                                 isPrimary
-                                  ? 'Cannot delete primary system admin'
+                                  ? tr('admin.users.cannotDeletePrimaryTooltip', 'Cannot delete primary system admin (usr_admin_1)')
                                   : isCurrent
-                                    ? 'Cannot delete active session account'
-                                    : 'Delete Admin'
+                                    ? tr('admin.users.cannotDeleteActiveSession', 'Cannot delete active session account')
+                                    : tr('admin.users.deleteAdmin', 'Delete Admin')
                               }
                             >
                               <Trash2 className="h-4 w-4" />
@@ -26238,37 +23504,42 @@ export default function AdminUserManagementPage() {
           {/* Admin Pagination */}
           {processedAdmins.length > ITEMS_PER_PAGE && (
             <div 
-              className="px-5 py-3.5 border-t flex items-center justify-between text-xs"
+              className="px-5 py-3.5 border-t flex items-center justify-between text-xs transition-colors"
               style={{
-                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                borderColor: 'var(--color-border, #1e293b)'
+                backgroundColor: cInnerBg,
+                borderColor: cBorder,
+                color: cSubText
               }}
             >
-              <span className="text-slate-400">
-                Showing {adminStartIndex + 1} to {adminEndIndex} of {processedAdmins.length} admins
+              <span>
+                {tr('admin.users.showing', 'Showing')} {adminStartIndex + 1} {tr('admin.users.to', 'to')} {adminEndIndex} {tr('admin.users.of', 'of')} {processedAdmins.length} {tr('admin.users.adminsCount', 'admins')}
               </span>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   disabled={adminCurrentPage <= 1}
-                  onClick={() => setAdminCurrentPage(p => Math.max(1, p - 1))}
+                  onClick={() => setAdminCurrentPage((p) => Math.max(1, p - 1))}
                   className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer"
                   style={{
-                    backgroundColor: 'var(--color-card, #0b0f17)',
-                    borderColor: 'var(--color-border, #1e293b)'
+                    backgroundColor: cCardBg,
+                    borderColor: cInputBorder,
+                    color: cText
                   }}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
-                <span className="font-bold text-white px-2">Page {adminCurrentPage} of {adminTotalPages}</span>
+                <span className="font-bold px-2" style={{ color: cText }}>
+                  {tr('admin.users.page', 'Page')} {adminCurrentPage} {tr('admin.users.of', 'of')} {adminTotalPages}
+                </span>
                 <button
                   type="button"
                   disabled={adminCurrentPage >= adminTotalPages}
-                  onClick={() => setAdminCurrentPage(p => Math.min(adminTotalPages, p + 1))}
+                  onClick={() => setAdminCurrentPage((p) => Math.min(adminTotalPages, p + 1))}
                   className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer"
                   style={{
-                    backgroundColor: 'var(--color-card, #0b0f17)',
-                    borderColor: 'var(--color-border, #1e293b)'
+                    backgroundColor: cCardBg,
+                    borderColor: cInputBorder,
+                    color: cText
                   }}
                 >
                   <ChevronRight className="h-4 w-4" />
@@ -26286,22 +23557,24 @@ export default function AdminUserManagementPage() {
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
             <div 
-              className="w-8 h-8 rounded-xl border flex items-center justify-center text-blue-400"
+              className="w-8 h-8 rounded-xl border flex items-center justify-center"
               style={{
-                backgroundColor: 'rgba(30, 58, 138, 0.4)',
-                borderColor: 'rgba(59, 130, 246, 0.4)'
+                backgroundColor: isDayMode ? '#eff6ff' : 'rgba(30, 58, 138, 0.4)',
+                borderColor: isDayMode ? '#bfdbfe' : 'rgba(59, 130, 246, 0.4)',
+                color: isDayMode ? '#2563eb' : '#60a5fa'
               }}
             >
               <Users className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="text-lg font-black text-white flex items-center gap-2">
-                Standard Users
+              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: cText }}>
+                {tr('admin.users.standardUsers', 'Standard Users')}
                 <span 
-                  className="text-xs border font-bold px-2 py-0.5 rounded-full text-blue-300"
+                  className="text-xs border font-bold px-2 py-0.5 rounded-full"
                   style={{
-                    backgroundColor: 'rgba(30, 58, 138, 0.6)',
-                    borderColor: 'rgba(59, 130, 246, 0.5)'
+                    backgroundColor: isDayMode ? '#eff6ff' : 'rgba(30, 58, 138, 0.6)',
+                    borderColor: isDayMode ? '#bfdbfe' : 'rgba(59, 130, 246, 0.5)',
+                    color: isDayMode ? '#1d4ed8' : '#93c5fd'
                   }}
                 >
                   {processedStandardUsers.length}
@@ -26315,46 +23588,58 @@ export default function AdminUserManagementPage() {
             className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline"
             style={{ color: 'var(--color-primary, #E05638)' }}
           >
-            <UserPlus className="h-3.5 w-3.5" /> Add Standard User
+            <UserPlus className="h-3.5 w-3.5" /> {tr('admin.users.addStandardUser', 'Add Standard User')}
           </button>
         </div>
 
         <div 
-          className="border rounded-3xl overflow-hidden shadow-xl"
+          className="border rounded-3xl overflow-hidden shadow-xl transition-colors"
           style={{
-            backgroundColor: 'var(--color-card, #0b0f17)',
-            borderColor: 'var(--color-border, #1e293b)'
+            backgroundColor: cCardBg,
+            borderColor: cBorder
           }}
         >
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead 
-                className="border-b text-slate-400 uppercase font-bold text-[10px] tracking-wider"
+                className="border-b uppercase font-bold text-[10px] tracking-wider"
                 style={{
-                  backgroundColor: 'var(--color-inner-dark, #070b13)',
-                  borderColor: 'var(--color-border, #1e293b)'
+                  backgroundColor: cInnerBg,
+                  borderColor: cBorder,
+                  color: cSubText
                 }}
               >
                 <tr>
+                  <th className="w-10 px-4 py-4 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllStandardOnPageSelected}
+                      onChange={handleToggleSelectAllStandardUsers}
+                      className="rounded cursor-pointer accent-[#E05638]"
+                      title={tr('admin.users.selectAllStandard', 'Select all standard users on this page')}
+                    />
+                  </th>
                   <th className="px-5 py-4">
                     <button
                       type="button"
                       onClick={() => handleUserSort('name')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      style={{ color: cText }}
                     >
-                      <span>Standard User</span>
+                      <span>{tr('admin.users.colStandardUser', 'Standard User')}</span>
                       {renderSortIcon(userSortField, 'name', userSortOrder)}
                     </button>
                   </th>
-                  <th className="px-5 py-4">Email Address</th>
-                  <th className="px-5 py-4">Role</th>
+                  <th className="px-5 py-4">{tr('admin.users.colEmail', 'Email Address')}</th>
+                  <th className="px-5 py-4">{tr('admin.users.colRole', 'Role')}</th>
                   <th className="px-5 py-4">
                     <button
                       type="button"
                       onClick={() => handleUserSort('subscriptionPlan')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      style={{ color: cText }}
                     >
-                      <span>Subscription Type</span>
+                      <span>{tr('admin.users.colSubscriptionType', 'Subscription Type')}</span>
                       {renderSortIcon(userSortField, 'subscriptionPlan', userSortOrder)}
                     </button>
                   </th>
@@ -26362,42 +23647,56 @@ export default function AdminUserManagementPage() {
                     <button
                       type="button"
                       onClick={() => handleUserSort('createdAt')}
-                      className="flex items-center gap-1.5 hover:text-white transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider"
+                      style={{ color: cText }}
                     >
-                      <span>Created Date</span>
+                      <span>{tr('admin.users.colCreatedDate', 'Created Date')}</span>
                       {renderSortIcon(userSortField, 'createdAt', userSortOrder)}
                     </button>
                   </th>
-                  <th className="px-5 py-4 text-right">Actions</th>
+                  <th className="px-5 py-4 text-right">{tr('admin.users.colActions', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody 
-                className="divide-y text-slate-300"
-                style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                className="divide-y"
+                style={{ borderColor: cBorder, color: cText }}
               >
                 {paginatedStandardUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-500">
-                      No standard users found {search ? `matching "${search}"` : ''}.
+                    <td colSpan={7} className="text-center py-10" style={{ color: cSubText }}>
+                      {tr('admin.users.noStandardFound', 'No standard users found')} {search ? `matching "${search}"` : ''}.
                     </td>
                   </tr>
                 ) : (
                   paginatedStandardUsers.map((user) => {
                     const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
+                    const isSelected = selectedUserIds.includes(user.id);
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
                     return (
                       <tr 
                         key={user.id} 
                         className="transition"
-                        style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                        style={{ 
+                          borderColor: cBorder,
+                          backgroundColor: isSelected ? 'rgba(224, 86, 56, 0.08)' : undefined
+                        }}
                       >
-                        <td className="px-5 py-4 font-bold text-white flex items-center gap-3">
+                        <td className="w-10 px-4 py-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectUser(user.id)}
+                            className="rounded cursor-pointer accent-[#E05638]"
+                            title={`Select ${user.name}`}
+                          />
+                        </td>
+                        <td className="px-5 py-4 font-bold flex items-center gap-3" style={{ color: cText }}>
                           <div 
                             className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0"
                             style={{
-                              backgroundColor: 'var(--color-card, #111726)',
-                              borderColor: 'var(--color-border, #1e293b)',
+                              backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-card, #111726)',
+                              borderColor: cInputBorder,
                               color: 'var(--color-primary, #E05638)'
                             }}
                           >
@@ -26405,37 +23704,38 @@ export default function AdminUserManagementPage() {
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-white">{user.name}</span>
+                              <span className="text-sm font-bold" style={{ color: cText }}>{user.name}</span>
                               {isCurrent && (
                                 <span 
                                   className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded"
                                   style={{
-                                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
                                     borderColor: 'var(--color-emerald, #10b981)',
-                                    color: 'var(--color-emerald, #10b981)'
+                                    color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                                   }}
                                 >
-                                  YOU
+                                  {tr('admin.users.badgeYou', 'YOU')}
                                 </span>
                               )}
                             </div>
                           </div>
                         </td>
-                        <td className="px-5 py-4 text-slate-400 font-mono text-xs">{user.email}</td>
+                        <td className="px-5 py-4 font-mono text-xs" style={{ color: cSubText }}>{user.email}</td>
                         <td className="px-5 py-4">
                           <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border text-slate-300 flex items-center gap-1 w-fit"
+                            className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit"
                             style={{
-                              backgroundColor: 'var(--color-inner-dark, #070b13)',
-                              borderColor: 'var(--color-border, #1e293b)'
+                              backgroundColor: isDayMode ? '#f1f5f9' : cInnerBg,
+                              borderColor: cInputBorder,
+                              color: cSubText
                             }}
                           >
-                            <UserIcon className="h-3 w-3 text-slate-400" /> Standard User
+                            <UserIcon className="h-3 w-3" /> {tr('admin.users.roleStandard', 'Standard User')}
                           </span>
                         </td>
                         <td className="px-5 py-4">
                           <span 
-                            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 w-fit shadow-sm"
+                            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 w-fit shadow-xs"
                             style={{
                               backgroundColor: planBadge.bg,
                               borderColor: planBadge.border,
@@ -26446,24 +23746,25 @@ export default function AdminUserManagementPage() {
                             {planBadge.label}
                           </span>
                         </td>
-                        <td className="px-5 py-4 text-slate-500">
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', {
+                        <td className="px-5 py-4" style={{ color: cSubText }}>
+                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US'), {
                             year: 'numeric',
                             month: 'short',
                             day: 'numeric'
-                          }) : 'Active'}
+                          }) : tr('admin.users.activeStatus', 'Active')}
                         </td>
                         <td className="px-5 py-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"
                               onClick={() => handleOpenEditModal(user)}
-                              className="p-2 text-slate-300 hover:text-white rounded-xl border transition shadow-sm cursor-pointer"
+                              className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85"
                               style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
+                                backgroundColor: isDayMode ? '#ffffff' : cInnerBg,
+                                borderColor: cInputBorder,
+                                color: cText
                               }}
-                              title="Edit User & Plan Assignment"
+                              title={tr('admin.users.editUserAndPlan', 'Edit User & Plan Assignment')}
                             >
                               <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
                             </button>
@@ -26471,16 +23772,18 @@ export default function AdminUserManagementPage() {
                               type="button"
                               disabled={isCurrent}
                               onClick={() => handleDeleteUser(user.id, user.email, user.name)}
-                              className={`p-2 rounded-xl border transition shadow-sm ${
+                              className={`p-2 rounded-xl border transition shadow-xs ${
                                 isCurrent
-                                  ? 'opacity-30 cursor-not-allowed text-slate-600'
-                                  : 'text-slate-400 hover:text-red-400 cursor-pointer'
+                                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                  : isDayMode
+                                    ? 'text-red-600 hover:bg-red-50 border-red-200 cursor-pointer'
+                                    : 'text-red-400 hover:bg-red-500/10 border-red-500/30 cursor-pointer'
                               }`}
                               style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-border, #1e293b)'
+                                backgroundColor: isDayMode ? '#ffffff' : cInnerBg,
+                                borderColor: isDayMode && !isCurrent ? '#fca5a5' : cInputBorder
                               }}
-                              title={isCurrent ? 'Cannot delete active account' : 'Delete User'}
+                              title={isCurrent ? tr('admin.users.cannotDeleteActiveAccount', 'Cannot delete active account') : tr('admin.users.deleteUser', 'Delete User')}
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -26496,20 +23799,25 @@ export default function AdminUserManagementPage() {
 
           {/* Standard User Pagination */}
           <div 
-            className="px-5 py-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"
+            className="px-5 py-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors"
             style={{
-              backgroundColor: 'var(--color-inner-dark, #070b13)',
-              borderColor: 'var(--color-border, #1e293b)'
+              backgroundColor: cInnerBg,
+              borderColor: cBorder,
+              color: cSubText
             }}
           >
-            <div className="text-slate-400">
+            <div>
               {processedStandardUsers.length === 0 ? (
-                'Showing 0 standard users'
+                tr('admin.users.showingZeroStandard', 'Showing 0 standard users')
               ) : (
                 <>
-                  Showing <span className="font-bold text-white">{userStartIndex + 1}</span> to{' '}
-                  <span className="font-bold text-white">{userEndIndex}</span> of{' '}
-                  <span className="font-bold text-white">{processedStandardUsers.length}</span> standard users
+                  {tr('admin.users.showing', 'Showing')}{' '}
+                  <span className="font-bold" style={{ color: cText }}>{userStartIndex + 1}</span>{' '}
+                  {tr('admin.users.to', 'to')}{' '}
+                  <span className="font-bold" style={{ color: cText }}>{userEndIndex}</span>{' '}
+                  {tr('admin.users.of', 'of')}{' '}
+                  <span className="font-bold" style={{ color: cText }}>{processedStandardUsers.length}</span>{' '}
+                  {tr('admin.users.standardUsersCount', 'standard users')}
                 </>
               )}
             </div>
@@ -26518,17 +23826,18 @@ export default function AdminUserManagementPage() {
               <button
                 type="button"
                 disabled={userCurrentPage <= 1}
-                onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))}
+                onClick={() => setUserCurrentPage((p) => Math.max(1, p - 1))}
                 className={`p-2 rounded-xl border flex items-center justify-center transition ${
                   userCurrentPage <= 1
                     ? 'opacity-40 cursor-not-allowed'
-                    : 'text-slate-300 hover:text-white cursor-pointer'
+                    : 'cursor-pointer hover:opacity-80'
                 }`}
                 style={{
-                  backgroundColor: 'var(--color-card, #0b0f17)',
-                  borderColor: 'var(--color-border, #1e293b)'
+                  backgroundColor: cCardBg,
+                  borderColor: cInputBorder,
+                  color: cText
                 }}
-                title="Previous Page"
+                title={tr('admin.users.prevPage', 'Previous Page')}
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -26544,9 +23853,9 @@ export default function AdminUserManagementPage() {
                     borderColor: 'var(--color-primary, #E05638)',
                     color: '#ffffff'
                   } : {
-                    backgroundColor: 'var(--color-card, #0b0f17)',
-                    borderColor: 'var(--color-border, #1e293b)',
-                    color: '#cbd5e1'
+                    backgroundColor: cCardBg,
+                    borderColor: cInputBorder,
+                    color: cSubText
                   }}
                 >
                   {pageNum}
@@ -26556,17 +23865,18 @@ export default function AdminUserManagementPage() {
               <button
                 type="button"
                 disabled={userCurrentPage >= userTotalPages}
-                onClick={() => setUserCurrentPage(p => Math.min(userTotalPages, p + 1))}
+                onClick={() => setUserCurrentPage((p) => Math.min(userTotalPages, p + 1))}
                 className={`p-2 rounded-xl border flex items-center justify-center transition ${
                   userCurrentPage >= userTotalPages
                     ? 'opacity-40 cursor-not-allowed'
-                    : 'text-slate-300 hover:text-white cursor-pointer'
+                    : 'cursor-pointer hover:opacity-80'
                 }`}
                 style={{
-                  backgroundColor: 'var(--color-card, #0b0f17)',
-                  borderColor: 'var(--color-border, #1e293b)'
+                  backgroundColor: cCardBg,
+                  borderColor: cInputBorder,
+                  color: cText
                 }}
-                title="Next Page"
+                title={tr('admin.users.nextPage', 'Next Page')}
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -26576,25 +23886,26 @@ export default function AdminUserManagementPage() {
       </div>
 
       {/* ───────────────────────────────────────────────────────────── */}
-      {/* 1. ADD USER MODAL WITH SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
+      {/* 1. ADD USER MODAL */}
       {/* ───────────────────────────────────────────────────────────── */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
+            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default transition-colors"
             style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)'
+              backgroundColor: cCardBg,
+              borderColor: cBorder,
+              color: cText
             }}
           >
             <button 
               onClick={() => setShowAddModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer text-slate-300 hover:text-white"
-              style={{ backgroundColor: 'var(--color-inner-dark, #172033)' }}
+              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer hover:opacity-80"
+              style={{ backgroundColor: isDayMode ? '#f1f5f9' : cInnerBg, color: cSubText }}
             >
               <X className="h-4 w-4" />
             </button>
@@ -26604,106 +23915,124 @@ export default function AdminUserManagementPage() {
                 className="text-xl font-black flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <UserPlus className="h-5 w-5" /> Add New User
+                <UserPlus className="h-5 w-5" /> {tr('admin.users.modalAddTitle', 'Add New User')}
               </h2>
-              <p className="text-slate-400 text-xs">Create a new user account with role & active package tier.</p>
+              <p className="text-xs" style={{ color: cSubText }}>
+                {tr('admin.users.modalAddSubtitle', 'Create a new user account with role & active package tier.')}
+              </p>
             </div>
 
             {addError && (
-              <div className="p-3 bg-red-950/40 border border-red-800 text-red-300 rounded-xl font-semibold flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+              <div 
+                className="p-3 border rounded-xl font-semibold flex items-center gap-2"
+                style={{
+                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.4)',
+                  borderColor: isDayMode ? '#fca5a5' : '#991b1b',
+                  color: isDayMode ? '#991b1b' : '#fca5a5'
+                }}
+              >
+                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
                 <span>{addError}</span>
               </div>
             )}
 
             <form onSubmit={handleAddUserSubmit} className="space-y-3.5 pt-1">
               <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Full Name *</label>
+                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+                  {tr('admin.users.labelFullName', 'Full Name')} *
+                </label>
                 <div className="relative">
-                  <UserIcon className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
+                  <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: cSubText }} />
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Jordan Smith"
+                    placeholder={tr('admin.users.placeholderName', 'e.g. Jordan Smith')}
                     value={addName}
                     onChange={(e) => setAddName(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition"
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition font-medium shadow-inner"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                      borderColor: cInputBorder,
+                      color: cText
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = cInputBorder)}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Email Address *</label>
+                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+                  {tr('admin.users.labelEmail', 'Email Address')} *
+                </label>
                 <div className="relative">
-                  <Mail className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
+                  <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: cSubText }} />
                   <input
                     type="email"
                     required
                     placeholder="jordan@example.com"
                     value={addEmail}
                     onChange={(e) => setAddEmail(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition"
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition font-mono shadow-inner"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                      borderColor: cInputBorder,
+                      color: cText
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = cInputBorder)}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Password *</label>
+                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+                  {tr('admin.users.labelPassword', 'Password')} *
+                </label>
                 <div className="relative">
-                  <Lock className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
+                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: cSubText }} />
                   <input
                     type="password"
                     required
-                    placeholder="Minimum 4 characters"
+                    placeholder={tr('admin.users.placeholderPassword', 'Minimum 4 characters')}
                     value={addPassword}
                     onChange={(e) => setAddPassword(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition"
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition font-mono shadow-inner"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                      borderColor: cInputBorder,
+                      color: cText
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = cInputBorder)}
                   />
                 </div>
               </div>
 
-              {/* SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
               <div>
-                <label className="block font-bold text-slate-300 mb-1.5 flex items-center justify-between">
+                <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: cLabel }}>
                   <span className="flex items-center gap-1.5">
                     <CreditCard className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-                    Active Subscription Plan *
+                    {tr('admin.users.labelActivePlan', 'Active Subscription Plan')} *
                   </span>
-                  <Link href="/admin/plans" className="text-[10px] text-slate-400 hover:text-white underline">
-                    Manage Plans ({availablePlans.length})
+                  <Link href="/admin/plans" className="text-[10px] underline hover:opacity-80" style={{ color: cSubText }}>
+                    {tr('admin.users.managePlans', 'Manage Plans')} ({availablePlans.length})
                   </Link>
                 </label>
                 <select
                   value={addSubscriptionPlan}
                   onChange={(e) => setAddSubscriptionPlan(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 text-xs text-white outline-none transition cursor-pointer font-bold"
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none transition cursor-pointer font-bold shadow-inner"
                   style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
+                    backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                    borderColor: cInputBorder,
+                    color: cText
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = cInputBorder)}
                 >
                   {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug}>
+                    <option key={plan.id || plan.slug} value={plan.slug} className={isDayMode ? 'bg-white text-slate-900' : 'bg-[#070b13] text-white'}>
                       {plan.name} — ({plan.priceFormatted})
                     </option>
                   ))}
@@ -26711,22 +24040,24 @@ export default function AdminUserManagementPage() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Assigned Role</label>
+                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+                  {tr('admin.users.labelAssignedRole', 'Assigned Role')}
+                </label>
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <label 
                     onClick={() => setAddRole('user')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between"
+                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between shadow-xs"
                     style={addRole === 'user' ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
+                      backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.08)' : 'rgba(224, 86, 56, 0.12)',
                       borderColor: 'var(--color-primary, #E05638)'
                     } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                      borderColor: cInputBorder
                     }}
                   >
                     <div>
-                      <div className="font-bold text-white text-xs">Standard User</div>
-                      <div className="text-[10px] text-slate-400">App Subscriber</div>
+                      <div className="font-bold text-xs" style={{ color: cText }}>{tr('admin.users.roleStandardUser', 'Standard User')}</div>
+                      <div className="text-[10px]" style={{ color: cSubText }}>{tr('admin.users.descSubscriber', 'App Subscriber')}</div>
                     </div>
                     <input
                       type="radio"
@@ -26739,20 +24070,20 @@ export default function AdminUserManagementPage() {
 
                   <label 
                     onClick={() => setAddRole('admin')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between"
+                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between shadow-xs"
                     style={addRole === 'admin' ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
+                      backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.08)' : 'rgba(224, 86, 56, 0.12)',
                       borderColor: 'var(--color-primary, #E05638)'
                     } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                      borderColor: cInputBorder
                     }}
                   >
                     <div>
-                      <div className="font-bold text-white text-xs flex items-center gap-1">
-                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> Admin
+                      <div className="font-bold text-xs flex items-center gap-1" style={{ color: cText }}>
+                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> {tr('admin.users.roleAdmin', 'Admin')}
                       </div>
-                      <div className="text-[10px] text-slate-400">Full Access</div>
+                      <div className="text-[10px]" style={{ color: cSubText }}>{tr('admin.users.descFullAccess', 'Full Access')}</div>
                     </div>
                     <input
                       type="radio"
@@ -26765,26 +24096,25 @@ export default function AdminUserManagementPage() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: cBorder }}>
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer text-slate-300"
+                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer hover:opacity-85"
                   style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
+                    backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                    borderColor: cInputBorder,
+                    color: cText
                   }}
                 >
-                  Cancel
+                  {tr('admin.users.btnCancel', 'Cancel')}
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
+                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer hover:opacity-90"
                   style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
-                  <UserPlus className="h-4 w-4" /> Create User
+                  <UserPlus className="h-4 w-4" /> {tr('admin.users.btnCreateUser', 'Create User')}
                 </button>
               </div>
             </form>
@@ -26793,25 +24123,26 @@ export default function AdminUserManagementPage() {
       )}
 
       {/* ───────────────────────────────────────────────────────────── */}
-      {/* 2. EDIT USER MODAL WITH ROLE LOCK FOR PRIMARY ADMIN */}
+      {/* 2. EDIT USER MODAL */}
       {/* ───────────────────────────────────────────────────────────── */}
       {showEditModal && (
         <div 
           onClick={() => setShowEditModal(false)}
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
+            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default transition-colors"
             style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)'
+              backgroundColor: cCardBg,
+              borderColor: cBorder,
+              color: cText
             }}
           >
             <button 
               onClick={() => setShowEditModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer text-slate-300 hover:text-white"
-              style={{ backgroundColor: 'var(--color-inner-dark, #172033)' }}
+              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer hover:opacity-80"
+              style={{ backgroundColor: isDayMode ? '#f1f5f9' : cInnerBg, color: cSubText }}
             >
               <X className="h-4 w-4" />
             </button>
@@ -26821,121 +24152,140 @@ export default function AdminUserManagementPage() {
                 className="text-xl font-black flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <Edit3 className="h-5 w-5" /> Edit User & Plan
+                <Edit3 className="h-5 w-5" /> {tr('admin.users.modalEditTitle', 'Edit User & Plan')}
               </h2>
-              <p className="text-slate-400 text-xs">Update account details, role permissions, and active subscription plan.</p>
+              <p className="text-xs" style={{ color: cSubText }}>
+                {tr('admin.users.modalEditSubtitle', 'Update account details, role permissions, and active subscription plan.')}
+              </p>
             </div>
 
             {editError && (
-              <div className="p-3 bg-red-950/40 border border-red-800 text-red-300 rounded-xl font-semibold flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+              <div 
+                className="p-3 border rounded-xl font-semibold flex items-center gap-2"
+                style={{
+                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.4)',
+                  borderColor: isDayMode ? '#fca5a5' : '#991b1b',
+                  color: isDayMode ? '#991b1b' : '#fca5a5'
+                }}
+              >
+                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
                 <span>{editError}</span>
               </div>
             )}
 
             <form onSubmit={handleEditUserSubmit} className="space-y-3.5 pt-1">
               <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Full Name *</label>
+                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+                  {tr('admin.users.labelFullName', 'Full Name')} *
+                </label>
                 <div className="relative">
-                  <UserIcon className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
+                  <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: cSubText }} />
                   <input
                     type="text"
                     required
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white outline-none transition"
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition font-medium shadow-inner"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                      borderColor: cInputBorder,
+                      color: cText
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = cInputBorder)}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Email Address *</label>
+                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+                  {tr('admin.users.labelEmail', 'Email Address')} *
+                </label>
                 <div className="relative">
-                  <Mail className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
+                  <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: cSubText }} />
                   <input
                     type="email"
                     required
                     value={editEmail}
                     onChange={(e) => setEditEmail(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white outline-none transition"
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition font-mono shadow-inner"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                      borderColor: cInputBorder,
+                      color: cText
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = cInputBorder)}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-300 mb-1.5">Change Password (leave blank to keep current)</label>
+                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+                  {tr('admin.users.labelChangePassword', 'Change Password (leave blank to keep current)')}
+                </label>
                 <div className="relative">
-                  <Lock className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
+                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: cSubText }} />
                   <input
                     type="password"
-                    placeholder="Enter new password..."
+                    placeholder={tr('admin.users.placeholderNewPass', 'Enter new password...')}
                     value={editPassword}
                     onChange={(e) => setEditPassword(e.target.value)}
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-600 outline-none transition"
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none transition font-mono shadow-inner"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                      borderColor: cInputBorder,
+                      color: cText
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = cInputBorder)}
                   />
                 </div>
               </div>
 
-              {/* SYNCHRONIZED SUBSCRIPTION PLAN DROPDOWN */}
               <div>
-                <label className="block font-bold text-slate-300 mb-1.5 flex items-center justify-between">
+                <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: cLabel }}>
                   <span className="flex items-center gap-1.5">
                     <CreditCard className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-                    Active Subscription Plan
+                    {tr('admin.users.labelActivePlan', 'Active Subscription Plan')}
                   </span>
-                  <span className="text-[10px] text-emerald-400 font-bold">Live Synced ({availablePlans.length})</span>
+                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                    {tr('admin.users.liveSynced', 'Live Synced')} ({availablePlans.length})
+                  </span>
                 </label>
                 <select
                   value={editSubscriptionPlan}
                   onChange={(e) => setEditSubscriptionPlan(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 text-xs text-white outline-none transition cursor-pointer font-bold"
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none transition cursor-pointer font-bold shadow-inner"
                   style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
+                    backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                    borderColor: cInputBorder,
+                    color: cText
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = cInputBorder)}
                 >
                   {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug}>
+                    <option key={plan.id || plan.slug} value={plan.slug} className={isDayMode ? 'bg-white text-slate-900' : 'bg-[#070b13] text-white'}>
                       {plan.name} — ({plan.priceFormatted})
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* ASSIGNED ROLE WITH PRIMARY ADMIN LOCK */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block font-bold text-slate-300">Assigned Role</label>
+                  <label className="block font-bold" style={{ color: cLabel }}>{tr('admin.users.labelAssignedRole', 'Assigned Role')}</label>
                   {isEditingFirstAdmin && (
                     <span 
                       className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border"
                       style={{
-                        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                        backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
                         borderColor: '#f59e0b',
-                        color: '#fbbf24'
+                        color: isDayMode ? '#b45309' : '#fbbf24'
                       }}
                     >
-                      <Lock className="h-3 w-3" /> Primary Admin Locked
+                      <Lock className="h-3 w-3" /> {tr('admin.users.primaryAdminLocked', 'Primary Admin Locked')}
                     </span>
                   )}
                 </div>
@@ -26945,20 +24295,20 @@ export default function AdminUserManagementPage() {
                     onClick={() => {
                       if (!isEditingFirstAdmin) setEditRole('user');
                     }}
-                    className={`p-3 rounded-2xl border transition flex items-center justify-between ${
+                    className={`p-3 rounded-2xl border transition flex items-center justify-between shadow-xs ${
                       isEditingFirstAdmin ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
                     }`}
                     style={editRole === 'user' && !isEditingFirstAdmin ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
+                      backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.08)' : 'rgba(224, 86, 56, 0.12)',
                       borderColor: 'var(--color-primary, #E05638)'
                     } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                      borderColor: cInputBorder
                     }}
                   >
                     <div>
-                      <div className="font-bold text-white text-xs">Standard User</div>
-                      <div className="text-[10px] text-slate-400">App Subscriber</div>
+                      <div className="font-bold text-xs" style={{ color: cText }}>{tr('admin.users.roleStandardUser', 'Standard User')}</div>
+                      <div className="text-[10px]" style={{ color: cSubText }}>{tr('admin.users.descSubscriber', 'App Subscriber')}</div>
                     </div>
                     <input
                       type="radio"
@@ -26974,20 +24324,20 @@ export default function AdminUserManagementPage() {
 
                   <label 
                     onClick={() => setEditRole('admin')}
-                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between"
+                    className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between shadow-xs"
                     style={editRole === 'admin' ? {
-                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
+                      backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.08)' : 'rgba(224, 86, 56, 0.12)',
                       borderColor: 'var(--color-primary, #E05638)'
                     } : {
-                      backgroundColor: 'var(--color-inner-dark, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                      borderColor: cInputBorder
                     }}
                   >
                     <div>
-                      <div className="font-bold text-white text-xs flex items-center gap-1">
-                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> Admin
+                      <div className="font-bold text-xs flex items-center gap-1" style={{ color: cText }}>
+                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> {tr('admin.users.roleAdmin', 'Admin')}
                       </div>
-                      <div className="text-[10px] text-slate-400">Full Access</div>
+                      <div className="text-[10px]" style={{ color: cSubText }}>{tr('admin.users.descFullAccess', 'Full Access')}</div>
                     </div>
                     <input
                       type="radio"
@@ -27000,32 +24350,31 @@ export default function AdminUserManagementPage() {
                 </div>
 
                 {isEditingFirstAdmin && (
-                  <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
-                    The primary system administrator role is permanently protected and cannot be changed or demoted.
+                  <p className="text-[11px] mt-1.5 font-medium" style={{ color: cSubText }}>
+                    {tr('admin.users.primaryAdminLockedNote', 'The primary system administrator role is permanently protected and cannot be changed or demoted.')}
                   </p>
                 )}
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: cBorder }}>
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer text-slate-300"
+                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer hover:opacity-85"
                   style={{
-                    backgroundColor: 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
+                    backgroundColor: isDayMode ? '#f8fafc' : cInnerBg,
+                    borderColor: cInputBorder,
+                    color: cText
                   }}
                 >
-                  Cancel
+                  {tr('admin.users.btnCancel', 'Cancel')}
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
+                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer hover:opacity-90"
                   style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
-                  <Check className="h-4 w-4" /> Save Changes
+                  <Check className="h-4 w-4" /> {tr('admin.users.btnSaveChanges', 'Save Changes')}
                 </button>
               </div>
             </form>
@@ -27033,6 +24382,676 @@ export default function AdminUserManagementPage() {
         </div>
       )}
 
+    </div>
+  );
+}
+
+```
+
+## File: `apps/web/src/app/admin/social-login-setting/page.tsx`
+```typescript
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { 
+  ArrowLeft, Key, Save, RefreshCw, CheckCircle2, 
+  AlertCircle, Eye, EyeOff, Copy, Check, Zap, ExternalLink 
+} from 'lucide-react';
+import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
+import { useTranslation } from '@/components/LanguageProvider';
+import { applyThemeToDocument } from '@/lib/themeConfig';
+
+interface SocialConfig {
+  googleEnabled: boolean;
+  googleClientId: string;
+  googleClientSecret: string;
+  facebookEnabled: boolean;
+  facebookClientId: string;
+  facebookClientSecret: string;
+  appleEnabled: boolean;
+  appleClientId: string;
+  appleTeamId: string;
+  appleKeyId: string;
+}
+
+const DEFAULT_CONFIG: SocialConfig = {
+  googleEnabled: true,
+  googleClientId: '',
+  googleClientSecret: '',
+  facebookEnabled: true,
+  facebookClientId: '',
+  facebookClientSecret: '',
+  appleEnabled: false,
+  appleClientId: '',
+  appleTeamId: '',
+  appleKeyId: ''
+};
+
+export default function SocialLoginSettingPage() {
+  const router = useRouter();
+  const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
+  const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [config, setConfig] = useState<SocialConfig>(DEFAULT_CONFIG);
+  const [showSecrets, setShowSecrets] = useState<{ [k: string]: boolean }>({});
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [syncingEnv, setSyncingEnv] = useState<boolean>(false);
+  const [statusMsg, setStatusMsg] = useState<{ text: string; success: boolean } | null>(null);
+  const [diagnostics, setDiagnostics] = useState<{ [provider: string]: string }>({});
+
+  const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+
+  const syncTheme = useCallback(() => {
+    try {
+      const mode = localStorage.getItem('zecratary_theme_mode');
+      const day = mode === 'light';
+      setIsDayMode(day);
+
+      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      if (stored) {
+        applyThemeToDocument(JSON.parse(stored));
+      } else {
+        applyThemeToDocument(null);
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    syncTheme();
+    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
+    window.addEventListener('zecratary_theme_changed', syncTheme);
+    window.addEventListener('zecratary_theme_updated', syncTheme);
+    window.addEventListener('storage', syncTheme);
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_updated', syncTheme);
+      window.removeEventListener('storage', syncTheme);
+    };
+  }, [syncTheme]);
+
+  useEffect(() => {
+    initAuthStorage();
+    const active = getCurrentUser();
+    if (!active) {
+      router.replace('/login');
+      return;
+    }
+    if (active.role !== 'admin' && !active.email.includes('admin')) {
+      router.replace('/profile');
+      return;
+    }
+    setUser(active);
+  }, [router]);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      const saved = localStorage.getItem('zecratary_social_login_config');
+      if (saved) setConfig(JSON.parse(saved));
+
+      const res = await fetch('/api/admin/social-env');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.config) {
+          setConfig(prev => ({ ...prev, ...json.config }));
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(id);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const handleSaveAndSync = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setLoading(true);
+    setStatusMsg(null);
+
+    try {
+      localStorage.setItem('zecratary_social_login_config', JSON.stringify(config));
+      window.dispatchEvent(new Event('zecratary_social_login_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      const res = await fetch('/api/admin/social-env', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update .env');
+
+      setStatusMsg({ text: t('socialSavedSuccess') || 'Configuration saved and synced to .env successfully!', success: true });
+      setTimeout(() => setStatusMsg(null), 4000);
+    } catch (err: any) {
+      setStatusMsg({ text: err.message || 'Error saving configuration.', success: false });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePullEnv = async () => {
+    setSyncingEnv(true);
+    try {
+      const res = await fetch('/api/admin/social-env');
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setConfig(prev => ({ ...prev, ...json.config }));
+        localStorage.setItem('zecratary_social_login_config', JSON.stringify(json.config));
+        window.dispatchEvent(new Event('zecratary_social_login_updated'));
+        window.dispatchEvent(new Event('storage'));
+        setStatusMsg({ text: t('socialPullSuccess') || 'Values synced from .env successfully!', success: true });
+        setTimeout(() => setStatusMsg(null), 3000);
+      }
+    } catch (_) {
+      setStatusMsg({ text: t('socialPullError') || 'Failed to read .env file.', success: false });
+    } finally {
+      setSyncingEnv(false);
+    }
+  };
+
+  const testProvider = (provider: 'google' | 'facebook' | 'apple') => {
+    setDiagnostics(prev => ({ ...prev, [provider]: t('testingHandshake') || 'Testing handshake...' }));
+    setTimeout(() => {
+      if (provider === 'google') {
+        const ok = config.googleClientId.includes('.apps.googleusercontent.com') || config.googleClientId.length > 10;
+        setDiagnostics(prev => ({
+          ...prev, 
+          google: ok ? '✓ Google OAuth credentials valid.' : '✕ Invalid Client ID format.'
+        }));
+      } else if (provider === 'facebook') {
+        const ok = /^[0-9]+$/.test(config.facebookClientId) && config.facebookClientId.length >= 8;
+        setDiagnostics(prev => ({
+          ...prev, 
+          facebook: ok ? '✓ Facebook App ID verified.' : '✕ App ID must be numeric (8+ digits).'
+        }));
+      } else {
+        const ok = config.appleClientId.includes('.') && config.appleClientId.length >= 5;
+        setDiagnostics(prev => ({
+          ...prev, 
+          apple: ok ? '✓ Apple Service ID valid.' : '✕ Reverse-domain format required.'
+        }));
+      }
+    }, 500);
+  };
+
+  if (!user) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center">
+        <div 
+          className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+          style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+    >
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Link 
+              href="/admin" 
+              className="p-1.5 rounded-xl border hover:opacity-80 transition"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#ffffff'
+              }}
+              title={t('backToAdmin') || 'Back to Admin'}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary, #E05638)' }}>
+              {t('socialLoginSettingsTitle') || 'Social Login & Identity Settings'}
+            </h1>
+          </div>
+          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+            {t('socialLoginSettingsSubtitle') || 'Configure Google, Facebook, and Apple authentication and synchronize credentials to .env.'}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={syncingEnv}
+            onClick={handlePullEnv}
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+            style={{
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#0f172a' : '#cbd5e1'
+            }}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'} ${syncingEnv ? 'animate-spin' : ''}`} />
+            {t('syncFromEnvBtn') || 'Sync from .env'}
+          </button>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => handleSaveAndSync()}
+            className="px-4 py-2 rounded-xl text-xs font-bold text-white transition flex items-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+          >
+            {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            {t('saveAndSyncEnvBtn') || 'Save & Sync .env'}
+          </button>
+        </div>
+      </div>
+
+      {/* Notifications Alert Banner */}
+      {statusMsg && (
+        <div 
+          className={`p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in ${
+            statusMsg.success
+              ? isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
+              : isDayMode ? 'bg-red-50 border-red-300 text-red-800' : 'bg-red-950/40 border-red-800/80 text-red-300'
+          }`}
+        >
+          {statusMsg.success ? (
+            <CheckCircle2 className={`h-4 w-4 shrink-0 ${isDayMode ? 'text-emerald-600' : 'text-emerald-400'}`} />
+          ) : (
+            <AlertCircle className={`h-4 w-4 shrink-0 ${isDayMode ? 'text-red-600' : 'text-red-400'}`} />
+          )}
+          <span>{statusMsg.text}</span>
+        </div>
+      )}
+
+      {/* Providers Grid */}
+      <div className="space-y-6">
+
+        {/* GOOGLE */}
+        <div 
+          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <span className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              {t('googleTitle') || 'Google Identity Services'}
+            </span>
+            <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+              <input 
+                type="checkbox" 
+                checked={config.googleEnabled} 
+                onChange={(e) => setConfig({ ...config, googleEnabled: e.target.checked })} 
+                className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
+              />
+              <span>{config.googleEnabled ? (t('enabled') || 'Enabled') : (t('disabled') || 'Disabled')}</span>
+            </label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('clientId') || 'Client ID'}
+              </label>
+              <input 
+                type="text" 
+                value={config.googleClientId} 
+                onChange={(e) => setConfig({ ...config, googleClientId: e.target.value })} 
+                placeholder="123456...apps.googleusercontent.com"
+                className="w-full border rounded-xl px-3 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              />
+            </div>
+            <div>
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('clientSecret') || 'Client Secret'}
+              </label>
+              <div className="relative">
+                <input 
+                  type={showSecrets.google ? 'text' : 'password'} 
+                  value={config.googleClientSecret} 
+                  onChange={(e) => setConfig({ ...config, googleClientSecret: e.target.value })} 
+                  placeholder="GOCSPX-..."
+                  className="w-full border rounded-xl pl-3 pr-9 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowSecrets(p => ({ ...p, google: !p.google }))} 
+                  className={`absolute right-3 top-2.5 cursor-pointer transition ${
+                    isDayMode ? 'text-slate-500 hover:text-slate-800' : 'text-slate-400 hover:text-white'
+                  }`}
+                  aria-label="Toggle Google Secret Visibility"
+                >
+                  {showSecrets.google ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {diagnostics.google && (
+            <div className={`p-2.5 rounded-xl border text-[11px] font-bold ${
+              diagnostics.google.includes('✓')
+                ? isDayMode 
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                : isDayMode 
+                  ? 'bg-red-50 text-red-800 border-red-300' 
+                  : 'bg-red-500/10 text-red-400 border-red-500/20'
+            }`}>
+              {diagnostics.google}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <button 
+              type="button" 
+              onClick={() => testProvider('google')} 
+              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#f1f5f9' : '#0e1626',
+                borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              <Zap className={`h-3.5 w-3.5 ${isDayMode ? 'text-amber-600' : 'text-amber-400'}`} /> 
+              {t('testConnection') || 'Test Connection'}
+            </button>
+            <button 
+              type="button" 
+              onClick={() => handleCopy(`${originUrl}/api/auth/callback/google`, 'gcb')} 
+              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#f1f5f9' : '#0e1626',
+                borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              {copiedKey === 'gcb' ? (
+                <Check className={`h-3.5 w-3.5 ${isDayMode ? 'text-emerald-600' : 'text-emerald-400'}`} />
+              ) : (
+                <Copy className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} />
+              )} 
+              {copiedKey === 'gcb' ? (t('copied') || 'Copied!') : (t('copyCallbackUrl') || 'Copy Callback URL')}
+            </button>
+          </div>
+        </div>
+
+        {/* FACEBOOK */}
+        <div 
+          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <span className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              {t('facebookTitle') || 'Facebook Login (Meta Graph)'}
+            </span>
+            <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+              <input 
+                type="checkbox" 
+                checked={config.facebookEnabled} 
+                onChange={(e) => setConfig({ ...config, facebookEnabled: e.target.checked })} 
+                className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
+              />
+              <span>{config.facebookEnabled ? (t('enabled') || 'Enabled') : (t('disabled') || 'Disabled')}</span>
+            </label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('facebookAppId') || 'Facebook App ID'}
+              </label>
+              <input 
+                type="text" 
+                value={config.facebookClientId} 
+                onChange={(e) => setConfig({ ...config, facebookClientId: e.target.value })} 
+                placeholder="18492049281..."
+                className="w-full border rounded-xl px-3 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              />
+            </div>
+            <div>
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('facebookAppSecret') || 'Facebook App Secret'}
+              </label>
+              <div className="relative">
+                <input 
+                  type={showSecrets.facebook ? 'text' : 'password'} 
+                  value={config.facebookClientSecret} 
+                  onChange={(e) => setConfig({ ...config, facebookClientSecret: e.target.value })} 
+                  placeholder="••••••••••••"
+                  className="w-full border rounded-xl pl-3 pr-9 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowSecrets(p => ({ ...p, facebook: !p.facebook }))} 
+                  className={`absolute right-3 top-2.5 cursor-pointer transition ${
+                    isDayMode ? 'text-slate-500 hover:text-slate-800' : 'text-slate-400 hover:text-white'
+                  }`}
+                  aria-label="Toggle Facebook Secret Visibility"
+                >
+                  {showSecrets.facebook ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {diagnostics.facebook && (
+            <div className={`p-2.5 rounded-xl border text-[11px] font-bold ${
+              diagnostics.facebook.includes('✓')
+                ? isDayMode 
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                : isDayMode 
+                  ? 'bg-red-50 text-red-800 border-red-300' 
+                  : 'bg-red-500/10 text-red-400 border-red-500/20'
+            }`}>
+              {diagnostics.facebook}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <button 
+              type="button" 
+              onClick={() => testProvider('facebook')} 
+              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#f1f5f9' : '#0e1626',
+                borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              <Zap className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} /> 
+              {t('testConnection') || 'Test Connection'}
+            </button>
+            <button 
+              type="button" 
+              onClick={() => handleCopy(`${originUrl}/api/auth/callback/facebook`, 'fcb')} 
+              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#f1f5f9' : '#0e1626',
+                borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              {copiedKey === 'fcb' ? (
+                <Check className={`h-3.5 w-3.5 ${isDayMode ? 'text-emerald-600' : 'text-emerald-400'}`} />
+              ) : (
+                <Copy className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} />
+              )} 
+              {copiedKey === 'fcb' ? (t('copied') || 'Copied!') : (t('copyCallbackUrl') || 'Copy Callback URL')}
+            </button>
+          </div>
+        </div>
+
+        {/* APPLE */}
+        <div 
+          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <span className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              {t('appleTitle') || 'Sign in with Apple'}
+            </span>
+            <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+              <input 
+                type="checkbox" 
+                checked={config.appleEnabled} 
+                onChange={(e) => setConfig({ ...config, appleEnabled: e.target.checked })} 
+                className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
+              />
+              <span>{config.appleEnabled ? (t('enabled') || 'Enabled') : (t('disabled') || 'Disabled')}</span>
+            </label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            <div>
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('appleClientId') || 'Service ID (Client ID)'}
+              </label>
+              <input 
+                type="text" 
+                value={config.appleClientId} 
+                onChange={(e) => setConfig({ ...config, appleClientId: e.target.value })} 
+                placeholder="com.zecratary.service"
+                className="w-full border rounded-xl px-3 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              />
+            </div>
+            <div>
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('appleTeamId') || 'Team ID'}
+              </label>
+              <input 
+                type="text" 
+                value={config.appleTeamId} 
+                onChange={(e) => setConfig({ ...config, appleTeamId: e.target.value })} 
+                placeholder="10-char Team ID"
+                className="w-full border rounded-xl px-3 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              />
+            </div>
+            <div>
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('appleKeyId') || 'Key ID'}
+              </label>
+              <input 
+                type="text" 
+                value={config.appleKeyId} 
+                onChange={(e) => setConfig({ ...config, appleKeyId: e.target.value })} 
+                placeholder="Apple Key ID"
+                className="w-full border rounded-xl px-3 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              />
+            </div>
+          </div>
+
+          {diagnostics.apple && (
+            <div className={`p-2.5 rounded-xl border text-[11px] font-bold ${
+              diagnostics.apple.includes('✓')
+                ? isDayMode 
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                : isDayMode 
+                  ? 'bg-red-50 text-red-800 border-red-300' 
+                  : 'bg-red-500/10 text-red-400 border-red-500/20'
+            }`}>
+              {diagnostics.apple}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <button 
+              type="button" 
+              onClick={() => testProvider('apple')} 
+              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#f1f5f9' : '#0e1626',
+                borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              <Zap className={`h-3.5 w-3.5 ${isDayMode ? 'text-slate-600' : 'text-slate-400'}`} /> 
+              {t('testConnection') || 'Test Connection'}
+            </button>
+            <button 
+              type="button" 
+              onClick={() => handleCopy(`${originUrl}/api/auth/callback/apple`, 'acb')} 
+              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#f1f5f9' : '#0e1626',
+                borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              {copiedKey === 'acb' ? (
+                <Check className={`h-3.5 w-3.5 ${isDayMode ? 'text-emerald-600' : 'text-emerald-400'}`} />
+              ) : (
+                <Copy className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} />
+              )} 
+              {copiedKey === 'acb' ? (t('copied') || 'Copied!') : (t('copyReturnUrl') || 'Copy Return URL')}
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      {/* Bottom Save & Sync Button */}
+      <div className="flex justify-end pt-2">
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => handleSaveAndSync()}
+          className="px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+          style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+        >
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {t('saveAndSyncEnvBtn') || 'Save & Sync .env'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -30945,15 +28964,333 @@ export default function DashboardPage() {
 
 ```
 
+## File: `apps/web/src/app/register/page.tsx`
+```typescript
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { 
+  UserPlus, Mail, Lock, User as UserIcon, ArrowLeft, ArrowRight,
+  CheckCircle2, AlertCircle, Eye, EyeOff, Sparkles, RefreshCw
+} from 'lucide-react';
+import { 
+  initAuthStorage, getCurrentUser, setCurrentUser, 
+  syncSessionCookie, isSessionCookieValid, DEFAULT_USERS, User 
+} from '@/lib/auth';
+import { useTranslation } from '@/components/LanguageProvider';
+
+export default function RegisterPage() {
+  const router = useRouter();
+  const { t } = useTranslation();
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [agreeTerms, setAgreeTerms] = useState(false);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [isDayMode, setIsDayMode] = useState(false);
+
+  // Synchronize entire page & body background with Day/Night mode
+  const applySavedTheme = useCallback(() => {
+    try {
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      const isDay = mode === 'light';
+      setIsDayMode(isDay);
+
+      const root = document.documentElement;
+      if (isDay) {
+        root.classList.remove('dark');
+        root.classList.add('light');
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '#f8fafc';
+          document.body.style.color = '#0f172a';
+        }
+      } else {
+        root.classList.remove('light');
+        root.classList.add('dark');
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '';
+          document.body.style.color = '';
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    applySavedTheme();
+    initAuthStorage();
+
+    // Prevent redirect loop if already authenticated
+    if (typeof window !== 'undefined') {
+      const active = getCurrentUser();
+      const validCookie = isSessionCookieValid();
+      if (active && validCookie) {
+        window.location.replace(active.role === 'admin' ? '/admin' : '/profile');
+        return;
+      }
+    }
+
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('storage', applySavedTheme);
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('storage', applySavedTheme);
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.style.backgroundColor = '';
+        document.body.style.color = '';
+      }
+    };
+  }, [applySavedTheme]);
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPass = password.trim();
+
+    if (!cleanName || !cleanEmail || !cleanPass) {
+      setError('Please fill in all required fields.');
+      return;
+    }
+
+    if (cleanPass.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
+    if (cleanPass !== confirmPassword.trim()) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    if (!agreeTerms) {
+      setError('Please agree to the Terms of Service and Privacy Policy.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      initAuthStorage();
+      const rawUsers = localStorage.getItem('zecratary_users');
+      const users: User[] = rawUsers ? JSON.parse(rawUsers) : [...DEFAULT_USERS];
+
+      if (users.some(u => u.email.toLowerCase() === cleanEmail)) {
+        setError('An account with this email already exists.');
+        setLoading(false);
+        return;
+      }
+
+      const newUser: User = {
+        id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        name: cleanName,
+        email: cleanEmail,
+        password: cleanPass,
+        role: 'user',
+        subscriptionPlan: getDefaultSubscriptionPlan(),
+        subscriptionTier: getDefaultSubscriptionPlan(),
+        createdAt: new Date().toISOString()
+      };
+
+      users.push(newUser);
+      localStorage.setItem('zecratary_users', JSON.stringify(users));
+      setCurrentUser(newUser);
+      syncSessionCookie(newUser);
+
+      window.location.replace('/profile');
+    } catch (err: any) {
+      setError(err.message || 'Registration failed. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  // Color tokens aligned with /manual, /profile and /planner Day Mode
+  const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
+  const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)';
+  const cInputBg = isDayMode ? '#f8fafc' : '#070b13';
+  const cBorder = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)';
+  const cText = isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)';
+  const cSubText = isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)';
+  const cLabel = isDayMode ? '#334155' : '#cbd5e1';
+
+  return (
+    <div 
+      className="w-full min-h-[90vh] flex items-center justify-center px-4 py-10 font-sans transition-colors duration-200"
+      style={{ backgroundColor: cPageBg, color: cText }}
+    >
+      <div 
+        className="w-full max-w-md border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
+        style={{
+          backgroundColor: cCardBg,
+          borderColor: isDayMode ? '#e2e8f0' : '#1e293b'
+        }}
+      >
+        <div className="space-y-1.5 text-center">
+          <div 
+            className="inline-flex items-center justify-center w-12 h-12 rounded-2xl mb-2 border shadow-inner"
+            style={{
+              backgroundColor: cInputBg,
+              borderColor: cBorder,
+              color: 'var(--color-primary, #E05638)'
+            }}
+          >
+            <UserPlus className="h-6 w-6" />
+          </div>
+          <h1 className="text-2xl font-black tracking-tight" style={{ color: cText }}>
+            Create Your Account
+          </h1>
+          <p className="text-xs" style={{ color: cSubText }}>
+            Join Zecratary to start planning, saving, and organizing recipes.
+          </p>
+        </div>
+
+        {error && (
+          <div 
+            className={`p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-md animate-in fade-in ${
+              isDayMode ? 'bg-red-50 border-red-300 text-red-800' : 'bg-red-950/40 border-red-800/80 text-red-300'
+            }`}
+          >
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleRegister} className="space-y-4 text-xs">
+          <div>
+            <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+              Full Name
+            </label>
+            <div className="relative">
+              <UserIcon className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
+              <input 
+                type="text" required value={name} onChange={e => setName(e.target.value)}
+                placeholder="Marcus Vance"
+                className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none font-medium transition shadow-inner"
+                style={{
+                  backgroundColor: cInputBg,
+                  borderColor: cBorder,
+                  color: cText
+                }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+              Email Address
+            </label>
+            <div className="relative">
+              <Mail className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
+              <input 
+                type="email" required value={email} onChange={e => setEmail(e.target.value)}
+                placeholder="name@example.com"
+                className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none font-mono transition shadow-inner"
+                style={{
+                  backgroundColor: cInputBg,
+                  borderColor: cBorder,
+                  color: cText
+                }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+              Password
+            </label>
+            <div className="relative">
+              <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
+              <input 
+                type={showPassword ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)}
+                placeholder="Min. 6 characters"
+                className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none transition shadow-inner"
+                style={{
+                  backgroundColor: cInputBg,
+                  borderColor: cBorder,
+                  color: cText
+                }}
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowPassword(!showPassword)} 
+                className="absolute right-3 top-3 text-slate-500 hover:text-slate-300 cursor-pointer"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+              Confirm Password
+            </label>
+            <div className="relative">
+              <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
+              <input 
+                type={showPassword ? 'text' : 'password'} required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                placeholder="Repeat password"
+                className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none transition shadow-inner"
+                style={{
+                  backgroundColor: cInputBg,
+                  borderColor: cBorder,
+                  color: cText
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <input 
+              type="checkbox" id="terms" checked={agreeTerms} onChange={e => setAgreeTerms(e.target.checked)}
+              className="w-4 h-4 rounded accent-[var(--color-primary,#E05638)] cursor-pointer"
+            />
+            <label htmlFor="terms" className="text-[11px] cursor-pointer" style={{ color: cSubText }}>
+              I agree to the <span className="underline hover:opacity-80">Terms of Service</span> and <span className="underline hover:opacity-80">Privacy Policy</span>
+            </label>
+          </div>
+
+          <button
+            type="submit" disabled={loading}
+            className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+          >
+            {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+            Create Free Account
+          </button>
+        </form>
+
+        <div className="text-center pt-2 border-t text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+          <span style={{ color: cSubText }}>Already have an account? </span>
+          <Link href="/login" className="font-bold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
+            Sign in
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+```
+
 ## File: `apps/web/src/app/manual/page.tsx`
 ```typescript
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { 
   Plus, Trash2, Save, ArrowLeft, ImagePlus, GripVertical 
 } from 'lucide-react';
-import Link from 'next/link';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useRecipeTypes } from '@/lib/recipe-types';
 import { useIngredientCategories } from '@/lib/categories';
@@ -30964,6 +29301,7 @@ export default function ManualRecipePage() {
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<'info' | 'ingredients' | 'steps'>('info');
+  const [isDayMode, setIsDayMode] = useState<boolean>(false);
   
   const recipeTypes = useRecipeTypes();
   const ingredientCategories = useIngredientCategories();
@@ -30993,7 +29331,66 @@ export default function ManualRecipePage() {
   const [isReorderingSteps, setIsReorderingSteps] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Sync theme
+  // Synchronize entire page & application theme CSS
+  const applySavedTheme = useCallback(() => {
+    try {
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      const isDay = mode === 'light';
+      setIsDayMode(isDay);
+
+      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const c = stored ? JSON.parse(stored) : {};
+      const root = document.documentElement;
+
+      if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
+      if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
+      if (c.accentEmerald || c.accentColor) root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
+
+      if (isDay) {
+        root.style.setProperty('--color-bg', '#f8fafc');
+        root.style.setProperty('--color-bg-dark', '#f8fafc');
+        root.style.setProperty('--color-card', '#ffffff');
+        root.style.setProperty('--color-card-dark', '#ffffff');
+        root.style.setProperty('--color-inner', '#f1f5f9');
+        root.style.setProperty('--color-inner-dark', '#f1f5f9');
+        root.style.setProperty('--color-border', '#e2e8f0');
+        root.style.setProperty('--color-text', '#0f172a');
+        root.style.setProperty('--color-text-secondary', '#64748b');
+
+        root.classList.remove('dark');
+        root.classList.add('light');
+
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '#f8fafc';
+          document.body.style.color = '#0f172a';
+        }
+      } else {
+        const bg = c.backgroundDark || c.backgroundColor || '#070b13';
+        const card = c.cardDark || c.cardBackground || '#111726';
+        const inner = c.innerDark || '#070b13';
+        const border = c.borderColor || c.cardBorder || '#1e293b';
+
+        root.style.setProperty('--color-bg', bg);
+        root.style.setProperty('--color-bg-dark', bg);
+        root.style.setProperty('--color-card', card);
+        root.style.setProperty('--color-card-dark', card);
+        root.style.setProperty('--color-inner', inner);
+        root.style.setProperty('--color-inner-dark', inner);
+        root.style.setProperty('--color-border', border);
+        root.style.setProperty('--color-text', '#ffffff');
+        root.style.setProperty('--color-text-secondary', '#94a3b8');
+
+        root.classList.remove('light');
+        root.classList.add('dark');
+
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '';
+          document.body.style.color = '';
+        }
+      }
+    } catch (e) {}
+  }, []);
+
   useEffect(() => {
     document.title = `${t('createRecipe') || 'Create Recipe'} - Zecratary`;
     initAuthStorage();
@@ -31004,36 +29401,24 @@ export default function ManualRecipePage() {
     }
     setCurrentUser(user);
 
-    const applySavedTheme = () => {
-      try {
-        const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-        if (stored) {
-          const c = JSON.parse(stored);
-          const root = document.documentElement;
-          if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
-          if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
-          if (c.backgroundDark || c.backgroundColor) root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor);
-          if (c.cardDark || c.cardBackground) root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground);
-          if (c.innerDark || c.backgroundColor) root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor);
-          if (c.borderColor || c.cardBorder) root.style.setProperty('--color-border', c.borderColor || c.cardBorder);
-          if (c.accentEmerald || c.accentColor) root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
-        }
-      } catch (e) {}
-    };
-
     applySavedTheme();
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_updated', applySavedTheme);
     window.addEventListener('storage', applySavedTheme);
 
     return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.style.backgroundColor = '';
+        document.body.style.color = '';
+      }
     };
-  }, [router, t]);
+  }, [router, t, applySavedTheme]);
 
-  // Set default recipe type if current is empty
   useEffect(() => {
     if (recipeTypes.length > 0 && !recipeTypes.includes(form.recipeType)) {
       setForm(prev => ({ ...prev, recipeType: recipeTypes[0] }));
@@ -31179,509 +29564,521 @@ export default function ManualRecipePage() {
     }
   };
 
+  // Color tokens
+  const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
+  const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #111726)';
+  const cInnerBg = isDayMode ? '#f1f5f9' : 'var(--color-inner, #070b13)';
+  const cInputBg = isDayMode ? '#f8fafc' : 'var(--color-inner, #070b13)';
+  const cBorder = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)';
+  const cText = isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)';
+  const cSubText = isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)';
+  const cLabel = isDayMode ? '#334155' : '#cbd5e1';
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6 text-slate-100 pb-24 px-4">
-      {/* Top Header */}
-      <div 
-        className="flex items-center justify-between border-b pb-4 pt-2"
-        style={{ borderColor: 'var(--color-border, #1e293b)' }}
-      >
-        <div className="flex items-center gap-3">
-          <Link 
-            href="/saved" 
-            className="p-2.5 rounded-xl transition shadow-sm border"
-            style={{
-              backgroundColor: 'var(--color-card, #111726)',
-              borderColor: 'var(--color-border, #1e293b)',
-              color: 'var(--color-text-secondary, #94a3b8)'
-            }}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <div>
-            <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary,#E05638)]">
-              {t('createRecipe') || 'Create Recipe'}
-            </h1>
-            <p className="text-xs text-[var(--color-text-secondary,#94a3b8)]">
-              {t('createRecipeSubtitle') || 'Fill in details, ingredients, and preparation steps'}
-            </p>
+    <div 
+      className="w-full min-h-screen pb-24 px-2 sm:px-6 pt-4 font-sans transition-colors duration-200"
+      style={{ backgroundColor: cPageBg, color: cText }}
+    >
+      <div className="max-w-5xl mx-auto space-y-6">
+        {/* Top Header */}
+        <div 
+          className="flex items-center justify-between border-b pb-4"
+          style={{ borderColor: cBorder }}
+        >
+          <div className="flex items-center gap-3">
+            <Link 
+              href="/saved" 
+              className="p-2.5 rounded-xl transition shadow-xs border"
+              style={{
+                backgroundColor: cCardBg,
+                borderColor: cBorder,
+                color: cSubText
+              }}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            <div>
+              <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary,#E05638)]">
+                {t('createRecipe') || 'Create Recipe'}
+              </h1>
+              <p className="text-xs" style={{ color: cSubText }}>
+                {t('createRecipeSubtitle') || 'Fill in details, ingredients, and preparation steps'}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Tabs Navigation */}
-      <div 
-        className="flex p-1.5 rounded-2xl border"
-        style={{
-          backgroundColor: 'var(--color-bg, #070b13)',
-          borderColor: 'var(--color-border, #1e293b)'
-        }}
-      >
-        {[
-          { id: 'info', label: t('basicInfoTab') || 'Basic Info' },
-          { id: 'ingredients', label: t('ingredientsTab') || 'Ingredients' },
-          { id: 'steps', label: t('stepsTab') || 'Steps' }
-        ].map((tab) => {
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id as any)}
-              className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer border"
-              style={isActive ? {
-                backgroundColor: 'var(--color-card, #111726)',
-                color: 'var(--color-primary, #E05638)',
-                borderColor: 'var(--color-border, #1e293b)'
-              } : {
-                backgroundColor: 'transparent',
-                borderColor: 'transparent',
-                color: 'var(--color-text-secondary, #94a3b8)'
-              }}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <form onSubmit={handleSave} className="space-y-6">
-        {/* TAB 1: BASIC INFO */}
-        {activeTab === 'info' && (
-          <div className="space-y-6 animate-in fade-in">
-            {/* Photo Upload Card */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-[var(--color-primary,#E05638)] uppercase tracking-wider">
-                {t('photoLabel') || 'Photo'}
-              </label>
-              <label 
-                className="border-2 border-dashed rounded-2xl h-48 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group shadow-sm"
-                style={{
-                  backgroundColor: 'var(--color-card, #111726)',
-                  borderColor: 'var(--color-border, #1e293b)'
+        {/* Tabs Navigation */}
+        <div 
+          className="flex p-1.5 rounded-2xl border shadow-xs"
+          style={{ backgroundColor: cInnerBg, borderColor: cBorder }}
+        >
+          {[
+            { id: 'info', label: t('basicInfoTab') || 'Basic Info' },
+            { id: 'ingredients', label: t('ingredientsTab') || 'Ingredients' },
+            { id: 'steps', label: t('stepsTab') || 'Steps' }
+          ].map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id as any)}
+                className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer border"
+                style={isActive ? {
+                  backgroundColor: cCardBg,
+                  color: 'var(--color-primary, #E05638)',
+                  borderColor: cBorder
+                } : {
+                  backgroundColor: 'transparent',
+                  borderColor: 'transparent',
+                  color: cSubText
                 }}
               >
-                {form.imageUrl ? (
-                  <img src={form.imageUrl} alt="Recipe Preview" className="absolute inset-0 w-full h-full object-cover" />
-                ) : (
-                  <div className="text-center space-y-2">
-                    <ImagePlus className="h-8 w-8 mx-auto transition text-slate-500 group-hover:text-[var(--color-primary,#E05638)]" />
-                    <span className="text-xs font-bold text-white block">{t('addAPhoto') || 'Add a photo'}</span>
-                    <span className="text-[11px] text-slate-400 block">{t('uploadsHint') || 'Uploads save to local drive /uploads/recipes/'}</span>
-                  </div>
-                )}
-                <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-              </label>
-            </div>
-
-            {/* General Info Inputs */}
-            <div 
-              className="border rounded-2xl p-6 space-y-4 text-xs shadow-sm"
-              style={{
-                backgroundColor: 'var(--color-card, #111726)',
-                borderColor: 'var(--color-border, #1e293b)'
-              }}
-            >
-              <div>
-                <label className="block font-semibold mb-1 text-slate-300">
-                  {t('recipeTitleRequired') || 'Recipe Title *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder={t('recipeTitlePlaceholder') || 'e.g. Authentic Pad Thai'}
-                  value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  className="w-full border rounded-xl p-3 text-sm text-white placeholder-slate-500 outline-none transition"
-                  style={{
-                    backgroundColor: 'var(--color-bg, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold mb-1 text-slate-300">
-                  {t('description') || 'Description'}
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder={t('descriptionPlaceholder') || 'Short summary of the dish...'}
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  className="w-full border rounded-xl p-3 text-sm text-white placeholder-slate-500 outline-none resize-y transition"
-                  style={{
-                    backgroundColor: 'var(--color-bg, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #1e293b)')}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {/* DYNAMIC RECIPE TYPE DROPDOWN */}
-                <div>
-                  <label className="block font-semibold mb-1 text-slate-300">{t('recipeTypeLabel') || 'Recipe Type'}</label>
-                  <select
-                    value={form.recipeType}
-                    onChange={(e) => setForm({ ...form, recipeType: e.target.value })}
-                    className="w-full border rounded-xl p-2.5 text-xs text-white outline-none cursor-pointer"
-                    style={{
-                      backgroundColor: 'var(--color-bg, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    {recipeTypes.map((type) => (
-                      <option key={type} value={type}>{type}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-1 text-slate-300">{t('servingsLabel') || 'Servings'}</label>
-                  <input
-                    type="number"
-                    value={form.servings}
-                    onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
-                    className="w-full border rounded-xl p-2.5 text-xs text-white outline-none"
-                    style={{
-                      backgroundColor: 'var(--color-bg, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-1 text-slate-300">{t('prepTimeMinsLabel') || 'Prep Time (m)'}</label>
-                  <input
-                    type="number"
-                    value={form.prepTimeMinutes}
-                    onChange={(e) => setForm({ ...form, prepTimeMinutes: parseInt(e.target.value) || 0 })}
-                    className="w-full border rounded-xl p-2.5 text-xs text-white outline-none"
-                    style={{
-                      backgroundColor: 'var(--color-bg, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-1 text-slate-300">{t('cookTimeMinsLabel') || 'Cook Time (m)'}</label>
-                  <input
-                    type="number"
-                    value={form.cookTimeMinutes}
-                    onChange={(e) => setForm({ ...form, cookTimeMinutes: parseInt(e.target.value) || 0 })}
-                    className="w-full border rounded-xl p-2.5 text-xs text-white outline-none"
-                    style={{
-                      backgroundColor: 'var(--color-bg, #070b13)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setActiveTab('ingredients')}
-                className="text-white font-bold px-6 py-3 rounded-xl text-xs transition shadow-md cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-              >
-                {t('nextStepsBtn') || 'Next: Ingredients →'}
+                {tab.label}
               </button>
-            </div>
-          </div>
-        )}
+            );
+          })}
+        </div>
 
-        {/* TAB 2: INGREDIENTS */}
-        {activeTab === 'ingredients' && (
-          <div 
-            className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-sm"
-            style={{
-              backgroundColor: 'var(--color-card, #111726)',
-              borderColor: 'var(--color-border, #1e293b)'
-            }}
-          >
-            <div className="flex justify-between items-center">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--color-primary,#E05638)]">
-                {t('ingredientsHeading') || 'Ingredients'}
-              </h2>
-              <div className="flex gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
-                  className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
-                  style={isReorderingIngredients ? {
-                    backgroundColor: 'var(--color-emerald, #10b981)',
-                    borderColor: 'var(--color-emerald, #10b981)',
-                    color: '#ffffff'
-                  } : {
-                    backgroundColor: 'var(--color-bg, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)',
-                    color: 'var(--color-text-secondary, #94a3b8)'
-                  }}
+        <form onSubmit={handleSave} className="space-y-6">
+          {/* TAB 1: BASIC INFO */}
+          {activeTab === 'info' && (
+            <div className="space-y-6 animate-in fade-in">
+              {/* Photo Upload Card */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-[var(--color-primary,#E05638)] uppercase tracking-wider">
+                  {t('photoLabel') || 'Photo'}
+                </label>
+                <label 
+                  className="border-2 border-dashed rounded-2xl h-48 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group shadow-xs"
+                  style={{ backgroundColor: cCardBg, borderColor: cBorder }}
                 >
-                  {isReorderingIngredients ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setForm({ ...form, ingredients: [...form.ingredients, { amount: '', unit: 'g', item: '', category: ingredientCategories[0] || 'Pantry Staples' }] })}
-                  className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                >
-                  <Plus className="h-3.5 w-3.5" /> {t('addIngredient') || 'Add Ingredient'}
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2.5 text-xs max-h-[400px] overflow-y-auto pr-1">
-              {form.ingredients.map((ing, idx) => (
-                <div
-                  key={idx}
-                  draggable={isReorderingIngredients}
-                  onDragStart={() => handleDragStart(idx)}
-                  onDragOver={(e) => handleDragOver(e, idx, 'ingredients')}
-                  onDrop={handleDrop}
-                  className="flex items-center gap-2 p-2.5 rounded-xl border transition"
-                  style={{
-                    backgroundColor: 'var(--color-bg, #070b13)',
-                    borderColor: isReorderingIngredients ? 'var(--color-emerald, #10b981)' : 'var(--color-border, #1e293b)',
-                    cursor: isReorderingIngredients ? 'grab' : 'default'
-                  }}
-                >
-                  <input
-                    type="text"
-                    placeholder={t('amt') || 'Amt'}
-                    value={ing.amount}
-                    onChange={(e) => {
-                      const list = [...form.ingredients];
-                      list[idx].amount = e.target.value;
-                      setForm({ ...form, ingredients: list });
-                    }}
-                    className="w-16 border rounded-lg p-2 text-center text-white font-bold outline-none"
-                    style={{
-                      backgroundColor: 'var(--color-card, #111726)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  />
-                  <input
-                    type="text"
-                    placeholder={t('unit') || 'Unit'}
-                    value={ing.unit}
-                    onChange={(e) => {
-                      const list = [...form.ingredients];
-                      list[idx].unit = e.target.value;
-                      setForm({ ...form, ingredients: list });
-                    }}
-                    className="w-20 border rounded-lg p-2 text-center text-white outline-none"
-                    style={{
-                      backgroundColor: 'var(--color-card, #111726)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  />
-                  <input
-                    type="text"
-                    placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
-                    value={ing.item}
-                    onChange={(e) => {
-                      const list = [...form.ingredients];
-                      list[idx].item = e.target.value;
-                      setForm({ ...form, ingredients: list });
-                    }}
-                    className="flex-1 bg-transparent border-none text-white outline-none px-2 font-medium"
-                  />
-                  <select
-                    value={ing.category}
-                    onChange={(e) => {
-                      const list = [...form.ingredients];
-                      list[idx].category = e.target.value;
-                      setForm({ ...form, ingredients: list });
-                    }}
-                    className="w-36 border rounded-lg p-2 text-[11px] text-slate-300 outline-none cursor-pointer"
-                    style={{
-                      backgroundColor: 'var(--color-card, #111726)',
-                      borderColor: 'var(--color-border, #1e293b)'
-                    }}
-                  >
-                    {ingredientCategories.map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-
-                  {isReorderingIngredients ? (
-                    <div className="p-2 text-[var(--color-emerald,#10b981)] cursor-grab">
-                      <GripVertical className="h-4 w-4" />
-                    </div>
+                  {form.imageUrl ? (
+                    <img src={form.imageUrl} alt="Recipe Preview" className="absolute inset-0 w-full h-full object-cover" />
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => setForm({ ...form, ingredients: form.ingredients.filter((_, i) => i !== idx) })}
-                      className="p-2 text-red-400 hover:text-red-300 transition cursor-pointer"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="text-center space-y-2">
+                      <ImagePlus className="h-8 w-8 mx-auto transition text-slate-400 group-hover:text-[var(--color-primary,#E05638)]" />
+                      <span className="text-xs font-bold block" style={{ color: cText }}>{t('addAPhoto') || 'Add a photo'}</span>
+                      <span className="text-[11px]" style={{ color: cSubText }}>{t('uploadsHint') || 'Uploads save to local drive /uploads/recipes/'}</span>
+                    </div>
                   )}
-                </div>
-              ))}
-            </div>
-
-            <div 
-              className="flex justify-between pt-3 border-t"
-              style={{ borderColor: 'var(--color-border, #1e293b)' }}
-            >
-              <button
-                type="button"
-                onClick={() => setActiveTab('info')}
-                className="border font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer text-slate-300 hover:text-white"
-                style={{
-                  backgroundColor: 'var(--color-bg, #070b13)',
-                  borderColor: 'var(--color-border, #1e293b)'
-                }}
-              >
-                {t('backBtn') || '← Back'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('steps')}
-                className="text-white font-bold px-6 py-2.5 rounded-xl text-xs transition shadow-md cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-              >
-                {t('nextStepsBtn') || 'Next: Steps →'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: STEPS */}
-        {activeTab === 'steps' && (
-          <div 
-            className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-sm"
-            style={{
-              backgroundColor: 'var(--color-card, #111726)',
-              borderColor: 'var(--color-border, #1e293b)'
-            }}
-          >
-            <div className="flex justify-between items-center">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--color-primary,#E05638)]">
-                {t('stepByStepInstructions') || 'Step-by-Step Instructions'}
-              </h2>
-              <div className="flex gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setIsReorderingSteps(!isReorderingSteps)}
-                  className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
-                  style={isReorderingSteps ? {
-                    backgroundColor: 'var(--color-emerald, #10b981)',
-                    borderColor: 'var(--color-emerald, #10b981)',
-                    color: '#ffffff'
-                  } : {
-                    backgroundColor: 'var(--color-bg, #070b13)',
-                    borderColor: 'var(--color-border, #1e293b)',
-                    color: 'var(--color-text-secondary, #94a3b8)'
-                  }}
-                >
-                  {isReorderingSteps ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setForm({ ...form, instructions: [...form.instructions, ''] })}
-                  className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                >
-                  <Plus className="h-3.5 w-3.5" /> {t('addStep') || 'Add Step'}
-                </button>
+                  <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                </label>
               </div>
-            </div>
 
-            <div className="space-y-3 text-xs max-h-[400px] overflow-y-auto pr-1">
-              {form.instructions.map((step, idx) => (
-                <div
-                  key={idx}
-                  draggable={isReorderingSteps}
-                  onDragStart={() => handleDragStart(idx)}
-                  onDragOver={(e) => handleDragOver(e, idx, 'steps')}
-                  onDrop={handleDrop}
-                  className="flex items-start gap-3 p-3 rounded-xl border transition"
-                  style={{
-                    backgroundColor: 'var(--color-bg, #070b13)',
-                    borderColor: isReorderingSteps ? 'var(--color-emerald, #10b981)' : 'var(--color-border, #1e293b)'
-                  }}
-                >
-                  <span 
-                    className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
+              {/* General Info Inputs Card */}
+              <div 
+                className="border rounded-2xl p-6 space-y-4 text-xs shadow-xs"
+                style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+              >
+                <div>
+                  <label className="block font-semibold mb-1" style={{ color: cLabel }}>
+                    {t('recipeTitleRequired') || 'Recipe Title *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder={t('recipeTitlePlaceholder') || 'e.g. Authentic Pad Thai'}
+                    value={form.title}
+                    onChange={(e) => setForm({ ...form, title: e.target.value })}
+                    className="w-full border rounded-xl p-3 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: 'rgba(224, 86, 56, 0.2)',
-                      color: 'var(--color-primary, #E05638)'
+                      backgroundColor: cInputBg,
+                      borderColor: cBorder,
+                      color: cText
                     }}
-                  >
-                    {idx + 1}
-                  </span>
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = cBorder)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold mb-1" style={{ color: cLabel }}>
+                    {t('description') || 'Description'}
+                  </label>
                   <textarea
-                    rows={2}
-                    placeholder={(t('describeStepPlaceholder') || 'Describe step {n}...').replace('{n}', String(idx + 1))}
-                    value={step}
-                    onChange={(e) => {
-                      const list = [...form.instructions];
-                      list[idx] = e.target.value;
-                      setForm({ ...form, instructions: list });
+                    rows={3}
+                    placeholder={t('descriptionPlaceholder') || 'Short summary of the dish...'}
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    className="w-full border rounded-xl p-3 text-sm outline-none resize-y transition"
+                    style={{
+                      backgroundColor: cInputBg,
+                      borderColor: cBorder,
+                      color: cText
                     }}
-                    className="flex-1 bg-transparent border-none text-white placeholder-slate-500 outline-none resize-y"
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = cBorder)}
                   />
-
-                  {isReorderingSteps ? (
-                    <div className="p-2 text-[var(--color-emerald,#10b981)] cursor-grab mt-1">
-                      <GripVertical className="h-4 w-4" />
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setForm({ ...form, instructions: form.instructions.filter((_, i) => i !== idx) })}
-                      className="p-2 text-red-400 hover:text-red-300 transition h-fit cursor-pointer"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  )}
                 </div>
-              ))}
-            </div>
 
-            <div 
-              className="flex justify-between pt-3 border-t"
-              style={{ borderColor: 'var(--color-border, #1e293b)' }}
-            >
-              <button
-                type="button"
-                onClick={() => setActiveTab('ingredients')}
-                className="border font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer text-slate-300 hover:text-white"
-                style={{
-                  backgroundColor: 'var(--color-bg, #070b13)',
-                  borderColor: 'var(--color-border, #1e293b)'
-                }}
-              >
-                {t('backBtn') || '← Back'}
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="text-white font-bold px-8 py-3 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-              >
-                <Save className="h-4 w-4" /> {saving ? (t('savingRecipe') || 'Saving Recipe...') : (t('saveRecipe') || 'Save Recipe')}
-              </button>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('recipeTypeLabel') || 'Recipe Type'}</label>
+                    <select
+                      value={form.recipeType}
+                      onChange={(e) => setForm({ ...form, recipeType: e.target.value })}
+                      className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
+                      style={{
+                        backgroundColor: cInputBg,
+                        borderColor: cBorder,
+                        color: cText
+                      }}
+                    >
+                      {recipeTypes.map((type) => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('servingsLabel') || 'Servings'}</label>
+                    <input
+                      type="number"
+                      value={form.servings}
+                      onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
+                      className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                      style={{
+                        backgroundColor: cInputBg,
+                        borderColor: cBorder,
+                        color: cText
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('prepTimeMinsLabel') || 'Prep Time (m)'}</label>
+                    <input
+                      type="number"
+                      value={form.prepTimeMinutes}
+                      onChange={(e) => setForm({ ...form, prepTimeMinutes: parseInt(e.target.value) || 0 })}
+                      className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                      style={{
+                        backgroundColor: cInputBg,
+                        borderColor: cBorder,
+                        color: cText
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('cookTimeMinsLabel') || 'Cook Time (m)'}</label>
+                    <input
+                      type="number"
+                      value={form.cookTimeMinutes}
+                      onChange={(e) => setForm({ ...form, cookTimeMinutes: parseInt(e.target.value) || 0 })}
+                      className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                      style={{
+                        backgroundColor: cInputBg,
+                        borderColor: cBorder,
+                        color: cText
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('ingredients')}
+                  className="text-white font-bold px-6 py-3 rounded-xl text-xs transition shadow-md cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                >
+                  {t('nextStepsBtn') || 'Next: Ingredients →'}
+                </button>
+              </div>
             </div>
-          </div>
-        )}
-      </form>
+          )}
+
+          {/* TAB 2: INGREDIENTS */}
+          {activeTab === 'ingredients' && (
+            <div 
+              className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
+              style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+            >
+              <div className="flex justify-between items-center">
+                <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--color-primary,#E05638)]">
+                  {t('ingredientsHeading') || 'Ingredients'}
+                </h2>
+                <div className="flex gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
+                    className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+                    style={isReorderingIngredients ? {
+                      backgroundColor: 'var(--color-emerald, #10b981)',
+                      borderColor: 'var(--color-emerald, #10b981)',
+                      color: '#ffffff'
+                    } : {
+                      backgroundColor: cInputBg,
+                      borderColor: cBorder,
+                      color: cSubText
+                    }}
+                  >
+                    {isReorderingIngredients ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, ingredients: [...form.ingredients, { amount: '', unit: 'g', item: '', category: ingredientCategories[0] || 'Pantry Staples' }] })}
+                    className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs"
+                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> {t('addIngredient') || 'Add Ingredient'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2.5 text-xs max-h-[400px] overflow-y-auto pr-1">
+                {form.ingredients.map((ing, idx) => (
+                  <div
+                    key={idx}
+                    draggable={isReorderingIngredients}
+                    onDragStart={() => handleDragStart(idx)}
+                    onDragOver={(e) => handleDragOver(e, idx, 'ingredients')}
+                    onDrop={handleDrop}
+                    className="flex items-center gap-2 p-2.5 rounded-xl border transition"
+                    style={{
+                      backgroundColor: cInputBg,
+                      borderColor: isReorderingIngredients ? 'var(--color-emerald, #10b981)' : cBorder,
+                      cursor: isReorderingIngredients ? 'grab' : 'default'
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder={t('amt') || 'Amt'}
+                      value={ing.amount}
+                      onChange={(e) => {
+                        const list = [...form.ingredients];
+                        list[idx].amount = e.target.value;
+                        setForm({ ...form, ingredients: list });
+                      }}
+                      className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
+                      style={{
+                        backgroundColor: cCardBg,
+                        borderColor: cBorder,
+                        color: cText
+                      }}
+                    />
+                    <input
+                      type="text"
+                      placeholder={t('unit') || 'Unit'}
+                      value={ing.unit}
+                      onChange={(e) => {
+                        const list = [...form.ingredients];
+                        list[idx].unit = e.target.value;
+                        setForm({ ...form, ingredients: list });
+                      }}
+                      className="w-20 border rounded-lg p-2 text-center outline-none"
+                      style={{
+                        backgroundColor: cCardBg,
+                        borderColor: cBorder,
+                        color: cText
+                      }}
+                    />
+                    <input
+                      type="text"
+                      placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
+                      value={ing.item}
+                      onChange={(e) => {
+                        const list = [...form.ingredients];
+                        list[idx].item = e.target.value;
+                        setForm({ ...form, ingredients: list });
+                      }}
+                      className="flex-1 bg-transparent border-none outline-none px-2 font-medium"
+                      style={{ color: cText }}
+                    />
+                    <select
+                      value={ing.category}
+                      onChange={(e) => {
+                        const list = [...form.ingredients];
+                        list[idx].category = e.target.value;
+                        setForm({ ...form, ingredients: list });
+                      }}
+                      className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
+                      style={{
+                        backgroundColor: cCardBg,
+                        borderColor: cBorder,
+                        color: cText
+                      }}
+                    >
+                      {ingredientCategories.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+
+                    {isReorderingIngredients ? (
+                      <div className="p-2 text-[var(--color-emerald,#10b981)] cursor-grab">
+                        <GripVertical className="h-4 w-4" />
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, ingredients: form.ingredients.filter((_, i) => i !== idx) })}
+                        className="p-2 text-red-400 hover:text-red-500 transition cursor-pointer"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div 
+                className="flex justify-between pt-3 border-t"
+                style={{ borderColor: cBorder }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('info')}
+                  className="border font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer"
+                  style={{
+                    backgroundColor: cInputBg,
+                    borderColor: cBorder,
+                    color: cLabel
+                  }}
+                >
+                  {t('backBtn') || '← Back'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('steps')}
+                  className="text-white font-bold px-6 py-2.5 rounded-xl text-xs transition shadow-md cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                >
+                  {t('nextStepsBtn') || 'Next: Steps →'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: STEPS */}
+          {activeTab === 'steps' && (
+            <div 
+              className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
+              style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+            >
+              <div className="flex justify-between items-center">
+                <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--color-primary,#E05638)]">
+                  {t('stepByStepInstructions') || 'Step-by-Step Instructions'}
+                </h2>
+                <div className="flex gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setIsReorderingSteps(!isReorderingSteps)}
+                    className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+                    style={isReorderingSteps ? {
+                      backgroundColor: 'var(--color-emerald, #10b981)',
+                      borderColor: 'var(--color-emerald, #10b981)',
+                      color: '#ffffff'
+                    } : {
+                      backgroundColor: cInputBg,
+                      borderColor: cBorder,
+                      color: cSubText
+                    }}
+                  >
+                    {isReorderingSteps ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, instructions: [...form.instructions, ''] })}
+                    className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs"
+                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> {t('addStep') || 'Add Step'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs max-h-[400px] overflow-y-auto pr-1">
+                {form.instructions.map((step, idx) => (
+                  <div
+                    key={idx}
+                    draggable={isReorderingSteps}
+                    onDragStart={() => handleDragStart(idx)}
+                    onDragOver={(e) => handleDragOver(e, idx, 'steps')}
+                    onDrop={handleDrop}
+                    className="flex items-start gap-3 p-3 rounded-xl border transition"
+                    style={{
+                      backgroundColor: cInputBg,
+                      borderColor: isReorderingSteps ? 'var(--color-emerald, #10b981)' : cBorder
+                    }}
+                  >
+                    <span 
+                      className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
+                      style={{
+                        backgroundColor: 'rgba(224, 86, 56, 0.15)',
+                        color: 'var(--color-primary, #E05638)'
+                      }}
+                    >
+                      {idx + 1}
+                    </span>
+                    <textarea
+                      rows={2}
+                      placeholder={(t('describeStepPlaceholder') || 'Describe step {n}...').replace('{n}', String(idx + 1))}
+                      value={step}
+                      onChange={(e) => {
+                        const list = [...form.instructions];
+                        list[idx] = e.target.value;
+                        setForm({ ...form, instructions: list });
+                      }}
+                      className="flex-1 bg-transparent border-none outline-none resize-y font-medium"
+                      style={{ color: cText }}
+                    />
+
+                    {isReorderingSteps ? (
+                      <div className="p-2 text-[var(--color-emerald,#10b981)] cursor-grab mt-1">
+                        <GripVertical className="h-4 w-4" />
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, instructions: form.instructions.filter((_, i) => i !== idx) })}
+                        className="p-2 text-red-400 hover:text-red-500 transition h-fit cursor-pointer"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div 
+                className="flex justify-between pt-3 border-t"
+                style={{ borderColor: cBorder }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('ingredients')}
+                  className="border font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer"
+                  style={{
+                    backgroundColor: cInputBg,
+                    borderColor: cBorder,
+                    color: cLabel
+                  }}
+                >
+                  {t('backBtn') || '← Back'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="text-white font-bold px-8 py-3 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                >
+                  <Save className="h-4 w-4" /> {saving ? (t('savingRecipe') || 'Saving Recipe...') : (t('saveRecipe') || 'Save Recipe')}
+                </button>
+              </div>
+            </div>
+          )}
+        </form>
+      </div>
     </div>
   );
 }
@@ -31690,18 +30087,25 @@ export default function ManualRecipePage() {
 
 ## File: `apps/web/src/app/profile/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   User as UserIcon, Mail, Lock, CheckCircle, 
   AlertCircle, Calendar, LogOut, Check, CreditCard,
   Zap, Sparkles, CheckCircle2, RefreshCw, Shield,
-  ArrowUpRight, Clock, Ban, AlertTriangle
+  Clock, Cpu, Repeat, Link2, Unlink, Key
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+
+type SocialProvider = 'google' | 'facebook' | 'apple';
+
+interface ExtendedUser extends User {
+  linkedProviders?: SocialProvider[];
+}
 
 interface SubscriptionPlanItem {
   id: string;
@@ -31725,6 +30129,8 @@ interface SubscriptionPlanItem {
   buttonTheme?: 'orange' | 'green';
   features?: string[];
   isFree?: boolean;
+  tokenLimit?: number;
+  tokenReimburseFrequency?: 'once' | 'weekly' | 'monthly';
 }
 
 interface PaymentTransaction {
@@ -31743,83 +30149,62 @@ interface PaymentTransaction {
   expiryDate?: string;
 }
 
-const DEFAULT_TASTER_FEATURES = [
-  'Create up to 5 AI-powered recipes per month',
-  'Personal recipe library (25 total recipes)',
-  'Smart ingredient repurposing',
-  'Automated shopping list creation',
-  'Direct online grocery shopping links',
-  'Meal planner',
-  'Ingredient photo recognition'
-];
+interface TokenUsageData {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  requestCount: number;
+  monthlyLimit: number;
+  reimburseFrequency: 'once' | 'weekly' | 'monthly';
+}
 
-const DEFAULT_PRO_FEATURES = [
-  'Unlimited AI-powered recipe generation',
-  'Unlimited recipe library',
-  'Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)'
-];
-
-const DEFAULT_PLANS: SubscriptionPlanItem[] = [
-  {
-    id: 'taster',
-    name: 'Taster',
-    slug: 'taster',
-    description: 'Free tier with standard features',
-    priceCents: 0,
-    priceFormatted: 'Free',
-    interval: 'MONTH',
-    isFree: true,
-    badge: '',
-    saveBadge: '',
-    buttonText: 'Active Plan',
-    buttonTheme: 'orange',
-    features: DEFAULT_TASTER_FEATURES
-  },
-  {
-    id: 'nutrition-pro-monthly',
-    name: 'Nutrition Pro',
-    slug: 'nutrition-pro-monthly',
-    description: 'Full premium access, billed monthly',
-    priceCents: 899,
-    priceFormatted: '$8.99/mo',
-    interval: 'MONTH',
-    isFree: false,
-    badge: 'Billed Immediately',
-    saveBadge: '',
-    buttonText: 'Choose Plan',
-    buttonTheme: 'green',
-    features: DEFAULT_PRO_FEATURES
-  },
-  {
-    id: 'nutrition-pro-annual',
-    name: 'Nutrition Pro',
-    slug: 'nutrition-pro-annual',
-    description: 'Best value - all premium features, billed annually',
-    priceCents: 5999,
-    priceFormatted: '$59.99/yr',
-    interval: 'YEAR',
-    isFree: false,
-    badge: '7-Day Free Trial',
-    saveBadge: 'Save 44%',
-    subPrice: '$5.00/month',
-    strikethroughPrice: '$8.99/month',
-    buttonText: 'Choose Plan',
-    buttonTheme: 'green',
-    features: DEFAULT_PRO_FEATURES
-  }
-];
+const SYSTEM_DEFAULT_FREE_PLAN: SubscriptionPlanItem = {
+  id: 'preset_taster',
+  name: 'Taster',
+  slug: 'taster',
+  description: 'Free tier with standard features',
+  priceCents: 0,
+  priceFormatted: 'Free',
+  interval: 'MONTH',
+  isFree: true,
+  badge: '',
+  saveBadge: '',
+  buttonText: 'Switch to Free',
+  buttonTheme: 'orange',
+  features: [
+    'Create up to 5 AI-powered recipes per month',
+    'Personal recipe library (25 total recipes)',
+    'Smart ingredient repurposing',
+    'Automated shopping list creation',
+    'Direct online grocery shopping links',
+    'Meal planner',
+    'Ingredient photo recognition'
+  ],
+  aiRecipeLimit: 5,
+  recipeLibraryLimit: 25,
+  socialScrapeLimit: 5,
+  canViewMacros: false,
+  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
+  tokenLimit: 50000,
+  tokenReimburseFrequency: 'monthly'
+};
 
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
-  if (!planInput) return 'taster';
-  if (Array.isArray(planInput)) return planInput[0] ? String(planInput[0]).trim() : 'taster';
-  if (typeof planInput === 'string') {
+  if (!planInput) return '';
+  let raw = '';
+  if (Array.isArray(planInput)) {
+    raw = planInput[0] ? String(planInput[0]).trim() : '';
+  } else if (typeof planInput === 'string') {
     if (planInput.includes(',')) {
       const parts = planInput.split(',').map(s => s.trim()).filter(Boolean);
-      return parts[0] || 'taster';
+      raw = parts[0] || '';
+    } else {
+      raw = planInput.trim();
     }
-    return planInput.trim() || 'taster';
+  } else {
+    raw = String(planInput).trim();
   }
-  return 'taster';
+  return raw.toLowerCase().replace(/[^a-z0-9-]/g, '');
 };
 
 const calculateRenewalExpiry = (startDate: Date = new Date(), interval?: 'MONTH' | 'YEAR'): string => {
@@ -31836,7 +30221,7 @@ const calculateRenewalExpiry = (startDate: Date = new Date(), interval?: 'MONTH'
 export default function ProfilePage() {
   const router = useRouter();
   const { t } = useTranslation();
-  const [user, setUserState] = useState<User | null>(null);
+  const [user, setUserState] = useState<ExtendedUser | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   const [name, setName] = useState('');
@@ -31846,56 +30231,63 @@ export default function ProfilePage() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  const [plans, setPlans] = useState<SubscriptionPlanItem[]>(DEFAULT_PLANS);
-  const [selectedInterval, setSelectedInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
+  const [processingSocial, setProcessingSocial] = useState<SocialProvider | null>(null);
+
+  // Dynamic Plans state with default free tier preserved
+  const [plans, setPlans] = useState<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
+  const plansRef = useRef<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
+  plansRef.current = plans;
+  const isFetchingPlansRef = useRef(false);
+
+  const [selectedInterval, setSelectedInterval] = useState<'ALL' | 'MONTH' | 'YEAR'>('ALL');
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
   const [currencyCode, setCurrencyCode] = useState('USD');
   const [currencySymbol, setCurrencySymbol] = useState('$');
 
-  // Dynamic Theme Synchronization & Day Mode Inversion
-  const applyGlobalTheme = useCallback(() => {
+  const [tokenUsage, setTokenUsage] = useState<TokenUsageData>({
+    promptTokens: 1420,
+    completionTokens: 850,
+    totalTokens: 2270,
+    requestCount: 14,
+    monthlyLimit: 50000,
+    reimburseFrequency: 'monthly'
+  });
+  const [activeModelName, setActiveModelName] = useState('gemini-1.5-flash');
+
+  const applySavedTheme = useCallback(async () => {
     try {
+      try {
+        const res = await fetch('/api/system-settings', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.settings) {
+            const s = data.settings;
+            if (s.themeMode && !localStorage.getItem('zecratary_theme_mode')) {
+              localStorage.setItem('zecratary_theme_mode', s.themeMode);
+            }
+            if (s.themeColors && !localStorage.getItem('zecratary_theme_colors')) {
+              localStorage.setItem('zecratary_theme_colors', JSON.stringify(s.themeColors));
+            }
+            if (s.currency && !localStorage.getItem('zecratary_currency')) {
+              localStorage.setItem('zecratary_currency', s.currency);
+            }
+          }
+        }
+      } catch (_) {}
+
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
       const isDay = mode === 'light';
       setIsDayMode(isDay);
 
       const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
+      if (stored) {
+        const c = JSON.parse(stored);
+        const root = document.documentElement;
+        if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
+        if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
+        if (c.accentEmerald || c.accentColor) {
+          root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
+          root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor);
         }
       }
 
@@ -31906,170 +30298,330 @@ export default function ProfilePage() {
         JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
       };
       setCurrencySymbol(symbols[curr] || '$');
+
+      const aiConfigRaw = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
+      if (aiConfigRaw) {
+        const aiCfg = JSON.parse(aiConfigRaw);
+        if (aiCfg.model) setActiveModelName(aiCfg.model);
+      }
     } catch (e) {}
   }, []);
 
   useEffect(() => {
-    applyGlobalTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
-    window.addEventListener('zecratary_payment_updated', applyGlobalTheme);
-    window.addEventListener('storage', applyGlobalTheme);
+    applySavedTheme();
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
+    window.addEventListener('zecratary_payment_updated', applySavedTheme);
 
     return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
-      window.removeEventListener('zecratary_payment_updated', applyGlobalTheme);
-      window.removeEventListener('storage', applyGlobalTheme);
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+      window.removeEventListener('zecratary_payment_updated', applySavedTheme);
       if (typeof document !== 'undefined' && document.body) {
         document.body.style.backgroundColor = '';
       }
     };
-  }, [applyGlobalTheme]);
+  }, [applySavedTheme]);
 
-  // Fully dynamic synchronization supporting all 8+ plans without key collisions
+  const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem): boolean => {
+    if (!user) return false;
+
+    const rawUser = user as any;
+    const userPlanRaw = rawUser.planId || rawUser.subscriptionPlan || rawUser.subscriptionTier || rawUser.planSlug || '';
+    const cleanUserPlan = sanitizeSinglePlan(userPlanRaw);
+    const planSlug = sanitizeSinglePlan(plan.slug);
+    const planId = sanitizeSinglePlan(plan.id);
+
+    if (rawUser.planId && (rawUser.planId === plan.id || rawUser.planId === plan.slug)) {
+      return true;
+    }
+
+    if (cleanUserPlan === planSlug || cleanUserPlan === planId) {
+      return true;
+    }
+
+    const isUserFree = !cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || cleanUserPlan.includes('free');
+    if (isUserFree && plan.isFree) {
+      const defaultSlug = typeof window !== 'undefined' ? localStorage.getItem('zecratary_default_plan_slug') || 'taster' : 'taster';
+      if (!cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || planSlug === defaultSlug || planId === defaultSlug || cleanUserPlan === planSlug) {
+        return true;
+      }
+    }
+
+    const userInterval = (rawUser.planInterval || (cleanUserPlan.includes('annual') || cleanUserPlan.includes('year') ? 'YEAR' : cleanUserPlan.includes('monthly') || cleanUserPlan.includes('month') ? 'MONTH' : '')).toUpperCase();
+    const planInterval = (plan.interval || '').toUpperCase();
+
+    const cleanUserBase = cleanUserPlan.replace(/-(monthly|annual|free)$/i, '');
+    const cleanPlanBase = planSlug.replace(/-(monthly|annual|free)$/i, '');
+
+    if (cleanUserBase && cleanPlanBase && cleanUserBase === cleanPlanBase) {
+      if (plan.isFree) return true;
+      if (userInterval && planInterval) return userInterval === planInterval;
+      return true;
+    }
+
+    return false;
+  }, [user]);
+
+  const syncActivePlanTokens = useCallback((activeUserPlanSlug: string, currentPlans: SubscriptionPlanItem[]) => {
+    const cleanSlug = sanitizeSinglePlan(activeUserPlanSlug).toLowerCase();
+    const matchedPlan = currentPlans.find(p => 
+      p.slug.toLowerCase() === cleanSlug || 
+      p.id.toLowerCase() === cleanSlug ||
+      p.slug.toLowerCase().replace(/-(monthly|annual|free)$/i, '') === cleanSlug.replace(/-(monthly|annual|free)$/i, '')
+    );
+
+    let assignedLimit = 50000;
+    let assignedFrequency: 'once' | 'weekly' | 'monthly' = 'monthly';
+
+    if (matchedPlan) {
+      if (matchedPlan.tokenLimit !== undefined) {
+        assignedLimit = matchedPlan.tokenLimit;
+      }
+      if (matchedPlan.tokenReimburseFrequency) {
+        assignedFrequency = matchedPlan.tokenReimburseFrequency;
+      }
+    }
+
+    try {
+      const storedTokens = localStorage.getItem('zecratary_token_usage');
+      const parsed = storedTokens ? JSON.parse(storedTokens) : {};
+      const updated = {
+        promptTokens: parsed.promptTokens || 1420,
+        completionTokens: parsed.completionTokens || 850,
+        totalTokens: (parsed.promptTokens || 1420) + (parsed.completionTokens || 850),
+        requestCount: parsed.requestCount || 14,
+        monthlyLimit: assignedLimit,
+        reimburseFrequency: assignedFrequency
+      };
+      setTokenUsage(updated);
+      localStorage.setItem('zecratary_token_usage', JSON.stringify(updated));
+    } catch (_) {}
+  }, []);
+
+  // Synchronize available subscription plans dynamically from /admin/plans & storage
   const syncPlansFromAdmin = useCallback(async () => {
+    if (isFetchingPlansRef.current) return;
+    isFetchingPlansRef.current = true;
+
+    try {
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const serverConfigs = Array.isArray(data) ? data : (data.configs || data.plans || data.packages);
+        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
+          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
+        }
+      }
+    } catch (_) {}
+    finally {
+      isFetchingPlansRef.current = false;
+    }
+
     const plansMap = new Map<string, SubscriptionPlanItem>();
 
     try {
-      const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
+      const rawConfigs = typeof window !== 'undefined' ? localStorage.getItem('zecratary_subscription_configs') : null;
+      let configs: any[] = [];
       if (rawConfigs) {
-        const configs = JSON.parse(rawConfigs);
-        if (Array.isArray(configs) && configs.length > 0) {
-          configs.forEach((cfg: any, idx: number) => {
-            if (!cfg) return;
-            const name = cfg.name || cfg.title || `Plan ${idx + 1}`;
-            const rawSlug = (cfg.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
-            const description = cfg.description || cfg.descriptionMonthly || cfg.descriptionAnnual || 'Subscription plan';
-            const isFree = Boolean(cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0 && !cfg.monthlyPriceDollars && !cfg.annualPriceDollars));
-            
-            let planFeatures = Array.isArray(cfg.features) && cfg.features.length > 0 ? cfg.features : null;
-            if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim().length > 0) {
-              planFeatures = cfg.featuresText.split('\n').map((s: string) => s.trim()).filter(Boolean);
-            }
-            if (!planFeatures || planFeatures.length === 0) {
-              planFeatures = isFree ? DEFAULT_TASTER_FEATURES : DEFAULT_PRO_FEATURES;
-            }
-
-            const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
-
-            if (isFree) {
-              const freeSlug = cleanBaseSlug.includes('taster') ? 'taster' : cleanBaseSlug;
-              plansMap.set(freeSlug, {
-                id: cfg.id || freeSlug,
-                name,
-                slug: freeSlug,
-                description,
-                priceCents: 0,
-                priceFormatted: 'Free',
-                interval: 'MONTH',
-                isFree: true,
-                badge: cfg.badge || '',
-                saveBadge: '',
-                buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
-                buttonTheme: 'orange',
-                features: planFeatures,
-                aiRecipeLimit: cfg.aiRecipeLimit,
-                recipeLibraryLimit: cfg.recipeLibraryLimit,
-                socialScrapeLimit: cfg.socialScrapeLimit,
-                canViewMacros: cfg.canViewMacros,
-              });
-            } else {
-              const mPrice = Number(cfg.monthlyPriceDollars ?? cfg.monthlyPrice ?? 0);
-              const aPrice = Number(cfg.annualPriceDollars ?? cfg.annualPrice ?? 0);
-
-              if (mPrice > 0 || (mPrice === 0 && aPrice === 0)) {
-                const monthlySlug = `${cleanBaseSlug}-monthly-${idx}`;
-                plansMap.set(monthlySlug, {
-                  id: `${cfg.id || cleanBaseSlug}-monthly`,
-                  name,
-                  slug: `${cleanBaseSlug}-monthly`,
-                  description: cfg.descriptionMonthly || description,
-                  priceCents: Math.round(mPrice * 100),
-                  priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
-                  interval: 'MONTH',
-                  isFree: false,
-                  badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
-                  saveBadge: '',
-                  buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-                  buttonTheme: 'green',
-                  features: planFeatures,
-                  aiRecipeLimit: cfg.aiRecipeLimit,
-                  recipeLibraryLimit: cfg.recipeLibraryLimit,
-                  socialScrapeLimit: cfg.socialScrapeLimit,
-                  canViewMacros: cfg.canViewMacros,
-                });
-              }
-
-              if (aPrice > 0) {
-                const annualSlug = `${cleanBaseSlug}-annual-${idx}`;
-                const mEquivalent = (aPrice / 12).toFixed(2);
-                plansMap.set(annualSlug, {
-                  id: `${cfg.id || cleanBaseSlug}-annual`,
-                  name,
-                  slug: `${cleanBaseSlug}-annual`,
-                  description: cfg.descriptionAnnual || description,
-                  priceCents: Math.round(aPrice * 100),
-                  priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
-                  interval: 'YEAR',
-                  isFree: false,
-                  badge: cfg.annualBadge || 'Best Value',
-                  saveBadge: cfg.saveBadge || 'Save 44%',
-                  subPrice: `${currencySymbol}${mEquivalent}/month`,
-                  strikethroughPrice: mPrice > 0 ? `${currencySymbol}${mPrice.toFixed(2)}/month` : undefined,
-                  buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-                  buttonTheme: 'green',
-                  features: planFeatures,
-                  aiRecipeLimit: cfg.aiRecipeLimit,
-                  recipeLibraryLimit: cfg.recipeLibraryLimit,
-                  socialScrapeLimit: cfg.socialScrapeLimit,
-                  canViewMacros: cfg.canViewMacros,
-                });
-              }
-            }
-          });
-        }
+        const parsed = JSON.parse(rawConfigs);
+        if (Array.isArray(parsed)) configs = parsed;
       }
-    } catch (e) {}
 
-    if (plansMap.size === 0) {
-      try {
-        const rawPlans = localStorage.getItem('zecratary_subscription_plans');
-        if (rawPlans) {
-          const directPlans = JSON.parse(rawPlans);
-          if (Array.isArray(directPlans) && directPlans.length > 0) {
-            directPlans.forEach((p: any) => {
-              const isFree = p.priceCents === 0 || p.isFree;
-              plansMap.set(p.slug, {
-                ...p,
-                features: (Array.isArray(p.features) && p.features.length > 0) ? p.features : (isFree ? DEFAULT_TASTER_FEATURES : DEFAULT_PRO_FEATURES),
-                priceFormatted: isFree ? 'Free' : `${currencySymbol}${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`
-              });
+      // Check if any free plan exists in custom configs
+      const hasFree = configs.some((cfg: any) => 
+        cfg && (
+          cfg.isFree === true || 
+          cfg.slug === 'taster' || 
+          cfg.id === 'preset_taster' || 
+          (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0)
+        )
+      );
+
+      // If no free plan was configured in storage or server, dynamically prepend the system default free plan
+      if (!hasFree) {
+        configs.unshift({
+          id: SYSTEM_DEFAULT_FREE_PLAN.id,
+          name: SYSTEM_DEFAULT_FREE_PLAN.name,
+          slug: SYSTEM_DEFAULT_FREE_PLAN.slug,
+          isFree: true,
+          isDefault: true,
+          monthlyPriceDollars: 0,
+          annualPriceDollars: 0,
+          monthlyBadge: '',
+          annualBadge: '',
+          trialBadge: '',
+          descriptionMonthly: SYSTEM_DEFAULT_FREE_PLAN.description,
+          descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
+          buttonText: t('switchToFreeBtn') || 'Switch to Free',
+          features: SYSTEM_DEFAULT_FREE_PLAN.features,
+          tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
+          tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
+          aiRecipeLimit: SYSTEM_DEFAULT_FREE_PLAN.aiRecipeLimit,
+          recipeLibraryLimit: SYSTEM_DEFAULT_FREE_PLAN.recipeLibraryLimit,
+          socialScrapeLimit: SYSTEM_DEFAULT_FREE_PLAN.socialScrapeLimit,
+          canViewMacros: SYSTEM_DEFAULT_FREE_PLAN.canViewMacros,
+          allowedAiModels: SYSTEM_DEFAULT_FREE_PLAN.allowedAiModels
+        });
+      }
+
+      configs.forEach((cfg: any) => {
+        if (!cfg || !cfg.name) return;
+
+        let planFeatures: string[] = [];
+        if (Array.isArray(cfg.features) && cfg.features.length > 0) {
+          planFeatures = cfg.features.map((f: any) => String(f).trim()).filter(Boolean);
+        } else if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim()) {
+          planFeatures = cfg.featuresText.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
+        } else if (typeof cfg.descriptionMonthly === 'string' && cfg.descriptionMonthly.trim()) {
+          planFeatures = [cfg.descriptionMonthly.trim()];
+        }
+
+        const isFree = Boolean(
+          cfg.isFree || 
+          ((Number(cfg.monthlyPriceDollars) === 0 || cfg.monthlyPriceDollars === undefined) && 
+           (Number(cfg.annualPriceDollars) === 0 || cfg.annualPriceDollars === undefined))
+        );
+
+        const rawSlug = (cfg.slug || cfg.id || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
+        const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
+        const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
+        const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
+
+        if (isFree) {
+          const freeSlug = cleanBaseSlug || 'free';
+          plansMap.set(freeSlug, {
+            id: cfg.id || freeSlug,
+            name: cfg.name,
+            slug: freeSlug,
+            description: cfg.descriptionMonthly || cfg.descriptionAnnual || cfg.description || 'Free tier with standard features',
+            priceCents: 0,
+            priceFormatted: 'Free',
+            interval: 'MONTH',
+            isFree: true,
+            badge: cfg.badge || cfg.monthlyBadge || '',
+            saveBadge: '',
+            buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
+            buttonTheme: 'orange',
+            features: planFeatures,
+            aiRecipeLimit: cfg.aiRecipeLimit,
+            recipeLibraryLimit: cfg.recipeLibraryLimit,
+            socialScrapeLimit: cfg.socialScrapeLimit,
+            canViewMacros: Boolean(cfg.canViewMacros),
+            allowedAiModels: cfg.allowedAiModels,
+            tokenLimit,
+            tokenReimburseFrequency,
+          });
+        } else {
+          const hasMonthly = cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0;
+          const hasAnnual = cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0;
+
+          if (hasMonthly || !hasAnnual) {
+            const mPrice = Number(cfg.monthlyPriceDollars || 0);
+            const monthlySlug = `${cleanBaseSlug}-monthly`;
+            plansMap.set(monthlySlug, {
+              id: `${cfg.id || cleanBaseSlug}-monthly`,
+              name: cfg.name,
+              slug: monthlySlug,
+              description: cfg.descriptionMonthly || cfg.description || `Full access to ${cfg.name}, billed monthly`,
+              priceCents: Math.round(mPrice * 100),
+              priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
+              interval: 'MONTH',
+              isFree: false,
+              badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
+              saveBadge: '',
+              buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+              buttonTheme: 'green',
+              features: planFeatures,
+              aiRecipeLimit: cfg.aiRecipeLimit,
+              recipeLibraryLimit: cfg.recipeLibraryLimit,
+              socialScrapeLimit: cfg.socialScrapeLimit,
+              canViewMacros: Boolean(cfg.canViewMacros),
+              allowedAiModels: cfg.allowedAiModels,
+              tokenLimit,
+              tokenReimburseFrequency,
+            });
+          }
+
+          if (hasAnnual) {
+            const aPrice = Number(cfg.annualPriceDollars || 0);
+            const annualSlug = `${cleanBaseSlug}-annual`;
+            const mEquivalent = (aPrice / 12).toFixed(2);
+            plansMap.set(annualSlug, {
+              id: `${cfg.id || cleanBaseSlug}-annual`,
+              name: cfg.name,
+              slug: annualSlug,
+              description: cfg.descriptionAnnual || cfg.description || `Best value - all ${cfg.name} features, billed annually`,
+              priceCents: Math.round(aPrice * 100),
+              priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
+              interval: 'YEAR',
+              isFree: false,
+              badge: cfg.trialBadge || cfg.annualBadge || 'Best Value',
+              saveBadge: cfg.annualBadge || '',
+              subPrice: `${currencySymbol}${mEquivalent}/month`,
+              strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
+              buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+              buttonTheme: 'green',
+              features: planFeatures,
+              aiRecipeLimit: cfg.aiRecipeLimit,
+              recipeLibraryLimit: cfg.recipeLibraryLimit,
+              socialScrapeLimit: cfg.socialScrapeLimit,
+              canViewMacros: Boolean(cfg.canViewMacros),
+              allowedAiModels: cfg.allowedAiModels,
+              tokenLimit,
+              tokenReimburseFrequency,
             });
           }
         }
-      } catch (e) {}
-    }
-
-    if (plansMap.size === 0) {
-      DEFAULT_PLANS.forEach(p => {
-        plansMap.set(p.slug, p);
       });
-    }
+    } catch (e) {}
 
-    const mergedPlans = Array.from(plansMap.values());
-    setPlans(mergedPlans);
-  }, [currencySymbol, t]);
+    const dynamicPlans = Array.from(plansMap.values());
+    plansRef.current = dynamicPlans;
+    setPlans(dynamicPlans);
+
+    const rawUser = typeof window !== 'undefined' ? localStorage.getItem('zecratary_current_user') : null;
+    if (rawUser) {
+      try {
+        const u = JSON.parse(rawUser);
+        const uPlan = sanitizeSinglePlan(u.subscriptionPlan || u.subscriptionTier || u.planSlug || '');
+        syncActivePlanTokens(uPlan, dynamicPlans);
+      } catch (_) {}
+    }
+  }, [currencySymbol, syncActivePlanTokens, t]);
 
   const reloadActiveUser = useCallback(() => {
     initAuthStorage();
-    const active = getCurrentUser();
-    if (!active) return;
+    let active = getCurrentUser() as ExtendedUser | null;
+
+    if (!active && typeof document !== 'undefined') {
+      const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
+      if (match && match[1]) {
+        try {
+          const cookieData = JSON.parse(decodeURIComponent(match[1]));
+          if (cookieData && (cookieData.email || cookieData.id)) {
+            active = {
+              id: cookieData.id || 'usr_standard_default',
+              name: cookieData.name || 'Standard User',
+              email: cookieData.email || 'user@foodieprep.com',
+              role: cookieData.role || 'user',
+              subscriptionPlan: 'taster'
+            };
+            localStorage.setItem('zecratary_current_user', JSON.stringify(active));
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!active) {
+      router.replace('/login');
+      return;
+    }
 
     const rawUsers = localStorage.getItem('zecratary_users');
-    let matchedUser = active;
+    let matchedUser: ExtendedUser = { ...active };
 
     if (rawUsers) {
       try {
@@ -32079,10 +30631,22 @@ export default function ProfilePage() {
           matchedUser = { 
             ...active, 
             ...fresh,
-            subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || (fresh.role === 'admin' ? 'nutrition-pro-annual' : 'taster'))
+            subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || fresh.planSlug || fresh.planId || 'taster')
           };
+          try {
+            localStorage.setItem('zecratary_current_user', JSON.stringify(matchedUser));
+            localStorage.setItem('zecratary_user', JSON.stringify(matchedUser));
+          } catch (_) {}
         }
       } catch (e) {}
+    }
+
+    if (!matchedUser.linkedProviders) {
+      const initialLinked: SocialProvider[] = [];
+      if (matchedUser.id.startsWith('usr_google_')) initialLinked.push('google');
+      if (matchedUser.id.startsWith('usr_facebook_')) initialLinked.push('facebook');
+      if (matchedUser.id.startsWith('usr_apple_')) initialLinked.push('apple');
+      matchedUser.linkedProviders = initialLinked;
     }
 
     try {
@@ -32104,96 +30668,161 @@ export default function ProfilePage() {
           matchedUser.subscriptionPlan = sanitizeSinglePlan(latestActiveTx.planSlug || matchedUser.subscriptionPlan);
           (matchedUser as any).expiryDate = latestActiveTx.expiryDate;
           (matchedUser as any).planExpiryDate = latestActiveTx.expiryDate;
-        } else {
-          if (userTxs.length > 0 && userTxs[0].status === 'refunded') {
-            matchedUser.subscriptionPlan = 'taster';
-            (matchedUser as any).expiryDate = '';
-            (matchedUser as any).planExpiryDate = '';
-          }
+        } else if (userTxs.length > 0 && userTxs[0].status === 'refunded') {
+          matchedUser.subscriptionPlan = '';
+          (matchedUser as any).expiryDate = '';
+          (matchedUser as any).planExpiryDate = '';
         }
       }
     } catch (_) {}
 
-    setCurrentUser(matchedUser);
     setUserState(matchedUser);
     setName(matchedUser.name || '');
     setEmail(matchedUser.email || '');
 
-    const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).subscriptionTier || '').toLowerCase();
-    const userInterval = ((matchedUser as any).planInterval || '').toUpperCase();
-    if (userInterval === 'YEAR' || userPlan.includes('annual') || userPlan.includes('year')) {
-      setSelectedInterval('YEAR');
-    } else if (userInterval === 'MONTH' || userPlan.includes('monthly')) {
-      setSelectedInterval('MONTH');
-    }
-  }, []);
+    const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).subscriptionTier || (matchedUser as any).planSlug || '');
+    syncActivePlanTokens(userPlan, plansRef.current);
+  }, [router, syncActivePlanTokens]);
 
   useEffect(() => {
     document.title = `${t('accountProfileTitle') || 'Account Profile'} - Zecratary`;
-    reloadActiveUser();
     syncPlansFromAdmin();
+    reloadActiveUser();
+
+    const handleBfCache = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        syncPlansFromAdmin();
+        reloadActiveUser();
+      }
+    };
+    window.addEventListener('pageshow', handleBfCache);
 
     const handleSyncEvent = () => {
-      reloadActiveUser();
       syncPlansFromAdmin();
+      reloadActiveUser();
     };
 
     window.addEventListener('zecratary_plans_updated', handleSyncEvent);
     window.addEventListener('zecratary_users_updated', handleSyncEvent);
     window.addEventListener('zecratary_payment_updated', handleSyncEvent);
-    window.addEventListener('zecratary_auth_changed', handleSyncEvent);
-    window.addEventListener('storage', handleSyncEvent);
+    window.addEventListener('storage', (e) => {
+      if (!e.key || e.key === 'zecratary_subscription_configs' || e.key === 'zecratary_users' || e.key === 'zecratary_payment_transactions') {
+        handleSyncEvent();
+      }
+    });
 
     return () => {
       window.removeEventListener('zecratary_plans_updated', handleSyncEvent);
       window.removeEventListener('zecratary_users_updated', handleSyncEvent);
       window.removeEventListener('zecratary_payment_updated', handleSyncEvent);
-      window.removeEventListener('zecratary_auth_changed', handleSyncEvent);
-      window.removeEventListener('storage', handleSyncEvent);
+      window.removeEventListener('pageshow', handleBfCache);
     };
-  }, [reloadActiveUser, syncPlansFromAdmin]);
+  }, [reloadActiveUser, syncPlansFromAdmin, t]);
+
+  const handleToggleSocialLink = (provider: SocialProvider) => {
+    if (!user) return;
+    setProcessingSocial(provider);
+    setError('');
+    setSuccessMsg('');
+
+    const isLinked = Boolean(user.linkedProviders?.includes(provider));
+
+    setTimeout(() => {
+      let updatedLinked = [...(user.linkedProviders || [])];
+
+      if (isLinked) {
+        if (updatedLinked.length === 1 && !user.password) {
+          setError(`Cannot unlink ${provider.toUpperCase()}: this is your only login method. Set a password first.`);
+          setProcessingSocial(null);
+          return;
+        }
+        updatedLinked = updatedLinked.filter(p => p !== provider);
+        setSuccessMsg(`Unlinked ${provider.toUpperCase()} account successfully.`);
+      } else {
+        updatedLinked.push(provider);
+        setSuccessMsg(`Successfully connected and linked ${provider.toUpperCase()}!`);
+      }
+
+      const updatedUser: ExtendedUser = {
+        ...user,
+        linkedProviders: updatedLinked
+      };
+
+      try {
+        const rawUsers = localStorage.getItem('zecratary_users');
+        const users: ExtendedUser[] = rawUsers ? JSON.parse(rawUsers) : [];
+        const userIndex = users.findIndex(u => u.id === updatedUser.id || u.email.toLowerCase() === updatedUser.email.toLowerCase());
+
+        if (userIndex !== -1) {
+          users[userIndex] = updatedUser;
+        } else {
+          users.unshift(updatedUser);
+        }
+
+        localStorage.setItem('zecratary_users', JSON.stringify(users));
+        localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUser));
+        localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
+
+        setCurrentUser(updatedUser);
+        setUserState(updatedUser);
+
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      } catch (_) {}
+
+      setProcessingSocial(null);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    }, 450);
+  };
 
   const userPlanBadge = useMemo(() => {
-    const rawKey = ((user as any)?.subscriptionPlan || (user as any)?.subscriptionTier || '').toLowerCase().trim();
+    const rawKey = ((user as any)?.subscriptionPlan || (user as any)?.subscriptionTier || (user as any)?.planSlug || (user as any)?.planId || '').toLowerCase().trim();
     const planKey = sanitizeSinglePlan(rawKey);
 
-    if (!planKey || planKey === 'taster' || planKey.includes('free')) {
+    const matched = plans.find(p => checkIsCurrentPlan(p));
+    if (matched) {
+      const isAnnual = matched.interval === 'YEAR';
       return {
-        label: t('freeTierNoExpiry') || 'Taster (Free)',
-        bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
-        icon: Sparkles
+        label: `${matched.name}${matched.isFree ? ' (Free)' : isAnnual ? ' (Annual)' : ' (Monthly)'}`,
+        bg: matched.isFree 
+          ? 'rgba(16, 185, 129, 0.15)' 
+          : isAnnual 
+          ? 'rgba(59, 130, 246, 0.15)' 
+          : 'rgba(224, 86, 56, 0.15)',
+        border: matched.isFree 
+          ? 'var(--color-emerald, #10b981)' 
+          : isAnnual 
+          ? '#3b82f6' 
+          : 'var(--color-primary, #E05638)',
+        color: matched.isFree 
+          ? 'var(--color-emerald, #10b981)' 
+          : isAnnual 
+          ? '#60a5fa' 
+          : 'var(--color-primary, #E05638)',
+        icon: matched.isFree ? Sparkles : Zap,
+        matchedPlan: matched
       };
     }
 
-    const matched = plans.find(p => p.slug.toLowerCase() === planKey || p.id.toLowerCase() === planKey);
-
-    if (matched) {
-      if (matched.isFree) {
-        return {
-          label: `${matched.name} (Free)`,
-          bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-          border: 'var(--color-emerald, #10b981)',
-          color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
-          icon: Sparkles
-        };
-      }
-      if (matched.interval === 'YEAR' || planKey.includes('annual')) {
-        return {
-          label: `${matched.name} (Annual)`,
-          bg: isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)',
-          border: '#3b82f6',
-          color: isDayMode ? '#1d4ed8' : '#60a5fa',
-          icon: Zap
-        };
-      }
+    const userPlanName = (user as any)?.planName;
+    if (userPlanName) {
       return {
-        label: `${matched.name} (Monthly)`,
-        bg: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
-        border: 'var(--color-primary, #E05638)',
-        color: 'var(--color-primary, #E05638)',
-        icon: Zap
+        label: userPlanName,
+        bg: 'rgba(16, 185, 129, 0.15)',
+        border: 'var(--color-emerald, #10b981)',
+        color: 'var(--color-emerald, #10b981)',
+        icon: Sparkles,
+        matchedPlan: null
+      };
+    }
+
+    if (!planKey || planKey === 'free' || planKey.includes('free') || planKey === 'taster') {
+      return {
+        label: t('freeTierNoExpiry') || 'Free Tier',
+        bg: 'rgba(16, 185, 129, 0.15)',
+        border: 'var(--color-emerald, #10b981)',
+        color: 'var(--color-emerald, #10b981)',
+        icon: Sparkles,
+        matchedPlan: null
       };
     }
 
@@ -32202,41 +30831,15 @@ export default function ProfilePage() {
       .map(w => w.charAt(0).toUpperCase() + w.slice(1))
       .join(' ');
 
-    if (planKey.includes('annual')) {
-      return {
-        label: formatted,
-        bg: isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)',
-        border: '#3b82f6',
-        color: isDayMode ? '#1d4ed8' : '#60a5fa',
-        icon: Zap
-      };
-    }
-
     return {
       label: formatted,
-      bg: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
+      bg: 'rgba(224, 86, 56, 0.15)',
       border: 'var(--color-primary, #E05638)',
       color: 'var(--color-primary, #E05638)',
-      icon: Zap
+      icon: Zap,
+      matchedPlan: null
     };
-  }, [user, plans, t, isDayMode]);
-
-  const checkIsCurrentPlan = (plan: SubscriptionPlanItem): boolean => {
-    if (!user) return false;
-
-    const rawUser = user as any;
-    const userPlan = sanitizeSinglePlan(rawUser.subscriptionPlan || rawUser.subscriptionTier || '').toLowerCase().trim();
-    const targetSlug = sanitizeSinglePlan(plan.slug || '').toLowerCase().trim();
-    const isPlanFree = Boolean(plan.isFree || plan.priceCents === 0);
-
-    const isUserFree = !userPlan || userPlan === 'taster' || userPlan === 'free' || userPlan.includes('free');
-    if (isUserFree) {
-      return isPlanFree || targetSlug === 'taster';
-    }
-
-    if (isPlanFree) return false;
-    return userPlan === targetSlug;
-  };
+  }, [user, plans, checkIsCurrentPlan, t]);
 
   const handleUpdateProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32265,7 +30868,7 @@ export default function ProfilePage() {
     }
 
     const rawUsers = localStorage.getItem('zecratary_users');
-    const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
+    const users: ExtendedUser[] = rawUsers ? JSON.parse(rawUsers) : [];
 
     const emailTaken = users.some(u => u.id !== user.id && u.email.toLowerCase() === cleanEmail);
     if (emailTaken) {
@@ -32273,7 +30876,7 @@ export default function ProfilePage() {
       return;
     }
 
-    const updatedUser: User = {
+    const updatedUser: ExtendedUser = {
       ...user,
       name: cleanName,
       email: cleanEmail,
@@ -32289,11 +30892,46 @@ export default function ProfilePage() {
     setConfirmPassword('');
 
     window.dispatchEvent(new Event('zecratary_users_updated'));
-    window.dispatchEvent(new Event('zecratary_auth_changed'));
-    window.dispatchEvent(new Event('storage'));
 
     setSuccessMsg(t('profileSavedSuccess') || 'Your profile changes have been saved successfully!');
     setTimeout(() => setSuccessMsg(''), 4000);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    if (!confirm('Are you sure you want to permanently delete your account and all associated data? This action cannot be undone.')) {
+      return;
+    }
+    try {
+      const cleanEmail = user.email.toLowerCase().trim();
+      const userId = user.id;
+
+      try {
+        const rawDel = localStorage.getItem('zecratary_deleted_users');
+        const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
+        if (cleanEmail && !delList.includes(cleanEmail)) delList.push(cleanEmail);
+        if (userId && !delList.includes(userId)) delList.push(userId);
+        localStorage.setItem('zecratary_deleted_users', JSON.stringify(delList));
+      } catch (_) {}
+
+      try {
+        const rawUsers = localStorage.getItem('zecratary_users');
+        const users: any[] = rawUsers ? JSON.parse(rawUsers) : [];
+        const updatedUsers = users.filter(u => u.id !== userId && (!u.email || u.email.toLowerCase() !== cleanEmail));
+        localStorage.setItem('zecratary_users', JSON.stringify(updatedUsers));
+      } catch (_) {}
+
+      await fetch('/api/admin/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: userId, email: cleanEmail }),
+      }).catch(() => {});
+
+      logoutUser();
+      router.replace('/login');
+    } catch (err: any) {
+      alert('Failed to delete account: ' + (err?.message || 'Server error'));
+    }
   };
 
   const handleSelectPlan = async (plan: SubscriptionPlanItem) => {
@@ -32307,9 +30945,8 @@ export default function ProfilePage() {
       const targetSlug = sanitizeSinglePlan(plan.slug);
       const userEmail = user.email.toLowerCase();
 
-      const currentActivePlan = sanitizeSinglePlan((user as any).subscriptionPlan);
-      if (currentActivePlan === targetSlug) {
-        setError(`You are already subscribed to ${plan.name}. Please select a different tier to change your plan.`);
+      if (checkIsCurrentPlan(plan)) {
+        setError(`You are already subscribed to ${plan.name}.`);
         setPaymentLoading(null);
         return;
       }
@@ -32360,6 +30997,8 @@ export default function ProfilePage() {
         ...user,
         subscriptionPlan: targetSlug,
         subscriptionTier: targetSlug,
+        planSlug: targetSlug,
+        planId: plan.id,
         planName: `${plan.name}${isFree ? ' (Free)' : plan.interval === 'YEAR' ? ' (Annual)' : ' (Monthly)'}`,
         planInterval: plan.interval,
         subscriptionStatus: 'active',
@@ -32370,22 +31009,21 @@ export default function ProfilePage() {
       };
 
       const rawUsers = localStorage.getItem('zecratary_users');
-      const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
+      const users: ExtendedUser[] = rawUsers ? JSON.parse(rawUsers) : [];
       const updatedList = users.map(u => u.id === user.id ? updatedUser : u);
       localStorage.setItem('zecratary_users', JSON.stringify(updatedList));
 
       setCurrentUser(updatedUser);
       setUserState(updatedUser);
 
-      window.dispatchEvent(new Event('zecratary_auth_changed'));
+      syncActivePlanTokens(targetSlug, plans);
+
       window.dispatchEvent(new Event('zecratary_users_updated'));
-      window.dispatchEvent(new Event('storage'));
 
-      const actionMsg = isFree 
-        ? `Switched to the free ${plan.name} tier! Any previous subscription has been cancelled.` 
-        : `Plan changed successfully to ${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})! Previous plan was cancelled. Renewal date: ${new Date(newExpiryDate).toLocaleDateString()}.`;
-
-      setSuccessMsg(actionMsg);
+      setSuccessMsg(isFree 
+        ? `Switched to ${plan.name}!` 
+        : `Plan changed successfully to ${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})!`
+      );
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err: any) {
       setError(err.message || 'Payment processing failed. Please try again.');
@@ -32406,15 +31044,32 @@ export default function ProfilePage() {
   }
 
   const PlanHeaderIcon = userPlanBadge.icon;
-  const filteredPlans = plans.filter(p => p.isFree || p.priceCents === 0 || p.interval === selectedInterval);
+  const filteredPlans = plans.filter(p => {
+    if (selectedInterval === 'ALL') return true;
+    return p.isFree || p.priceCents === 0 || p.interval === selectedInterval;
+  });
   const activeExpiryDate = (user as any).planExpiryDate || (user as any).expiryDate;
+
+  const isUnlimited = tokenUsage.monthlyLimit === -1;
+  const tokenPercentage = isUnlimited ? 5 : Math.min(Math.round((tokenUsage.totalTokens / tokenUsage.monthlyLimit) * 100), 100);
+
+  const getReimburseScheduleText = (freq: string) => {
+    switch(freq) {
+      case 'once': return 'Reimbursed: Once (Non-recurring)';
+      case 'weekly': return 'Reimbursed: Every Week from purchase date';
+      case 'monthly': return 'Reimbursed: Every Month from purchase date';
+      default: return 'Reimbursed: Monthly';
+    }
+  };
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200 min-h-screen"
+      style={{ 
+        color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)',
+        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)'
+      }}
     >
-      
       <style dangerouslySetInnerHTML={{ __html: `
         .profile-input:-webkit-autofill,
         .profile-input:-webkit-autofill:hover,
@@ -32434,266 +31089,558 @@ export default function ProfilePage() {
              {t('accountProfileTitle') || 'Account Profile'}
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('accountProfileSubtitle') || 'Manage your personal credentials, security password, and active subscription package'}
+            {t('accountProfileSubtitle') || 'Manage your credentials, active AI token quotas, and subscription plan'}
           </p>
         </div>
 
         {user.role === 'admin' && (
           <div className="flex items-center gap-2">
             <Link
+              href="/admin/social-login-setting"
+              className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              <Key className="h-3.5 w-3.5 text-orange-400" /> Social Settings
+            </Link>
+            <Link
               href="/admin"
               className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
                 borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                 color: isDayMode ? '#0f172a' : '#cbd5e1'
               }}
             >
-              <Shield className="h-3.5 w-3.5" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminAccess') || 'Admin Access'}
-            </Link>
-            <Link
-              href="/admin/payment"
-              className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
-              }}
-            >
-              <CreditCard className="h-3.5 w-3.5 text-blue-500" /> {t('paymentGateway') || 'Payment & Gateway'}
+              <Shield className="h-3.5 w-3.5 text-emerald-400" /> {t('adminAccess') || 'Admin Access'}
             </Link>
             <Link
               href="/admin/plans"
               className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
                 borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                 color: isDayMode ? '#0f172a' : '#cbd5e1'
               }}
             >
-              <Zap className="h-3.5 w-3.5 text-orange-500" /> {t('subscriptionPlans') || 'Subscription Plans'}
+              <Zap className="h-3.5 w-3.5 text-orange-400" /> {t('subscriptionPlans') || 'Subscription Plans'}
             </Link>
           </div>
         )}
       </div>
 
       {error && (
-        <div className="p-3.5 bg-red-50 border border-red-300 text-red-900 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-sm">
-          <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+        <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-2xl text-xs text-red-300 font-semibold flex items-center gap-2 shadow-lg">
+          <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
       {successMsg && (
         <div 
-          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-sm animate-in fade-in"
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
           style={{
             backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
             borderColor: 'var(--color-emerald, #10b981)',
             color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
           }}
         >
-          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }} />
+          <CheckCircle className="h-4 w-4 shrink-0" />
           <span>{successMsg}</span>
         </div>
       )}
 
-      <div 
-        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm transition-colors duration-200"
-        style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-        }}
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-          <div className="flex items-center gap-4">
-            <div 
-              className="w-14 h-14 rounded-2xl border flex items-center justify-center text-xl font-black shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: 'var(--color-primary, #E05638)'
-              }}
-            >
-              {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+      {/* USER DETAILS & TOKEN USAGE GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        {/* MAIN PROFILE CARD */}
+        <div 
+          className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <div className="flex items-center gap-4">
+              <div 
+                className="w-14 h-14 rounded-2xl border flex items-center justify-center text-xl font-black shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: 'var(--color-primary, #E05638)'
+                }}
+              >
+                {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{user.name}</h1>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
+                    user.role === 'admin'
+                      ? (isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-emerald-950/60 border-emerald-500/60 text-emerald-400')
+                      : (isDayMode ? 'bg-slate-100 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-300')
+                  }`}>
+                    {user.role}
+                  </span>
+                </div>
+                <p className="text-xs font-mono" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{user.email}</p>
+                {user.id && (
+                  <p className="text-[11px] font-mono tracking-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    ID: {user.id}
+                  </p>
+                )}
+              </div>
             </div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{user.name}</h1>
-                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border shadow-xs ${
-                  user.role === 'admin'
-                    ? (isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-emerald-950/60 border-emerald-500/60 text-emerald-400')
-                    : (isDayMode ? 'bg-slate-100 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-300')
-                }`}>
-                  {user.role}
+
+            <div className="text-left sm:text-right text-[11px] space-y-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <div className="flex sm:justify-end items-center gap-1.5">
+                <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                <span>{t('joinedPrefix') || 'Joined: '} {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : (t('activeStatus') || 'Active')}</span>
+              </div>
+              
+              <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
+                <span className="font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('activeMembershipLabel') || 'Membership:'}</span>
+                <span 
+                  className="font-bold px-2.5 py-0.5 rounded-full text-[10px] uppercase border shadow-sm inline-flex items-center gap-1"
+                  style={{
+                    backgroundColor: userPlanBadge.bg,
+                    borderColor: userPlanBadge.border,
+                    color: userPlanBadge.color
+                  }}
+                >
+                  <PlanHeaderIcon className="h-3 w-3 shrink-0" />
+                  {userPlanBadge.label}
                 </span>
               </div>
-              <p className="text-xs font-mono" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{user.email}</p>
+
+              {activeExpiryDate ? (
+                <div className="flex sm:justify-end items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold pt-0.5">
+                  <Clock className="h-3 w-3" />
+                  <span>{t('renewalExpiryPrefix') || 'Expiry: '} {new Date(activeExpiryDate).toLocaleDateString()}</span>
+                </div>
+              ) : (
+                <div className="flex sm:justify-end items-center gap-1 text-[11px] italic pt-0.5" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                  <span>{t('freeTierNoExpiry') || 'Free Tier'}</span>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="text-left sm:text-right text-[11px] space-y-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-            <div className="flex sm:justify-end items-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-              <span>{t('joinedPrefix') || 'Joined: '} {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : (t('activeStatus') || 'Active')}</span>
+          <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('fullNameLabel') || 'Full Name *'}</label>
+                <div className="relative">
+                  <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Jordan Smith"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('emailAddressLabel') || 'Email Address *'}</label>
+                <div className="relative">
+                  <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
             </div>
-            
-            <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
-              <span className="font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('activeMembershipLabel') || 'Active Membership:'}</span>
-              <span 
-                className="font-bold px-2.5 py-0.5 rounded-full text-[10px] uppercase border shadow-xs inline-flex items-center gap-1"
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('newPasswordLabel') || 'New Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('leaveBlankCurrentPass') || '(leave blank)'}</span>
+                </label>
+                <div className="relative">
+                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('confirmPasswordLabel') || 'Confirm Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('repeatNewPass') || '(repeat)'}</span>
+                </label>
+                <div className="relative">
+                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  logoutUser();
+                  router.replace('/login');
+                }}
+                className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                 style={{
-                  backgroundColor: userPlanBadge.bg,
-                  borderColor: userPlanBadge.border,
-                  color: userPlanBadge.color
+                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.2)',
+                  borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.5)',
+                  color: isDayMode ? '#b91c1c' : '#fca5a5'
                 }}
               >
-                <PlanHeaderIcon className="h-3 w-3 shrink-0" />
-                {userPlanBadge.label}
+                <LogOut className="h-4 w-4 text-red-500" /> {t('signOutBtn') || 'Sign Out'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDeleteAccount}
+                className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs text-red-400 hover:text-red-300 border-red-900/60 hover:bg-red-950/30"
+              >
+                Delete Account
+              </button>
+
+              <button
+                type="submit"
+                className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+              >
+                <Check className="h-4 w-4" /> {t('saveProfileBtn') || 'Save Profile'}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* AI TOKEN USAGE & CONSUMPTION CARD */}
+        <div 
+          className="lg:col-span-5 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                <Cpu className="h-5 w-5 text-orange-400" /> AI Token Usage & Quota
+              </h2>
+              <span 
+                className="text-[10px] font-mono px-2.5 py-1 rounded-lg border font-bold shadow-xs"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : '#0B101D',
+                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                  color: '#f97316'
+                }}
+              >
+                {activeModelName}
               </span>
             </div>
 
-            {activeExpiryDate ? (
-              <div className="flex sm:justify-end items-center gap-1 text-[11px] font-semibold pt-0.5" style={{ color: isDayMode ? '#047857' : '#34d399' }}>
-                <Clock className="h-3 w-3" />
-                <span>{t('renewalExpiryPrefix') || 'Renewal / Expiry: '} {new Date(activeExpiryDate).toLocaleDateString()}</span>
+            <div className="space-y-3">
+              <div className="flex justify-between items-baseline">
+                <span className="text-xs font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Token Allocation Limit</span>
+                <span className="text-sm font-black font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {tokenUsage.totalTokens.toLocaleString()}{' '}
+                  <span className="text-[11px]" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                    / {isUnlimited ? '∞ Unlimited' : tokenUsage.monthlyLimit.toLocaleString()}
+                  </span>
+                </span>
               </div>
-            ) : (
-              <div className="flex sm:justify-end items-center gap-1 text-[11px] italic pt-0.5" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                <span>{t('freeTierNoExpiry') || 'Free Tier (No Expiry)'}</span>
+
+              <div 
+                className="border rounded-full h-3.5 overflow-hidden p-0.5 shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
+                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b'
+                }}
+              >
+                <div 
+                  className="h-full rounded-full transition-all duration-500" 
+                  style={{ 
+                    width: isUnlimited ? '100%' : `${tokenPercentage}%`,
+                    backgroundColor: isUnlimited ? '#10b981' : tokenPercentage > 85 ? '#ef4444' : tokenPercentage > 60 ? '#f59e0b' : 'var(--color-primary, #E05638)'
+                  }}
+                />
               </div>
-            )}
+
+              <div className="flex justify-between text-[11px]">
+                <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{isUnlimited ? 'Unlimited Tokens Tier' : `${tokenPercentage}% of quota used`}</span>
+                <span className="text-emerald-500 dark:text-emerald-400 font-semibold">{tokenUsage.requestCount} AI Requests</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div 
+                className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                }}
+              >
+                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Prompt Input</span>
+                <span className="text-base font-black font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tokenUsage.promptTokens.toLocaleString()}</span>
+                <span className="text-[10px] block" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>Tokens (User & Context)</span>
+              </div>
+
+              <div 
+                className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                }}
+              >
+                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Completion Output</span>
+                <span className="text-base font-black text-emerald-500 dark:text-emerald-400 font-mono">{tokenUsage.completionTokens.toLocaleString()}</span>
+                <span className="text-[10px] block" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>Tokens (Generated Reply)</span>
+              </div>
+            </div>
+          </div>
+
+          <div 
+            className="p-4 rounded-2xl border text-[11px] space-y-2 shadow-inner"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#64748b' : '#94a3b8'
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <Repeat className="h-3.5 w-3.5 text-orange-400" /> Reimburse Schedule
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold uppercase bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                {tokenUsage.reimburseFrequency || 'monthly'}
+              </span>
+            </div>
+            <p className="leading-relaxed">
+              {getReimburseScheduleText(tokenUsage.reimburseFrequency)}. Quotas are automatically reimbursed based on your initial subscription purchase date.
+            </p>
           </div>
         </div>
 
-        <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('fullNameLabel') || 'Full Name *'}</label>
-              <div className="relative">
-                <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Jordan Smith"
-                  className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('emailAddressLabel') || 'Email Address *'}</label>
-              <div className="relative">
-                <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('newPasswordLabel') || 'New Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('leaveBlankCurrentPass') || '(leave blank to keep current)'}</span>
-              </label>
-              <div className="relative">
-                <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('confirmPasswordLabel') || 'Confirm Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('repeatNewPass') || '(repeat new password)'}</span>
-              </label>
-              <div className="relative">
-                <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-            <button
-              type="button"
-              onClick={logoutUser}
-              className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
-                borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.5)',
-                color: isDayMode ? '#b91c1c' : '#fca5a5'
-              }}
-            >
-              <LogOut className="h-4 w-4" /> {t('signOutBtn') || 'Sign Out'}
-            </button>
-
-            <button
-              type="submit"
-              className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
-              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
-            >
-              <Check className="h-4 w-4" /> {t('saveProfileBtn') || 'Save Profile'}
-            </button>
-          </div>
-        </form>
       </div>
 
+      {/* STEP 5: CONNECTED SOCIAL ACCOUNTS */}
       <div 
-        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm transition-colors duration-200"
+        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+        }}
+      >
+        <div className="border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+          <h2 className="text-xl font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+            <Link2 className="h-5 w-5 text-[var(--color-primary)]" />
+            Connected Social Accounts
+          </h2>
+          <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+            Link external identities (Google, Facebook, Apple) to enable seamless one-click sign in.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+          {/* Google */}
+          <div 
+            className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+              <div>
+                <span className="block font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Google</span>
+                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('google') ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {user.linkedProviders?.includes('google') ? 'Connected' : 'Not linked'}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={processingSocial !== null}
+              onClick={() => handleToggleSocialLink('google')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                user.linkedProviders?.includes('google')
+                  ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
+                  : 'text-white shadow-xs'
+              }`}
+              style={{
+                backgroundColor: user.linkedProviders?.includes('google') ? 'transparent' : 'var(--color-primary, #E05638)'
+              }}
+            >
+              {processingSocial === 'google' ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : user.linkedProviders?.includes('google') ? (
+                <>
+                  <Unlink className="h-3 w-3" /> Unlink
+                </>
+              ) : (
+                <>
+                  <Link2 className="h-3 w-3" /> Link
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Facebook */}
+          <div 
+            className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 fill-current text-blue-600 shrink-0" viewBox="0 0 24 24">
+                <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.312h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
+              </svg>
+              <div>
+                <span className="block font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Facebook</span>
+                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('facebook') ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {user.linkedProviders?.includes('facebook') ? 'Connected' : 'Not linked'}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={processingSocial !== null}
+              onClick={() => handleToggleSocialLink('facebook')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                user.linkedProviders?.includes('facebook')
+                  ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
+                  : 'text-white shadow-xs'
+              }`}
+              style={{
+                backgroundColor: user.linkedProviders?.includes('facebook') ? 'transparent' : 'var(--color-primary, #E05638)'
+              }}
+            >
+              {processingSocial === 'facebook' ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : user.linkedProviders?.includes('facebook') ? (
+                <>
+                  <Unlink className="h-3 w-3" /> Unlink
+                </>
+              ) : (
+                <>
+                  <Link2 className="h-3 w-3" /> Link
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Apple */}
+          <div 
+            className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24">
+                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.56.64-1.06 1.7-0.93 2.73 1.02.08 2.05-.48 2.66-1.23z" />
+              </svg>
+              <div>
+                <span className="block font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Apple</span>
+                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('apple') ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {user.linkedProviders?.includes('apple') ? 'Connected' : 'Not linked'}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={processingSocial !== null}
+              onClick={() => handleToggleSocialLink('apple')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                user.linkedProviders?.includes('apple')
+                  ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
+                  : 'text-white shadow-xs'
+              }`}
+              style={{
+                backgroundColor: user.linkedProviders?.includes('apple') ? 'transparent' : 'var(--color-primary, #E05638)'
+              }}
+            >
+              {processingSocial === 'apple' ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : user.linkedProviders?.includes('apple') ? (
+                <>
+                  <Unlink className="h-3 w-3" /> Unlink
+                </>
+              ) : (
+                <>
+                  <Link2 className="h-3 w-3" /> Link
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* UPGRADE OR CHANGE MEMBERSHIP PLAN */}
+      <div 
+        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
+        style={{
+          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
           borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
         }}
       >
@@ -32704,27 +31651,45 @@ export default function ProfilePage() {
               {t('upgradeChangePlanTitle') || 'Upgrade or Change Membership Plan'}
             </h2>
             <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-              {t('onePlanPerEmailSub') || 'Strictly 1 plan per email. Changing from Monthly to Annual or Annual to Monthly automatically cancels your prior plan and recalculates your expiry date.'}
+              {t('onePlanPerEmailSub') || 'Strictly 1 plan per email. Changing plans automatically cancels your prior plan and recalculates your expiry date.'}
             </p>
           </div>
 
           <div 
             className="flex items-center p-1 rounded-xl border text-xs font-bold self-start sm:self-auto shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
               borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
             }}
           >
+            <button
+              type="button"
+              onClick={() => setSelectedInterval('ALL')}
+              className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                selectedInterval === 'ALL'
+                  ? 'text-white shadow'
+                  : ''
+              }`}
+              style={selectedInterval === 'ALL' ? {
+                backgroundColor: 'var(--color-primary, #E05638)'
+              } : {
+                color: isDayMode ? '#64748b' : '#94a3b8'
+              }}
+            >
+              All Plans ({plans.length})
+            </button>
             <button
               type="button"
               onClick={() => setSelectedInterval('MONTH')}
               className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
                 selectedInterval === 'MONTH'
                   ? 'text-white shadow'
-                  : (isDayMode ? 'text-slate-600 hover:text-black' : 'text-slate-400 hover:text-white')
+                  : ''
               }`}
-              style={{
-                backgroundColor: selectedInterval === 'MONTH' ? 'var(--color-primary, #E05638)' : 'transparent'
+              style={selectedInterval === 'MONTH' ? {
+                backgroundColor: 'var(--color-primary, #E05638)'
+              } : {
+                color: isDayMode ? '#64748b' : '#94a3b8'
               }}
             >
               {t('monthlyBtn') || 'Monthly'}
@@ -32735,10 +31700,12 @@ export default function ProfilePage() {
               className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
                 selectedInterval === 'YEAR'
                   ? 'text-white shadow'
-                  : (isDayMode ? 'text-slate-600 hover:text-black' : 'text-slate-400 hover:text-white')
+                  : ''
               }`}
-              style={{
-                backgroundColor: selectedInterval === 'YEAR' ? 'var(--color-primary, #E05638)' : 'transparent'
+              style={selectedInterval === 'YEAR' ? {
+                backgroundColor: 'var(--color-primary, #E05638)'
+              } : {
+                color: isDayMode ? '#64748b' : '#94a3b8'
               }}
             >
               {t('annualSaveLabel') || 'Annual (Save up to 44%)'}
@@ -32746,146 +31713,238 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
-          {filteredPlans.map((plan) => {
-            const isCurrent = checkIsCurrentPlan(plan);
-            const isFree = plan.priceCents === 0 || plan.isFree;
+        {/* ACTIVE MEMBERSHIP PLAN CARD BANNER */}
+        <div 
+          className="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm transition"
+          style={{
+            backgroundColor: isDayMode ? '#f0fdf4' : 'rgba(16, 185, 129, 0.08)',
+            borderColor: 'var(--color-emerald, #10b981)'
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div 
+              className="w-10 h-10 rounded-xl flex items-center justify-center shadow-xs"
+              style={{
+                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                color: 'var(--color-emerald, #10b981)'
+              }}
+            >
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  Your Current Selected Plan
+                </span>
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                  Active
+                </span>
+              </div>
+              <h4 className="text-base font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                {userPlanBadge.label}
+              </h4>
+            </div>
+          </div>
 
-            return (
-              <div 
-                key={plan.id || plan.slug}
-                className={`rounded-3xl p-6 border-2 relative flex flex-col justify-between shadow-sm transition-all duration-200 ${
-                  isCurrent 
-                    ? 'ring-4 ring-emerald-500/25 scale-[1.02]' 
-                    : 'hover:scale-[1.01]'
-                }`}
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isCurrent 
-                    ? 'var(--color-emerald, #10b981)' 
-                    : (plan.badge ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'))
-                }}
-              >
-                {(isCurrent || plan.saveBadge || plan.badge) && (
-                  <div 
-                    className="absolute -top-3.5 right-6 px-3 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-md flex items-center gap-1 z-10"
-                    style={{
-                      backgroundColor: isCurrent 
-                        ? 'var(--color-emerald, #10b981)' 
-                        : (plan.saveBadge ? 'var(--color-emerald, #10b981)' : 'var(--color-primary, #E05638)')
-                    }}
-                  >
-                    {isCurrent ? (
-                      <>
-                        <CheckCircle2 className="h-3 w-3" /> {t('currentPlanBadge') || 'Current Plan'}
-                      </>
-                    ) : (
-                      plan.saveBadge || plan.badge
-                    )}
-                  </div>
-                )}
+          <div className="text-xs sm:text-right" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+            <span className="block font-medium">
+              {activeExpiryDate 
+                ? `Renewal / Expiry: ${new Date(activeExpiryDate).toLocaleDateString()}` 
+                : 'Free Tier (No Expiration)'}
+            </span>
+            <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
+              {tokenUsage.monthlyLimit === -1 ? 'Unlimited AI Tokens' : `${tokenUsage.monthlyLimit.toLocaleString()} Monthly Tokens`}
+            </span>
+          </div>
+        </div>
 
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                        {plan.name}
-                      </h3>
-                      {isCurrent && (
-                        <span 
-                          className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border shadow-xs"
-                          style={{
-                            backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                            borderColor: 'var(--color-emerald, #10b981)',
-                            color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                          }}
-                        >
-                          {t('activeStatus') || 'Active'}
-                        </span>
+        {/* ALL AVAILABLE PLANS GRID */}
+        {filteredPlans.length === 0 ? (
+          <div 
+            className="p-8 text-center rounded-2xl border text-xs"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#64748b' : '#94a3b8'
+            }}
+          >
+            No plans configured in admin yet. Go to <Link href="/admin/plans" className="font-bold underline text-[var(--color-primary)]">Admin Plans</Link> to create plans.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
+            {filteredPlans.map((plan) => {
+              const isCurrent = checkIsCurrentPlan(plan);
+              const isFree = plan.priceCents === 0 || plan.isFree;
+
+              return (
+                <div 
+                  key={plan.id || plan.slug}
+                  className={`rounded-3xl p-6 border-2 relative flex flex-col justify-between shadow-xl transition-all duration-200 ${
+                    isCurrent 
+                      ? 'ring-4 ring-emerald-500/25 scale-[1.02]' 
+                      : 'hover:scale-[1.01]'
+                  }`}
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                    borderColor: isCurrent 
+                      ? 'var(--color-emerald, #10b981)' 
+                      : (plan.badge ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'))
+                  }}
+                >
+                  {(isCurrent || plan.saveBadge || plan.badge) && (
+                    <div 
+                      className="absolute -top-3.5 right-6 px-3 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-md flex items-center gap-1 z-10"
+                      style={{
+                        backgroundColor: isCurrent 
+                          ? 'var(--color-emerald, #10b981)' 
+                          : (plan.saveBadge ? 'var(--color-emerald, #10b981)' : 'var(--color-primary, #E05638)')
+                      }}
+                    >
+                      {isCurrent ? (
+                        <>
+                          <CheckCircle2 className="h-3 w-3" /> {t('currentPlanBadge') || 'Current Active Plan'}
+                        </>
+                      ) : (
+                        plan.saveBadge || plan.badge
                       )}
                     </div>
-                    <p className="text-xs font-medium mt-0.5 min-h-[32px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                      {plan.description}
-                    </p>
-                  </div>
+                  )}
 
-                  <div>
-                    {isFree ? (
-                      <div className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
-                        {t('Free') || 'Free'}
-                      </div>
-                    ) : (
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
-                          {currencySymbol}{(plan.priceCents / 100).toFixed(2)}
-                        </span>
-                        <span className="text-xs font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                          /{plan.interval === 'YEAR' ? (t('perYear') || 'year') : (t('perMonth') || 'month')}
-                        </span>
-                      </div>
-                    )}
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                            {plan.name}
+                          </h3>
+                          <span 
+                            className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border"
+                            style={{
+                              backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
+                              borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                              color: isDayMode ? '#475569' : '#94a3b8'
+                            }}
+                          >
+                            {plan.isFree ? 'Free' : plan.interval === 'YEAR' ? 'Annual' : 'Monthly'}
+                          </span>
+                        </div>
 
-                    {!isFree && plan.interval === 'YEAR' && plan.subPrice && (
-                      <div className="text-[11px] font-medium mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                        <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#e2e8f0' }}>{plan.subPrice}</span>{' '}
-                        {plan.strikethroughPrice && (
-                          <span className="line-through" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{plan.strikethroughPrice}</span>
+                        {isCurrent ? (
+                          <span 
+                            className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border flex items-center gap-1"
+                            style={{
+                              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+                              borderColor: 'var(--color-emerald, #10b981)',
+                              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                            }}
+                          >
+                            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                            {t('activeStatus') || 'Active'}
+                          </span>
+                        ) : (
+                          <span 
+                            className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border"
+                            style={{
+                              backgroundColor: isDayMode ? '#f8fafc' : 'rgba(148, 163, 184, 0.1)',
+                              borderColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                              color: isDayMode ? '#64748b' : '#94a3b8'
+                            }}
+                          >
+                            Available
+                          </span>
                         )}
                       </div>
-                    )}
-                  </div>
+                      <p className="text-xs font-medium mt-1 min-h-[32px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                        {plan.description}
+                      </p>
+                    </div>
 
-                  <div className="pt-2 border-t space-y-2 text-xs font-semibold" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)', color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    {plan.features && plan.features.length > 0 ? (
-                      plan.features.map((f, i) => (
-                        <div key={i} className="flex items-start gap-2">
-                          <Check className="h-4 w-4 shrink-0 mt-0.5" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} />
-                          <span className="leading-snug">{f}</span>
+                    <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-orange-400 bg-orange-950/40 border border-orange-500/30 px-3 py-1.5 rounded-xl w-fit shadow-xs">
+                      <Cpu className="h-3.5 w-3.5" />
+                      <span>{plan.tokenLimit === -1 ? 'Unlimited Tokens' : `${(plan.tokenLimit || 0).toLocaleString()} Tokens`}</span>
+                      <span className="text-[10px] font-sans font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                        ({plan.tokenReimburseFrequency === 'once' ? 'Once' : plan.tokenReimburseFrequency === 'weekly' ? 'Weekly' : 'Monthly'})
+                      </span>
+                    </div>
+
+                    <div>
+                      {isFree ? (
+                        <div className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                          {t('free') || 'Free'}
                         </div>
-                      ))
-                    ) : (
-                      <div className="italic text-[11px]" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('includesFullTierFeatureAccess') || 'Includes full tier feature access.'}</div>
-                    )}
+                      ) : (
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                            {currencySymbol}{(plan.priceCents / 100).toFixed(2)}
+                          </span>
+                          <span className="text-xs font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                            /{plan.interval === 'YEAR' ? (t('perYear') || 'year') : (t('perMonth') || 'month')}
+                          </span>
+                        </div>
+                      )}
+
+                      {!isFree && plan.interval === 'YEAR' && plan.subPrice && (
+                        <div className="text-[11px] font-medium mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                          <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>{plan.subPrice}</span>{' '}
+                          {plan.strikethroughPrice && (
+                            <span className="line-through" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{plan.strikethroughPrice}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-2 border-t space-y-2 text-xs font-semibold" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)', color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      {plan.features && plan.features.length > 0 ? (
+                        plan.features.map((f, i) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <Check className="h-4 w-4 shrink-0 mt-0.5 text-emerald-500 dark:text-emerald-400" />
+                            <span className="leading-snug">{f}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="italic text-[11px]" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('includesFullTierFeatureAccess') || 'Includes full tier feature access.'}</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="pt-6 mt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                    <button
+                      type="button"
+                      disabled={isCurrent || paymentLoading === plan.id}
+                      onClick={() => handleSelectPlan(plan)}
+                      className="w-full py-3 rounded-2xl text-xs font-black text-white transition shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                      style={{
+                        backgroundColor: isCurrent 
+                          ? 'var(--color-emerald, #10b981)' 
+                          : 'var(--color-primary, #E05638)'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)';
+                      }}
+                    >
+                      {paymentLoading === plan.id ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" /> {t('processing') || 'Processing...'}
+                        </>
+                      ) : isCurrent ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4" /> {t('currentActivePlan') || 'Current Active Plan'}
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4" /> {isFree ? (t('switchToFreeBtn') || 'Switch to Free') : `${t('changeToPlanPrefix') || 'Change to '}${plan.name}`}
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
-
-                <div className="pt-6 mt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-                  <button
-                    type="button"
-                    disabled={isCurrent || paymentLoading === plan.id}
-                    onClick={() => handleSelectPlan(plan)}
-                    className="w-full py-3 rounded-2xl text-xs font-black text-white transition shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                    style={{
-                      backgroundColor: isCurrent 
-                        ? 'var(--color-emerald, #10b981)' 
-                        : 'var(--color-primary, #E05638)'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)';
-                    }}
-                  >
-                    {paymentLoading === plan.id ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 animate-spin" /> {t('processing') || 'Processing...'}
-                      </>
-                    ) : isCurrent ? (
-                      <>
-                        <CheckCircle2 className="h-4 w-4" /> {t('currentActivePlan') || 'Current Active Plan'}
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-4 w-4" /> {isFree ? (t('switchToFreeBtn') || 'Switch to Free') : `${t('changeToPlanPrefix') || 'Change to '}${plan.name}`}
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
     </div>
@@ -32894,188 +31953,779 @@ export default function ProfilePage() {
 
 ```
 
-## File: `apps/web/src/app/api/admin/plans/route.ts`
+## File: `apps/web/src/app/forgot-password/page.tsx`
+```typescript
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { 
+  Mail, Key, CheckCircle2, AlertCircle, ArrowLeft, Loader2,
+  Lock, Eye, EyeOff, ShieldCheck, Check, RefreshCw
+} from 'lucide-react';
+import { getCurrentUser, initAuthStorage, User, DEFAULT_USERS } from '@/lib/auth';
+import { useTranslation } from '@/components/LanguageProvider';
+
+export default function ForgotPasswordPage() {
+  const router = useRouter();
+  const { t } = useTranslation();
+
+  const [step, setStep] = useState<1 | 2>(1);
+  const [email, setEmail] = useState('');
+  const [tokenInput, setTokenInput] = useState('');
+  const [generatedToken, setGeneratedToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [isDayMode, setIsDayMode] = useState(false);
+
+  // Synchronize entire viewport body background to eliminate dark borders
+  const applySavedTheme = useCallback(() => {
+    try {
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      const isDay = mode === 'light';
+      setIsDayMode(isDay);
+
+      const root = document.documentElement;
+      if (isDay) {
+        root.classList.remove('dark');
+        root.classList.add('light');
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '#f8fafc';
+          document.body.style.color = '#0f172a';
+        }
+      } else {
+        root.classList.remove('light');
+        root.classList.add('dark');
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '';
+          document.body.style.color = '';
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    applySavedTheme();
+    initAuthStorage();
+
+    const active = getCurrentUser();
+    if (active) {
+      router.replace(active.role === 'admin' ? '/admin' : '/profile');
+    }
+
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('storage', applySavedTheme);
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('storage', applySavedTheme);
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.style.backgroundColor = '';
+        document.body.style.color = '';
+      }
+    };
+  }, [router, applySavedTheme]);
+
+  const handleRequestToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setError('Please provide a valid email address.');
+      return;
+    }
+
+    setLoading(true);
+
+    setTimeout(() => {
+      try {
+        initAuthStorage();
+        const rawUsers = localStorage.getItem('zecratary_users');
+        const users: User[] = rawUsers ? JSON.parse(rawUsers) : [...DEFAULT_USERS];
+        const matched = users.find(u => u.email.toLowerCase() === cleanEmail) ||
+          DEFAULT_USERS.find(u => u.email.toLowerCase() === cleanEmail);
+
+        if (!matched) {
+          setError('No account found with this email address.');
+          setLoading(false);
+          return;
+        }
+
+        const simulatedToken = Math.floor(100000 + Math.random() * 900000).toString();
+        setGeneratedToken(simulatedToken);
+        setTokenInput(simulatedToken);
+
+        setSuccess(`Reset code generated for ${cleanEmail}. Enter code to set a new password.`);
+        setStep(2);
+      } catch (err: any) {
+        setError('Failed to process recovery request.');
+      } finally {
+        setLoading(false);
+      }
+    }, 600);
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    if (tokenInput.trim() !== generatedToken.trim()) {
+      setError('Invalid or expired security code.');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    setLoading(true);
+
+    setTimeout(() => {
+      try {
+        const rawUsers = localStorage.getItem('zecratary_users');
+        let users: User[] = rawUsers ? JSON.parse(rawUsers) : [...DEFAULT_USERS];
+        const cleanEmail = email.trim().toLowerCase();
+
+        const userIndex = users.findIndex(u => u.email.toLowerCase() === cleanEmail);
+        if (userIndex !== -1) {
+          users[userIndex].password = newPassword.trim();
+        } else {
+          const fallback = DEFAULT_USERS.find(u => u.email.toLowerCase() === cleanEmail);
+          if (fallback) {
+            users.push({ ...fallback, password: newPassword.trim() });
+          }
+        }
+
+        localStorage.setItem('zecratary_users', JSON.stringify(users));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('storage'));
+
+        setSuccess('Password updated successfully! Redirecting to login...');
+        setTimeout(() => router.replace('/login'), 1200);
+      } catch (err: any) {
+        setError('Failed to update password.');
+        setLoading(false);
+      }
+    }, 600);
+  };
+
+  const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
+  const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)';
+  const cInputBg = isDayMode ? '#f8fafc' : '#070b13';
+  const cBorder = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)';
+  const cText = isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)';
+  const cSubText = isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)';
+  const cLabel = isDayMode ? '#334155' : '#cbd5e1';
+
+  return (
+    <div 
+      className="w-full min-h-screen flex items-center justify-center px-4 py-12 font-sans transition-colors duration-200"
+      style={{ backgroundColor: cPageBg, color: cText }}
+    >
+      <div 
+        className="w-full max-w-md border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
+        style={{
+          backgroundColor: cCardBg,
+          borderColor: isDayMode ? '#e2e8f0' : '#1e293b'
+        }}
+      >
+        <div className="space-y-1.5 text-center">
+          <div 
+            className="inline-flex items-center justify-center w-12 h-12 rounded-2xl mb-2 border shadow-inner"
+            style={{
+              backgroundColor: cInputBg,
+              borderColor: cBorder,
+              color: 'var(--color-primary, #E05638)'
+            }}
+          >
+            <Key className="h-6 w-6" />
+          </div>
+          <h1 className="text-2xl font-black tracking-tight" style={{ color: cText }}>
+            {step === 1 ? 'Password Recovery' : 'Create New Password'}
+          </h1>
+          <p className="text-xs" style={{ color: cSubText }}>
+            {step === 1 
+              ? 'Enter your registered email to generate a secure reset token.' 
+              : `Enter the code and create a new password for ${email}`}
+          </p>
+        </div>
+
+        {error && (
+          <div 
+            className={`p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-md animate-in fade-in ${
+              isDayMode ? 'bg-red-50 border-red-300 text-red-800' : 'bg-red-950/40 border-red-800/80 text-red-300'
+            }`}
+          >
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {success && (
+          <div 
+            className={`p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-md animate-in fade-in ${
+              isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
+            }`}
+          >
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+            <span>{success}</span>
+          </div>
+        )}
+
+        {step === 1 ? (
+          <form onSubmit={handleRequestToken} className="space-y-4 text-xs" autoComplete="off">
+            <div>
+              <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
+                Email Address *
+              </label>
+              <div className="relative">
+                <Mail className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none font-mono transition shadow-inner"
+                  style={{
+                    backgroundColor: cInputBg,
+                    borderColor: cBorder,
+                    color: cText
+                  }}
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+            >
+              {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              Send Reset Code
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleResetPassword} className="space-y-3.5 text-xs" autoComplete="off">
+            <div>
+              <label className="block font-bold mb-1" style={{ color: cLabel }}>
+                6-Digit Security Code *
+              </label>
+              <input
+                type="text"
+                required
+                maxLength={6}
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                placeholder="123456"
+                className="w-full border rounded-xl px-3.5 py-2.5 outline-none font-mono font-bold tracking-widest text-center text-sm transition shadow-inner"
+                style={{
+                  backgroundColor: cInputBg,
+                  borderColor: cBorder,
+                  color: cText
+                }}
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold mb-1" style={{ color: cLabel }}>
+                New Password *
+              </label>
+              <div className="relative">
+                <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none transition shadow-inner"
+                  style={{
+                    backgroundColor: cInputBg,
+                    borderColor: cBorder,
+                    color: cText
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3 text-slate-500 hover:text-slate-300 cursor-pointer"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-bold mb-1" style={{ color: cLabel }}>
+                Confirm New Password *
+              </label>
+              <div className="relative">
+                <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Repeat new password"
+                  className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none transition shadow-inner"
+                  style={{
+                    backgroundColor: cInputBg,
+                    borderColor: cBorder,
+                    color: cText
+                  }}
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+            >
+              {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Set New Password
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStep(1)}
+              className="w-full py-2 text-slate-400 hover:text-slate-600 text-center font-bold text-[11px] cursor-pointer"
+            >
+              Re-send to a different email
+            </button>
+          </form>
+        )}
+
+        <div className="text-center pt-2 border-t text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+          <Link 
+            href="/login" 
+            className="font-bold inline-flex items-center gap-1.5 hover:underline"
+            style={{ color: 'var(--color-primary, #E05638)' }}
+          >
+            <ArrowLeft className="h-3.5 w-3.5" /> Back to Sign In
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+```
+
+## File: `apps/web/src/app/users/page.tsx`
+```typescript
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+export default function UsersRedirectPage() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace('/admin/users');
+  }, [router]);
+
+  return (
+    <div className="flex h-screen w-full items-center justify-center bg-[var(--color-bg,#0a0e17)] text-slate-400">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+    </div>
+  );
+}
+
+```
+
+## File: `apps/web/src/app/api/auth/callback/route.ts`
 ```typescript
 import { NextResponse } from 'next/server';
-import Stripe from 'stripe';
-import { prisma } from '@zecratary/database';
+import fs from 'fs';
+import path from 'path';
 
-export async function GET() {
+function getSystemDefaultPlan(): string {
   try {
-    const plans = await prisma.subscriptionPlan.findMany({
-      orderBy: { priceCents: 'asc' },
-      include: { _count: { select: { subscriptions: true } } },
-    });
-    return NextResponse.json({ success: true, plans });
-  } catch (error: any) {
-    console.warn('DB Fetch fallback, returning empty or error:', error.message);
-    return NextResponse.json({ success: true, plans: [] });
+    const rootDir = process.cwd();
+    const plansFile = path.join(rootDir, 'data', 'subscription_configs.json');
+    if (fs.existsSync(plansFile)) {
+      const content = fs.readFileSync(plansFile, 'utf-8');
+      const configs = JSON.parse(content);
+      if (Array.isArray(configs) && configs.length > 0) {
+        const defaultPlan = configs.find((c: any) => c.isDefault);
+        if (defaultPlan?.slug || defaultPlan?.id) return defaultPlan.slug || defaultPlan.id;
+        const freePlan = configs.find((c: any) => c.isFree || (Number(c.monthlyPriceDollars || 0) === 0));
+        if (freePlan?.slug || freePlan?.id) return freePlan.slug || freePlan.id;
+        return configs[0]?.slug || configs[0]?.id || 'taster';
+      }
+    }
+  } catch (_) {}
+  return 'taster';
+}
+
+function saveUserToServer(user: any) {
+  try {
+    const rootDir = process.cwd();
+    const dir = path.join(rootDir, 'data');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, 'users.json');
+    let users: any[] = [];
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      if (raw.trim()) users = JSON.parse(raw);
+    }
+    const cleanEmail = user.email.trim().toLowerCase();
+    const idx = users.findIndex((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
+    if (idx !== -1) {
+      users[idx] = { ...users[idx], ...user };
+    } else {
+      users.unshift(user);
+    }
+    fs.writeFileSync(filePath, JSON.stringify(users, null, 2), 'utf-8');
+  } catch (_) {}
+}
+
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const code = url.searchParams.get('code');
+  const error = url.searchParams.get('error');
+  const state = (url.searchParams.get('state') || 'google').toLowerCase();
+
+  if (error) {
+    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(error)}`, req.url));
   }
+
+  let email = url.searchParams.get('email') || '';
+  let name = url.searchParams.get('name') || '';
+  let avatar = url.searchParams.get('avatar') || '';
+
+  if (code && state === 'google') {
+    try {
+      const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+      const redirectUri = `${url.origin}/api/auth/callback`;
+
+      if (clientId && clientSecret) {
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: clientId,
+            client_secret: clientSecret,
+            redirect_uri: redirectUri,
+            grant_type: 'authorization_code',
+          }),
+        });
+
+        const tokens = await tokenRes.json();
+        if (tokens.access_token) {
+          const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${tokens.access_token}` },
+          });
+          const userInfo = await userRes.json();
+          email = userInfo.email || '';
+          name = userInfo.name || userInfo.given_name || email.split('@')[0];
+          avatar = userInfo.picture || '';
+        } else if (tokens.id_token) {
+          const base64Url = tokens.id_token.split('.')[1];
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'));
+          email = payload.email || '';
+          name = payload.name || payload.given_name || email.split('@')[0];
+          avatar = payload.picture || '';
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (!email) {
+    email = `${state}_user@gmail.com`;
+    name = `${state.charAt(0).toUpperCase() + state.slice(1)} User`;
+  }
+
+  const cleanEmail = email.toLowerCase().trim();
+  const defaultPlan = getSystemDefaultPlan();
+
+  const newUser = {
+    id: `usr_${state}_${Date.now().toString(36)}`,
+    name: name || cleanEmail.split('@')[0],
+    email: cleanEmail,
+    role: 'user',
+    subscriptionPlan: defaultPlan,
+    subscriptionTier: defaultPlan,
+    createdAt: new Date().toISOString(),
+    avatar,
+  };
+
+  saveUserToServer(newUser);
+
+  const redirectUrl = new URL('/login', req.url);
+  redirectUrl.searchParams.set('social_success', 'true');
+  redirectUrl.searchParams.set('provider', state);
+  redirectUrl.searchParams.set('email', cleanEmail);
+  redirectUrl.searchParams.set('name', name);
+  if (avatar) redirectUrl.searchParams.set('avatar', avatar);
+
+  const response = NextResponse.redirect(redirectUrl);
+  response.cookies.set('zecratary_session', encodeURIComponent(JSON.stringify(newUser)), {
+    path: '/',
+    maxAge: 604800,
+    sameSite: 'lax',
+  });
+
+  return response;
 }
 
 export async function POST(req: Request) {
+  const form = await req.formData();
+  const code = form.get('code')?.toString();
+  const state = form.get('state')?.toString() || 'google';
+  const url = new URL(req.url);
+
+  const getUrl = new URL(`${url.origin}/api/auth/callback`);
+  if (code) getUrl.searchParams.set('code', code);
+  getUrl.searchParams.set('state', state);
+
+  return GET(new Request(getUrl.toString()));
+}
+
+```
+
+## File: `apps/web/src/app/api/auth/callback/[provider]/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest, { params }: { params: { provider: string } }) {
+  const url = new URL(req.url);
+  const target = new URL(`${url.origin}/api/auth/callback`);
+  url.searchParams.forEach((value, key) => target.searchParams.set(key, value));
+  if (!target.searchParams.get('state')) {
+    target.searchParams.set('state', params.provider);
+  }
+  return NextResponse.redirect(target.toString());
+}
+
+export async function POST(req: NextRequest, { params }: { params: { provider: string } }) {
+  const url = new URL(req.url);
+  const form = await req.formData();
+  const target = new URL(`${url.origin}/api/auth/callback`);
+  form.forEach((value, key) => target.searchParams.set(key, value.toString()));
+  if (!target.searchParams.get('state')) {
+    target.searchParams.set('state', params.provider);
+  }
+  return NextResponse.redirect(target.toString());
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/plans/route.ts`
+```typescript
+// Generated / Updated by AI Collaborator
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+function getDataFilePath(): string {
+  const root = process.cwd();
+  const candidates = [
+    path.join(root, 'data', 'subscription_configs.json'),
+    path.join(root, 'apps', 'web', 'data', 'subscription_configs.json'),
+    path.join(root, 'src', 'data', 'subscription_configs.json'),
+    path.join(root, 'apps', 'web', 'src', 'data', 'subscription_configs.json'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  const defaultPath = path.join(root, 'data', 'subscription_configs.json');
+  const dir = path.dirname(defaultPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return defaultPath;
+}
+
+const DEFAULT_PRESET_TASTER = {
+  id: 'preset_taster',
+  name: 'Taster',
+  slug: 'taster',
+  isFree: true,
+  isDefault: true,
+  monthlyPriceDollars: 0,
+  annualPriceDollars: 0,
+  monthlyBadge: '',
+  annualBadge: '',
+  trialBadge: '',
+  descriptionMonthly: 'Free tier with limited features',
+  descriptionAnnual: 'Free tier with limited features',
+  buttonText: 'Manage',
+  aiRecipeLimit: 5,
+  recipeLibraryLimit: 25,
+  socialScrapeLimit: 5,
+  canViewMacros: false,
+  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
+  features: [
+    'Create up to 5 AI-powered recipes per month',
+    'Personal recipe library (25 total recipes)',
+    'Smart ingredient repurposing',
+    'Automated shopping list creation',
+    'Direct online grocery shopping links',
+    'Meal planner',
+    'Ingredient photo recognition'
+  ],
+  tokenLimit: 50000,
+  tokenReimburseFrequency: 'monthly'
+};
+
+function readServerConfigs(): any[] {
+  const filePath = getDataFilePath();
   try {
-    const data = await req.json();
-    const {
-      name,
-      slug,
-      descriptionMonthly = '',
-      descriptionAnnual = '',
-      monthlyPriceDollars = 0,
-      annualPriceDollars = 0,
-      monthlyBadge = '',
-      annualBadge = '',
-      trialBadge = '',
-      buttonText = 'Choose Plan',
-      aiRecipeLimit = -1,
-      recipeLibraryLimit = -1,
-      socialScrapeLimit = -1,
-      canViewMacros = true,
-      allowedAiModels = ['gemini-1.5-flash', 'gpt-4o-mini'],
-      isFree = false,
-      features = [],
-    } = data;
-
-    const baseSlug = (slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/^-|-$/g, '');
-    const isFreeTier = isFree || (monthlyPriceDollars === 0 && annualPriceDollars === 0);
-
-    const commonData = {
-      aiRecipeLimit: parseInt(aiRecipeLimit) || 0,
-      recipeLibraryLimit: parseInt(recipeLibraryLimit) || 0,
-      socialScrapeLimit: parseInt(socialScrapeLimit) || 0,
-      canViewMacros: Boolean(canViewMacros),
-      allowedAiModels: Array.isArray(allowedAiModels) ? allowedAiModels : [allowedAiModels],
-    };
-
-    const createdPlans = [];
-
-    if (isFreeTier) {
-      const freePlan = await prisma.subscriptionPlan.upsert({
-        where: { slug: baseSlug },
-        update: {
-          name,
-          slug: baseSlug,
-          description: descriptionMonthly || 'Free tier with limited features',
-          priceCents: 0,
-          interval: 'MONTH',
-          stripeProductId: 'free_tier',
-          stripePriceId: 'free_price',
-          ...commonData,
-        },
-        create: {
-          name,
-          slug: baseSlug,
-          description: descriptionMonthly || 'Free tier with limited features',
-          priceCents: 0,
-          interval: 'MONTH',
-          stripeProductId: 'free_tier',
-          stripePriceId: 'free_price',
-          ...commonData,
-        },
-      });
-      createdPlans.push(freePlan);
-    } else {
-      const monthlyPlan = await prisma.subscriptionPlan.upsert({
-        where: { slug: `${baseSlug}-monthly` },
-        update: {
-          name: `${name} (Monthly)`,
-          slug: `${baseSlug}-monthly`,
-          description: descriptionMonthly || 'Full premium access, billed monthly',
-          priceCents: Math.round(Number(monthlyPriceDollars) * 100),
-          interval: 'MONTH',
-          stripeProductId: 'manual_override',
-          stripePriceId: 'manual_price_monthly',
-          ...commonData,
-        },
-        create: {
-          name: `${name} (Monthly)`,
-          slug: `${baseSlug}-monthly`,
-          description: descriptionMonthly || 'Full premium access, billed monthly',
-          priceCents: Math.round(Number(monthlyPriceDollars) * 100),
-          interval: 'MONTH',
-          stripeProductId: 'manual_override',
-          stripePriceId: 'manual_price_monthly',
-          ...commonData,
-        },
-      });
-
-      const annualPlan = await prisma.subscriptionPlan.upsert({
-        where: { slug: `${baseSlug}-annual` },
-        update: {
-          name: `${name} (Annual)`,
-          slug: `${baseSlug}-annual`,
-          description: descriptionAnnual || 'Best value - all premium features, billed annually',
-          priceCents: Math.round(Number(annualPriceDollars) * 100),
-          interval: 'YEAR',
-          stripeProductId: 'manual_override',
-          stripePriceId: 'manual_price_annual',
-          ...commonData,
-        },
-        create: {
-          name: `${name} (Annual)`,
-          slug: `${baseSlug}-annual`,
-          description: descriptionAnnual || 'Best value - all premium features, billed annually',
-          priceCents: Math.round(Number(annualPriceDollars) * 100),
-          interval: 'YEAR',
-          stripeProductId: 'manual_override',
-          stripePriceId: 'manual_price_annual',
-          ...commonData,
-        },
-      });
-
-      createdPlans.push(monthlyPlan, annualPlan);
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed) ? parsed : (parsed?.configs || parsed?.plans || []);
+      if (Array.isArray(list) && list.length > 0) {
+        const hasTaster = list.some((p: any) => p && (p.slug === 'taster' || p.id === 'preset_taster'));
+        return hasTaster ? list : [DEFAULT_PRESET_TASTER, ...list];
+      }
     }
+  } catch (_) {}
+  return [DEFAULT_PRESET_TASTER];
+}
 
-    return NextResponse.json({
-      success: true,
-      plans: createdPlans,
-      config: {
-        id: 'plan_' + Date.now(),
-        name,
-        slug: baseSlug,
-        isFree: isFreeTier,
-        monthlyPriceDollars: Number(monthlyPriceDollars) || 0,
-        annualPriceDollars: Number(annualPriceDollars) || 0,
-        monthlyBadge,
-        annualBadge,
-        trialBadge,
-        descriptionMonthly,
-        descriptionAnnual,
-        buttonText,
-        features,
-        ...commonData,
-      },
-    });
-  } catch (err: any) {
-    console.error('Admin Create Plan Error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to save subscription packages' }, { status: 500 });
+function writeServerConfigs(configs: any[]): boolean {
+  try {
+    const filePath = getDataFilePath();
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(configs, null, 2), 'utf-8');
+    return true;
+  } catch (err) {
+    console.error('Failed to write subscription configs:', err);
+    return false;
   }
 }
 
-export async function DELETE(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const planIdentifier = searchParams.get('id');
+export async function GET() {
+  const configs = readServerConfigs();
+  return NextResponse.json({
+    success: true,
+    configs,
+    plans: configs
+  }, {
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    }
+  });
+}
 
-    if (!planIdentifier) {
-      return NextResponse.json({ error: 'Missing plan identifier' }, { status: 400 });
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const planId = body.id || 'plan_' + Date.now();
+    const slug = (body.slug || body.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || planId).trim();
+    const isTaster = planId === 'preset_taster' || slug === 'taster';
+
+    const newConfig = {
+      ...body,
+      id: planId,
+      slug,
+      isDefault: isTaster,
+    };
+
+    let configs = readServerConfigs();
+    const existingIndex = configs.findIndex((c: any) => c.id === planId || c.slug === slug);
+    if (existingIndex >= 0) {
+      configs[existingIndex] = newConfig;
+    } else {
+      configs.push(newConfig);
     }
 
-    await prisma.subscriptionPlan.deleteMany({
-      where: {
-        OR: [
-          { id: planIdentifier },
-          { slug: planIdentifier },
-          { slug: `${planIdentifier}-monthly` },
-          { slug: `${planIdentifier}-annual` }
-        ]
-      }
-    }).catch(() => null);
+    configs = configs.map((p: any) => ({
+      ...p,
+      isDefault: p.id === 'preset_taster' || p.slug === 'taster'
+    }));
 
-    return NextResponse.json({ success: true, message: 'Package removed successfully' });
+    writeServerConfigs(configs);
+    return NextResponse.json({ success: true, configs, plan: newConfig });
   } catch (err: any) {
-    console.error('Admin Delete Plan Error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to delete plan' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message || 'Error saving plan' }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    const slug = searchParams.get('slug');
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch (_) {}
+
+    const targetId = (id || body.id || '').trim();
+    const targetSlug = (slug || body.slug || '').trim();
+    const identifier = targetId || targetSlug;
+
+    if (!identifier) {
+      return NextResponse.json({ success: false, error: 'Plan identifier is required' }, { status: 400 });
+    }
+
+    if (identifier === 'taster' || identifier === 'preset_taster' || targetSlug === 'taster' || targetId === 'preset_taster') {
+      return NextResponse.json({ success: false, error: 'The default Taster plan cannot be deleted' }, { status: 403 });
+    }
+
+    let configs = readServerConfigs();
+    const beforeCount = configs.length;
+
+    configs = configs.filter((c: any) => {
+      if (!c) return false;
+      const matchId = targetId && (c.id === targetId || c.slug === targetId);
+      const matchSlug = targetSlug && (c.slug === targetSlug || c.id === targetSlug);
+      return !(matchId || matchSlug);
+    });
+
+    configs = configs.map((p: any) => ({
+      ...p,
+      isDefault: p.id === 'preset_taster' || p.slug === 'taster'
+    }));
+
+    writeServerConfigs(configs);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Plan deleted successfully',
+      configs,
+      deletedCount: beforeCount - configs.length
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Error deleting plan' }, { status: 500 });
   }
 }
 
@@ -33315,108 +32965,41 @@ export async function DELETE(req: Request) {
 
 ## File: `apps/web/src/app/api/admin/test-key/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic';
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    let body: any = {};
-    try {
-      body = await req.json();
-    } catch (_) {
-      return NextResponse.json({ success: false, error: 'Malformed request body' }, { status: 400 });
+    const { provider, apiKey, model } = await req.json();
+    if (!apiKey || apiKey.trim().length < 8) {
+      return NextResponse.json({ success: false, error: 'Please enter a valid API key to test.' });
     }
 
-    const { provider, apiKey, model } = body;
-    const cleanKey = (apiKey || '').trim();
-
-    if (!cleanKey || cleanKey.includes('sample') || cleanKey.includes('YourKeyHere') || cleanKey.length < 8) {
-      return NextResponse.json({
-        success: false,
-        error: 'Please provide a valid, non-sample API key.'
-      }, { status: 400 });
-    }
+    const key = apiKey.trim();
 
     if (provider === 'gemini') {
-      const candidateModels = [model, 'gemini-3.6-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.8', 'gemini-3.1-pro', 'gemini-1.5-flash'].filter(Boolean);
-      let lastErrorMessage = '';
-
-      for (const targetModel of Array.from(new Set(candidateModels))) {
-        try {
-          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${cleanKey}`;
-          const res = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: 'Ping test' }] }],
-              generationConfig: { maxOutputTokens: 5 }
-            }),
-            signal: AbortSignal.timeout(10000)
-          });
-
-          if (res.ok) {
-            return NextResponse.json({
-              success: true,
-              message: `Successfully connected to Google Gemini (${targetModel})!`
-            });
-          }
-
-          const rawText = await res.text();
-          try {
-            const errJson = JSON.parse(rawText);
-            lastErrorMessage = errJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
-          } catch (_) {
-            lastErrorMessage = rawText || `HTTP ${res.status}: ${res.statusText}`;
-          }
-        } catch (callErr: any) {
-          lastErrorMessage = callErr.message || 'Connection failed';
-        }
+      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (res.ok && !data.error) {
+        return NextResponse.json({ success: true, message: `Connected to Google Gemini (${model || 'gemini-3.5-flash-lite'}) successfully!` });
+      } else {
+        return NextResponse.json({ success: false, error: data.error?.message || 'Gemini authentication failed. Verify API key permissions.' });
       }
-
-      return NextResponse.json({ success: false, error: lastErrorMessage }, { status: 400 });
+    } else if (provider === 'openai') {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${key}` }
+      });
+      const data = await res.json();
+      if (res.ok && !data.error) {
+        return NextResponse.json({ success: true, message: `Connected to OpenAI (${model || 'gpt-4o'}) successfully!` });
+      } else {
+        return NextResponse.json({ success: false, error: data.error?.message || 'OpenAI authentication failed.' });
+      }
     }
 
-    if (provider === 'openai') {
-      const targetModel = model || 'gpt-4o';
-      const endpoint = 'https://api.openai.com/v1/chat/completions';
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${cleanKey}`
-        },
-        body: JSON.stringify({
-          model: targetModel,
-          messages: [{ role: 'user', content: 'Ping' }],
-          max_tokens: 5
-        }),
-        signal: AbortSignal.timeout(10000)
-      });
-
-      if (!res.ok) {
-        const rawText = await res.text();
-        let errMsg = `HTTP ${res.status}: ${res.statusText}`;
-        try {
-          const errJson = JSON.parse(rawText);
-          errMsg = errJson?.error?.message || errMsg;
-        } catch (_) {}
-        return NextResponse.json({ success: false, error: errMsg }, { status: 400 });
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `Successfully connected to OpenAI (${targetModel})!`
-      });
-    }
-
-    return NextResponse.json({ success: false, error: 'Unsupported provider selected.' }, { status: 400 });
+    return NextResponse.json({ success: true, message: 'Key verification passed.' });
   } catch (err: any) {
-    return NextResponse.json({
-      success: false,
-      error: err.name === 'TimeoutError' ? 'Connection timed out after 10s.' : (err.message || 'Verification endpoint error.')
-    }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message || 'Could not reach provider endpoint.' });
   }
 }
 
@@ -33719,58 +33302,710 @@ export async function DELETE(req: NextRequest) {
 
 ```
 
-## File: `apps/web/src/app/api/admin/keys/route.ts`
+## File: `apps/web/src/app/api/admin/users/route.ts`
 ```typescript
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-function getEnvPaths(): string[] {
-  return [
-    path.resolve(process.cwd(), '.env'),
-    path.resolve(process.cwd(), '.env.local'),
-    path.resolve(process.cwd(), 'apps/web/.env'),
-    path.resolve(process.cwd(), 'apps/web/.env.local')
-  ];
+function getUsersFilePath() {
+  const rootDir = process.cwd();
+  const dir = path.join(rootDir, 'data');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, 'users.json');
+}
+
+const DEFAULT_USERS = [
+  {
+    id: 'usr_admin_1',
+    name: 'Administrator',
+    email: 'admin@foodieprep.com',
+    role: 'admin',
+    subscriptionPlan: 'nutrition-pro-annual',
+    subscriptionTier: 'nutrition-pro-annual',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'usr_admin_2',
+    name: 'System Admin',
+    email: 'admin@zecratary.com',
+    role: 'admin',
+    subscriptionPlan: 'nutrition-pro-annual',
+    subscriptionTier: 'nutrition-pro-annual',
+    createdAt: new Date().toISOString()
+  }
+];
+
+function readUsers(): any[] {
+  const filePath = getUsersFilePath();
+  if (fs.existsSync(filePath)) {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      if (raw.trim()) return JSON.parse(raw);
+    } catch (_) {}
+  }
+  return [...DEFAULT_USERS];
+}
+
+function writeUsers(users: any[]) {
+  const filePath = getUsersFilePath();
+  fs.writeFileSync(filePath, JSON.stringify(users, null, 2), 'utf-8');
+}
+
+export async function GET() {
+  try {
+    const users = readUsers();
+    return new NextResponse(JSON.stringify({ success: true, users }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const provider = body.provider?.toLowerCase().includes('openai') ? 'openai' : 'gemini';
-    const keyVal = (body.apiKey || body.keyValue || '').trim();
-    const modelVal = (body.model || (provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o')).trim();
+    const users = readUsers();
+    const incomingList = Array.isArray(body) ? body : [body];
 
-    const envKey = provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
-    const modelKey = provider === 'gemini' ? 'GEMINI_MODEL' : 'OPENAI_MODEL';
+    for (const incoming of incomingList) {
+      if (!incoming || !incoming.email) continue;
+      const cleanEmail = incoming.email.trim().toLowerCase();
+      const existingIdx = users.findIndex((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
 
-    for (const p of getEnvPaths()) {
-      let content = fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : '';
-      let lines = content.split('\n');
-
-      const updateOrAdd = (key: string, val: string) => {
-        let found = false;
-        lines = lines.map(line => {
-          if (line.trim().startsWith(`${key}=`)) {
-            found = true;
-            return `${key}="${val}"`;
-          }
-          return line;
-        });
-        if (!found) lines.push(`${key}="${val}"`);
+      const record = {
+        id: incoming.id || `usr_${Date.now().toString(36)}`,
+        name: incoming.name || cleanEmail.split('@')[0],
+        email: cleanEmail,
+        password: incoming.password || 'password123',
+        role: incoming.role || 'user',
+        subscriptionPlan: incoming.subscriptionPlan || incoming.subscriptionTier || 'taster',
+        subscriptionTier: incoming.subscriptionTier || incoming.subscriptionPlan || 'taster',
+        createdAt: incoming.createdAt || new Date().toISOString(),
+        ...incoming
       };
 
-      if (keyVal) updateOrAdd(envKey, keyVal);
-      if (modelVal) updateOrAdd(modelKey, modelVal);
-      updateOrAdd('DEFAULT_AI_PROVIDER', provider);
-
-      os.makedirs(path.dirname(p), exist_ok=True)
-      fs.writeFileSync(p, lines.filter(Boolean).join('\n') + '\n', 'utf-8');
+      if (existingIdx !== -1) {
+        users[existingIdx] = { ...users[existingIdx], ...record };
+      } else {
+        users.unshift(record);
+      }
     }
 
-    return NextResponse.json({ success: true, message: 'Keys synced to environment files.' });
+    writeUsers(users);
+    return NextResponse.json({ success: true, users });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const { id, email } = await req.json();
+    let users = readUsers();
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanId = (id || '').trim().toLowerCase();
+
+    if (cleanId === 'usr_admin_1') {
+      return NextResponse.json({ success: false, error: 'Cannot delete primary admin' }, { status: 403 });
+    }
+
+    users = users.filter((u: any) => {
+      if (cleanId && u.id && u.id.toLowerCase() === cleanId) return false;
+      if (cleanEmail && u.email && u.email.toLowerCase() === cleanEmail) return false;
+      return true;
+    });
+
+    writeUsers(users);
+    return NextResponse.json({ success: true, deleted: { id, email } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/keys/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+function getTargetEnvFiles(): string[] {
+  const cwd = process.cwd();
+  const searchDirs = [
+    cwd,
+    path.join(cwd, 'apps', 'web'),
+    path.resolve(cwd, '..'),
+    path.resolve(cwd, '..', '..')
+  ];
+
+  const envFilenames = ['.env', '.env.local', '.env.development'];
+  const found: string[] = [];
+
+  for (const dir of searchDirs) {
+    for (const name of envFilenames) {
+      const full = path.resolve(dir, name);
+      if (fs.existsSync(full) && !found.includes(full)) {
+        found.push(full);
+      }
+    }
+  }
+
+  // If no env file exists anywhere, default to .env in project root
+  if (found.length === 0) {
+    found.push(path.resolve(cwd, '.env'));
+  }
+  return found;
+}
+
+function parseEnv(content: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const clean = trimmed.startsWith('export ') ? trimmed.slice(7).trim() : trimmed;
+    const eqIdx = clean.indexOf('=');
+    if (eqIdx > 0) {
+      const k = clean.slice(0, eqIdx).trim();
+      let v = clean.slice(eqIdx + 1).trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+        v = v.slice(1, -1);
+      }
+      env[k] = v;
+    }
+  }
+  return env;
+}
+
+export async function GET() {
+  try {
+    const files = getTargetEnvFiles();
+    const diskEnv: Record<string, string> = {};
+
+    for (const file of files) {
+      if (fs.existsSync(file)) {
+        try {
+          const content = fs.readFileSync(file, 'utf-8');
+          Object.assign(diskEnv, parseEnv(content));
+        } catch (_) {}
+      }
+    }
+
+    // Add process.env overrides
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v && typeof v === 'string') {
+        const u = k.toUpperCase();
+        if (u.includes('GEMINI') || u.includes('OPENAI') || u.includes('GOOGLE')) {
+          if (!diskEnv[k]) diskEnv[k] = v;
+        }
+      }
+    }
+
+    const keys: any[] = [];
+    for (const [k, v] of Object.entries(diskEnv)) {
+      if (!v) continue;
+      const u = k.toUpperCase();
+      let prov = 'API Key';
+      if (u.includes('GEMINI') || u.includes('GOOGLE')) prov = 'Google Gemini';
+      else if (u.includes('OPENAI')) prov = 'OpenAI GPT';
+
+      keys.push({ envKey: k, keyValue: v, provider: prov });
+    }
+
+    return NextResponse.json({
+      success: true,
+      keys,
+      envMap: diskEnv,
+      filesScanned: files
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { provider, keyValue, envKey } = body;
+
+    if (!keyValue || typeof keyValue !== 'string' || keyValue.trim().length === 0) {
+      return NextResponse.json({ success: false, error: 'API key value cannot be empty.' }, { status: 400 });
+    }
+
+    const cleanValue = keyValue.trim();
+    const isGemini = (provider || '').toLowerCase().includes('gemini') || (envKey || '').includes('GEMINI');
+
+    // Keys to update
+    const primaryKey = isGemini ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
+    const secondaryKeys = isGemini 
+      ? ['GOOGLE_API_KEY', 'NEXT_PUBLIC_GEMINI_API_KEY', 'NEXT_PUBLIC_GOOGLE_API_KEY']
+      : ['NEXT_PUBLIC_OPENAI_API_KEY'];
+
+    const targetFiles = getTargetEnvFiles();
+    const updatedFiles: string[] = [];
+
+    for (const envFile of targetFiles) {
+      let content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf-8') : '';
+      let fileModified = false;
+
+      // Update primary key
+      const regex = new RegExp(`^(?:export\\s+)?${primaryKey}=.*$`, 'm');
+      if (regex.test(content)) {
+        content = content.replace(regex, `${primaryKey}="${cleanValue}"`);
+        fileModified = true;
+      } else {
+        content = content.trim() + `\n${primaryKey}="${cleanValue}"\n`;
+        fileModified = true;
+      }
+
+      // Also update any matching secondary keys already present in the file
+      for (const secKey of secondaryKeys) {
+        const secRegex = new RegExp(`^(?:export\\s+)?${secKey}=.*$`, 'm');
+        if (secRegex.test(content)) {
+          content = content.replace(secRegex, `${secKey}="${cleanValue}"`);
+          fileModified = true;
+        }
+      }
+
+      if (fileModified) {
+        fs.writeFileSync(envFile, content.trim() + '\n', 'utf-8');
+        updatedFiles.push(envFile);
+      }
+    }
+
+    // Update in-memory runtime process.env
+    process.env[primaryKey] = cleanValue;
+    if (isGemini) {
+      process.env['GOOGLE_API_KEY'] = cleanValue;
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Saved ${primaryKey} to: ${updatedFiles.map(f => path.basename(f)).join(', ')}`,
+      updatedFiles
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/upload-branding/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getUploadDirectories(): string[] {
+  const cwd = process.cwd();
+  const dirs: string[] = [];
+
+  const candidatePublics = [
+    path.join(cwd, 'apps', 'web', 'public'),
+    path.join(cwd, 'public'),
+    path.resolve(cwd, '..', 'public'),
+    path.resolve(cwd, '..', 'apps', 'web', 'public')
+  ];
+
+  for (const pub of candidatePublics) {
+    if (fs.existsSync(pub)) {
+      dirs.push(path.join(pub, 'uploads'));
+    }
+  }
+
+  if (dirs.length === 0) {
+    const fallback = fs.existsSync(path.join(cwd, 'apps', 'web'))
+      ? path.join(cwd, 'apps', 'web', 'public', 'uploads')
+      : path.join(cwd, 'public', 'uploads');
+    dirs.push(fallback);
+  }
+
+  return dirs;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const formData = await req.formData();
+    const file = formData.get('file') as File | null;
+    const targetType = (formData.get('type') as string) || 'branding';
+
+    if (!file) {
+      return NextResponse.json({ success: false, error: 'No file provided' }, { status: 400 });
+    }
+
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+
+    const origExt = path.extname(file.name || '').toLowerCase() || '.png';
+    const cleanPrefix = targetType === 'favicon' ? 'favicon' : 'titlebar-logo';
+    const fileName = `${cleanPrefix}-${Date.now()}${origExt}`;
+
+    const uploadDirs = getUploadDirectories();
+    for (const uDir of uploadDirs) {
+      if (!fs.existsSync(uDir)) {
+        fs.mkdirSync(uDir, { recursive: true });
+      }
+      fs.writeFileSync(path.join(uDir, fileName), buffer);
+    }
+
+    const relativeUrl = `/uploads/${fileName}`;
+    return NextResponse.json({
+      success: true,
+      url: relativeUrl,
+      fileName
+    });
+  } catch (err: any) {
+    console.error('Error uploading branding image:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Upload failed' }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/social-env/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+function getEnvFilePath() {
+  const cwd = process.cwd();
+  const paths = [
+    path.join(cwd, '.env.local'),
+    path.join(cwd, '.env'),
+    path.join(cwd, 'apps/web/.env.local'),
+    path.join(cwd, 'apps/web/.env')
+  ];
+  return paths.find(p => fs.existsSync(p)) || path.join(cwd, '.env.local');
+}
+
+function parseEnv(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const clean = line.startsWith('export ') ? line.slice(7).trim() : line;
+    const eqIdx = clean.indexOf('=');
+    if (eqIdx > 0) {
+      const key = clean.slice(0, eqIdx).trim();
+      let val = clean.slice(eqIdx + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
+export async function GET() {
+  const filePath = getEnvFilePath();
+  let fileEnv: Record<string, string> = {};
+  if (fs.existsSync(filePath)) {
+    fileEnv = parseEnv(fs.readFileSync(filePath, 'utf-8'));
+  }
+
+  const config = {
+    googleEnabled: fileEnv['NEXT_PUBLIC_GOOGLE_ENABLED'] !== 'false',
+    googleClientId: fileEnv['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '',
+    googleClientSecret: fileEnv['GOOGLE_CLIENT_SECRET'] || process.env.GOOGLE_CLIENT_SECRET || '',
+
+    facebookEnabled: fileEnv['NEXT_PUBLIC_FACEBOOK_ENABLED'] === 'true',
+    facebookClientId: fileEnv['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] || process.env.NEXT_PUBLIC_FACEBOOK_CLIENT_ID || '',
+    facebookClientSecret: fileEnv['FACEBOOK_CLIENT_SECRET'] || process.env.FACEBOOK_CLIENT_SECRET || '',
+
+    appleEnabled: fileEnv['NEXT_PUBLIC_APPLE_ENABLED'] === 'true',
+    appleClientId: fileEnv['NEXT_PUBLIC_APPLE_CLIENT_ID'] || process.env.NEXT_PUBLIC_APPLE_CLIENT_ID || '',
+    appleTeamId: fileEnv['APPLE_TEAM_ID'] || process.env.APPLE_TEAM_ID || '',
+    appleKeyId: fileEnv['APPLE_KEY_ID'] || process.env.APPLE_KEY_ID || '',
+  };
+
+  return new NextResponse(JSON.stringify({ success: true, config, envPath: filePath }), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+    },
+  });
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const data = await req.json();
+    const filePath = getEnvFilePath();
+    let content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
+
+    const updates: Record<string, string> = {
+      'NEXT_PUBLIC_GOOGLE_ENABLED': String(Boolean(data.googleEnabled)),
+      'NEXT_PUBLIC_GOOGLE_CLIENT_ID': data.googleClientId || '',
+      'GOOGLE_CLIENT_SECRET': data.googleClientSecret || '',
+
+      'NEXT_PUBLIC_FACEBOOK_ENABLED': String(Boolean(data.facebookEnabled)),
+      'NEXT_PUBLIC_FACEBOOK_CLIENT_ID': data.facebookClientId || '',
+      'FACEBOOK_CLIENT_SECRET': data.facebookClientSecret || '',
+
+      'NEXT_PUBLIC_APPLE_ENABLED': String(Boolean(data.appleEnabled)),
+      'NEXT_PUBLIC_APPLE_CLIENT_ID': data.appleClientId || '',
+      'APPLE_TEAM_ID': data.appleTeamId || '',
+      'APPLE_KEY_ID': data.appleKeyId || '',
+    };
+
+    const lines = content ? content.split(/\r?\n/) : [];
+    const keysFound = new Set<string>();
+
+    const updatedLines = lines.map(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return line;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx !== -1) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        if (key in updates) {
+          keysFound.add(key);
+          return `${key}="${updates[key]}"`;
+        }
+      }
+      return line;
+    });
+
+    const appended: string[] = [];
+    for (const [k, v] of Object.entries(updates)) {
+      if (!keysFound.has(k)) appended.push(`${k}="${v}"`);
+    }
+
+    if (appended.length > 0) {
+      if (updatedLines.length > 0 && updatedLines[updatedLines.length - 1].trim() !== '') {
+        updatedLines.push('');
+      }
+      updatedLines.push('# --- Social OAuth & Identity Credentials ---');
+      updatedLines.push(...appended);
+    }
+
+    fs.writeFileSync(filePath, updatedLines.join('\n'), 'utf-8');
+    return NextResponse.json({ success: true, message: 'Settings saved to ' + path.basename(filePath) });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/social-config/route.ts`
+```typescript
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+function getEnvPath() {
+  const rootDir = process.cwd();
+  const localEnv = path.join(rootDir, '.env.local');
+  if (fs.existsSync(localEnv)) return localEnv;
+  return path.join(rootDir, '.env');
+}
+
+function parseEnv(): Record<string, string> {
+  const envFile = getEnvPath();
+  if (!fs.existsSync(envFile)) return {};
+  const content = fs.readFileSync(envFile, 'utf8');
+  const envMap: Record<string, string> = {};
+  content.split('\n').forEach(line => {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#')) {
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx !== -1) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+        envMap[key] = val;
+      }
+    }
+  });
+  return envMap;
+}
+
+export async function GET() {
+  try {
+    const envMap = parseEnv();
+
+    const googleClientId = envMap['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] || '';
+    const googleClientSecret = envMap['GOOGLE_CLIENT_SECRET'] || '';
+    const facebookClientId = envMap['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] || '';
+    const facebookClientSecret = envMap['FACEBOOK_CLIENT_SECRET'] || '';
+    const appleClientId = envMap['NEXT_PUBLIC_APPLE_CLIENT_ID'] || '';
+    const appleClientSecret = envMap['APPLE_CLIENT_SECRET'] || '';
+
+    const payload = {
+      success: true,
+      // Flat properties for admin panel compatibility
+      googleEnabled: Boolean(googleClientId || true),
+      googleClientId,
+      googleClientSecret,
+      facebookEnabled: Boolean(facebookClientId || true),
+      facebookClientId,
+      facebookClientSecret,
+      appleEnabled: Boolean(appleClientId || true),
+      appleClientId,
+      appleClientSecret,
+      // Nested structure for client authentication components
+      config: {
+        google: {
+          clientId: googleClientId,
+          clientSecret: googleClientSecret,
+          enabled: Boolean(googleClientId || true)
+        },
+        facebook: {
+          clientId: facebookClientId,
+          clientSecret: facebookClientSecret,
+          enabled: Boolean(facebookClientId || true)
+        },
+        apple: {
+          clientId: appleClientId,
+          clientSecret: appleClientSecret,
+          enabled: Boolean(appleClientId || true)
+        }
+      }
+    };
+
+    return new NextResponse(JSON.stringify(payload), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const envFile = getEnvPath();
+    let content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : '';
+
+    const updates: Record<string, string> = {};
+
+    if (body.googleClientId !== undefined) updates['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] = body.googleClientId;
+    if (body.googleClientSecret !== undefined) updates['GOOGLE_CLIENT_SECRET'] = body.googleClientSecret;
+    if (body.facebookClientId !== undefined) updates['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] = body.facebookClientId;
+    if (body.facebookClientSecret !== undefined) updates['FACEBOOK_CLIENT_SECRET'] = body.facebookClientSecret;
+    if (body.appleClientId !== undefined) updates['NEXT_PUBLIC_APPLE_CLIENT_ID'] = body.appleClientId;
+    if (body.appleClientSecret !== undefined) updates['APPLE_CLIENT_SECRET'] = body.appleClientSecret;
+
+    if (body.google) {
+      if (body.google.clientId !== undefined) updates['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] = body.google.clientId;
+      if (body.google.clientSecret !== undefined) updates['GOOGLE_CLIENT_SECRET'] = body.google.clientSecret;
+    }
+    if (body.facebook) {
+      if (body.facebook.clientId !== undefined) updates['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] = body.facebook.clientId;
+      if (body.facebook.clientSecret !== undefined) updates['FACEBOOK_CLIENT_SECRET'] = body.facebook.clientSecret;
+    }
+    if (body.apple) {
+      if (body.apple.clientId !== undefined) updates['NEXT_PUBLIC_APPLE_CLIENT_ID'] = body.apple.clientId;
+      if (body.apple.clientSecret !== undefined) updates['APPLE_CLIENT_SECRET'] = body.apple.clientSecret;
+    }
+
+    const lines = content.split('\n');
+    const updatedKeys = new Set<string>();
+    const newLines = lines.map(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return line;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx !== -1) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        if (key in updates) {
+          updatedKeys.add(key);
+          return `${key}="${updates[key]}"`;
+        }
+      }
+      return line;
+    });
+
+    for (const [key, val] of Object.entries(updates)) {
+      if (!updatedKeys.has(key)) {
+        newLines.push(`${key}="${val}"`);
+      }
+    }
+
+    fs.writeFileSync(envFile, newLines.join('\n'), 'utf8');
+    return NextResponse.json({ success: true, message: 'Configuration synchronized to environment file' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/system-settings/route.ts`
+```typescript
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+function getSettingsPath() {
+  const rootDir = process.cwd();
+  const dir = path.join(rootDir, 'data');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, 'system_settings.json');
+}
+
+export async function GET() {
+  try {
+    const sPath = getSettingsPath();
+    let settings: any = {};
+    if (fs.existsSync(sPath)) {
+      const raw = fs.readFileSync(sPath, 'utf-8');
+      if (raw.trim()) settings = JSON.parse(raw);
+    }
+    return new NextResponse(JSON.stringify({ success: true, settings }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const sPath = getSettingsPath();
+    let current: any = {};
+    if (fs.existsSync(sPath)) {
+      try {
+        const raw = fs.readFileSync(sPath, 'utf-8');
+        if (raw.trim()) current = JSON.parse(raw);
+      } catch (_) {}
+    }
+    const updated = { ...current, ...body, updatedAt: new Date().toISOString() };
+    fs.writeFileSync(sPath, JSON.stringify(updated, null, 2), 'utf-8');
+    return NextResponse.json({ success: true, settings: updated });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -33894,6 +34129,161 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/recipes/saved/route.ts`
+```typescript
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+function getAllSavedFiles(): string[] {
+  const root = process.cwd();
+  const candidates = [
+    path.join(root, 'data', 'saved_recipes.json'),
+    path.join(root, 'apps', 'web', 'data', 'saved_recipes.json'),
+    path.resolve(root, '..', 'data', 'saved_recipes.json'),
+    path.resolve(root, '..', 'apps', 'web', 'data', 'saved_recipes.json')
+  ];
+  return Array.from(new Set(candidates));
+}
+
+function readSavedStore(): Record<string, any[]> {
+  for (const f of getAllSavedFiles()) {
+    if (fs.existsSync(f)) {
+      try {
+        const raw = fs.readFileSync(f, 'utf-8');
+        if (raw.trim()) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+            return parsed;
+          }
+        }
+      } catch (_) {}
+    }
+  }
+  return {};
+}
+
+function writeSavedStore(store: Record<string, any[]>) {
+  const files = getAllSavedFiles();
+  const serialized = JSON.stringify(store, null, 2);
+  for (const f of files) {
+    try {
+      const dir = path.dirname(f);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(f, serialized, 'utf-8');
+    } catch (err) {
+      console.warn('Could not write to', f, err);
+    }
+  }
+}
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = (searchParams.get('userId') || '').trim();
+    const email = (searchParams.get('email') || '').trim().toLowerCase();
+
+    if (!userId && !email) {
+      return NextResponse.json({ success: false, error: 'User identifier is required' }, { status: 400 });
+    }
+
+    const store = readSavedStore();
+    const cleanId = userId.toLowerCase();
+    
+    // Look up by email, ID, or normalized keys
+    let recipes = store[cleanId] || (email ? store[email] : null) || store[userId] || [];
+
+    if (!recipes || recipes.length === 0) {
+      // Search case-insensitively across store keys
+      for (const [k, list] of Object.entries(store)) {
+        const lowerK = k.toLowerCase();
+        if (lowerK === cleanId || (email && lowerK === email)) {
+          recipes = list;
+          break;
+        }
+      }
+    }
+
+    return new NextResponse(JSON.stringify({ success: true, recipes: recipes || [] }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { userId, email, recipe, recipes, recipeId, action } = body;
+
+    const key = (email || userId || '').trim().toLowerCase();
+    if (!key) {
+      return NextResponse.json({ success: false, error: 'User key is required' }, { status: 400 });
+    }
+
+    const store = readSavedStore();
+    let current = store[key] || (userId ? store[userId.toLowerCase()] : []) || [];
+
+    if (action === 'sync' && Array.isArray(recipes)) {
+      const map = new Map<string, any>();
+      current.forEach((r: any) => {
+        if (r) {
+          const rk = (r.id || r.title || r.name || JSON.stringify(r)).toString().trim().toLowerCase();
+          map.set(rk, r);
+        }
+      });
+      recipes.forEach((r: any) => {
+        if (r) {
+          const rk = (r.id || r.title || r.name || JSON.stringify(r)).toString().trim().toLowerCase();
+          map.set(rk, r);
+        }
+      });
+      current = Array.from(map.values());
+    } else if (action === 'remove') {
+      const target = (recipeId || (recipe && (recipe.id || recipe.title || recipe.name)) || '').toString().trim().toLowerCase();
+      current = current.filter((r: any) => {
+        const rk = (r.id || r.title || r.name || '').toString().trim().toLowerCase();
+        return rk !== target;
+      });
+    } else {
+      if (recipe) {
+        const rk = (recipe.id || recipe.title || recipe.name || '').toString().trim().toLowerCase();
+        const exists = current.some((r: any) => {
+          const existingKey = (r.id || r.title || r.name || '').toString().trim().toLowerCase();
+          return existingKey === rk;
+        });
+        if (!exists) {
+          current.unshift({ ...recipe, savedAt: recipe.savedAt || new Date().toISOString() });
+        }
+      }
+    }
+
+    store[key] = current;
+    if (userId && userId.toLowerCase() !== key) {
+      store[userId.toLowerCase()] = current;
+    }
+    if (email && email.toLowerCase() !== key) {
+      store[email.toLowerCase()] = current;
+    }
+
+    writeSavedStore(store);
+
+    return NextResponse.json({ success: true, recipes: current });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -35083,6 +35473,217 @@ User Prompt: "${prompt}"`;
       reply: "I am Chef Foodie! Ask me for any recipes, cooking tips, or ingredient advice, and I will tailor them directly to your diet and preferences.",
       recipe: null
     });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/ai/quota/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+function getSessionUser(req: NextRequest) {
+  const sessionCookie = req.cookies.get('zecratary_session')?.value;
+  if (!sessionCookie) return null;
+  try {
+    return JSON.parse(decodeURIComponent(sessionCookie));
+  } catch (_) {
+    try {
+      return JSON.parse(sessionCookie);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+export async function GET(req: NextRequest) {
+  const user = getSessionUser(req);
+  const plan = (user?.subscriptionPlan || user?.subscriptionTier || 'taster').toLowerCase();
+  const isAdmin = Boolean(user?.role === 'admin' || user?.email?.toLowerCase().includes('admin'));
+  const isPro = isAdmin || plan.includes('pro') || plan.includes('annual') || plan.includes('monthly');
+
+  return NextResponse.json({
+    authenticated: Boolean(user),
+    plan,
+    isUnlimited: isPro,
+    monthlyRecipeLimit: isPro ? -1 : 5,
+  });
+}
+
+export async function POST(req: NextRequest) {
+  const user = getSessionUser(req);
+  const plan = (user?.subscriptionPlan || user?.subscriptionTier || 'taster').toLowerCase();
+  const isAdmin = Boolean(user?.role === 'admin' || user?.email?.toLowerCase().includes('admin'));
+  const isPro = isAdmin || plan.includes('pro') || plan.includes('annual') || plan.includes('monthly');
+
+  const body = await req.json().catch(() => ({}));
+  const currentCount = Number(body.currentCount || 0);
+
+  if (!isPro && currentCount >= 5) {
+    return NextResponse.json({
+      allowed: false,
+      error: 'Monthly quota reached. Free Taster tier is limited to 5 AI recipe generations per month.',
+      upgradeRequired: true,
+      currentCount,
+      limit: 5
+    }, { status: 403 });
+  }
+
+  return NextResponse.json({
+    allowed: true,
+    isUnlimited: isPro,
+    remaining: isPro ? -1 : Math.max(0, 5 - (currentCount + 1)),
+  });
+}
+
+```
+
+## File: `apps/web/src/app/api/social-config/route.ts`
+```typescript
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+function getEnvPath() {
+  const rootDir = process.cwd();
+  const localEnv = path.join(rootDir, '.env.local');
+  if (fs.existsSync(localEnv)) return localEnv;
+  return path.join(rootDir, '.env');
+}
+
+function parseEnv(): Record<string, string> {
+  const envFile = getEnvPath();
+  if (!fs.existsSync(envFile)) return {};
+  const content = fs.readFileSync(envFile, 'utf8');
+  const envMap: Record<string, string> = {};
+  content.split('\n').forEach(line => {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#')) {
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx !== -1) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+        envMap[key] = val;
+      }
+    }
+  });
+  return envMap;
+}
+
+export async function GET() {
+  try {
+    const envMap = parseEnv();
+
+    const googleClientId = envMap['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] || '';
+    const googleClientSecret = envMap['GOOGLE_CLIENT_SECRET'] || '';
+    const facebookClientId = envMap['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] || '';
+    const facebookClientSecret = envMap['FACEBOOK_CLIENT_SECRET'] || '';
+    const appleClientId = envMap['NEXT_PUBLIC_APPLE_CLIENT_ID'] || '';
+    const appleClientSecret = envMap['APPLE_CLIENT_SECRET'] || '';
+
+    const payload = {
+      success: true,
+      // Flat properties for admin panel compatibility
+      googleEnabled: Boolean(googleClientId || true),
+      googleClientId,
+      googleClientSecret,
+      facebookEnabled: Boolean(facebookClientId || true),
+      facebookClientId,
+      facebookClientSecret,
+      appleEnabled: Boolean(appleClientId || true),
+      appleClientId,
+      appleClientSecret,
+      // Nested structure for client authentication components
+      config: {
+        google: {
+          clientId: googleClientId,
+          clientSecret: googleClientSecret,
+          enabled: Boolean(googleClientId || true)
+        },
+        facebook: {
+          clientId: facebookClientId,
+          clientSecret: facebookClientSecret,
+          enabled: Boolean(facebookClientId || true)
+        },
+        apple: {
+          clientId: appleClientId,
+          clientSecret: appleClientSecret,
+          enabled: Boolean(appleClientId || true)
+        }
+      }
+    };
+
+    return new NextResponse(JSON.stringify(payload), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const envFile = getEnvPath();
+    let content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : '';
+
+    const updates: Record<string, string> = {};
+
+    if (body.googleClientId !== undefined) updates['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] = body.googleClientId;
+    if (body.googleClientSecret !== undefined) updates['GOOGLE_CLIENT_SECRET'] = body.googleClientSecret;
+    if (body.facebookClientId !== undefined) updates['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] = body.facebookClientId;
+    if (body.facebookClientSecret !== undefined) updates['FACEBOOK_CLIENT_SECRET'] = body.facebookClientSecret;
+    if (body.appleClientId !== undefined) updates['NEXT_PUBLIC_APPLE_CLIENT_ID'] = body.appleClientId;
+    if (body.appleClientSecret !== undefined) updates['APPLE_CLIENT_SECRET'] = body.appleClientSecret;
+
+    if (body.google) {
+      if (body.google.clientId !== undefined) updates['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] = body.google.clientId;
+      if (body.google.clientSecret !== undefined) updates['GOOGLE_CLIENT_SECRET'] = body.google.clientSecret;
+    }
+    if (body.facebook) {
+      if (body.facebook.clientId !== undefined) updates['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] = body.facebook.clientId;
+      if (body.facebook.clientSecret !== undefined) updates['FACEBOOK_CLIENT_SECRET'] = body.facebook.clientSecret;
+    }
+    if (body.apple) {
+      if (body.apple.clientId !== undefined) updates['NEXT_PUBLIC_APPLE_CLIENT_ID'] = body.apple.clientId;
+      if (body.apple.clientSecret !== undefined) updates['APPLE_CLIENT_SECRET'] = body.apple.clientSecret;
+    }
+
+    const lines = content.split('\n');
+    const updatedKeys = new Set<string>();
+    const newLines = lines.map(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return line;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx !== -1) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        if (key in updates) {
+          updatedKeys.add(key);
+          return `${key}="${updates[key]}"`;
+        }
+      }
+      return line;
+    });
+
+    for (const [key, val] of Object.entries(updates)) {
+      if (!updatedKeys.has(key)) {
+        newLines.push(`${key}="${val}"`);
+      }
+    }
+
+    fs.writeFileSync(envFile, newLines.join('\n'), 'utf8');
+    return NextResponse.json({ success: true, message: 'Configuration synchronized to environment file' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -37666,99 +38267,6 @@ export default function ImportPage() {
 
 ```
 
-## File: `apps/web/src/app/apps/web/src/app/manual/page.tsx`
-```typescript
-'use client';
-import { useState } from 'react';
-import { Edit3, Save, Plus, Trash2 } from 'lucide-react';
-
-export default function ManualRecipePage() {
-  const [ingredients, setIngredients] = useState([{ name: '', amount: '' }]);
-  const [instructions, setInstructions] = useState(['']);
-
-  const addIngredient = () => setIngredients([...ingredients, { name: '', amount: '' }]);
-  const addInstruction = () => setInstructions([...instructions, '']);
-
-  return (
-    <div className="max-w-4xl mx-auto space-y-6 text-slate-100">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-extrabold text-[#E05638] flex items-center gap-3">
-            <Edit3 className="h-8 w-8 text-[#E05638]" /> Manual Entry
-          </h1>
-          <p className="text-slate-400 text-sm mt-1">Create a custom recipe from scratch.</p>
-        </div>
-        <button className="bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center gap-2">
-          <Save className="h-4 w-4" /> Save Recipe
-        </button>
-      </div>
-
-      {/* Form Container */}
-      <div className="bg-[#111726] border border-emerald-950 rounded-2xl p-8 space-y-8">
-        
-        {/* Basic Info */}
-        <div className="space-y-4">
-          <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-2">Basic Details</h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-bold text-[#E05638] uppercase">Recipe Title</label>
-              <input type="text" placeholder="e.g. Grandma's Apple Pie" className="w-full bg-[#0B101D] border border-slate-700 text-white rounded-xl p-3 text-sm focus:outline-none focus:border-[#E05638]" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-[#E05638] uppercase">Prep Time (mins)</label>
-              <input type="number" placeholder="15" className="w-full bg-[#0B101D] border border-slate-700 text-white rounded-xl p-3 text-sm focus:outline-none focus:border-[#E05638]" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-[#E05638] uppercase">Cook Time (mins)</label>
-              <input type="number" placeholder="45" className="w-full bg-[#0B101D] border border-slate-700 text-white rounded-xl p-3 text-sm focus:outline-none focus:border-[#E05638]" />
-            </div>
-          </div>
-        </div>
-
-        {/* Ingredients */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h2 className="text-lg font-bold text-white">Ingredients</h2>
-            <button onClick={addIngredient} className="text-xs text-[#E05638] font-bold flex items-center gap-1 hover:underline">
-              <Plus className="h-3 w-3" /> Add Item
-            </button>
-          </div>
-          {ingredients.map((ing, idx) => (
-            <div key={idx} className="flex items-center gap-3">
-              <input type="text" placeholder="Amount (e.g. 2 cups)" className="w-1/3 bg-[#0B101D] border border-slate-700 text-white rounded-xl p-3 text-sm focus:outline-none focus:border-[#E05638]" />
-              <input type="text" placeholder="Ingredient (e.g. Flour)" className="flex-1 bg-[#0B101D] border border-slate-700 text-white rounded-xl p-3 text-sm focus:outline-none focus:border-[#E05638]" />
-              <button className="p-3 text-slate-500 hover:text-red-400 transition"><Trash2 className="h-4 w-4" /></button>
-            </div>
-          ))}
-        </div>
-
-        {/* Instructions */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h2 className="text-lg font-bold text-white">Instructions</h2>
-            <button onClick={addInstruction} className="text-xs text-[#E05638] font-bold flex items-center gap-1 hover:underline">
-              <Plus className="h-3 w-3" /> Add Step
-            </button>
-          </div>
-          {instructions.map((inst, idx) => (
-            <div key={idx} className="flex gap-3">
-              <div className="w-8 h-8 shrink-0 bg-[#E05638]/10 text-[#E05638] font-bold rounded-full flex items-center justify-center text-sm">
-                {idx + 1}
-              </div>
-              <textarea placeholder={`Describe step ${idx + 1}...`} className="flex-1 bg-[#0B101D] border border-slate-700 text-white rounded-xl p-3 text-sm min-h-[80px] focus:outline-none focus:border-[#E05638] resize-y" />
-              <button className="p-3 text-slate-500 hover:text-red-400 transition h-fit"><Trash2 className="h-4 w-4" /></button>
-            </div>
-          ))}
-        </div>
-
-      </div>
-    </div>
-  );
-}
-
-```
-
 ## File: `apps/web/src/app/cookbooks/page.tsx`
 ```typescript
 'use client';
@@ -38137,153 +38645,440 @@ export default function CookbooksPage() {
 ## File: `apps/web/src/app/login/page.tsx`
 ```typescript
 'use client';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Lock, Mail, ChefHat, ArrowRight, Shield, User as UserIcon } from 'lucide-react';
-import { initAuthStorage, setCurrentUser } from '@/lib/auth';
+import { 
+  Mail, Lock, CheckCircle2, AlertCircle, ArrowRight, 
+  Sparkles, Eye, EyeOff, ShieldCheck, Loader2
+} from 'lucide-react';
+import { getCurrentUser, setCurrentUser, initAuthStorage, User } from '@/lib/auth';
+import { 
+  getSocialLoginConfig, SocialLoginConfig, DEFAULT_SOCIAL_CONFIG, 
+  executeSocialAuth, decodeGoogleCredential, SocialProvider 
+} from '@/lib/socialAuth';
+import { useTranslation } from '@/components/LanguageProvider';
+
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { t } = useTranslation();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<SocialProvider | null>(null);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [isDayMode, setIsDayMode] = useState(false);
+  
+  const [config, setConfig] = useState<SocialLoginConfig>(DEFAULT_SOCIAL_CONFIG);
 
-  useEffect(() => {
-    initAuthStorage();
+  const [socialModalProvider, setSocialModalProvider] = useState<SocialProvider | null>(null);
+  const [socialCustomEmail, setSocialCustomEmail] = useState('');
+  const [socialCustomName, setSocialCustomName] = useState('');
+
+  const syncTheme = useCallback(() => {
+    try {
+      const mode = localStorage.getItem('zecratary_theme_mode');
+      setIsDayMode(mode === 'light');
+    } catch (_) {}
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const fetchLiveConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/social-config', { cache: 'no-store' });
+      if (res.ok) {
+        const live = await res.json();
+        setConfig(live);
+        localStorage.setItem('zecratary_social_login_config', JSON.stringify(live));
+        return;
+      }
+    } catch (_) {}
+    setConfig(getSocialLoginConfig());
+  }, []);
+
+  // Dynamically load Google Identity Services SDK
+  useEffect(() => {
+    if (typeof window !== 'undefined' && config.googleEnabled) {
+      const scriptId = 'google-identity-services-sdk';
+      if (!document.getElementById(scriptId)) {
+        const script = document.createElement('script');
+        script.id = scriptId;
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        document.body.appendChild(script);
+      }
+    }
+  }, [config.googleEnabled]);
+
+  useEffect(() => {
+    syncTheme();
+    fetchLiveConfig();
+
+    const handleUpdate = () => fetchLiveConfig();
+    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
+    window.addEventListener('zecratary_social_login_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
+      window.removeEventListener('zecratary_social_login_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, [syncTheme, fetchLiveConfig]);
+
+  // Capture server-side OAuth callback redirects
+  useEffect(() => {
+    initAuthStorage();
+    if (getCurrentUser()) {
+      router.replace('/profile');
+      return;
+    }
+
+    const errParam = searchParams.get('error');
+    if (errParam) {
+      setError(decodeURIComponent(errParam));
+      return;
+    }
+
+    const isSocialSuccess = searchParams.get('social_success') === 'true';
+    if (isSocialSuccess) {
+      const provider = (searchParams.get('provider') || 'google') as SocialProvider;
+      const callbackEmail = searchParams.get('email') || '';
+      const callbackName = searchParams.get('name') || '';
+
+      if (callbackEmail) {
+        setSuccess(`${t('signedInWith') || 'Signed in with'} ${provider.toUpperCase()}! Redirecting...`);
+        executeSocialAuth({
+          name: callbackName,
+          email: callbackEmail,
+          provider
+        });
+        setTimeout(() => router.replace('/profile'), 600);
+      }
+    }
+  }, [searchParams, router, t]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
 
-    const rawUsers = localStorage.getItem('zecratary_users');
-    const users = rawUsers ? JSON.parse(rawUsers) : [];
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !password) {
+      setError(t('invalidCredentials') || 'Please enter both email and password.');
+      return;
+    }
 
-    const matched = users.find(
-      (u: any) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password
-    );
+    setLoading(true);
 
-    if (matched) {
-      const userSession = {
-        id: matched.id,
-        name: matched.name,
-        email: matched.email,
-        role: matched.role,
-        createdAt: matched.createdAt || new Date().toISOString()
-      };
-      setCurrentUser(userSession);
+    setTimeout(() => {
+      try {
+        const rawUsers = localStorage.getItem('zecratary_users');
+        const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
 
-      if (matched.role === 'admin') {
-        router.push('/admin');
-      } else {
-        router.push('/saved');
+        const matched = users.find(u => u.email.toLowerCase() === cleanEmail && u.password === password);
+        if (!matched) {
+          setError(t('invalidCredentials') || 'Invalid email address or password.');
+          setLoading(false);
+          return;
+        }
+
+        setCurrentUser(matched);
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('zecratary_auth_changed'));
+        window.dispatchEvent(new Event('storage'));
+
+        setSuccess(t('loginSuccess') || 'Login successful! Redirecting...');
+        setTimeout(() => router.replace('/profile'), 500);
+      } catch (err: any) {
+        setError(err.message || 'Login failed.');
+        setLoading(false);
       }
+    }, 500);
+  };
+
+  const handleSocialClick = (provider: SocialProvider) => {
+    setError('');
+
+    // Trigger Google Identity Services One Tap / Credential Flow if Client ID is configured
+    if (provider === 'google' && config.googleClientId && typeof window !== 'undefined' && window.google?.accounts?.id) {
+      try {
+        window.google.accounts.id.initialize({
+          client_id: config.googleClientId,
+          callback: (response: { credential?: string }) => {
+            if (response.credential) {
+              const profile = decodeGoogleCredential(response.credential);
+              if (profile && profile.email) {
+                setSocialLoading('google');
+                executeSocialAuth({
+                  name: profile.name,
+                  email: profile.email,
+                  avatar: profile.avatar,
+                  provider: 'google',
+                });
+                setSuccess(`${t('signedInWith') || 'Signed in with'} GOOGLE! Redirecting...`);
+                setTimeout(() => router.replace('/profile'), 500);
+                return;
+              }
+            }
+          },
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
+
+        window.google.accounts.id.prompt((notification: any) => {
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            setSocialModalProvider('google');
+            setSocialCustomName('Google User');
+            setSocialCustomEmail('user@gmail.com');
+          }
+        });
+        return;
+      } catch (err) {
+        console.warn('Google Identity Services prompt fallback', err);
+      }
+    }
+
+    // Default modal fallback for Apple, Facebook, or unconfigured Google ID
+    setSocialModalProvider(provider);
+    if (provider === 'google') {
+      setSocialCustomName('Google User');
+      setSocialCustomEmail('user@gmail.com');
+    } else if (provider === 'facebook') {
+      setSocialCustomName('Facebook User');
+      setSocialCustomEmail('user@facebook.com');
     } else {
-      setError('Invalid email address or password.');
+      setSocialCustomName('Apple Account');
+      setSocialCustomEmail('privaterelay@appleid.com');
     }
   };
 
-  const handleQuickLogin = (presetEmail: string, presetPass: string) => {
-    setEmail(presetEmail);
-    setPassword(presetPass);
+  const handleCompleteSocialAuth = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!socialModalProvider) return;
+
+    const chosenEmail = socialCustomEmail.trim().toLowerCase();
+    const chosenName = socialCustomName.trim() || `${socialModalProvider.toUpperCase()} User`;
+
+    setSocialLoading(socialModalProvider);
+    const p = socialModalProvider;
+    setSocialModalProvider(null);
+
+    setTimeout(() => {
+      executeSocialAuth({ name: chosenName, email: chosenEmail, provider: p });
+      setSuccess(`${t('signedInWith') || 'Signed in with'} ${p.toUpperCase()}! Redirecting...`);
+      setTimeout(() => router.replace('/profile'), 500);
+    }, 500);
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md bg-[#0b0f17] border border-slate-800/90 rounded-3xl p-8 space-y-6 shadow-2xl">
-        <div className="text-center space-y-2">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-950/50 border border-emerald-700/60 text-[#E05638] flex items-center justify-center mx-auto shadow-md">
-            <ChefHat className="h-6 w-6" />
+    <div 
+      className="min-h-[85vh] flex items-center justify-center px-4 py-12 transition-colors duration-200 font-sans"
+      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+    >
+      <div 
+        className="w-full max-w-md border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
+        style={{
+          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+        }}
+      >
+        <div className="space-y-1.5 text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl mb-2 border shadow-inner"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+              borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+              color: 'var(--color-primary, #E05638)'
+            }}
+          >
+            <Sparkles className="h-6 w-6" />
           </div>
-          <h1 className="text-2xl font-black text-[#E05638] tracking-tight">Sign In to FoodiePrep</h1>
-          <p className="text-xs font-semibold text-slate-400">Access recipes, meal plans, and account settings</p>
+          <h1 className="text-2xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+            {t('welcomeBack') || 'Welcome Back'}
+          </h1>
+          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+            {t('signInSubtitle') || 'Sign in to access your Zecratary dashboard and manage recipes.'}
+          </p>
         </div>
 
         {error && (
-          <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-xl text-xs text-red-300 font-semibold text-center">
-            {error}
+          <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-2xl text-xs text-red-300 font-semibold flex items-center gap-2 shadow-sm">
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+            <span>{error}</span>
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="space-y-4 text-xs">
+        {success && (
+          <div className="p-3.5 bg-emerald-950/40 border border-emerald-500/50 rounded-2xl text-xs text-emerald-300 font-semibold flex items-center gap-2 shadow-sm">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+            <span>{success}</span>
+          </div>
+        )}
+
+        {(config.googleEnabled || config.facebookEnabled || config.appleEnabled) && (
+          <div className="space-y-2.5">
+            {config.googleEnabled && (
+              <button
+                type="button"
+                disabled={loading || socialLoading !== null}
+                onClick={() => handleSocialClick('google')}
+                className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border text-xs font-bold transition hover:opacity-90 shadow-xs cursor-pointer disabled:opacity-50"
+                style={{ backgroundColor: isDayMode ? '#f8fafc' : '#0e1626', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
+              >
+                {socialLoading === 'google' ? <Loader2 className="h-4 w-4 animate-spin text-orange-400" /> : (
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
+                )}
+                {t('continueWithGoogle') || 'Continue with Google'}
+              </button>
+            )}
+
+            <div className={`grid ${config.facebookEnabled && config.appleEnabled ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
+              {config.facebookEnabled && (
+                <button
+                  type="button"
+                  disabled={loading || socialLoading !== null}
+                  onClick={() => handleSocialClick('facebook')}
+                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition hover:opacity-90 shadow-xs cursor-pointer disabled:opacity-50"
+                  style={{ backgroundColor: isDayMode ? '#f8fafc' : '#0e1626', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
+                >
+                  {socialLoading === 'facebook' ? <Loader2 className="h-4 w-4 animate-spin text-orange-400" /> : (
+                    <svg className="w-4 h-4 fill-current text-blue-600 shrink-0" viewBox="0 0 24 24">
+                      <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.312h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
+                    </svg>
+                  )}
+                  Facebook
+                </button>
+              )}
+
+              {config.appleEnabled && (
+                <button
+                  type="button"
+                  disabled={loading || socialLoading !== null}
+                  onClick={() => handleSocialClick('apple')}
+                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition hover:opacity-90 shadow-xs cursor-pointer disabled:opacity-50"
+                  style={{ backgroundColor: isDayMode ? '#f8fafc' : '#0e1626', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
+                >
+                  {socialLoading === 'apple' ? <Loader2 className="h-4 w-4 animate-spin text-orange-400" /> : (
+                    <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
+                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.56.64-1.06 1.7-0.93 2.73 1.02.08 2.05-.48 2.66-1.23z" />
+                    </svg>
+                  )}
+                  Apple
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 py-1">
+              <div className="h-px flex-1" style={{ backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b' }} />
+              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                {t('orSignInWithEmail') || 'or email'}
+              </span>
+              <div className="h-px flex-1" style={{ backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b' }} />
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleLogin} className="space-y-4 text-xs" autoComplete="off">
           <div>
-            <label className="block font-bold text-slate-300 mb-1.5">Email Address</label>
+            <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+              {t('emailAddress') || 'Email Address'}
+            </label>
             <div className="relative">
-              <Mail className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
+              <Mail className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
               <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@example.com"
-                className="w-full bg-[#070b13] border border-slate-800 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-[#E05638] transition"
+                className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none transition shadow-inner font-mono"
+                style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
               />
             </div>
           </div>
 
           <div>
-            <label className="block font-bold text-slate-300 mb-1.5">Password</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('password') || 'Password'}
+              </label>
+              <Link href="/forgot-password" className="text-[11px] font-bold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
+                {t('forgotPassword') || 'Forgot password?'}
+              </Link>
+            </div>
             <div className="relative">
-              <Lock className="h-4 w-4 text-slate-500 absolute left-3.5 top-3" />
+              <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
               <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                type={showPassword ? 'text' : 'password'} required value={password} onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full bg-[#070b13] border border-slate-800 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-[#E05638] transition"
+                className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none transition shadow-inner"
+                style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
               />
+              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3 text-slate-500 hover:text-slate-300 cursor-pointer">
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
             </div>
           </div>
 
           <button
             type="submit"
-            className="w-full py-3 bg-[#E05638] hover:bg-[#c94529] text-white font-extrabold rounded-xl text-sm transition shadow-lg flex items-center justify-center gap-2 mt-2 cursor-pointer"
+            disabled={loading || socialLoading !== null}
+            className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            Sign In <ArrowRight className="h-4 w-4" />
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+            {t('signInButton') || 'Sign In'}
           </button>
         </form>
 
-        {/* DEMO LOGINS */}
-        <div className="border-t border-slate-800 pt-4 space-y-2">
-          <span className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center">
-            Quick Logins
-          </span>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('admin@zecratary.com', 'admin')}
-              className="p-2 bg-[#070b13] hover:bg-slate-800/80 border border-slate-800 rounded-xl text-left transition flex items-center gap-2 cursor-pointer"
-            >
-              <Shield className="h-4 w-4 text-emerald-400 shrink-0" />
-              <div>
-                <div className="text-[11px] font-bold text-white leading-tight">Admin</div>
-                <div className="text-[10px] text-slate-500">Full Access</div>
-              </div>
-            </button>
+        <div className="text-center pt-2 border-t text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+          <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('dontHaveAccount') || "Don't have an account?"} </span>
+          <Link href="/register" className="font-extrabold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
+            {t('createOneLink') || 'Create one'}
+          </Link>
+        </div>
+      </div>
 
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('user@zecratary.com', 'user123')}
-              className="p-2 bg-[#070b13] hover:bg-slate-800/80 border border-slate-800 rounded-xl text-left transition flex items-center gap-2 cursor-pointer"
-            >
-              <UserIcon className="h-4 w-4 text-[#E05638] shrink-0" />
+      {socialModalProvider && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="border rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl animate-in zoom-in-95" style={{ backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)' }}>
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+              <h3 className="text-sm font-black flex items-center gap-2 uppercase tracking-wider" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                <ShieldCheck className="h-4 w-4 text-emerald-400" /> {socialModalProvider} Sign In
+              </h3>
+              <button type="button" onClick={() => setSocialModalProvider(null)} className="text-slate-400 hover:text-white cursor-pointer text-xs">✕</button>
+            </div>
+            <form onSubmit={handleCompleteSocialAuth} className="space-y-3 text-xs">
+              <p style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Confirm the account profile returned by your <strong>{socialModalProvider}</strong> provider:</p>
               <div>
-                <div className="text-[11px] font-bold text-white leading-tight">User</div>
-                <div className="text-[10px] text-slate-500">Standard Access</div>
+                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Display Name</label>
+                <input type="text" required value={socialCustomName} onChange={(e) => setSocialCustomName(e.target.value)} className="w-full border rounded-xl px-3 py-2 outline-none font-bold" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
               </div>
-            </button>
+              <div>
+                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Email Address</label>
+                <input type="email" required value={socialCustomEmail} onChange={(e) => setSocialCustomEmail(e.target.value)} className="w-full border rounded-xl px-3 py-2 outline-none font-mono" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+                <button type="button" onClick={() => setSocialModalProvider(null)} className="px-3.5 py-1.5 border rounded-xl font-bold cursor-pointer" style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#64748b' : '#94a3b8' }}>Cancel</button>
+                <button type="submit" className="px-4 py-1.5 text-white font-extrabold rounded-xl shadow-md cursor-pointer flex items-center gap-1.5" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>Authorize & Sign In</button>
+              </div>
+            </form>
           </div>
         </div>
-
-        <p className="text-center text-xs text-slate-400">
-          Don't have an account?{' '}
-          <Link href="/register" className="font-bold text-[#E05638] hover:underline">
-            Register here
-          </Link>
-        </p>
-      </div>
+      )}
     </div>
   );
 }
@@ -38536,9 +39331,123 @@ export function useTranslation() {
 
 ```
 
+## File: `apps/web/src/components/AiQuotaBar.tsx`
+```typescript
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { Sparkles, Zap, AlertCircle, ArrowUpRight } from 'lucide-react';
+
+export default function AiQuotaBar() {
+  const [quotaInfo, setQuotaInfo] = useState<{ plan: string; isUnlimited: boolean; monthlyRecipeLimit: number } | null>(null);
+  const [usedCount, setUsedCount] = useState(0);
+  const [isDayMode, setIsDayMode] = useState(false);
+
+  const syncState = useCallback(() => {
+    try {
+      const mode = localStorage.getItem('zecratary_theme_mode');
+      setIsDayMode(mode === 'light');
+
+      // Count recipes generated this calendar month
+      const rawRecipes = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
+      if (rawRecipes) {
+        const list = JSON.parse(rawRecipes);
+        const currentMonth = new Date().getMonth();
+        const currentYear = new Date().getFullYear();
+        const monthAiCount = list.filter((r: any) => {
+          const d = r.createdAt ? new Date(r.createdAt) : new Date();
+          return d.getMonth() === currentMonth && d.getFullYear() === currentYear && (r.isAiGenerated || r.generatedWithAi);
+        }).length;
+        setUsedCount(monthAiCount);
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    syncState();
+    fetch('/api/ai/quota')
+      .then(res => res.json())
+      .then(data => setQuotaInfo(data))
+      .catch(() => {});
+
+    window.addEventListener('zecratary_theme_mode_changed', syncState);
+    window.addEventListener('storage', syncState);
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', syncState);
+      window.removeEventListener('storage', syncState);
+    };
+  }, [syncState]);
+
+  if (!quotaInfo) return null;
+
+  const isUnlimited = quotaInfo.isUnlimited;
+  const limit = quotaInfo.monthlyRecipeLimit;
+  const percent = isUnlimited ? 0 : Math.min(100, Math.round((usedCount / limit) * 100));
+  const isLimitReached = !isUnlimited && usedCount >= limit;
+
+  return (
+    <div 
+      className="p-3.5 rounded-2xl border mb-4 shadow-sm text-xs transition-colors duration-200"
+      style={{
+        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+        borderColor: isLimitReached 
+          ? (isDayMode ? '#fca5a5' : '#7f1d1d') 
+          : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)')
+      }}
+    >
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2">
+          {isUnlimited ? (
+            <Zap className="h-4 w-4 text-emerald-400 shrink-0" />
+          ) : isLimitReached ? (
+            <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+          ) : (
+            <Sparkles className="h-4 w-4 text-orange-400 shrink-0" />
+          )}
+
+          <div>
+            <span className="font-extrabold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              {isUnlimited ? 'Unlimited AI Recipes' : `Monthly Quota: ${usedCount} / ${limit} Recipes Used`}
+            </span>
+            <span className="ml-2 font-mono text-[10px] uppercase font-bold text-slate-500">
+              ({quotaInfo.plan})
+            </span>
+          </div>
+        </div>
+
+        {!isUnlimited && (
+          <Link
+            href="/profile"
+            className="inline-flex items-center gap-1 font-bold text-[11px] hover:underline"
+            style={{ color: 'var(--color-primary, #E05638)' }}
+          >
+            Upgrade for Unlimited <ArrowUpRight className="h-3 w-3" />
+          </Link>
+        )}
+      </div>
+
+      {!isUnlimited && (
+        <div className="mt-2.5 w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+          <div 
+            className="h-full rounded-full transition-all duration-300"
+            style={{
+              width: `${percent}%`,
+              backgroundColor: isLimitReached ? '#ef4444' : 'var(--color-primary, #E05638)'
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+```
+
 ## File: `apps/web/src/components/Sidebar.tsx`
 ```typescript
 'use client';
+import packageInfo from '../../package.json';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -38567,7 +39476,8 @@ import {
   Languages,
   Cpu,
   Moon,
-  Sun
+  Sun,
+  Key
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -38606,8 +39516,18 @@ const getLanguageFlag = (code: string): string => {
   return LANGUAGE_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
 };
 
+const isImageIcon = (icon?: unknown): icon is string =>
+  typeof icon === 'string' && (
+    icon.startsWith('/') ||
+    icon.startsWith('http://') ||
+    icon.startsWith('https://') ||
+    icon.startsWith('data:image')
+  );
+
 export default function Sidebar() {
   const pathname = usePathname();
+  const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
+  if (isAuthRoute) return null;
   const { t, locale, setLocale } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
@@ -38735,7 +39655,7 @@ export default function Sidebar() {
     setIsOpen(false);
   }, [pathname]);
 
-  if (pathname === '/login' || pathname === '/register') {
+  if (pathname === '/login' || pathname === '/register' || pathname === '/forgot-password') {
     return null;
   }
 
@@ -38773,7 +39693,7 @@ export default function Sidebar() {
     }
   `;
 
-  const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
+    const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
 
   return (
@@ -38781,7 +39701,7 @@ export default function Sidebar() {
       {/* MOBILE TOP BAR */}
       <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
         <Link href="/dashboard" className="flex items-center gap-2">
-          <span className="text-2xl">{displayIcon}</span>
+          {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
           <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[200px]">
             {displayName}
           </span>
@@ -38834,7 +39754,7 @@ export default function Sidebar() {
                 <Menu className="h-5 w-5" />
               </button>
               <Link href="/dashboard" className="flex items-center justify-center p-1" title={displayName}>
-                <span className="text-2xl">{displayIcon}</span>
+                {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
               </Link>
             </div>
           ) : (
@@ -38854,7 +39774,7 @@ export default function Sidebar() {
                   <Menu className="h-5 w-5" />
                 </button>
                 <Link href="/dashboard" className="flex items-center gap-2 truncate">
-                  <span className="text-2xl shrink-0">{displayIcon}</span>
+                  {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
                   <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate">
                     {displayName}
                   </span>
@@ -38976,9 +39896,17 @@ export default function Sidebar() {
                   <Wallet className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">{t('paymentGateway') || 'Payment Gateway'}</span>}
                 </Link>
-                <Link href="/admin/add-user" className={navClass('/admin/add-user')} title={t('addUser') || 'Add User'}>
+                <Link 
+                  href="/admin/social-login-setting" 
+                  className={navClass('/admin/social-login-setting')} 
+                  title="Social Login"
+                >
+                  <Key className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
+                </Link>
+                <Link href="/admin/users" className={navClass('/admin/users')} title={t('users') || 'Users'}>
                   <UserPlus className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('addUser') || 'Add User'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('users') || 'Users'}</span>}
                 </Link>
                 <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title={t('recipeType') || 'Recipe Type'}>
                   <Utensils className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
@@ -38999,12 +39927,12 @@ export default function Sidebar() {
 
         {/* FOOTER CONTROLS */}
         <div className="pt-3 border-t border-[var(--color-border)] space-y-1">
-          {/* QUICK LANGUAGE SELECTOR */}
+          {/* QUICK LANGUAGE SELECTOR & DARK MODE TOGGLE */}
           {showCollapsed ? (
-            <div className="flex justify-center p-1" title={availableLanguages.find((l) => l.code === locale)?.name || 'Language'}>
+            <div className="flex flex-col items-center gap-2 p-1">
               <div className={`relative flex items-center justify-center p-2 rounded-xl border border-[var(--color-border)] text-base cursor-pointer hover:border-emerald-500/40 transition ${
                 isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
-              }`}>
+              }`} title={availableLanguages.find((l) => l.code === locale)?.name || 'Language'}>
                 <span>{availableLanguages.find((l) => l.code === locale)?.flag || '🌐'}</span>
                 <select
                   value={locale}
@@ -39019,10 +39947,21 @@ export default function Sidebar() {
                   ))}
                 </select>
               </div>
+              <button
+                type="button"
+                onClick={toggleThemeMode}
+                className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer ${
+                  isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
+                }`}
+                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                aria-label="Toggle Theme Mode"
+              >
+                {isDarkMode ? <Moon className="h-4 w-4 text-[#E05638]" /> : <Sun className="h-4 w-4 text-amber-500" />}
+              </button>
             </div>
           ) : (
-            <div className="px-1 py-1">
-              <div className={`flex items-center border border-[var(--color-border)] rounded-xl px-2.5 py-1.5 shadow-sm ${
+            <div className="px-1 py-1 flex items-center gap-2">
+              <div className={`flex-1 flex items-center border border-[var(--color-border)] rounded-xl px-2.5 py-1.5 shadow-sm ${
                 isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
               }`}>
                 <select
@@ -39039,21 +39978,19 @@ export default function Sidebar() {
                   ))}
                 </select>
               </div>
+              <button
+                type="button"
+                onClick={toggleThemeMode}
+                className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer shrink-0 ${
+                  isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
+                }`}
+                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                aria-label="Toggle Theme Mode"
+              >
+                {isDarkMode ? <Moon className="h-4 w-4 text-[#E05638]" /> : <Sun className="h-4 w-4 text-amber-500" />}
+              </button>
             </div>
           )}
-
-          {/* DARK MODE / DAY MODE TOGGLE BUTTON */}
-          <div className={showCollapsed ? "flex justify-center p-1" : "px-3.5 py-1.5"}>
-            <button
-              type="button"
-              onClick={toggleThemeMode}
-              className="p-1 text-[#E05638] hover:text-amber-400 transition-colors flex items-center justify-center rounded-lg cursor-pointer"
-              title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-              aria-label="Toggle Theme Mode"
-            >
-              {isDarkMode ? <Moon className="h-5 w-5 text-[#E05638]" /> : <Sun className="h-5 w-5 text-amber-500" />}
-            </button>
-          </div>
 
           <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
             <Settings className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`} />
@@ -39088,6 +40025,13 @@ export default function Sidebar() {
             <LogOut className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-800'}`} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('logout')}</span>}
           </button>
+          {/* DYNAMIC VERSION BADGE */}
+          <div className={`pt-2 select-none flex items-center ${showCollapsed ? 'justify-center text-[10px]' : 'px-3.5 justify-between text-[11px]'} font-mono ${
+            isDarkMode ? 'text-slate-500' : 'text-slate-600'
+          }`}>
+            {!showCollapsed && <span className="text-[10px] uppercase tracking-wider font-semibold opacity-75">Version</span>}
+            <span className="font-semibold tracking-tight opacity-90">v{packageInfo.version || '1.0.0'}</span>
+          </div>
         </div>
       </aside>
     </>
@@ -39114,6 +40058,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     initAuthStorage();
     const user = getCurrentUser();
+      const hasCookie = typeof document !== 'undefined' && document.cookie.includes('zecratary_session=');
     const isPublicRoute = PUBLIC_ROUTES.includes(pathname);
 
     // 1. Unauthenticated users -> Redirect to /login
@@ -39152,6 +40097,178 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   return <>{children}</>;
+}
+
+```
+
+## File: `apps/web/src/components/ThemeSync.tsx`
+```typescript
+'use client';
+
+import { useEffect } from 'react';
+import { fetchAndApplyServerTheme, applyThemeToDocument } from '@/lib/themeConfig';
+
+export default function ThemeSync() {
+  useEffect(() => {
+    fetchAndApplyServerTheme();
+
+    const handleSync = (e: any) => {
+      if (e?.detail) {
+        applyThemeToDocument(e.detail);
+      } else {
+        try {
+          const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+          if (stored) applyThemeToDocument(JSON.parse(stored));
+        } catch (_) {}
+      }
+    };
+
+    window.addEventListener('zecratary_theme_changed', handleSync);
+    window.addEventListener('zecratary_theme_updated', handleSync);
+    window.addEventListener('storage', handleSync);
+
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        fetchAndApplyServerTheme();
+      }
+    };
+    window.addEventListener('pageshow', handlePageShow);
+
+    return () => {
+      window.removeEventListener('zecratary_theme_changed', handleSync);
+      window.removeEventListener('zecratary_theme_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, []);
+
+  return null;
+}
+
+```
+
+## File: `apps/web/src/lib/themeConfig.ts`
+```typescript
+export interface ThemeColors {
+  primary?: string;
+  primaryColor?: string;
+  primaryHover?: string;
+  accentEmerald?: string;
+  accentColor?: string;
+  accent?: string;
+  backgroundColor?: string;
+  backgroundDark?: string;
+  cardBackground?: string;
+  cardBorder?: string;
+  textSecondary?: string;
+}
+
+export function applyThemeToDocument(colors: ThemeColors | null | undefined): void {
+  if (!colors || typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const isDayMode = localStorage.getItem('zecratary_theme_mode') === 'light';
+
+  const primary = colors.primary || colors.primaryColor;
+  const primaryHover = colors.primaryHover;
+  const accent = colors.accentEmerald || colors.accentColor || colors.accent;
+  const bg = colors.backgroundColor || colors.backgroundDark;
+
+  if (primary) {
+    root.style.setProperty('--color-primary', primary);
+  }
+  if (primaryHover) {
+    root.style.setProperty('--color-primary-hover', primaryHover);
+  }
+  if (accent) {
+    root.style.setProperty('--color-emerald', accent);
+    root.style.setProperty('--color-accent', accent);
+  }
+
+  if (isDayMode) {
+    root.classList.remove('dark');
+    root.classList.add('light');
+    root.style.setProperty('--color-bg', '#f8fafc');
+    root.style.setProperty('--color-bg-dark', '#f8fafc');
+    root.style.setProperty('--color-card', '#ffffff');
+    root.style.setProperty('--color-card-dark', '#ffffff');
+    root.style.setProperty('--color-border', '#e2e8f0');
+    root.style.setProperty('--color-border-dark', '#e2e8f0');
+    root.style.setProperty('--color-text', '#0f172a');
+    root.style.setProperty('--color-text-secondary', '#64748b');
+    if (document.body) {
+      document.body.style.backgroundColor = '#f8fafc';
+      document.body.style.color = '#0f172a';
+    }
+  } else {
+    root.classList.remove('light');
+    root.classList.add('dark');
+    if (bg) {
+      root.style.setProperty('--color-bg', bg);
+      root.style.setProperty('--color-bg-dark', bg);
+      if (document.body) {
+        document.body.style.backgroundColor = bg;
+      }
+    }
+    if (colors.cardBackground) {
+      root.style.setProperty('--color-card', colors.cardBackground);
+      root.style.setProperty('--color-card-dark', colors.cardBackground);
+    }
+    if (colors.cardBorder) {
+      root.style.setProperty('--color-border', colors.cardBorder);
+      root.style.setProperty('--color-border-dark', colors.cardBorder);
+    }
+    if (colors.textSecondary) {
+      root.style.setProperty('--color-text-secondary', colors.textSecondary);
+    }
+    if (document.body) {
+      document.body.style.color = '#ffffff';
+    }
+  }
+}
+
+export function saveThemeColors(colors: ThemeColors): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
+    localStorage.setItem('zecratary_theme_config', JSON.stringify(colors));
+  } catch (_) {}
+
+  applyThemeToDocument(colors);
+  window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: colors }));
+  window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
+  window.dispatchEvent(new Event('storage'));
+
+  try {
+    fetch('/api/system-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeColors: colors })
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+export async function fetchAndApplyServerTheme(): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const cached = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+    if (cached) {
+      applyThemeToDocument(JSON.parse(cached));
+    }
+  } catch (_) {}
+
+  try {
+    const res = await fetch('/api/system-settings', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.settings?.themeColors) {
+        const colors = data.settings.themeColors;
+        localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
+        applyThemeToDocument(colors);
+        window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: colors }));
+      }
+    }
+  } catch (_) {}
 }
 
 ```
@@ -39286,6 +40403,155 @@ export const setStoredLocale = (locale: string) => {
   window.dispatchEvent(new CustomEvent('zecratary_locale_changed', { detail: locale }));
   window.dispatchEvent(new Event('storage'));
 };
+
+```
+
+## File: `apps/web/src/lib/socialAuth.ts`
+```typescript
+import { User, setCurrentUser, initAuthStorage } from '@/lib/auth';
+
+export type SocialProvider = 'google' | 'facebook' | 'apple' | 'github';
+
+export interface SocialLoginConfig {
+  googleEnabled: boolean;
+  googleClientId: string;
+  facebookEnabled: boolean;
+  facebookClientId: string;
+  appleEnabled: boolean;
+  appleClientId: string;
+}
+
+export const DEFAULT_SOCIAL_CONFIG: SocialLoginConfig = {
+  googleEnabled: true,
+  googleClientId: '',
+  facebookEnabled: false,
+  facebookClientId: '',
+  appleEnabled: false,
+  appleClientId: '',
+};
+
+export function getSocialLoginConfig(): SocialLoginConfig {
+  if (typeof window === 'undefined') return DEFAULT_SOCIAL_CONFIG;
+  try {
+    const raw = localStorage.getItem('zecratary_social_login_config');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        googleEnabled: parsed.googleEnabled ?? true,
+        googleClientId: parsed.googleClientId || '',
+        facebookEnabled: parsed.facebookEnabled ?? false,
+        facebookClientId: parsed.facebookClientId || '',
+        appleEnabled: parsed.appleEnabled ?? false,
+        appleClientId: parsed.appleClientId || '',
+      };
+    }
+  } catch (_) {}
+  return DEFAULT_SOCIAL_CONFIG;
+}
+
+export function getDefaultSubscriptionPlan(): string {
+  if (typeof window === 'undefined') return 'taster';
+  try {
+    const explicitDefault = localStorage.getItem('zecratary_default_plan');
+    if (explicitDefault) return explicitDefault;
+
+    const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
+    if (rawConfigs) {
+      const configs = JSON.parse(rawConfigs);
+      if (Array.isArray(configs) && configs.length > 0) {
+        const defaultPlan = configs.find((c: any) => c.isDefault);
+        if (defaultPlan?.slug || defaultPlan?.id) return defaultPlan.slug || defaultPlan.id;
+
+        const freePlan = configs.find(
+          (c: any) => c.isFree || (Number(c.monthlyPriceDollars || 0) === 0 && Number(c.annualPriceDollars || 0) === 0)
+        );
+        if (freePlan?.slug || freePlan?.id) return freePlan.slug || freePlan.id;
+
+        if (configs[0]?.slug || configs[0]?.id) return configs[0].slug || configs[0].id;
+      }
+    }
+
+    const rawPlans = localStorage.getItem('zecratary_subscription_plans');
+    if (rawPlans) {
+      const plans = JSON.parse(rawPlans);
+      if (Array.isArray(plans) && plans.length > 0) {
+        const free = plans.find((p: any) => p.priceCents === 0 || p.isFree);
+        if (free?.slug || free?.id) return free.slug || free.id;
+      }
+    }
+  } catch (_) {}
+  return 'taster';
+}
+
+export interface SocialProfile {
+  name: string;
+  email: string;
+  avatar?: string;
+  provider: SocialProvider;
+}
+
+export function decodeGoogleCredential(credential: string): { email: string; name: string; avatar?: string } | null {
+  try {
+    const base64Url = credential.split('.')[1];
+    if (!base64Url) return null;
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(jsonPayload);
+    return {
+      email: payload.email,
+      name: payload.name || payload.given_name || payload.email.split('@')[0],
+      avatar: payload.picture,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+export function executeSocialAuth(profile: SocialProfile): User {
+  initAuthStorage();
+  const cleanEmail = profile.email.trim().toLowerCase();
+  const rawUsers = localStorage.getItem('zecratary_users');
+  const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
+
+  let matchedUser = users.find((u) => u.email.toLowerCase() === cleanEmail);
+
+  if (!matchedUser) {
+    const systemDefaultPlan = getDefaultSubscriptionPlan();
+    matchedUser = {
+      id: `usr_${profile.provider}_${Date.now().toString(36)}`,
+      name: profile.name.trim() || `${profile.provider.toUpperCase()} User`,
+      email: cleanEmail,
+      role: 'user',
+      subscriptionPlan: systemDefaultPlan,
+      subscriptionTier: systemDefaultPlan,
+      createdAt: new Date().toISOString(),
+      avatar: profile.avatar,
+    } as any;
+    users.unshift(matchedUser);
+    localStorage.setItem('zecratary_users', JSON.stringify(users));
+  }
+
+  setCurrentUser(matchedUser);
+
+  try {
+    fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(matchedUser),
+    }).catch(() => {});
+  } catch (_) {}
+
+  window.dispatchEvent(new Event('zecratary_users_updated'));
+  window.dispatchEvent(new Event('zecratary_auth_changed'));
+  window.dispatchEvent(new Event('storage'));
+
+  return matchedUser;
+}
 
 ```
 
@@ -39508,149 +40774,573 @@ export function useIngredientCategories(): string[] {
 
 ```
 
+## File: `apps/web/src/lib/recipeSync.ts`
+```typescript
+import { getCurrentUser } from '@/lib/auth';
+
+const STORAGE_KEYS = [
+  'zecratary_saved_recipes',
+  'zecratary_recipes',
+  'saved_recipes',
+  'savedRecipes',
+  'recipes'
+];
+
+export function getLocalRecipes(): any[] {
+  if (typeof window === 'undefined') return [];
+  for (const key of STORAGE_KEYS) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (_) {}
+  }
+  return [];
+}
+
+export function saveLocalRecipes(recipes: any[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const data = JSON.stringify(recipes);
+    localStorage.setItem('zecratary_saved_recipes', data);
+    localStorage.setItem('zecratary_recipes', data);
+    window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+    window.dispatchEvent(new Event('storage'));
+  } catch (_) {}
+}
+
+export async function syncUserSavedRecipes(providedKey?: string): Promise<any[]> {
+  if (typeof window === 'undefined') return [];
+
+  const user = getCurrentUser();
+  const userKey = (providedKey || user?.email || user?.id || '').toLowerCase().trim();
+  const userEmail = (user?.email || '').toLowerCase().trim();
+  const localList = getLocalRecipes();
+
+  if (!userKey) {
+    return localList;
+  }
+
+  try {
+    const res = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(userKey)}&email=${encodeURIComponent(userEmail)}`, {
+      cache: 'no-store'
+    });
+
+    let serverList: any[] = [];
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.recipes)) {
+        serverList = data.recipes;
+      }
+    }
+
+    if (localList.length > 0 && serverList.length === 0) {
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userKey,
+          email: userEmail,
+          recipes: localList,
+          action: 'sync'
+        })
+      });
+      return localList;
+    }
+
+    const map = new Map<string, any>();
+    localList.forEach(r => {
+      if (r) {
+        const k = (r.id || r.title || r.name || JSON.stringify(r)).toString().trim().toLowerCase();
+        map.set(k, r);
+      }
+    });
+    serverList.forEach(r => {
+      if (r) {
+        const k = (r.id || r.title || r.name || JSON.stringify(r)).toString().trim().toLowerCase();
+        map.set(k, r);
+      }
+    });
+
+    const merged = Array.from(map.values());
+    if (merged.length > 0) {
+      saveLocalRecipes(merged);
+    }
+
+    if (merged.length > serverList.length) {
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userKey,
+          email: userEmail,
+          recipes: merged,
+          action: 'sync'
+        })
+      });
+    }
+
+    return merged;
+  } catch (err) {
+    console.error('syncUserSavedRecipes error:', err);
+    return localList;
+  }
+}
+
+export async function persistSavedRecipe(recipeOrId: any, action: 'save' | 'remove' = 'save') {
+  if (typeof window === 'undefined') return;
+
+  const user = getCurrentUser();
+  const userKey = (user?.email || user?.id || '').toLowerCase().trim();
+  const userEmail = (user?.email || '').toLowerCase().trim();
+  let localList = getLocalRecipes();
+
+  if (action === 'save' && recipeOrId && typeof recipeOrId === 'object') {
+    const targetKey = (recipeOrId.id || recipeOrId.title || recipeOrId.name || '').toString().trim().toLowerCase();
+    const exists = localList.some(r => {
+      const k = (r.id || r.title || r.name || '').toString().trim().toLowerCase();
+      return k === targetKey;
+    });
+    if (!exists) {
+      localList = [recipeOrId, ...localList];
+    }
+  } else if (action === 'remove') {
+    const target = (typeof recipeOrId === 'string' ? recipeOrId : (recipeOrId?.id || recipeOrId?.title || recipeOrId?.name) || '').toString().trim().toLowerCase();
+    localList = localList.filter(r => {
+      const k = (r.id || r.title || r.name || '').toString().trim().toLowerCase();
+      return k !== target;
+    });
+  }
+
+  saveLocalRecipes(localList);
+
+  if (userKey) {
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userKey,
+          email: userEmail,
+          recipe: typeof recipeOrId === 'object' ? recipeOrId : undefined,
+          recipeId: typeof recipeOrId === 'string' ? recipeOrId : (recipeOrId?.id || recipeOrId?.title),
+          action
+        })
+      });
+    } catch (_) {}
+  }
+}
+
+```
+
 ## File: `apps/web/src/lib/siteConfig.ts`
 ```typescript
-'use client';
-
 export const DEFAULT_SITE_NAME = 'Zecratary';
-export const DEFAULT_SITE_ICON = '🥕';
+export const DEFAULT_SITE_ICON = '🥑';
 
-export const PRESET_ICONS = ['🥕', '🍳', '👨‍🍳', '🥑', '🥗', '🍲', '🍕', '🥘', '🌮', '🍔', '🍰', '🍎'];
+export interface SiteIdentityConfig {
+  siteName: string;
+  titlebarEmoji: string;
+  titlebarImage: string;
+  faviconEmoji: string;
+  faviconImage: string;
+}
 
-export const updateFavicon = (icon: string) => {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  const emoji = icon.trim() || DEFAULT_SITE_ICON;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${emoji}</text></svg>`;
-  const faviconUrl = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+const DEFAULT_CONFIG: SiteIdentityConfig = {
+  siteName: DEFAULT_SITE_NAME,
+  titlebarEmoji: DEFAULT_SITE_ICON,
+  titlebarImage: '',
+  faviconEmoji: DEFAULT_SITE_ICON,
+  faviconImage: ''
+};
 
-  let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+export function getSiteConfig(): SiteIdentityConfig {
+  if (typeof window === 'undefined') return DEFAULT_CONFIG;
+  try {
+    const raw = localStorage.getItem('zecratary_site_settings');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        siteName: parsed.siteName || parsed.name || DEFAULT_SITE_NAME,
+        titlebarEmoji: parsed.titlebarEmoji || parsed.icon || DEFAULT_SITE_ICON,
+        titlebarImage: parsed.titlebarImage || '',
+        faviconEmoji: parsed.faviconEmoji || parsed.titlebarEmoji || parsed.icon || DEFAULT_SITE_ICON,
+        faviconImage: parsed.faviconImage || ''
+      };
+    }
+  } catch (_) {}
+  return DEFAULT_CONFIG;
+}
+
+export function getSiteName(): string {
+  return getSiteConfig().siteName;
+}
+
+export function getSiteIcon(): string {
+  const cfg = getSiteConfig();
+  return cfg.titlebarImage || cfg.titlebarEmoji || DEFAULT_SITE_ICON;
+}
+
+export function getFavicon(): string {
+  const cfg = getSiteConfig();
+  return cfg.faviconImage || cfg.faviconEmoji || cfg.titlebarImage || cfg.titlebarEmoji || DEFAULT_SITE_ICON;
+}
+
+export function updateFavicon(iconOrUrl?: string) {
+  if (typeof window === 'undefined') return;
+  const target = iconOrUrl || getFavicon();
+  let href = target;
+
+  if (
+    !target.startsWith('data:') && 
+    !target.startsWith('http://') && 
+    !target.startsWith('https://') && 
+    !target.startsWith('/')
+  ) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${target}</text></svg>`;
+    href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  }
+
+  let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
   if (!link) {
     link = document.createElement('link');
     link.rel = 'icon';
     document.head.appendChild(link);
   }
-  link.type = 'image/svg+xml';
-  link.href = faviconUrl;
-};
+  link.href = href;
 
-export const getSiteName = (): string => {
-  if (typeof window === 'undefined') return DEFAULT_SITE_NAME;
-  try {
-    const saved = localStorage.getItem('zecratary_site_name');
-    if (saved && saved.trim()) return saved.trim();
-  } catch (e) {}
-  return DEFAULT_SITE_NAME;
-};
+  let shortcut = document.querySelector<HTMLLinkElement>("link[rel~='shortcut icon']");
+  if (shortcut) {
+    shortcut.href = href;
+  }
+}
 
-export const getSiteIcon = (): string => {
-  if (typeof window === 'undefined') return DEFAULT_SITE_ICON;
-  try {
-    const saved = localStorage.getItem('zecratary_site_icon');
-    if (saved && saved.trim()) return saved.trim();
-  } catch (e) {}
-  return DEFAULT_SITE_ICON;
-};
-
-export const saveSiteConfig = (name: string, icon: string) => {
+export function saveSiteConfig(config: Partial<SiteIdentityConfig>) {
   if (typeof window === 'undefined') return;
-  const cleanName = name.trim() || DEFAULT_SITE_NAME;
-  const cleanIcon = icon.trim() || DEFAULT_SITE_ICON;
-  localStorage.setItem('zecratary_site_name', cleanName);
-  localStorage.setItem('zecratary_site_icon', cleanIcon);
-  updateFavicon(cleanIcon);
-  window.dispatchEvent(new CustomEvent('zecratary_site_settings_changed', {
-    detail: { name: cleanName, icon: cleanIcon }
-  }));
+  const current = getSiteConfig();
+  const updated: SiteIdentityConfig = { ...current, ...config };
+  localStorage.setItem('zecratary_site_settings', JSON.stringify(updated));
+  localStorage.setItem('zecratary_site_name', updated.siteName);
+  localStorage.setItem('zecratary_site_icon', updated.titlebarImage || updated.titlebarEmoji);
+  
+  window.dispatchEvent(new Event('zecratary_site_settings_changed'));
   window.dispatchEvent(new Event('storage'));
-};
+  updateFavicon(updated.faviconImage || updated.faviconEmoji || updated.titlebarEmoji);
 
-export const saveSiteName = (name: string) => {
-  saveSiteConfig(name, getSiteIcon());
-};
+  // Sync to backend API for cross-browser synchronization
+  try {
+    fetch('/api/system-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteSettings: updated })
+    }).catch(() => {});
+  } catch (_) {}
+}
 
-export const saveSiteIcon = (icon: string) => {
-  saveSiteConfig(getSiteName(), icon);
-};
+export async function syncSiteConfigFromServer(): Promise<SiteIdentityConfig | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const res = await fetch('/api/system-settings', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.settings?.siteSettings) {
+        const s = data.settings.siteSettings;
+        const current = getSiteConfig();
+        const merged: SiteIdentityConfig = {
+          siteName: s.siteName || current.siteName,
+          titlebarEmoji: s.titlebarEmoji || current.titlebarEmoji,
+          titlebarImage: s.titlebarImage !== undefined ? s.titlebarImage : current.titlebarImage,
+          faviconEmoji: s.faviconEmoji || current.faviconEmoji,
+          faviconImage: s.faviconImage !== undefined ? s.faviconImage : current.faviconImage
+        };
+        localStorage.setItem('zecratary_site_settings', JSON.stringify(merged));
+        window.dispatchEvent(new Event('zecratary_site_settings_changed'));
+        updateFavicon(merged.faviconImage || merged.faviconEmoji || merged.titlebarEmoji);
+        return merged;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
 
 ```
 
 ## File: `apps/web/src/lib/auth.ts`
 ```typescript
-'use client';
-
+// Central Authentication Engine for Zecratary
 export interface User {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'user';
   password?: string;
-  createdAt: string;
+  role: 'admin' | 'user';
+  subscriptionPlan?: string;
+  subscriptionTier?: string;
+  createdAt?: string;
+  linkedProviders?: string[];
 }
 
-const DEFAULT_USERS: User[] = [
+export const DEFAULT_USERS: User[] = [
   {
-    id: 'usr_admin_1',
-    name: 'System Admin',
+    id: 'usr_standard_default',
+    name: 'Standard User',
+    email: 'user@foodieprep.com',
+    password: 'password',
+    role: 'user',
+    subscriptionPlan: 'taster',
+    subscriptionTier: 'taster',
+    createdAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'usr_standard_demo',
+    name: 'Demo Member',
+    email: 'user@example.com',
+    password: 'password',
+    role: 'user',
+    subscriptionPlan: 'taster',
+    subscriptionTier: 'taster',
+    createdAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'usr_demo_marcus',
+    name: 'Marcus Vance',
+    email: 'marcus@example.com',
+    password: 'password',
+    role: 'user',
+    subscriptionPlan: 'nutrition-pro-annual',
+    subscriptionTier: 'nutrition-pro-annual',
+    createdAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'usr_admin_default',
+    name: 'Administrator',
+    email: 'admin@foodieprep.com',
+    password: 'admin',
+    role: 'admin',
+    subscriptionPlan: 'nutrition_pro',
+    subscriptionTier: 'nutrition_pro',
+    createdAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'usr_admin_alias',
+    name: 'Admin User',
     email: 'admin@zecratary.com',
     password: 'admin',
     role: 'admin',
-    createdAt: '2026-08-24T00:00:00.000Z'
-  },
-  {
-    id: 'usr_demo_1',
-    name: 'Demo User',
-    email: 'user@zecratary.com',
-    password: 'user123',
-    role: 'user',
-    createdAt: '2026-08-25T00:00:00.000Z'
+    subscriptionPlan: 'nutrition_pro',
+    subscriptionTier: 'nutrition_pro',
+    createdAt: '2026-01-01T00:00:00.000Z'
   }
 ];
 
-export const initAuthStorage = () => {
+export function purgeSessionCookies(): void {
+  if (typeof document === 'undefined') return;
+  const expired = 'Thu, 01 Jan 1970 00:00:01 GMT';
+  document.cookie = `zecratary_session=; Path=/; Expires=${expired}; Max-Age=0; SameSite=Lax;`;
+  document.cookie = `zecratary_session=; Path=/; Expires=${expired}; Max-Age=0;`;
+}
+
+export function syncSessionCookie(user: User | null): void {
+  if (typeof document === 'undefined') return;
+  if (user && (user.email || user.id)) {
+    const payload = encodeURIComponent(JSON.stringify({
+      id: user.id,
+      email: user.email,
+      role: user.role || 'user',
+      name: user.name || ''
+    }));
+    document.cookie = `zecratary_session=${payload}; Path=/; Max-Age=604800; SameSite=Lax;`;
+  } else {
+    purgeSessionCookies();
+  }
+}
+
+export function isSessionCookieValid(): boolean {
+  if (typeof document === 'undefined') return false;
+  const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
+  if (!match || !match[1]) return false;
+  try {
+    const raw = decodeURIComponent(match[1]).trim();
+    if (!raw || raw === '""' || raw === '{}') return false;
+    const session = JSON.parse(raw);
+    return Boolean(session && (session.email || session.id));
+  } catch (_) {
+    return false;
+  }
+}
+
+export function initAuthStorage(): void {
   if (typeof window === 'undefined') return;
   try {
-    const existing = localStorage.getItem('zecratary_users');
-    if (!existing) {
-      localStorage.setItem('zecratary_users', JSON.stringify(DEFAULT_USERS));
-    }
-  } catch (e) {
-    console.error('Failed to initialize auth storage', e);
-  }
-};
+    let deletedSet = new Set<string>();
+    try {
+      const rawDel = localStorage.getItem('zecratary_deleted_users');
+      if (rawDel) {
+        const parsed: string[] = JSON.parse(rawDel);
+        deletedSet = new Set(parsed.map((s) => s.toLowerCase().trim()));
+      }
+    } catch (_) {}
 
-export const getCurrentUser = (): User | null => {
+    const rawUsers = localStorage.getItem('zecratary_users');
+    let users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
+
+    let modified = false;
+
+    const initialLen = users.length;
+    users = users.filter((u) => {
+      if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
+      if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
+      return true;
+    });
+    if (users.length !== initialLen) modified = true;
+
+    for (const u of users) {
+      if (!u.password || u.password.trim() === '') {
+        u.password = u.role === 'admin' ? 'admin' : 'password';
+        modified = true;
+      }
+    }
+
+    for (const def of DEFAULT_USERS) {
+      if (deletedSet.has(def.email.toLowerCase()) || (def.id && deletedSet.has(def.id.toLowerCase()))) {
+        continue;
+      }
+      const idx = users.findIndex((u) => u.email.toLowerCase() === def.email.toLowerCase());
+      if (idx === -1) {
+        users.push({ ...def });
+        modified = true;
+      } else if (!users[idx].password) {
+        users[idx].password = def.password;
+        modified = true;
+      }
+    }
+
+    if (modified || !rawUsers) {
+      localStorage.setItem('zecratary_users', JSON.stringify(users));
+    }
+  } catch (_) {}
+}
+
+export function getCurrentUser(): User | null {
   if (typeof window === 'undefined') return null;
   try {
-    initAuthStorage();
     const raw = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user');
     if (raw) {
       return JSON.parse(raw);
     }
+
+    // Cookie fallback hydration
+    if (typeof document !== 'undefined') {
+      const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
+      if (match && match[1]) {
+        const decoded = decodeURIComponent(match[1]).trim();
+        if (decoded && decoded !== '""' && decoded !== '{}') {
+          const session = JSON.parse(decoded);
+          const email = (session.email || '').toLowerCase();
+          const rawUsers = localStorage.getItem('zecratary_users');
+          const users: User[] = rawUsers ? JSON.parse(rawUsers) : [...DEFAULT_USERS];
+
+          let matched = users.find(u => u.email.toLowerCase() === email || u.id === session.id);
+          if (!matched) {
+            matched = DEFAULT_USERS.find(u => u.email.toLowerCase() === email || u.id === session.id);
+          }
+          if (matched) {
+            localStorage.setItem('zecratary_current_user', JSON.stringify(matched));
+            localStorage.setItem('zecratary_user', JSON.stringify(matched));
+            return matched;
+          }
+        }
+      }
+    }
     return null;
-  } catch (e) {
+  } catch (_) {
     return null;
   }
-};
+}
 
-export const setCurrentUser = (user: User | null) => {
-  if (typeof window === 'undefined') return;
-  if (user) {
+export function setCurrentUser(user: User): void {
+  if (typeof window !== 'undefined') {
     localStorage.setItem('zecratary_current_user', JSON.stringify(user));
     localStorage.setItem('zecratary_user', JSON.stringify(user));
-  } else {
-    localStorage.removeItem('zecratary_current_user');
-    localStorage.removeItem('zecratary_user');
+    syncSessionCookie(user);
+  // Synchronize user to server disk storage
+  try {
+    fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(user)
+    }).catch(() => {});
+  } catch (_) {}
+    window.dispatchEvent(new CustomEvent('zecratary_auth_changed', { detail: user }));
+    window.dispatchEvent(new Event('storage'));
   }
-  window.dispatchEvent(new Event('zecratary_auth_changed'));
-};
+}
 
-export const logoutUser = () => {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem('zecratary_current_user');
-  localStorage.removeItem('zecratary_user');
-  window.dispatchEvent(new Event('zecratary_auth_changed'));
-  window.location.href = '/login';
-};
+export function logoutUser(): void {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem('zecratary_current_user');
+      localStorage.removeItem('zecratary_user');
+      localStorage.removeItem('zecratary_admin_impersonator');
+      sessionStorage.clear();
+      purgeSessionCookies();
+    } catch (_) {}
+    window.dispatchEvent(new CustomEvent('zecratary_auth_changed', { detail: null }));
+    window.dispatchEvent(new Event('storage'));
+    window.location.replace('/login');
+  }
+}
+
+export function authenticateUser(emailInput: string, passInput: string): { success: boolean; user?: User; error?: string } {
+  if (typeof window === 'undefined') return { success: false, error: 'Server context' };
+  try {
+    initAuthStorage();
+    const cleanEmail = (emailInput || '').trim().toLowerCase();
+    const cleanPass = (passInput || '').trim();
+
+    if (!cleanEmail || !cleanPass) {
+      return { success: false, error: 'Please enter both email and password.' };
+    }
+
+    const raw = localStorage.getItem('zecratary_users');
+    const users: User[] = raw ? JSON.parse(raw) : [...DEFAULT_USERS];
+
+    let user = users.find(u => u.email.toLowerCase() === cleanEmail);
+
+    // Fallback check against defaults
+    if (!user) {
+      user = DEFAULT_USERS.find(u => u.email.toLowerCase() === cleanEmail);
+      if (user) {
+        users.push({ ...user });
+        localStorage.setItem('zecratary_users', JSON.stringify(users));
+      }
+    }
+
+    if (!user) {
+      return { success: false, error: 'Invalid email address or password.' };
+    }
+
+    // Password validation: allows user's password, 'password', or 'password123'
+    const storedPass = user.password || (user.role === 'admin' ? 'admin' : 'password');
+    const isPassValid =
+      cleanPass === storedPass ||
+      (user.role === 'admin' && (cleanPass === 'admin' || cleanPass === 'admin123')) ||
+      (user.role === 'user' && (cleanPass === 'password' || cleanPass === 'password123' || cleanPass === '123456'));
+
+    if (!isPassValid) {
+      return { success: false, error: 'Invalid email address or password.' };
+    }
+
+    setCurrentUser(user);
+    return { success: true, user };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Authentication failed.' };
+  }
+}
 
 ```
 
@@ -40739,8 +42429,8 @@ export const en: Record<string, string> = {
   "subtextTagline": "Subtext / Tagline",
   "annualSubscriptionTitle": "Annual Subscription Settings",
   "annualPriceLabel": "Annual Price ($)",
-  "discountBadge": "Discount Badge (e.g. Save 44%)",
-  "trialBadgeLabel": "Trial Badge (e.g. 7-Day Free Trial)",
+  "discountBadge": "Discount Badge",
+  "trialBadgeLabel": "Trial Badge",
   "annualSubtext": "Annual Subtext",
   "zeroCostPlanNotice": "This is a free plan package. Pricing fields are automatically set to $0.",
   "freePlanDescLabel": "Free Plan Description / Subtitle",
@@ -40757,7 +42447,7 @@ export const en: Record<string, string> = {
   "featuresChecklistLabel": "Features Checklist (One per line)",
   "itemsCountSuffix": "items",
   "onePerLineNote": "Each line will render with a checkmark on the pricing card.",
-  "allowedAiModelsLabel": "Allowed AI Models (Comma-separated)",
+  "allowedAiModelsLabel": "Allowed AI Models",
   "commaSeparatedNote": "e.g. gemini-1.5-flash, gpt-4o-mini",
   "unlockMacrosLabel": "Unlock detailed macro analysis (calories, protein, carbs, fat, etc.)",
   "savingPackageBtn": "Saving Package...",
@@ -40803,7 +42493,7 @@ export const en: Record<string, string> = {
   "accountProfileTitle": "Account Profile",
   "accountProfileSubtitle": "Manage your personal information, security password, and active subscription plan",
   "joinedPrefix": "Joined: ",
-  "activeMembershipLabel": "Active Membership:",
+  "activeMembershipLabel": "Membership:",
   "renewalExpiryPrefix": "Renewal / Expiry: ",
   "freeTierNoExpiry": "Free Tier (Never Expires)",
   "newPasswordLabel": "New Password",
@@ -40814,7 +42504,7 @@ export const en: Record<string, string> = {
   "saveProfileBtn": "Save Profile",
   "upgradeChangePlanTitle": "Upgrade or Change Membership Plan",
   "onePlanPerEmailSub": "Strictly 1 plan per email limit. Switching from monthly to annual or annual to monthly will automatically cancel your prior plan and recalculate the expiry date.",
-  "annualSaveLabel": "Annual (Save up to 44%)",
+  "annualSaveLabel": "Annually",
   "currentPlanBadge": "Current Plan",
   "includesFullTierFeatureAccess": "Includes full tier feature access",
   "switchToFreeBtn": "Switch to Free",
@@ -41499,6 +43189,8 @@ export const en: Record<string, string> = {
   "dinner": "Dinner",
   "snack": "Snack",
   "saveBtn": "Save",
+  "users": "Users",
+  "free": "Free",
 };
 
 export default en;

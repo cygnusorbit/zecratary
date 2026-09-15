@@ -1,17 +1,17 @@
 {
   "themeMode": "dark",
   "themeColors": {
-    "primary": "#ec4899",
-    "primaryColor": "#ec4899",
-    "primaryHover": "#7c3aed",
-    "accentEmerald": "#ec4899",
-    "accentColor": "#ec4899",
-    "accent": "#ec4899",
-    "backgroundColor": "#0f081c",
-    "backgroundDark": "#0f081c",
-    "cardBackground": "#180d2e",
-    "cardBorder": "#2a1650",
-    "textSecondary": "#d8b4fe"
+    "primary": "#E05638",
+    "primaryColor": "#E05638",
+    "primaryHover": "#c94529",
+    "accentEmerald": "#10b981",
+    "accentColor": "#10b981",
+    "accent": "#10b981",
+    "backgroundColor": "#070b13",
+    "backgroundDark": "#070b13",
+    "cardBackground": "#0b0f17",
+    "cardBorder": "#1e293b",
+    "textSecondary": "#94a3b8"
   },
   "currency": "USD",
   "currencySymbol": "$",
@@ -90,5 +90,20 @@
     "faviconEmoji": "🥑",
     "faviconImage": ""
   },
-  "updatedAt": "2026-09-15T03:59:47.513Z"
+  "updatedAt": "2026-09-15T08:08:46.501Z",
+  "settings": {
+    "themeColors": {
+      "primary": "#E05638",
+      "primaryColor": "#E05638",
+      "primaryHover": "#c94529",
+      "accentEmerald": "#10b981",
+      "accentColor": "#10b981",
+      "accent": "#10b981",
+      "backgroundColor": "#070b13",
+      "backgroundDark": "#070b13",
+      "cardBackground": "#0b0f17",
+      "cardBorder": "#1e293b",
+      "textSecondary": "#94a3b8"
+    }
+  }
 }
