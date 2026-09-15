@@ -217,6 +217,7 @@ export default function SavedRecipesPage() {
         setRecipes(current);
       }
     };
+    };
     window.addEventListener('zecratary_saved_recipes_updated', onRecipesUpdated);
 
     applyGlobalTheme();

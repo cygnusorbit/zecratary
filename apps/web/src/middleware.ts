@@ -21,7 +21,7 @@ export function middleware(req: NextRequest) {
     session && (session.role === 'admin' || session.email?.toLowerCase().includes('admin'))
   );
 
-  // Protected Admin Routes
+  // 1. Enforce Admin Routes
   if (pathname.startsWith('/admin')) {
     if (!isAuthenticated) {
       return NextResponse.redirect(new URL('/login', req.url));
@@ -31,21 +31,31 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  // Protected User Routes
-  if (
-    pathname.startsWith('/profile') ||
-    pathname.startsWith('/planner') ||
-    pathname.startsWith('/pantry') ||
-    pathname.startsWith('/chef') ||
-    pathname.startsWith('/import') ||
-    pathname.startsWith('/manual')
-  ) {
-    if (!isAuthenticated) {
-      return NextResponse.redirect(new URL('/login', req.url));
-    }
+  // 2. Enforce Protected Member Routes
+  const protectedPrefixes = [
+    '/profile',
+    '/dashboard',
+    '/planner',
+    '/pantry',
+    '/chef',
+    '/import',
+    '/manual',
+    '/saved',
+    '/shopping',
+    '/groceries',
+    '/cookbooks',
+    '/books',
+    '/templates',
+    '/recipe',
+    '/package'
+  ];
+
+  const isProtected = protectedPrefixes.some(prefix => pathname.startsWith(prefix));
+  if (isProtected && !isAuthenticated) {
+    return NextResponse.redirect(new URL('/login', req.url));
   }
 
-  // Guest Only Routes
+  // 3. Guest Only Routes
   if ((pathname === '/login' || pathname === '/register') && isAuthenticated) {
     if (isAdmin) {
       return NextResponse.redirect(new URL('/admin', req.url));
@@ -60,11 +70,21 @@ export const config = {
   matcher: [
     '/admin/:path*',
     '/profile/:path*',
+    '/dashboard/:path*',
     '/planner/:path*',
     '/pantry/:path*',
     '/chef/:path*',
     '/import/:path*',
     '/manual/:path*',
+    '/saved/:path*',
+    '/shopping/:path*',
+    '/groceries/:path*',
+    '/cookbooks/:path*',
+    '/books/:path*',
+    '/templates/:path*',
+    '/recipe/:path*',
+    '/package/:path*',
+    '/users/:path*',
     '/login',
     '/register'
   ],

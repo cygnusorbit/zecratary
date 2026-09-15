@@ -10,6 +10,7 @@ import {
   GripVertical, CheckSquare, CheckCircle2, Type
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
+import { persistSavedRecipe } from '@/lib/recipeSync';
 import { getStoredCategories } from '@/lib/categories';
 
 export default function SavedRecipesPage() {
@@ -159,6 +160,10 @@ export default function SavedRecipesPage() {
       setRecipes(updatedUserList);
       localStorage.setItem('zecratary_recipes', JSON.stringify(merged));
       localStorage.setItem('zecratary_saved_recipes', JSON.stringify(merged));
+      const activeUser = getCurrentUser();
+      if (activeUser && (activeUser.id || activeUser.email)) {
+        persistSavedRecipe(activeUser.id || activeUser.email, recipe, 'save');
+      }
 
       const updatedBooks = books.map((b: any) => ({
         ...b,

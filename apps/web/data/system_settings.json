@@ -1,17 +1,17 @@
 {
   "themeMode": "dark",
   "themeColors": {
-    "primary": "#f59e0b",
-    "primaryColor": "#f59e0b",
-    "primaryHover": "#774308",
-    "accentEmerald": "#cf2a93",
-    "accentColor": "#cf2a93",
-    "accent": "#cf2a93",
-    "backgroundColor": "#1c1a17",
-    "backgroundDark": "#1c1a17",
-    "cardBackground": "#000000",
-    "cardBorder": "#3d3629",
-    "textSecondary": "#fcd34d"
+    "primary": "#ec4899",
+    "primaryColor": "#ec4899",
+    "primaryHover": "#7c3aed",
+    "accentEmerald": "#ec4899",
+    "accentColor": "#ec4899",
+    "accent": "#ec4899",
+    "backgroundColor": "#0f081c",
+    "backgroundDark": "#0f081c",
+    "cardBackground": "#180d2e",
+    "cardBorder": "#2a1650",
+    "textSecondary": "#d8b4fe"
   },
   "currency": "USD",
   "currencySymbol": "$",
@@ -84,11 +84,11 @@
     }
   ],
   "siteSettings": {
-    "siteName": "Zecratary!",
+    "siteName": "Zecratary",
     "titlebarEmoji": "🥑",
-    "titlebarImage": "/uploads/titlebar-logo-1789377081004.png",
+    "titlebarImage": "",
     "faviconEmoji": "🥑",
     "faviconImage": ""
   },
-  "updatedAt": "2026-09-14T16:01:45.789Z"
+  "updatedAt": "2026-09-15T03:59:47.513Z"
 }

@@ -1,8 +1,16 @@
+import { syncUserSavedRecipes } from '@/lib/recipeSync';
 import { LanguageProvider } from '@/components/LanguageProvider';
 'use client';
 import Sidebar from '@/components/Sidebar';
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
+  // Global Cross-Browser Recipe Sync Bridge
+  useEffect(() => {
+    try {
+      syncUserSavedRecipes();
+    } catch (_) {}
+  }, []);
+
   return (
     <LanguageProvider>
       <div className="min-h-screen flex flex-col md:flex-row bg-[#0B101D] text-slate-100 font-sans antialiased">
