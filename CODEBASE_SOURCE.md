@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.0.7",
+  "version": "7.0.8",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -105,7 +105,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.0.7",
+  "version": "7.0.8",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -1392,7 +1392,6 @@ export default function SavedRecipesPage() {
   }, []);
 
   useEffect(() => {
-    // Safe Cross-Browser Recipe Synchronization
     const activeUser = getCurrentUser();
     if (activeUser && (activeUser.id || activeUser.email)) {
       const uKey = (activeUser.email || activeUser.id).toLowerCase().trim();
@@ -1482,8 +1481,6 @@ export default function SavedRecipesPage() {
         });
 
       setRecipes(userRecipes);
-    
-
 
       let parsedBooks = defaultBooks;
       if (localBooks) {
@@ -1939,7 +1936,7 @@ export default function SavedRecipesPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* 3x3, 4x4, 5x5 Grid Density Switchers */}
+          {/* Grid Density Switchers */}
           <div 
             className="flex items-center p-1 rounded-xl border shadow-sm"
             style={{
@@ -2102,7 +2099,6 @@ export default function SavedRecipesPage() {
                     </button>
                   </form>
 
-                  {/* Active Selected Ingredient Tags */}
                   {selectedIngredientsList.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
                       {selectedIngredientsList.map((ing) => (
