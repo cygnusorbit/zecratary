@@ -417,6 +417,124 @@
       "isCooked": false,
       "rating": 0,
       "createdAt": "2026-09-15T04:31:41.520Z"
+    },
+    {
+      "id": "rec_1789463398372_xhjr",
+      "userId": "usr_admin_1",
+      "createdBy": "admin@foodieprep.com",
+      "creatorName": "Administrator",
+      "title": "Sweet tartlet shells (individual tart crusts)",
+      "name": "Sweet tartlet shells (individual tart crusts)",
+      "imageUrl": "/uploads/recipes/import-1789463398354-g3z7v1.jpg",
+      "image": "/uploads/recipes/import-1789463398354-g3z7v1.jpg",
+      "category": "Main Dish",
+      "recipeType": "Main Dish",
+      "tags": [
+        "Main Dish",
+        "Imported"
+      ],
+      "servings": 6,
+      "prepTimeMinutes": 20,
+      "cookTimeMinutes": 25,
+      "prepTime": "20 mins",
+      "cookTime": "25 mins",
+      "ingredients": [
+        {
+          "id": "ing_1789463398364_0",
+          "amount": "1 1/2",
+          "quantity": "1 1/2",
+          "unit": "cups",
+          "item": "plain flour (all-purpose flour)",
+          "name": "plain flour (all-purpose flour)",
+          "category": "Grains and Pasta"
+        },
+        {
+          "id": "ing_1789463398365_1",
+          "amount": "1/2",
+          "quantity": "1/2",
+          "unit": "cup",
+          "item": "soft icing sugar (powdered sugar) (, sifted (Note 1))",
+          "name": "soft icing sugar (powdered sugar) (, sifted (Note 1))",
+          "category": "Pantry Staples"
+        },
+        {
+          "id": "ing_1789463398365_2",
+          "amount": "2 1/2",
+          "quantity": "2 1/2",
+          "unit": "tbsp",
+          "item": "almond meal (ground almonds) (, not almond flour (Note 2))",
+          "name": "almond meal (ground almonds) (, not almond flour (Note 2))",
+          "category": "Grains and Pasta"
+        },
+        {
+          "id": "ing_1789463398365_3",
+          "amount": "1/4",
+          "quantity": "1/4",
+          "unit": "tsp",
+          "item": "cooking salt / kosher salt",
+          "name": "cooking salt / kosher salt",
+          "category": "Pantry Staples"
+        },
+        {
+          "id": "ing_1789463398365_4",
+          "amount": "100",
+          "quantity": "100",
+          "unit": "g",
+          "item": "/ 7 tbsp  unsalted butter (, unsalted, softened, cut into 1cm / 0.4\" cubes)",
+          "name": "/ 7 tbsp  unsalted butter (, unsalted, softened, cut into 1cm / 0.4\" cubes)",
+          "category": "Dairy"
+        },
+        {
+          "id": "ing_1789463398365_5",
+          "amount": "1",
+          "quantity": "1",
+          "unit": "large",
+          "item": "egg (, at room temperature (~50 - 55g/2 oz) (Note 3))",
+          "name": "egg (, at room temperature (~50 - 55g/2 oz) (Note 3))",
+          "category": "Meat and Seafood"
+        }
+      ],
+      "instructions": [
+        "Mix dry ingredients, rub in butter then egg (or use food processor). Form disc, fridge 30 min. Portion into 6 balls*, roll out 15 cm / 6.5\" round (~3mm / 1/8\" thick), line 6 tartlet tins, trim excess. Fridge 30 min. Blind bake 12 min at 200°C / 390°F (180°C fan) with weights + 5 min uncovered for par-baked. * For mini tins or muffin tin, roll out single large one and press out circles. Gather scraps and repeat.",
+        "By hand option - Mix together flour, icing sugar, salt and almond meal in a bowl. Add butter and use your fingertips to rub it in until it resembles breadcrumbs. Add egg, mix with a rubber spatula until it becomes too hard to stir anymore, then use your hands to bring it together into a dough.",
+        "Food processor (30 sec) - Using the standard metal S blade, pulse the flour, icing sugar, salt and almond meal once just to combine. Add butter and pulse 3 to 4 times until it resembles breadcrumbs. Add egg and blitz for 15 to 20 seconds until it comes together into a dough.",
+        "Fridge 30 min - Turn dough out from the bowl or food processor onto a work surface. Knead lightly just to bring together into a smooth ball. Flatten into a 2cm / 0.8\" thick disc. Wrap with cling wrap and refrigerate for 30 minutes.",
+        "Divide dough (for larger tartlet tins) - Cut the disc into 6 equal portions, or however many tartlet tins you are using, then roll into balls. (If using a muffin tin or lots of mini tart tins, don't portion, roll out one big sheet, press circles out and press into tin. See Note 4)",
+        "Roll each ball out into a 15 cm / 6.5\" round (~3mm / 1/8\" thick).",
+        "Line and trim - Press pastry into 6 tartlet tins (12cm / 4.7\"), taking care not to stretch the dough as this causes shrinkage during baking. Roll the rolling pin over the tartlet tin to trim excess dough. (No need to grease the tins even if they are not non-stick ones, the butter in the pastry essentially self-greases the tins - as reader Ali so succinctly explained!).",
+        "Prick the base of the pastry 10 times with a fork. Not all the way through - just make a light prick on the surface. (Do less pricks for smaller tarts).",
+        "Refrigerate 30 minutes - Put the pastry in the tart tin for 30 minutes. (Extra insurance policy to avoid shrinkage and walls sliding down).",
+        "Preheat oven to 200°C / 390°F (180°C fan-forced).",
+        "Baking beads - Cut or tear baking paper into pieces about 50% larger than the tart shells. Scrunch the paper in your fist then unravel, smooth out and fit into the tartlet tins (scrunching makes it fit in more easily into the corners). Fill with baking beads (or dry raw rice or beans).",
+        "Park-bake or fully baked? Par-bake if the tartlet shell will be baked again after filling (eg. almond cream / frangipane like Raspberry Tartlets). Fully bake if they will not be baked again (eg filling with pastry cream or whipped cream).",
+        "Par-baked (12 + 5 min) - Bake 12 minutes. Use paper overhang to remove the beads, then bake uncovered for 5 minutes. Pastry should pale golden on the base and light golden on the edges. It will go golden when the filled pastry is baked.",
+        "Fully baked (14 + 5 min) - Bake 15 minutes, remove beads, then bake 5 minutes uncovered. The base should be light golden and the edges should be golden.",
+        "Cool and fill - Fully cool in the tart tins before filling and baking again if filling needs to be cooked (like Raspberry Tartlets).",
+        "Storage - Or keep unfilled in an airtight container for up to 3 days."
+      ],
+      "steps": [
+        "Mix dry ingredients, rub in butter then egg (or use food processor). Form disc, fridge 30 min. Portion into 6 balls*, roll out 15 cm / 6.5\" round (~3mm / 1/8\" thick), line 6 tartlet tins, trim excess. Fridge 30 min. Blind bake 12 min at 200°C / 390°F (180°C fan) with weights + 5 min uncovered for par-baked. * For mini tins or muffin tin, roll out single large one and press out circles. Gather scraps and repeat.",
+        "By hand option - Mix together flour, icing sugar, salt and almond meal in a bowl. Add butter and use your fingertips to rub it in until it resembles breadcrumbs. Add egg, mix with a rubber spatula until it becomes too hard to stir anymore, then use your hands to bring it together into a dough.",
+        "Food processor (30 sec) - Using the standard metal S blade, pulse the flour, icing sugar, salt and almond meal once just to combine. Add butter and pulse 3 to 4 times until it resembles breadcrumbs. Add egg and blitz for 15 to 20 seconds until it comes together into a dough.",
+        "Fridge 30 min - Turn dough out from the bowl or food processor onto a work surface. Knead lightly just to bring together into a smooth ball. Flatten into a 2cm / 0.8\" thick disc. Wrap with cling wrap and refrigerate for 30 minutes.",
+        "Divide dough (for larger tartlet tins) - Cut the disc into 6 equal portions, or however many tartlet tins you are using, then roll into balls. (If using a muffin tin or lots of mini tart tins, don't portion, roll out one big sheet, press circles out and press into tin. See Note 4)",
+        "Roll each ball out into a 15 cm / 6.5\" round (~3mm / 1/8\" thick).",
+        "Line and trim - Press pastry into 6 tartlet tins (12cm / 4.7\"), taking care not to stretch the dough as this causes shrinkage during baking. Roll the rolling pin over the tartlet tin to trim excess dough. (No need to grease the tins even if they are not non-stick ones, the butter in the pastry essentially self-greases the tins - as reader Ali so succinctly explained!).",
+        "Prick the base of the pastry 10 times with a fork. Not all the way through - just make a light prick on the surface. (Do less pricks for smaller tarts).",
+        "Refrigerate 30 minutes - Put the pastry in the tart tin for 30 minutes. (Extra insurance policy to avoid shrinkage and walls sliding down).",
+        "Preheat oven to 200°C / 390°F (180°C fan-forced).",
+        "Baking beads - Cut or tear baking paper into pieces about 50% larger than the tart shells. Scrunch the paper in your fist then unravel, smooth out and fit into the tartlet tins (scrunching makes it fit in more easily into the corners). Fill with baking beads (or dry raw rice or beans).",
+        "Park-bake or fully baked? Par-bake if the tartlet shell will be baked again after filling (eg. almond cream / frangipane like Raspberry Tartlets). Fully bake if they will not be baked again (eg filling with pastry cream or whipped cream).",
+        "Par-baked (12 + 5 min) - Bake 12 minutes. Use paper overhang to remove the beads, then bake uncovered for 5 minutes. Pastry should pale golden on the base and light golden on the edges. It will go golden when the filled pastry is baked.",
+        "Fully baked (14 + 5 min) - Bake 15 minutes, remove beads, then bake 5 minutes uncovered. The base should be light golden and the edges should be golden.",
+        "Cool and fill - Fully cool in the tart tins before filling and baking again if filling needs to be cooked (like Raspberry Tartlets).",
+        "Storage - Or keep unfilled in an airtight container for up to 3 days."
+      ],
+      "sourceUrl": "https://www.recipetineats.com/sweet-tartlet-shells-individual-tart-crusts/",
+      "isFavorite": false,
+      "isCooked": false,
+      "rating": 0,
+      "createdAt": "2026-09-15T09:09:58.372Z"
     }
   ]
 }
