@@ -1,4 +1,359 @@
-'use client';
+import os
+import glob
+import json
+import shutil
+
+# 1. Locate App Router directory
+candidates = [
+    'apps/web/src/app',
+    'src/app',
+    'apps/web/app',
+    'app'
+]
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/saved/page.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        app_dir = os.path.dirname(os.path.dirname(matches[0]))
+
+if not app_dir:
+    print("❌ Error: Could not locate App Router directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+lib_dir = os.path.join(base_dir, 'lib')
+os.makedirs(lib_dir, exist_ok=True)
+
+# 2. Recover all existing recipes from all JSON files and backups on disk
+print("=" * 65)
+print("🔍 1. RECOVERING & MERGING ALL HISTORICAL RECIPES ON DISK")
+print("=" * 65)
+
+merged_db = {}
+
+def extract_recipes_from_file(fpath):
+    try:
+        with open(fpath, 'r', encoding='utf-8', errors='ignore') as fp:
+            content = fp.read().strip()
+            if not content:
+                return []
+            data = json.loads(content)
+            if isinstance(data, list):
+                return [r for r in data if isinstance(r, dict)]
+            elif isinstance(data, dict):
+                r_list = data.get('recipes', [])
+                if isinstance(r_list, list):
+                    return [r for r in r_list if isinstance(r, dict)]
+    except Exception:
+        pass
+    return []
+
+# Scan for all active files, .bak files, and stale backups
+search_patterns = [
+    '**/saved_recipes.json',
+    '**/saved_recipes.json.bak*',
+    '**/saved_recipes.json.stale_bak*'
+]
+
+found_files = []
+for pat in search_patterns:
+    for match in glob.glob(pat, recursive=True):
+        if 'node_modules' not in match and '.next' not in match:
+            found_files.append(match)
+
+for fpath in found_files:
+    recs = extract_recipes_from_file(fpath)
+    if recs:
+        print(f"  • Extracted {len(recs)} recipes from {fpath}")
+        for r in recs:
+            # Key by id or normalized title
+            key = str(r.get('id') or r.get('title') or r.get('name') or '').strip().lower()
+            if key:
+                if key not in merged_db:
+                    merged_db[key] = r
+                else:
+                    merged_db[key].update({k: v for k, v in r.items() if v is not None})
+
+all_recovered_recipes = list(merged_db.values())
+for r in all_recovered_recipes:
+    if not r.get('userId'):
+        r['userId'] = 'usr_admin_1'
+
+print(f"✓ Total consolidated historical recipes recovered: {len(all_recovered_recipes)}")
+
+# Persist to apps/web/data and data/
+data_targets = [
+    os.path.join(os.getcwd(), 'apps/web/data', 'saved_recipes.json'),
+    os.path.join(os.getcwd(), 'data', 'saved_recipes.json')
+]
+
+for dt in data_targets:
+    os.makedirs(os.path.dirname(dt), exist_ok=True)
+    if os.path.exists(dt) and not os.path.islink(dt):
+        shutil.copy2(dt, dt + '.recovery_bak')
+    with open(dt, 'w', encoding='utf-8') as fp:
+        json.dump(all_recovered_recipes, fp, indent=2, ensure_ascii=False)
+    print(f"✓ Restored recovered recipes to: {dt}")
+
+# 3. Create robust API route /api/saved-recipes/route.ts
+print("\n" + "=" * 65)
+print("⚙️ 2. UPDATING /api/saved-recipes/route.ts")
+print("=" * 65)
+
+api_dir = os.path.join(app_dir, 'api', 'saved-recipes')
+os.makedirs(api_dir, exist_ok=True)
+api_route_path = os.path.join(api_dir, 'route.ts')
+
+api_route_code = """import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getTargetFiles(): string[] {
+  const cwd = process.cwd();
+  return [
+    path.join(cwd, 'apps/web/data/saved_recipes.json'),
+    path.join(cwd, 'data/saved_recipes.json')
+  ];
+}
+
+function readAllRecipes(): any[] {
+  const files = getTargetFiles();
+  for (const file of files) {
+    if (fs.existsSync(file)) {
+      try {
+        const raw = fs.readFileSync(file, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (parsed && Array.isArray(parsed.recipes) && parsed.recipes.length > 0) return parsed.recipes;
+      } catch (err) {
+        console.error('[API saved-recipes] Read error:', file, err);
+      }
+    }
+  }
+  return [];
+}
+
+function writeAllRecipes(recipes: any[]): boolean {
+  const files = getTargetFiles();
+  let wroteAny = false;
+  for (const file of files) {
+    try {
+      const dir = path.dirname(file);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(recipes, null, 2), 'utf-8');
+      wroteAny = true;
+    } catch (err) {
+      console.error('[API saved-recipes] Write error:', file, err);
+    }
+  }
+  return wroteAny;
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = (searchParams.get('userId') || 'usr_admin_1').trim();
+
+    const allRecipes = readAllRecipes();
+
+    // Deduplicate and filter recipes
+    const userRecipes = allRecipes.filter((r: any) => {
+      if (!userId || userId === 'usr_admin_1') return true;
+      if (r.userId && r.userId === userId) return true;
+      if (r.creatorId && r.creatorId === userId) return true;
+      if (r.createdBy && (r.createdBy === userId || (userId.includes('admin') && String(r.createdBy).includes('admin')))) return true;
+      return false;
+    });
+
+    return NextResponse.json(userRecipes, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const userId = (body.userId || 'usr_admin_1').trim();
+    const incoming = Array.isArray(body.recipes) ? body.recipes : (Array.isArray(body) ? body : []);
+
+    const existingAll = readAllRecipes();
+
+    // Build key-indexed lookup to safely merge without data wipeout
+    const mergedMap = new Map<string, any>();
+
+    // 1. Ingest existing recipes
+    for (const item of existingAll) {
+      if (!item) continue;
+      const key = String(item.id || item.title || item.name || '').trim().toLowerCase();
+      if (key) mergedMap.set(key, item);
+    }
+
+    // 2. Overlay incoming recipes
+    for (const item of incoming) {
+      if (!item) continue;
+      const key = String(item.id || item.title || item.name || '').trim().toLowerCase();
+      if (key) {
+        const existing = mergedMap.get(key) || {};
+        mergedMap.set(key, { ...existing, ...item, userId: userId });
+      }
+    }
+
+    const finalMerged = Array.from(mergedMap.values());
+    writeAllRecipes(finalMerged);
+
+    return NextResponse.json({
+      success: true,
+      count: finalMerged.length,
+      recipes: finalMerged
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+"""
+
+with open(api_route_path, 'w', encoding='utf-8') as f:
+    f.write(api_route_code)
+print(f"✓ Configured API route at: {api_route_path}")
+
+# 4. Update lib/recipeSync.ts to support bi-directional ingestion
+print("\n" + "=" * 65)
+print("⚙️ 3. UPDATING lib/recipeSync.ts")
+print("=" * 65)
+
+sync_path = os.path.join(lib_dir, 'recipeSync.ts')
+sync_code = """// Bi-directional recipe synchronization supporting import, manual, and server sources
+
+export function getLocalRecipes(): any[] {
+  if (typeof window === 'undefined') return [];
+  const keys = ['zecratary_saved_recipes', 'zecratary_recipes', 'saved_recipes', 'savedRecipes', 'recipes'];
+  const map = new Map<string, any>();
+
+  for (const k of keys) {
+    try {
+      const raw = localStorage.getItem(k);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          for (const r of parsed) {
+            if (r && typeof r === 'object') {
+              const id = String(r.id || r.title || r.name || '').trim().toLowerCase();
+              if (id && !map.has(id)) {
+                map.set(id, r);
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
+  }
+  return Array.from(map.values());
+}
+
+export async function syncUserSavedRecipes(userIdOrEmail: string): Promise<any[]> {
+  const uKey = (userIdOrEmail || 'usr_admin_1').trim();
+  const localList = getLocalRecipes();
+
+  try {
+    const res = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(uKey)}`, {
+      method: 'GET',
+      headers: { 'Cache-Control': 'no-cache, no-store' },
+      cache: 'no-store'
+    });
+
+    if (res.ok) {
+      const serverRecipes = await res.json();
+      const sList = Array.isArray(serverRecipes) ? serverRecipes : (serverRecipes.recipes || []);
+
+      // Merge server and local (which includes newly imported recipes)
+      const mergedMap = new Map<string, any>();
+      for (const r of sList) {
+        const key = String(r.id || r.title || r.name || '').trim().toLowerCase();
+        if (key) mergedMap.set(key, r);
+      }
+
+      let newLocalFound = false;
+      for (const r of localList) {
+        const key = String(r.id || r.title || r.name || '').trim().toLowerCase();
+        if (key && !mergedMap.has(key)) {
+          mergedMap.set(key, { ...r, userId: uKey });
+          newLocalFound = true;
+        }
+      }
+
+      const combined = Array.from(mergedMap.values());
+
+      // If local import had recipes missing from server, push them up immediately
+      if (newLocalFound && combined.length > sList.length) {
+        persistSavedRecipe(uKey, combined).catch(() => {});
+      }
+
+      // Keep localStorage in sync so /import and /manual components can read state
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('zecratary_recipes', JSON.stringify(combined));
+          localStorage.setItem('zecratary_saved_recipes', JSON.stringify(combined));
+        } catch (_) {}
+      }
+
+      return combined;
+    }
+  } catch (err) {
+    console.warn('[recipeSync] Server fetch error, using local data:', err);
+  }
+
+  return localList;
+}
+
+export async function persistSavedRecipe(userIdOrEmail: string, recipes: any[]): Promise<boolean> {
+  const uKey = (userIdOrEmail || 'usr_admin_1').trim();
+
+  // Sync to local browser storage immediately so other pages see it
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(recipes));
+      localStorage.setItem('zecratary_recipes', JSON.stringify(recipes));
+    } catch (_) {}
+  }
+
+  try {
+    const res = await fetch('/api/saved-recipes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: uKey, recipes })
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[recipeSync] Server persist failed:', err);
+    return false;
+  }
+}
+"""
+
+with open(sync_path, 'w', encoding='utf-8') as f:
+    f.write(sync_code)
+print(f"✓ Updated recipeSync.ts at: {sync_path}")
+
+# 5. Update apps/web/src/app/saved/page.tsx
+print("\n" + "=" * 65)
+print("⚙️ 4. UPDATING saved/page.tsx")
+print("=" * 65)
+
+saved_page_path = os.path.join(app_dir, 'saved', 'page.tsx')
+saved_page_code = """'use client';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -194,7 +549,7 @@ export default function SavedRecipesPage() {
         : `https://${urlStr}`;
       return new URL(normalized).hostname.replace('www.', '');
     } catch {
-      return urlStr.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] || 'source website';
+      return urlStr.replace(/^https?:\\/\\//i, '').replace(/^www\\./i, '').split('/')[0] || 'source website';
     }
   };
 
@@ -2736,3 +3091,10 @@ export default function SavedRecipesPage() {
     </div>
   );
 }
+"""
+
+with open(saved_page_path, 'w', encoding='utf-8') as f:
+    f.write(saved_page_code)
+print(f"✓ Patched saved/page.tsx with bidirectional sync at: {saved_page_path}")
+
+print("\n✨ Full Fix Complete! Both previous recipes and newly imported recipes are restored and synchronized across browsers.")

@@ -1,4 +1,29 @@
-'use client';
+import os
+import glob
+import json
+
+# 1. Locate saved/page.tsx
+candidates = [
+    'apps/web/src/app/saved/page.tsx',
+    'src/app/saved/page.tsx',
+    'apps/web/app/saved/page.tsx',
+    'app/saved/page.tsx'
+]
+
+target_path = next((c for c in candidates if os.path.exists(c)), None)
+
+if not target_path:
+    matches = glob.glob('**/saved/page.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        target_path = matches[0]
+
+if not target_path:
+    print("❌ Error: Could not locate saved/page.tsx.")
+    exit(1)
+
+# 2. Write updated SavedRecipesPage prioritizing user.id ("usr_admin_1")
+page_code = """'use client';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -52,6 +77,21 @@ const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label:
     titleSize: 'text-xs'
   }
 };
+
+function readLocalSavedRecipes(): any[] {
+  if (typeof window === 'undefined') return [];
+  const keys = ['zecratary_saved_recipes', 'zecratary_recipes', 'saved_recipes', 'savedRecipes', 'recipes'];
+  for (const k of keys) {
+    try {
+      const raw = localStorage.getItem(k);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (_) {}
+  }
+  return [];
+}
 
 export default function SavedRecipesPage() {
   const router = useRouter();
@@ -131,6 +171,7 @@ export default function SavedRecipesPage() {
     { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
   ];
 
+  // Dynamic Theme Synchronization & Color Inversion
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -204,56 +245,89 @@ export default function SavedRecipesPage() {
     return `https://${urlStr}`;
   };
 
-  const loadData = useCallback(async (user: User | null) => {
+  // Primary filtering by User ID ("usr_admin_1")
+  const loadData = useCallback((user: User | null) => {
     if (!user) return;
     setCategories(getStoredCategories());
-    const targetUserId = (user.id || 'usr_admin_1').trim();
-
     try {
-      setLoading(true);
-      // Fetches unified server data merged with any new imports
-      const rawRecipes = await syncUserSavedRecipes(targetUserId);
+      const localRecipes = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
+      const localBooks = localStorage.getItem('zecratary_recipe_books');
 
-      const userRecipes = rawRecipes.map((r: any) => {
-        const cleanType = getCleanRecipeType(r);
-        return {
-          ...r,
-          userId: targetUserId,
-          recipeType: cleanType,
-          category: cleanType,
-          tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
-        };
-      });
+      let parsedRecipes: any[] = [];
+      if (localRecipes) {
+        const parsed = JSON.parse(localRecipes);
+        if (Array.isArray(parsed)) {
+          parsedRecipes = parsed;
+        }
+      }
+
+      // Prioritize match on userId === user.id ("usr_admin_1"), falling back gracefully if unassigned
+      const userRecipes = parsedRecipes
+        .filter((r: any) => {
+          if (r.userId) return r.userId === user.id;
+          if (r.creatorId) return r.creatorId === user.id;
+          return r.createdBy === user.email || r.createdBy === user.id;
+        })
+        .map((r: any) => {
+          const cleanType = getCleanRecipeType(r);
+          return {
+            ...r,
+            userId: user.id, // Normalize to User ID
+            recipeType: cleanType,
+            category: cleanType,
+            tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
+          };
+        });
 
       setRecipes(userRecipes);
 
       let parsedBooks = defaultBooks;
-      const localBooks = localStorage.getItem('zecratary_recipe_books');
       if (localBooks) {
-        try {
-          const parsed = JSON.parse(localBooks);
-          if (Array.isArray(parsed) && parsed.length > 0) parsedBooks = parsed;
-        } catch (_) {}
+        const parsed = JSON.parse(localBooks);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          parsedBooks = parsed;
+        }
       }
 
       const userBooks = parsedBooks.filter((b: any) => {
         if (!b.userId && !b.createdBy) return true;
-        if (b.userId) return b.userId === targetUserId;
-        return b.createdBy === user.email || b.createdBy === targetUserId;
+        if (b.userId) return b.userId === user.id;
+        return b.createdBy === user.email || b.createdBy === user.id;
       });
 
-      setBooks(userBooks.map((b: any) => ({
+      const booksWithCounts = userBooks.map((b: any) => ({
         ...b,
         recipeCount: userRecipes.filter((r: any) => r.bookId === b.id).length
-      })));
+      }));
+
+      setBooks(booksWithCounts);
     } catch (e) {
-      console.error('[SavedRecipesPage] Load error:', e);
+      console.error(e);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    const activeUser = getCurrentUser();
+    if (activeUser && (activeUser.id || activeUser.email)) {
+      // Prioritize activeUser.id ("usr_admin_1") over email
+      const uKey = (activeUser.id || activeUser.email).trim();
+      syncUserSavedRecipes(uKey).then((synced) => {
+        if (Array.isArray(synced) && synced.length > 0) {
+          setRecipes(synced);
+        }
+      }).catch(() => {});
+    }
+
+    const onRecipesUpdated = () => {
+      const current = typeof getLocalRecipes === 'function' ? getLocalRecipes() : readLocalSavedRecipes();
+      if (Array.isArray(current)) {
+        setRecipes(current);
+      }
+    };
+    window.addEventListener('zecratary_saved_recipes_updated', onRecipesUpdated);
+
     applyGlobalTheme();
     window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
     window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
@@ -261,10 +335,14 @@ export default function SavedRecipesPage() {
     window.addEventListener('storage', applyGlobalTheme);
 
     return () => {
+      window.removeEventListener('zecratary_saved_recipes_updated', onRecipesUpdated);
       window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
       window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
       window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
       window.removeEventListener('storage', applyGlobalTheme);
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.style.backgroundColor = '';
+      }
     };
   }, [applyGlobalTheme]);
 
@@ -287,45 +365,54 @@ export default function SavedRecipesPage() {
       }
     };
 
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
     window.addEventListener('zecratary_categories_changed', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
-    window.addEventListener('storage', handleSync);
 
     return () => {
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
       window.removeEventListener('zecratary_categories_changed', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
-      window.removeEventListener('storage', handleSync);
     };
   }, [loadData, router, t]);
 
   const saveAllRecipes = (updatedUserList: any[]) => {
     if (!currentUser) return;
-    const targetUserId = currentUser.id || 'usr_admin_1';
+    try {
+      const localRecipes = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
+      const allRecipes: any[] = localRecipes ? JSON.parse(localRecipes) : [];
 
-    const updatedWithId = updatedUserList.map(r => ({
-      ...r,
-      userId: targetUserId
-    }));
+      // Partition recipes by user ID
+      const otherUsersRecipes = allRecipes.filter((r: any) => {
+        if (r.userId) return r.userId !== currentUser.id;
+        return r.createdBy !== currentUser.email && r.createdBy !== currentUser.id;
+      });
 
-    setRecipes(updatedWithId);
+      const updatedWithId = updatedUserList.map(r => ({
+        ...r,
+        userId: currentUser.id
+      }));
 
-    persistSavedRecipe(targetUserId, updatedWithId).then(() => {
+      const merged = [...updatedWithId, ...otherUsersRecipes];
+      setRecipes(updatedWithId);
+      localStorage.setItem('zecratary_recipes', JSON.stringify(merged));
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(merged));
+
+      const updatedBooks = books.map((b: any) => ({
+        ...b,
+        recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id).length
+      }));
+      setBooks(updatedBooks);
+
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
+        window.dispatchEvent(new Event('storage'));
       }
-    }).catch((err) => {
-      console.error('[SavedRecipesPage] Error saving recipes:', err);
-    });
-
-    const updatedBooks = books.map((b: any) => ({
-      ...b,
-      recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id).length
-    }));
-    setBooks(updatedBooks);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const toggleFavorite = (e: React.MouseEvent, id: string) => {
@@ -389,7 +476,7 @@ export default function SavedRecipesPage() {
     const recName = selectedRecipe.title || selectedRecipe.name;
     const newPlanItem = {
       id: 'plan_' + Date.now(),
-      userId: currentUser.id || 'usr_admin_1',
+      userId: currentUser.id,
       createdBy: currentUser.email,
       creatorName: currentUser.name,
       date: planDate,
@@ -404,6 +491,7 @@ export default function SavedRecipesPage() {
 
     localStorage.setItem('zecratary_meal_plan', JSON.stringify([...currentPlan, newPlanItem]));
     window.dispatchEvent(new Event('zecratary_planner_updated'));
+    window.dispatchEvent(new Event('storage'));
     setShowAddToPlanModal(false);
     const alertMsg = (t('scheduledMealAlert') || 'Successfully scheduled "{title}" in your meal plan!')
       .replace('{title}', recName);
@@ -510,7 +598,7 @@ export default function SavedRecipesPage() {
     const updatedRec = {
       ...selectedRecipe,
       ...editForm,
-      userId: currentUser?.id || selectedRecipe.userId || 'usr_admin_1',
+      userId: currentUser?.id || selectedRecipe.userId,
       recipeType: cleanType,
       category: cleanType,
       tags: [cleanType]
@@ -581,7 +669,7 @@ export default function SavedRecipesPage() {
     const current = local ? JSON.parse(local) : [];
     const formatted = selectedItems.map(i => ({
       id: 's_' + Date.now() + Math.random(),
-      userId: currentUser?.id || 'usr_admin_1',
+      userId: currentUser?.id,
       createdBy: currentUser?.email,
       creatorName: currentUser?.name,
       name: i.name,
@@ -740,7 +828,7 @@ export default function SavedRecipesPage() {
         </div>
       </div>
 
-      {/* Filter Row */}
+      {/* Search & Filter Trigger Bar */}
       <div className="space-y-3">
         <div className="flex gap-3">
           <div className="relative flex-1">
@@ -778,7 +866,7 @@ export default function SavedRecipesPage() {
           </button>
         </div>
 
-        {/* Filter Pills */}
+        {/* Multi-Filter Pills Strip */}
         {showFilters && (
           <div className="flex flex-wrap items-center gap-2 pt-1 animate-in fade-in text-xs font-semibold select-none">
             <button
@@ -1109,7 +1197,7 @@ export default function SavedRecipesPage() {
         )}
       </div>
 
-      {/* Grid */}
+      {/* Dynamic Recipe Card Grid */}
       {loading ? (
         <div className="text-xs py-12 text-center" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
           {t('loadingRecipes') || 'Loading recipes...'}
@@ -1325,7 +1413,9 @@ export default function SavedRecipesPage() {
 
             <div className="overflow-y-auto flex-1">
               {!isEditing ? (
+                /* RECIPE DETAILS VIEW */
                 <div className="space-y-5 pb-6">
+                  {/* Hero Banner */}
                   <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
                     <img
                       src={selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80'}
@@ -1361,6 +1451,7 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
+                  {/* Top Action Row */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
                     <div className="relative">
                       <button
@@ -1466,7 +1557,7 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t mx-5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }} />
 
-                  {/* Servings Stepper */}
+                  {/* Servings Stepper & Tools */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <span 
@@ -2736,3 +2827,36 @@ export default function SavedRecipesPage() {
     </div>
   );
 }
+"""
+
+with open(target_path, 'w', encoding='utf-8') as f:
+    f.write(page_code)
+print(f"✓ Updated SavedRecipesPage to query and save using User ID at: {target_path}")
+
+# 3. Migrate existing stored recipes in data files to assign userId: "usr_admin_1"
+json_candidates = [
+    'apps/web/data/saved_recipes.json',
+    'data/saved_recipes.json'
+]
+
+for j_path in json_candidates:
+    if os.path.exists(j_path) and not os.path.islink(j_path):
+        try:
+            with open(j_path, 'r', encoding='utf-8') as fp:
+                data = json.load(fp)
+            
+            modified = False
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        if not item.get('userId') or item.get('userId') != 'usr_admin_1':
+                            item['userId'] = 'usr_admin_1'
+                            modified = True
+            
+            if modified:
+                with open(j_path, 'w', encoding='utf-8') as fp:
+                    json.dump(data, fp, indent=2)
+                print(f"✓ Backfilled userId='usr_admin_1' in {j_path}")
+        except Exception as err:
+            print(f"⚠️ Could not migrate {j_path}: {err}")
+

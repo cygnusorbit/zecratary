@@ -1,4 +1,249 @@
-'use client';
+import os
+import glob
+import json
+
+# 1. Locate App Router directory
+candidates = [
+    'apps/web/src/app',
+    'src/app',
+    'apps/web/app',
+    'app'
+]
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/saved/page.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        app_dir = os.path.dirname(os.path.dirname(matches[0]))
+
+if not app_dir:
+    print("❌ Error: Could not locate App Router directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+lib_dir = os.path.join(base_dir, 'lib')
+os.makedirs(lib_dir, exist_ok=True)
+
+# 2. Synchronize master saved_recipes.json on server disk
+data_dirs = [
+    os.path.join(os.getcwd(), 'apps/web/data'),
+    os.path.join(os.getcwd(), 'data')
+]
+
+master_recipes = []
+for d in data_dirs:
+    target_json = os.path.join(d, 'saved_recipes.json')
+    if os.path.exists(target_json):
+        try:
+            with open(target_json, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                recipes = data if isinstance(data, list) else data.get('recipes', [])
+                if len(recipes) > len(master_recipes):
+                    master_recipes = recipes
+        except Exception:
+            pass
+
+# Guarantee user ID tagging
+for r in master_recipes:
+    if isinstance(r, dict) and (not r.get('userId') or r.get('userId') != 'usr_admin_1'):
+        r['userId'] = 'usr_admin_1'
+
+for d in data_dirs:
+    os.makedirs(d, exist_ok=True)
+    target_json = os.path.join(d, 'saved_recipes.json')
+    with open(target_json, 'w', encoding='utf-8') as f:
+        json.dump(master_recipes, f, indent=2)
+    print(f"✓ Synchronized server recipe database: {target_json}")
+
+# 3. Create/Update Server API Route: /api/saved-recipes/route.ts
+api_dir = os.path.join(app_dir, 'api', 'saved-recipes')
+os.makedirs(api_dir, exist_ok=True)
+api_route_path = os.path.join(api_dir, 'route.ts')
+
+api_route_code = """import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getTargetFiles(): string[] {
+  const cwd = process.cwd();
+  return [
+    path.join(cwd, 'apps/web/data/saved_recipes.json'),
+    path.join(cwd, 'data/saved_recipes.json')
+  ];
+}
+
+function readAllRecipes(): any[] {
+  const files = getTargetFiles();
+  for (const file of files) {
+    if (fs.existsSync(file)) {
+      try {
+        const raw = fs.readFileSync(file, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed && Array.isArray(parsed.recipes)) return parsed.recipes;
+      } catch (err) {
+        console.error('[API saved-recipes] Read error:', file, err);
+      }
+    }
+  }
+  return [];
+}
+
+function writeAllRecipes(recipes: any[]): boolean {
+  const files = getTargetFiles();
+  let wroteAny = false;
+  for (const file of files) {
+    try {
+      const dir = path.dirname(file);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(recipes, null, 2), 'utf-8');
+      wroteAny = true;
+    } catch (err) {
+      console.error('[API saved-recipes] Write error:', file, err);
+    }
+  }
+  return wroteAny;
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = (searchParams.get('userId') || 'usr_admin_1').trim();
+
+    const allRecipes = readAllRecipes();
+
+    const filtered = allRecipes.filter((r: any) => {
+      if (r.userId && r.userId === userId) return true;
+      if (r.creatorId && r.creatorId === userId) return true;
+      if (r.createdBy && (r.createdBy === userId || (userId.includes('admin') && String(r.createdBy).includes('admin')))) return true;
+      return userId === 'usr_admin_1';
+    });
+
+    return NextResponse.json(filtered, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const userId = (body.userId || 'usr_admin_1').trim();
+    const incomingRecipes = Array.isArray(body.recipes) ? body.recipes : (Array.isArray(body) ? body : []);
+
+    const existingAll = readAllRecipes();
+
+    const others = existingAll.filter((r: any) => {
+      if (r.userId) return r.userId !== userId;
+      if (r.creatorId) return r.creatorId !== userId;
+      return r.createdBy !== userId;
+    });
+
+    const normalized = incomingRecipes.map((r: any) => ({
+      ...r,
+      userId: userId
+    }));
+
+    const merged = [...normalized, ...others];
+    writeAllRecipes(merged);
+
+    return NextResponse.json({
+      success: true,
+      count: normalized.length,
+      recipes: normalized
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+"""
+
+with open(api_route_path, 'w', encoding='utf-8') as f:
+    f.write(api_route_code)
+print(f"✓ Created server API route at: {api_route_path}")
+
+# 4. Update lib/recipeSync.ts to completely remove localStorage recipe persistence
+sync_path = os.path.join(lib_dir, 'recipeSync.ts')
+sync_code = """// Server-driven recipe synchronization without browser localStorage caching
+
+export function purgeLegacyBrowserRecipeStorage(): void {
+  if (typeof window === 'undefined') return;
+  const legacyKeys = [
+    'zecratary_saved_recipes',
+    'zecratary_recipes',
+    'saved_recipes',
+    'savedRecipes',
+    'recipes'
+  ];
+  legacyKeys.forEach((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch (_) {}
+  });
+}
+
+export async function syncUserSavedRecipes(userIdOrEmail: string): Promise<any[]> {
+  const uKey = (userIdOrEmail || 'usr_admin_1').trim();
+
+  try {
+    const res = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(uKey)}`, {
+      method: 'GET',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      },
+      cache: 'no-store'
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.recipes || []);
+    }
+  } catch (err) {
+    console.error('[recipeSync] Failed to retrieve server recipes:', err);
+  }
+
+  return [];
+}
+
+export async function persistSavedRecipe(userIdOrEmail: string, recipes: any[]): Promise<boolean> {
+  const uKey = (userIdOrEmail || 'usr_admin_1').trim();
+
+  try {
+    const res = await fetch('/api/saved-recipes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: uKey, recipes })
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[recipeSync] Failed to persist recipes to server:', err);
+    return false;
+  }
+}
+
+export function getLocalRecipes(): any[] {
+  return [];
+}
+"""
+
+with open(sync_path, 'w', encoding='utf-8') as f:
+    f.write(sync_code)
+print(f"✓ Updated recipeSync.ts to server-only mode at: {sync_path}")
+
+# 5. Update saved/page.tsx to remove readLocalSavedRecipes and localStorage writes
+saved_page_path = os.path.join(app_dir, 'saved', 'page.tsx')
+saved_page_code = """'use client';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -12,7 +257,7 @@ import {
   Grid3X3, Rows3
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
-import { syncUserSavedRecipes, persistSavedRecipe, getLocalRecipes } from '@/lib/recipeSync';
+import { syncUserSavedRecipes, persistSavedRecipe, purgeLegacyBrowserRecipeStorage } from '@/lib/recipeSync';
 import { getStoredCategories } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -131,6 +376,7 @@ export default function SavedRecipesPage() {
     { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
   ];
 
+  // Global Dynamic Theme Application
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -194,7 +440,7 @@ export default function SavedRecipesPage() {
         : `https://${urlStr}`;
       return new URL(normalized).hostname.replace('www.', '');
     } catch {
-      return urlStr.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] || 'source website';
+      return urlStr.replace(/^https?:\\/\\//i, '').replace(/^www\\./i, '').split('/')[0] || 'source website';
     }
   };
 
@@ -204,6 +450,7 @@ export default function SavedRecipesPage() {
     return `https://${urlStr}`;
   };
 
+  // 100% Server Load - Zero localStorage reliance for recipe entries
   const loadData = useCallback(async (user: User | null) => {
     if (!user) return;
     setCategories(getStoredCategories());
@@ -211,10 +458,9 @@ export default function SavedRecipesPage() {
 
     try {
       setLoading(true);
-      // Fetches unified server data merged with any new imports
-      const rawRecipes = await syncUserSavedRecipes(targetUserId);
+      const serverRecipes = await syncUserSavedRecipes(targetUserId);
 
-      const userRecipes = rawRecipes.map((r: any) => {
+      const userRecipes = serverRecipes.map((r: any) => {
         const cleanType = getCleanRecipeType(r);
         return {
           ...r,
@@ -247,13 +493,16 @@ export default function SavedRecipesPage() {
         recipeCount: userRecipes.filter((r: any) => r.bookId === b.id).length
       })));
     } catch (e) {
-      console.error('[SavedRecipesPage] Load error:', e);
+      console.error('[SavedRecipesPage] Server load error:', e);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    // Purge outdated browser-side recipe cache to avoid split-brain states
+    purgeLegacyBrowserRecipeStorage();
+
     applyGlobalTheme();
     window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
     window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
@@ -287,21 +536,18 @@ export default function SavedRecipesPage() {
       }
     };
 
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
     window.addEventListener('zecratary_categories_changed', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
-    window.addEventListener('storage', handleSync);
 
     return () => {
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
       window.removeEventListener('zecratary_categories_changed', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
-      window.removeEventListener('storage', handleSync);
     };
   }, [loadData, router, t]);
 
+  // Persist strictly to server
   const saveAllRecipes = (updatedUserList: any[]) => {
     if (!currentUser) return;
     const targetUserId = currentUser.id || 'usr_admin_1';
@@ -313,12 +559,13 @@ export default function SavedRecipesPage() {
 
     setRecipes(updatedWithId);
 
+    // Save directly to server backend
     persistSavedRecipe(targetUserId, updatedWithId).then(() => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
       }
     }).catch((err) => {
-      console.error('[SavedRecipesPage] Error saving recipes:', err);
+      console.error('[SavedRecipesPage] Error pushing to server:', err);
     });
 
     const updatedBooks = books.map((b: any) => ({
@@ -2736,3 +2983,10 @@ export default function SavedRecipesPage() {
     </div>
   );
 }
+"""
+
+with open(saved_page_path, 'w', encoding='utf-8') as f:
+    f.write(saved_page_code)
+print(f"✓ Patched saved/page.tsx (zero localStorage for recipes) at: {saved_page_path}")
+
+print("\n🚀 Server-only recipe storage architecture deployed successfully!")
