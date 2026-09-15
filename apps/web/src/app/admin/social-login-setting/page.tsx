@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   ArrowLeft, Key, Save, RefreshCw, CheckCircle2, 
-  AlertCircle, Eye, EyeOff, Copy, Check, Zap, ExternalLink 
+  AlertCircle, Eye, EyeOff, Copy, Check, Zap 
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -54,11 +54,11 @@ export default function SocialLoginSettingPage() {
 
   const syncTheme = useCallback(() => {
     try {
-      const mode = localStorage.getItem('zecratary_theme_mode');
-      const day = mode === 'light';
-      setIsDayMode(day);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      if (typeof document !== 'undefined') {
+        const isDark = document.documentElement.classList.contains('dark');
+        setIsDayMode(!isDark);
+      }
+      const stored = typeof window !== 'undefined' ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config')) : null;
       if (stored) {
         applyThemeToDocument(JSON.parse(stored));
       } else {
@@ -97,17 +97,40 @@ export default function SocialLoginSettingPage() {
 
   const loadConfig = useCallback(async () => {
     try {
-      const saved = localStorage.getItem('zecratary_social_login_config');
-      if (saved) setConfig(JSON.parse(saved));
-
-      const res = await fetch('/api/admin/social-env');
+      // 1. Fetch from centralized server settings store
+      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
       if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.config) {
-          setConfig(prev => ({ ...prev, ...json.config }));
+        const data = await res.json();
+        const settings = data.settings || data;
+        if (settings?.socialLogin) {
+          setConfig(prev => ({
+            ...prev,
+            googleEnabled: settings.socialLogin.googleEnabled ?? prev.googleEnabled,
+            googleClientId: settings.socialLogin.googleClientId ?? prev.googleClientId,
+            googleClientSecret: settings.socialLogin.googleClientSecret ?? prev.googleClientSecret,
+            facebookEnabled: settings.socialLogin.facebookEnabled ?? prev.facebookEnabled,
+            facebookClientId: settings.socialLogin.facebookClientId ?? settings.socialLogin.facebookAppId ?? prev.facebookClientId,
+            facebookClientSecret: settings.socialLogin.facebookClientSecret ?? settings.socialLogin.facebookAppSecret ?? prev.facebookClientSecret,
+            appleEnabled: settings.socialLogin.appleEnabled ?? prev.appleEnabled,
+            appleClientId: settings.socialLogin.appleClientId ?? prev.appleClientId,
+            appleTeamId: settings.socialLogin.appleTeamId ?? prev.appleTeamId,
+            appleKeyId: settings.socialLogin.appleKeyId ?? prev.appleKeyId
+          }));
+          return;
         }
       }
-    } catch (_) {}
+
+      // 2. Fallback to reading from .env endpoint if server store hasn't initialized
+      const envRes = await fetch('/api/admin/social-env', { cache: 'no-store' });
+      if (envRes.ok) {
+        const envJson = await envRes.json();
+        if (envJson.success && envJson.config) {
+          setConfig(prev => ({ ...prev, ...envJson.config }));
+        }
+      }
+    } catch (err) {
+      console.error('[social-login-setting] Failed to fetch server config:', err);
+    }
   }, []);
 
   useEffect(() => {
@@ -126,20 +149,40 @@ export default function SocialLoginSettingPage() {
     setStatusMsg(null);
 
     try {
-      localStorage.setItem('zecratary_social_login_config', JSON.stringify(config));
-      window.dispatchEvent(new Event('zecratary_social_login_updated'));
-      window.dispatchEvent(new Event('storage'));
-
-      const res = await fetch('/api/admin/social-env', {
+      // Direct server-backed persistence - ZERO localStorage read/writes
+      const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config)
+        body: JSON.stringify({
+          socialLogin: {
+            ...config,
+            facebookAppId: config.facebookClientId,
+            facebookAppSecret: config.facebookClientSecret
+          }
+        })
       });
 
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update .env');
+      // Synchronize to .env handler if present
+      try {
+        await fetch('/api/admin/social-env', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+      } catch (_) {}
 
-      setStatusMsg({ text: t('socialSavedSuccess') || 'Configuration saved and synced to .env successfully!', success: true });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to persist settings to server storage');
+      }
+
+      window.dispatchEvent(new Event('zecratary_social_login_updated'));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+
+      setStatusMsg({ 
+        text: t('socialSavedSuccess') || 'Configuration saved and synced to server successfully!', 
+        success: true 
+      });
       setTimeout(() => setStatusMsg(null), 4000);
     } catch (err: any) {
       setStatusMsg({ text: err.message || 'Error saving configuration.', success: false });
@@ -151,18 +194,32 @@ export default function SocialLoginSettingPage() {
   const handlePullEnv = async () => {
     setSyncingEnv(true);
     try {
-      const res = await fetch('/api/admin/social-env');
+      const res = await fetch('/api/admin/social-env', { cache: 'no-store' });
       const json = await res.json();
-      if (res.ok && json.success) {
+      if (res.ok && json.success && json.config) {
         setConfig(prev => ({ ...prev, ...json.config }));
-        localStorage.setItem('zecratary_social_login_config', JSON.stringify(json.config));
+        await fetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            socialLogin: {
+              ...json.config,
+              facebookAppId: json.config.facebookClientId,
+              facebookAppSecret: json.config.facebookClientSecret
+            }
+          })
+        });
         window.dispatchEvent(new Event('zecratary_social_login_updated'));
-        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
         setStatusMsg({ text: t('socialPullSuccess') || 'Values synced from .env successfully!', success: true });
+        setTimeout(() => setStatusMsg(null), 3000);
+      } else {
+        await loadConfig();
+        setStatusMsg({ text: t('socialPullSuccess') || 'Values refreshed from server store!', success: true });
         setTimeout(() => setStatusMsg(null), 3000);
       }
     } catch (_) {
-      setStatusMsg({ text: t('socialPullError') || 'Failed to read .env file.', success: false });
+      setStatusMsg({ text: t('socialPullError') || 'Failed to sync configuration.', success: false });
     } finally {
       setSyncingEnv(false);
     }

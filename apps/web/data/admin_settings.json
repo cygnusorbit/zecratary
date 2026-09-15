@@ -1,0 +1,71 @@
+{
+  "siteName": "Zecratary",
+  "siteDescription": "Smart Meal Planning & Recipe Assistant",
+  "titlebarEmoji": "🍳",
+  "faviconEmoji": "🍳",
+  "aiProvider": "openai",
+  "aiModel": "gpt-4o",
+  "currency": "USD",
+  "taxRate": 0,
+  "maintenanceMode": false,
+  "allowRegistration": true,
+  "socialLogin": {
+    "googleEnabled": true,
+    "googleClientId": "479443923058-jeajhc080ad3kb0b57ighm8k101ip7q6.apps.googleusercontent.com",
+    "googleClientSecret": "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",
+    "facebookEnabled": false,
+    "facebookAppId": "",
+    "facebookAppSecret": "",
+    "appleEnabled": false,
+    "appleClientId": "",
+    "appleTeamId": "",
+    "appleKeyId": "",
+    "allowSocialRegistration": true,
+    "requireEmailVerification": true,
+    "facebookClientId": "",
+    "facebookClientSecret": ""
+  },
+  "subscriptionPlans": [
+    {
+      "id": "sub_free",
+      "name": "Free Tier",
+      "price": 0,
+      "interval": "monthly",
+      "features": [
+        "Standard Recipes",
+        "Weekly Meal Planner",
+        "Basic Shopping List"
+      ],
+      "isPopular": false,
+      "description": "Essential kitchen companion for home cooks"
+    },
+    {
+      "id": "sub_pro",
+      "name": "Pro Chef",
+      "price": 9.99,
+      "interval": "monthly",
+      "features": [
+        "AI Recipe Generator",
+        "Nutrition Analytics",
+        "Cloud Sync",
+        "Priority Support"
+      ],
+      "isPopular": true,
+      "description": "Full AI capabilities and nutritional tracking"
+    },
+    {
+      "id": "sub_enterprise",
+      "name": "Culinary Master",
+      "price": 24.99,
+      "interval": "monthly",
+      "features": [
+        "Multi-User Kitchen Accounts",
+        "Custom Recipe Books",
+        "Automated Pantry Reordering"
+      ],
+      "isPopular": false,
+      "description": "Advanced features for professional kitchens"
+    }
+  ],
+  "updatedAt": "2026-09-15T14:33:33.775Z"
+}

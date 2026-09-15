@@ -1,438 +1,475 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  Mail, Lock, CheckCircle2, AlertCircle, ArrowRight, 
-  Sparkles, Eye, EyeOff, ShieldCheck, Loader2
+  Mail, Lock, Eye, EyeOff, LogIn, AlertCircle, CheckCircle2, 
+  ArrowRight, Sparkles, ChefHat 
 } from 'lucide-react';
-import { getCurrentUser, setCurrentUser, initAuthStorage, User } from '@/lib/auth';
-import { 
-  getSocialLoginConfig, SocialLoginConfig, DEFAULT_SOCIAL_CONFIG, 
-  executeSocialAuth, decodeGoogleCredential, SocialProvider 
-} from '@/lib/socialAuth';
+import { getCurrentUser, loginUser, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import { applyThemeToDocument } from '@/lib/themeConfig';
 
-declare global {
-  interface Window {
-    google?: any;
-  }
+interface SocialProvidersConfig {
+  googleEnabled: boolean;
+  facebookEnabled: boolean;
+  appleEnabled: boolean;
 }
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useTranslation();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [socialLoading, setSocialLoading] = useState<SocialProvider | null>(null);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [isDayMode, setIsDayMode] = useState(false);
-  
-  const [config, setConfig] = useState<SocialLoginConfig>(DEFAULT_SOCIAL_CONFIG);
 
-  const [socialModalProvider, setSocialModalProvider] = useState<SocialProvider | null>(null);
-  const [socialCustomEmail, setSocialCustomEmail] = useState('');
-  const [socialCustomName, setSocialCustomName] = useState('');
+  // Dynamic social provider configuration state (defaulting to false to prevent layout flash)
+  const [socialConfig, setSocialConfig] = useState<SocialProvidersConfig>({
+    googleEnabled: false,
+    facebookEnabled: false,
+    appleEnabled: false
+  });
+  const [socialLoaded, setSocialLoaded] = useState(false);
 
+  // 1. Theme Synchronization
   const syncTheme = useCallback(() => {
     try {
-      const mode = localStorage.getItem('zecratary_theme_mode');
-      setIsDayMode(mode === 'light');
-    } catch (_) {}
-  }, []);
-
-  const fetchLiveConfig = useCallback(async () => {
-    try {
-      const res = await fetch('/api/social-config', { cache: 'no-store' });
-      if (res.ok) {
-        const live = await res.json();
-        setConfig(live);
-        localStorage.setItem('zecratary_social_login_config', JSON.stringify(live));
-        return;
+      if (typeof document !== 'undefined') {
+        const isDark = document.documentElement.classList.contains('dark');
+        setIsDayMode(!isDark);
+      }
+      const storedColors = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
+      if (storedColors) {
+        applyThemeToDocument(JSON.parse(storedColors));
+      } else {
+        applyThemeToDocument(null);
       }
     } catch (_) {}
-    setConfig(getSocialLoginConfig());
   }, []);
-
-  // Dynamically load Google Identity Services SDK
-  useEffect(() => {
-    if (typeof window !== 'undefined' && config.googleEnabled) {
-      const scriptId = 'google-identity-services-sdk';
-      if (!document.getElementById(scriptId)) {
-        const script = document.createElement('script');
-        script.id = scriptId;
-        script.src = 'https://accounts.google.com/gsi/client';
-        script.async = true;
-        script.defer = true;
-        document.body.appendChild(script);
-      }
-    }
-  }, [config.googleEnabled]);
 
   useEffect(() => {
     syncTheme();
-    fetchLiveConfig();
-
-    const handleUpdate = () => fetchLiveConfig();
     window.addEventListener('zecratary_theme_mode_changed', syncTheme);
-    window.addEventListener('zecratary_social_login_updated', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
+    window.addEventListener('zecratary_theme_changed', syncTheme);
+    window.addEventListener('zecratary_theme_updated', syncTheme);
+    window.addEventListener('storage', syncTheme);
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
-      window.removeEventListener('zecratary_social_login_updated', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
+      window.removeEventListener('zecratary_theme_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_updated', syncTheme);
+      window.removeEventListener('storage', syncTheme);
     };
-  }, [syncTheme, fetchLiveConfig]);
+  }, [syncTheme]);
 
-  // Capture server-side OAuth callback redirects
+  // 2. Fetch Centralized Server-Backed Social Login Settings
+  const fetchSocialConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/settings', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const settings = data.settings || data;
+        if (settings && settings.socialLogin) {
+          setSocialConfig({
+            googleEnabled: Boolean(settings.socialLogin.googleEnabled),
+            facebookEnabled: Boolean(settings.socialLogin.facebookEnabled),
+            appleEnabled: Boolean(settings.socialLogin.appleEnabled)
+          });
+          setSocialLoaded(true);
+          return;
+        }
+      }
+
+      // Fallback: Query .env endpoint if server store hasn't initialized
+      const envRes = await fetch('/api/admin/social-env', { cache: 'no-store' });
+      if (envRes.ok) {
+        const envData = await envRes.json();
+        if (envData.success && envData.config) {
+          setSocialConfig({
+            googleEnabled: Boolean(envData.config.googleEnabled),
+            facebookEnabled: Boolean(envData.config.facebookEnabled),
+            appleEnabled: Boolean(envData.config.appleEnabled)
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[login] Failed to load dynamic social login settings:', err);
+    } finally {
+      setSocialLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSocialConfig();
+    window.addEventListener('zecratary_social_login_updated', fetchSocialConfig);
+    window.addEventListener('zecratary_admin_settings_updated', fetchSocialConfig);
+    return () => {
+      window.removeEventListener('zecratary_social_login_updated', fetchSocialConfig);
+      window.removeEventListener('zecratary_admin_settings_updated', fetchSocialConfig);
+    };
+  }, [fetchSocialConfig]);
+
+  // 3. User Session Verification
   useEffect(() => {
     initAuthStorage();
-    if (getCurrentUser()) {
-      router.replace('/profile');
-      return;
+    const active = getCurrentUser();
+    if (active) {
+      const callback = searchParams.get('callbackUrl') || (active.role === 'admin' ? '/admin' : '/profile');
+      router.replace(callback);
     }
+  }, [router, searchParams]);
 
-    const errParam = searchParams.get('error');
-    if (errParam) {
-      setError(decodeURIComponent(errParam));
-      return;
-    }
-
-    const isSocialSuccess = searchParams.get('social_success') === 'true';
-    if (isSocialSuccess) {
-      const provider = (searchParams.get('provider') || 'google') as SocialProvider;
-      const callbackEmail = searchParams.get('email') || '';
-      const callbackName = searchParams.get('name') || '';
-
-      if (callbackEmail) {
-        setSuccess(`${t('signedInWith') || 'Signed in with'} ${provider.toUpperCase()}! Redirecting...`);
-        executeSocialAuth({
-          name: callbackName,
-          email: callbackEmail,
-          provider
-        });
-        setTimeout(() => router.replace('/profile'), 600);
-      }
-    }
-  }, [searchParams, router, t]);
-
-  const handleLogin = async (e: React.FormEvent) => {
+  // 4. Form Submission Handler
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
+    setErrorMsg('');
+    setSuccessMsg('');
 
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail || !password) {
-      setError(t('invalidCredentials') || 'Please enter both email and password.');
+    if (!email.trim() || !password) {
+      setErrorMsg(t('fillRequiredFields') || 'Please provide both email and password.');
       return;
     }
 
     setLoading(true);
-
-    setTimeout(() => {
-      try {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
-
-        const matched = users.find(u => u.email.toLowerCase() === cleanEmail && u.password === password);
-        if (!matched) {
-          setError(t('invalidCredentials') || 'Invalid email address or password.');
-          setLoading(false);
-          return;
-        }
-
-        setCurrentUser(matched);
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_auth_changed'));
-        window.dispatchEvent(new Event('storage'));
-
-        setSuccess(t('loginSuccess') || 'Login successful! Redirecting...');
-        setTimeout(() => router.replace('/profile'), 500);
-      } catch (err: any) {
-        setError(err.message || 'Login failed.');
-        setLoading(false);
+    try {
+      const user = await Promise.resolve(loginUser(email.trim(), password));
+      if (user) {
+        setSuccessMsg(t('loginSuccess') || 'Signing in...');
+        const callback = searchParams.get('callbackUrl') || (user.role === 'admin' ? '/admin' : '/profile');
+        setTimeout(() => {
+          router.push(callback);
+        }, 500);
+      } else {
+        setErrorMsg(t('invalidCredentials') || 'Invalid email or password.');
       }
-    }, 500);
-  };
-
-  const handleSocialClick = (provider: SocialProvider) => {
-    setError('');
-
-    // Trigger Google Identity Services One Tap / Credential Flow if Client ID is configured
-    if (provider === 'google' && config.googleClientId && typeof window !== 'undefined' && window.google?.accounts?.id) {
-      try {
-        window.google.accounts.id.initialize({
-          client_id: config.googleClientId,
-          callback: (response: { credential?: string }) => {
-            if (response.credential) {
-              const profile = decodeGoogleCredential(response.credential);
-              if (profile && profile.email) {
-                setSocialLoading('google');
-                executeSocialAuth({
-                  name: profile.name,
-                  email: profile.email,
-                  avatar: profile.avatar,
-                  provider: 'google',
-                });
-                setSuccess(`${t('signedInWith') || 'Signed in with'} GOOGLE! Redirecting...`);
-                setTimeout(() => router.replace('/profile'), 500);
-                return;
-              }
-            }
-          },
-          auto_select: false,
-          cancel_on_tap_outside: true,
-        });
-
-        window.google.accounts.id.prompt((notification: any) => {
-          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-            setSocialModalProvider('google');
-            setSocialCustomName('Google User');
-            setSocialCustomEmail('user@gmail.com');
-          }
-        });
-        return;
-      } catch (err) {
-        console.warn('Google Identity Services prompt fallback', err);
-      }
-    }
-
-    // Default modal fallback for Apple, Facebook, or unconfigured Google ID
-    setSocialModalProvider(provider);
-    if (provider === 'google') {
-      setSocialCustomName('Google User');
-      setSocialCustomEmail('user@gmail.com');
-    } else if (provider === 'facebook') {
-      setSocialCustomName('Facebook User');
-      setSocialCustomEmail('user@facebook.com');
-    } else {
-      setSocialCustomName('Apple Account');
-      setSocialCustomEmail('privaterelay@appleid.com');
+    } catch (err: any) {
+      setErrorMsg(err.message || (t('loginError') || 'Failed to sign in. Please try again.'));
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleCompleteSocialAuth = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!socialModalProvider) return;
-
-    const chosenEmail = socialCustomEmail.trim().toLowerCase();
-    const chosenName = socialCustomName.trim() || `${socialModalProvider.toUpperCase()} User`;
-
-    setSocialLoading(socialModalProvider);
-    const p = socialModalProvider;
-    setSocialModalProvider(null);
-
-    setTimeout(() => {
-      executeSocialAuth({ name: chosenName, email: chosenEmail, provider: p });
-      setSuccess(`${t('signedInWith') || 'Signed in with'} ${p.toUpperCase()}! Redirecting...`);
-      setTimeout(() => router.replace('/profile'), 500);
-    }, 500);
+  const handleSocialClick = (provider: 'google' | 'facebook' | 'apple') => {
+    const callback = searchParams.get('callbackUrl') || '/profile';
+    window.location.href = `/api/auth/login/${provider}?callbackUrl=${encodeURIComponent(callback)}`;
   };
+
+  const hasAnySocial = socialLoaded && (socialConfig.googleEnabled || socialConfig.facebookEnabled || socialConfig.appleEnabled);
+
+  // Active enabled providers count for flexible grid styling
+  const activeProvidersCount = [
+    socialConfig.googleEnabled, 
+    socialConfig.facebookEnabled, 
+    socialConfig.appleEnabled
+  ].filter(Boolean).length;
 
   return (
-    <div 
-      className="min-h-[85vh] flex items-center justify-center px-4 py-12 transition-colors duration-200 font-sans"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
-    >
+    <div className="w-full max-w-md mx-auto space-y-6">
+      {/* Brand Header */}
+      <div className="text-center space-y-2">
+        <div 
+          className="inline-flex items-center justify-center w-12 h-12 rounded-2xl shadow-md border mb-2"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+            color: 'var(--color-primary, #E05638)'
+          }}
+        >
+          <ChefHat className="h-6 w-6" />
+        </div>
+        <h1 
+          className="text-2xl sm:text-3xl font-black tracking-tight"
+          style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+        >
+          {t('signInTitle') || 'Welcome Back'}
+        </h1>
+        <p 
+          className="text-xs sm:text-sm"
+          style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
+        >
+          {t('signInSubtitle') || 'Enter your credentials to access your meal assistant.'}
+        </p>
+      </div>
+
+      {/* Card Container */}
       <div 
-        className="w-full max-w-md border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
+        className="border rounded-3xl p-6 sm:p-8 shadow-2xl transition-colors duration-200"
         style={{
           backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
           borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
         }}
       >
-        <div className="space-y-1.5 text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl mb-2 border shadow-inner"
+        {/* Status Alerts */}
+        {errorMsg && (
+          <div 
+            className="mb-5 p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-              borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-              color: 'var(--color-primary, #E05638)'
+              backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
+              borderColor: isDayMode ? '#fca5a5' : '#991b1b',
+              color: isDayMode ? '#991b1b' : '#fca5a5'
             }}
           >
-            <Sparkles className="h-6 w-6" />
-          </div>
-          <h1 className="text-2xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            {t('welcomeBack') || 'Welcome Back'}
-          </h1>
-          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('signInSubtitle') || 'Sign in to access your Zecratary dashboard and manage recipes.'}
-          </p>
-        </div>
-
-        {error && (
-          <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-2xl text-xs text-red-300 font-semibold flex items-center gap-2 shadow-sm">
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
-            <span>{error}</span>
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+            <span>{errorMsg}</span>
           </div>
         )}
 
-        {success && (
-          <div className="p-3.5 bg-emerald-950/40 border border-emerald-500/50 rounded-2xl text-xs text-emerald-300 font-semibold flex items-center gap-2 shadow-sm">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-            <span>{success}</span>
+        {successMsg && (
+          <div 
+            className="mb-5 p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in"
+            style={{
+              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
+              borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+            }}
+          >
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+            <span>{successMsg}</span>
           </div>
         )}
 
-        {(config.googleEnabled || config.facebookEnabled || config.appleEnabled) && (
-          <div className="space-y-2.5">
-            {config.googleEnabled && (
-              <button
-                type="button"
-                disabled={loading || socialLoading !== null}
-                onClick={() => handleSocialClick('google')}
-                className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border text-xs font-bold transition hover:opacity-90 shadow-xs cursor-pointer disabled:opacity-50"
-                style={{ backgroundColor: isDayMode ? '#f8fafc' : '#0e1626', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
-              >
-                {socialLoading === 'google' ? <Loader2 className="h-4 w-4 animate-spin text-orange-400" /> : (
-                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                  </svg>
-                )}
-                {t('continueWithGoogle') || 'Continue with Google'}
-              </button>
-            )}
-
-            <div className={`grid ${config.facebookEnabled && config.appleEnabled ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
-              {config.facebookEnabled && (
-                <button
-                  type="button"
-                  disabled={loading || socialLoading !== null}
-                  onClick={() => handleSocialClick('facebook')}
-                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition hover:opacity-90 shadow-xs cursor-pointer disabled:opacity-50"
-                  style={{ backgroundColor: isDayMode ? '#f8fafc' : '#0e1626', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
-                >
-                  {socialLoading === 'facebook' ? <Loader2 className="h-4 w-4 animate-spin text-orange-400" /> : (
-                    <svg className="w-4 h-4 fill-current text-blue-600 shrink-0" viewBox="0 0 24 24">
-                      <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.312h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
-                    </svg>
-                  )}
-                  Facebook
-                </button>
-              )}
-
-              {config.appleEnabled && (
-                <button
-                  type="button"
-                  disabled={loading || socialLoading !== null}
-                  onClick={() => handleSocialClick('apple')}
-                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition hover:opacity-90 shadow-xs cursor-pointer disabled:opacity-50"
-                  style={{ backgroundColor: isDayMode ? '#f8fafc' : '#0e1626', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
-                >
-                  {socialLoading === 'apple' ? <Loader2 className="h-4 w-4 animate-spin text-orange-400" /> : (
-                    <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
-                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.56.64-1.06 1.7-0.93 2.73 1.02.08 2.05-.48 2.66-1.23z" />
-                    </svg>
-                  )}
-                  Apple
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3 py-1">
-              <div className="h-px flex-1" style={{ backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b' }} />
-              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                {t('orSignInWithEmail') || 'or email'}
-              </span>
-              <div className="h-px flex-1" style={{ backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b' }} />
-            </div>
-          </div>
-        )}
-
-        <form onSubmit={handleLogin} className="space-y-4 text-xs" autoComplete="off">
+        {/* Credentials Form */}
+        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           <div>
-            <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-              {t('emailAddress') || 'Email Address'}
+            <label 
+              className="block font-bold mb-1.5"
+              style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
+            >
+              {t('emailLabel') || 'Email Address'}
             </label>
             <div className="relative">
-              <Mail className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
-              <input
-                type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
-                className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none transition shadow-inner font-mono"
-                style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
+              <Mail 
+                className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none" 
+                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} 
+              />
+              <input 
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full border rounded-xl pl-10 pr-3 py-2.5 outline-none font-medium transition"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
               />
             </div>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('password') || 'Password'}
+              <label 
+                className="block font-bold"
+                style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
+              >
+                {t('passwordLabel') || 'Password'}
               </label>
-              <Link href="/forgot-password" className="text-[11px] font-bold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
+              <Link 
+                href="/forgot-password"
+                className="text-[11px] font-semibold hover:underline"
+                style={{ color: 'var(--color-primary, #E05638)' }}
+              >
                 {t('forgotPassword') || 'Forgot password?'}
               </Link>
             </div>
             <div className="relative">
-              <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
-              <input
-                type={showPassword ? 'text' : 'password'} required value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none transition shadow-inner"
-                style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
+              <Lock 
+                className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none" 
+                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} 
               />
-              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3 text-slate-500 hover:text-slate-300 cursor-pointer">
+              <input 
+                type={showPassword ? 'text' : 'password'}
+                required
+                autoComplete="current-password"
+                placeholder="••••••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none font-mono transition"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              />
+              <button 
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-2.5 cursor-pointer hover:opacity-80 transition"
+                style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                aria-label="Toggle password visibility"
+              >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
 
-          <button
+          <button 
             type="submit"
-            disabled={loading || socialLoading !== null}
-            className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            disabled={loading}
+            className="w-full py-3 mt-2 rounded-xl text-xs font-bold text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-            {t('signInButton') || 'Sign In'}
+            {loading ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <>
+                <span>{t('signInBtn') || 'Sign In'}</span>
+                <ArrowRight className="h-4 w-4" />
+              </>
+            )}
           </button>
         </form>
 
-        <div className="text-center pt-2 border-t text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-          <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('dontHaveAccount') || "Don't have an account?"} </span>
-          <Link href="/register" className="font-extrabold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
-            {t('createOneLink') || 'Create one'}
+        {/* Dynamic Social Login Section (Only rendered when at least one provider is enabled) */}
+        {hasAnySocial && (
+          <div className="mt-6 space-y-4">
+            <div className="relative flex items-center justify-center">
+              <div 
+                className="w-full border-t"
+                style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+              />
+              <span 
+                className="absolute px-3 text-[11px] font-bold uppercase tracking-wider"
+                style={{ 
+                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+                  color: isDayMode ? '#94a3b8' : '#64748b' 
+                }}
+              >
+                {t('orContinueWith') || 'Or continue with'}
+              </span>
+            </div>
+
+            <div 
+              className={`grid gap-2.5 ${
+                activeProvidersCount === 1 ? 'grid-cols-1' : activeProvidersCount === 2 ? 'grid-cols-2' : 'grid-cols-3'
+              }`}
+            >
+              {/* Google Provider Button */}
+              {socialConfig.googleEnabled && (
+                <button 
+                  type="button"
+                  onClick={() => handleSocialClick('google')}
+                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                  title={t('signInWithGoogle') || 'Sign in with Google'}
+                >
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.98 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+                    />
+                  </svg>
+                  <span>Google</span>
+                </button>
+              )}
+
+              {/* Facebook Provider Button */}
+              {socialConfig.facebookEnabled && (
+                <button 
+                  type="button"
+                  onClick={() => handleSocialClick('facebook')}
+                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                  title={t('signInWithFacebook') || 'Sign in with Facebook'}
+                >
+                  <svg className="w-4 h-4 text-[#1877F2] fill-current shrink-0" viewBox="0 0 24 24">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                  </svg>
+                  <span>Facebook</span>
+                </button>
+              )}
+
+              {/* Apple Provider Button */}
+              {socialConfig.appleEnabled && (
+                <button 
+                  type="button"
+                  onClick={() => handleSocialClick('apple')}
+                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                  title={t('signInWithApple') || 'Sign in with Apple'}
+                >
+                  <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
+                    <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 0.92-2.85-.9.04-2 0.6-2.65 1.35-.58.66-1.09 1.73-.95 2.76.99.08 2.05-.51 2.68-1.26z" />
+                  </svg>
+                  <span>Apple</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Footer Navigation */}
+        <div 
+          className="mt-6 pt-4 border-t text-center text-xs"
+          style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+        >
+          <span style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+            {t('noAccountPrompt') || "Don't have an account?"}{' '}
+          </span>
+          <Link 
+            href="/register"
+            className="font-bold hover:underline"
+            style={{ color: 'var(--color-primary, #E05638)' }}
+          >
+            {t('signUpPrompt') || 'Sign up for free'}
           </Link>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {socialModalProvider && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="border rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl animate-in zoom-in-95" style={{ backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)' }}>
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-              <h3 className="text-sm font-black flex items-center gap-2 uppercase tracking-wider" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                <ShieldCheck className="h-4 w-4 text-emerald-400" /> {socialModalProvider} Sign In
-              </h3>
-              <button type="button" onClick={() => setSocialModalProvider(null)} className="text-slate-400 hover:text-white cursor-pointer text-xs">✕</button>
-            </div>
-            <form onSubmit={handleCompleteSocialAuth} className="space-y-3 text-xs">
-              <p style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Confirm the account profile returned by your <strong>{socialModalProvider}</strong> provider:</p>
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Display Name</label>
-                <input type="text" required value={socialCustomName} onChange={(e) => setSocialCustomName(e.target.value)} className="w-full border rounded-xl px-3 py-2 outline-none font-bold" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
-              </div>
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Email Address</label>
-                <input type="email" required value={socialCustomEmail} onChange={(e) => setSocialCustomEmail(e.target.value)} className="w-full border rounded-xl px-3 py-2 outline-none font-mono" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
-              </div>
-              <div className="flex items-center justify-end gap-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-                <button type="button" onClick={() => setSocialModalProvider(null)} className="px-3.5 py-1.5 border rounded-xl font-bold cursor-pointer" style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#64748b' : '#94a3b8' }}>Cancel</button>
-                <button type="submit" className="px-4 py-1.5 text-white font-extrabold rounded-xl shadow-md cursor-pointer flex items-center gap-1.5" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>Authorize & Sign In</button>
-              </div>
-            </form>
-          </div>
+export default function LoginPage() {
+  return (
+    <div className="min-h-[80vh] flex items-center justify-center px-4 py-12 transition-colors duration-200">
+      <Suspense fallback={
+        <div className="flex items-center justify-center">
+          <div 
+            className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+            style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }}
+          />
         </div>
-      )}
+      }>
+        <LoginForm />
+      </Suspense>
     </div>
   );
 }

@@ -142,7 +142,7 @@ export default function AdminUserManagementPage() {
     let parsedPlans: PlanOption[] = [];
 
     try {
-      const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
+      const rawConfigs = null;
       if (rawConfigs) {
         const configs = JSON.parse(rawConfigs);
         if (Array.isArray(configs) && configs.length > 0) {
@@ -188,7 +188,7 @@ export default function AdminUserManagementPage() {
 
     if (parsedPlans.length === 0) {
       try {
-        const rawPlans = localStorage.getItem('zecratary_subscription_plans');
+        const rawPlans = null;
         if (rawPlans) {
           const directPlans = JSON.parse(rawPlans);
           if (Array.isArray(directPlans) && directPlans.length > 0) {

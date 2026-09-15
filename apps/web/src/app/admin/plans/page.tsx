@@ -250,7 +250,7 @@ export default function AdminSubscriptionPlans() {
         if (rawDel) deletedSlugs = JSON.parse(rawDel);
       } catch (_) {}
 
-      const local = localStorage.getItem('zecratary_subscription_configs');
+      const local = null;
       if (local !== null) {
         const parsed = JSON.parse(local);
         if (Array.isArray(parsed)) {
@@ -297,7 +297,7 @@ export default function AdminSubscriptionPlans() {
             return true;
           });
 
-          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(cleanConfigs));
+          /* Synced via /api/admin/settings */
         }
       }
       const local = loadLocalPackages();
@@ -329,7 +329,7 @@ export default function AdminSubscriptionPlans() {
     }));
 
     setPackages(updated);
-    localStorage.setItem('zecratary_subscription_configs', JSON.stringify(updated));
+    /* Synced via /api/admin/settings */
     localStorage.setItem('zecratary_default_plan_slug', 'taster');
     localStorage.setItem('zecratary_default_plan', 'taster');
     window.dispatchEvent(new Event('zecratary_plans_updated'));
@@ -503,7 +503,7 @@ export default function AdminSubscriptionPlans() {
 
       updatedList = updatedList.map((p) => ({ ...p, isDefault: p.id === 'preset_taster' || p.slug === 'taster' }));
       setPackages(updatedList);
-      localStorage.setItem('zecratary_subscription_configs', JSON.stringify(updatedList));
+      /* Synced via /api/admin/settings */
       window.dispatchEvent(new Event('zecratary_plans_updated'));
       window.dispatchEvent(new Event('storage'));
 
@@ -552,7 +552,7 @@ export default function AdminSubscriptionPlans() {
         localStorage.setItem('zecratary_deleted_plan_slugs', JSON.stringify(delSlugs));
       } catch (_) {}
 
-      localStorage.setItem('zecratary_subscription_configs', JSON.stringify(updated));
+      /* Synced via /api/admin/settings */
       setPackages(updated);
 
       if (editingId === targetKey || editingId === pkg.id || editingId === pkg.slug || form.slug === pkg.slug) {
