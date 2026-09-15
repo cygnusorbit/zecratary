@@ -1,4 +1,23 @@
-'use client';
+import os
+import glob
+
+# 1. Locate App Router directory
+candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/admin/page.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        app_dir = os.path.dirname(os.path.dirname(matches[0]))
+
+if not app_dir:
+    print("❌ Error: Could not locate App Router directory.")
+    exit(1)
+
+admin_page_path = os.path.join(app_dir, 'admin', 'page.tsx')
+
+admin_page_code = """'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -19,9 +38,7 @@ import {
   Utensils, 
   Tag, 
   Key,
-  Languages,
-  LayoutGrid,
-  BookOpen
+  Languages
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { 
@@ -41,7 +58,6 @@ const PRESET_PALETTES = [
     primary: '#E05638', 
     primaryHover: '#c94529', 
     accent: '#10b981', 
-    sidebarIcon: '#10b981',
     background: '#070b13',
     card: '#0b0f17',
     border: '#1e293b',
@@ -52,7 +68,6 @@ const PRESET_PALETTES = [
     primary: '#10b981', 
     primaryHover: '#059669', 
     accent: '#3b82f6', 
-    sidebarIcon: '#10b981',
     background: '#06130d',
     card: '#0a1d14',
     border: '#133526',
@@ -63,7 +78,6 @@ const PRESET_PALETTES = [
     primary: '#2563eb', 
     primaryHover: '#1d4ed8', 
     accent: '#10b981', 
-    sidebarIcon: '#38bdf8',
     background: '#080d1a',
     card: '#0c152b',
     border: '#1e293b',
@@ -74,7 +88,6 @@ const PRESET_PALETTES = [
     primary: '#8b5cf6', 
     primaryHover: '#7c3aed', 
     accent: '#ec4899', 
-    sidebarIcon: '#c084fc',
     background: '#0f081c',
     card: '#180d2e',
     border: '#2a1650',
@@ -85,7 +98,6 @@ const PRESET_PALETTES = [
     primary: '#f59e0b', 
     primaryHover: '#d97706', 
     accent: '#10b981', 
-    sidebarIcon: '#fbbf24',
     background: '#120d04',
     card: '#1c1507',
     border: '#36270a',
@@ -96,7 +108,6 @@ const PRESET_PALETTES = [
     primary: '#38bdf8', 
     primaryHover: '#0284c7', 
     accent: '#a855f7', 
-    sidebarIcon: '#38bdf8',
     background: '#020617',
     card: '#080e22',
     border: '#172554',
@@ -130,7 +141,6 @@ export default function AdminSettingsPage() {
   const [primaryColor, setPrimaryColor] = useState<string>('#E05638');
   const [primaryHoverColor, setPrimaryHoverColor] = useState<string>('#c94529');
   const [accentColor, setAccentColor] = useState<string>('#10b981');
-  const [sidebarIconColor, setSidebarIconColor] = useState<string>('#10b981');
   const [backgroundColor, setBackgroundColor] = useState<string>('#070b13');
   const [cardBackgroundColor, setCardBackgroundColor] = useState<string>('#0b0f17');
   const [cardBorderColor, setCardBorderColor] = useState<string>('#1e293b');
@@ -139,12 +149,11 @@ export default function AdminSettingsPage() {
   const titlebarFileRef = useRef<HTMLInputElement>(null);
   const faviconFileRef = useRef<HTMLInputElement>(null);
 
-  // Decoupled state reference to avoid stale closures in listeners
+  // Maintain active colors in a ref to decouple mode-switching from the render loop
   const colorsRef = useRef({
     primary: primaryColor,
     primaryHover: primaryHoverColor,
     accent: accentColor,
-    sidebarIcon: sidebarIconColor,
     background: backgroundColor,
     card: cardBackgroundColor,
     border: cardBorderColor,
@@ -156,19 +165,17 @@ export default function AdminSettingsPage() {
       primary: primaryColor,
       primaryHover: primaryHoverColor,
       accent: accentColor,
-      sidebarIcon: sidebarIconColor,
       background: backgroundColor,
       card: cardBackgroundColor,
       border: cardBorderColor,
       textSecondary: secondaryTextColor,
     };
-  }, [primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor]);
+  }, [primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor]);
 
   const applyColorsLocally = (
     primary: string, 
     hover: string, 
     accent: string, 
-    sidebarIcon: string,
     bg: string,
     card: string,
     border: string,
@@ -181,8 +188,6 @@ export default function AdminSettingsPage() {
       accentEmerald: accent,
       accentColor: accent,
       accent: accent,
-      sidebarIconColor: sidebarIcon,
-      sidebarIcon: sidebarIcon,
       backgroundColor: bg,
       backgroundDark: bg,
       cardBackground: card,
@@ -216,7 +221,6 @@ export default function AdminSettingsPage() {
         const p = c.primary || c.primaryColor || '#E05638';
         const ph = c.primaryHover || '#c94529';
         const ac = c.accentEmerald || c.accentColor || c.accent || '#10b981';
-        const sbi = c.sidebarIconColor || c.sidebarIcon || ac || '#10b981';
         const bg = c.backgroundColor || c.backgroundDark || '#070b13';
         const card = c.cardBackground || '#0b0f17';
         const border = c.cardBorder || '#1e293b';
@@ -225,7 +229,6 @@ export default function AdminSettingsPage() {
         setPrimaryColor(p);
         setPrimaryHoverColor(ph);
         setAccentColor(ac);
-        setSidebarIconColor(sbi);
         setBackgroundColor(bg);
         setCardBackgroundColor(card);
         setCardBorderColor(border);
@@ -238,8 +241,6 @@ export default function AdminSettingsPage() {
           accentEmerald: ac,
           accentColor: ac,
           accent: ac,
-          sidebarIconColor: sbi,
-          sidebarIcon: sbi,
           backgroundColor: bg,
           backgroundDark: bg,
           cardBackground: card,
@@ -257,7 +258,6 @@ export default function AdminSettingsPage() {
           const p = tc.primary || tc.primaryColor || '#E05638';
           const ph = tc.primaryHover || '#c94529';
           const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
-          const sbi = tc.sidebarIconColor || tc.sidebarIcon || ac || '#10b981';
           const bg = tc.backgroundColor || tc.backgroundDark || '#070b13';
           const card = tc.cardBackground || '#0b0f17';
           const border = tc.cardBorder || '#1e293b';
@@ -267,7 +267,6 @@ export default function AdminSettingsPage() {
             setPrimaryColor(p);
             setPrimaryHoverColor(ph);
             setAccentColor(ac);
-            setSidebarIconColor(sbi);
             setBackgroundColor(bg);
             setCardBackgroundColor(card);
             setCardBorderColor(border);
@@ -278,8 +277,6 @@ export default function AdminSettingsPage() {
               primaryColor: p,
               primaryHover: ph,
               accentEmerald: ac,
-              sidebarIconColor: sbi,
-              sidebarIcon: sbi,
               backgroundColor: bg,
               cardBackground: card,
               cardBorder: border,
@@ -291,7 +288,7 @@ export default function AdminSettingsPage() {
       .catch(() => {});
   }, []);
 
-  // Theme mode change listener
+  // Theme mode listener without state reset cycle
   useEffect(() => {
     const handleModeChange = () => {
       try {
@@ -305,8 +302,6 @@ export default function AdminSettingsPage() {
           accentEmerald: cur.accent,
           accentColor: cur.accent,
           accent: cur.accent,
-          sidebarIconColor: cur.sidebarIcon,
-          sidebarIcon: cur.sidebarIcon,
           backgroundColor: cur.background,
           backgroundDark: cur.background,
           cardBackground: cur.card,
@@ -349,7 +344,6 @@ export default function AdminSettingsPage() {
     setPrimaryColor(preset.primary);
     setPrimaryHoverColor(preset.primaryHover);
     setAccentColor(preset.accent);
-    setSidebarIconColor(preset.sidebarIcon || preset.accent);
     setBackgroundColor(preset.background);
     setCardBackgroundColor(preset.card);
     setCardBorderColor(preset.border);
@@ -359,7 +353,6 @@ export default function AdminSettingsPage() {
       preset.primary, 
       preset.primaryHover, 
       preset.accent, 
-      preset.sidebarIcon || preset.accent,
       preset.background,
       preset.card,
       preset.border,
@@ -386,8 +379,6 @@ export default function AdminSettingsPage() {
       accentEmerald: accentColor,
       accentColor: accentColor,
       accent: accentColor,
-      sidebarIconColor: sidebarIconColor,
-      sidebarIcon: sidebarIconColor,
       backgroundColor: backgroundColor,
       backgroundDark: backgroundColor,
       cardBackground: cardBackgroundColor,
@@ -409,7 +400,6 @@ export default function AdminSettingsPage() {
     const defaultPrimary = '#E05638';
     const defaultPrimaryHover = '#c94529';
     const defaultAccent = '#10b981';
-    const defaultSidebarIcon = '#10b981';
     const defaultBg = '#070b13';
     const defaultCard = '#0b0f17';
     const defaultBorder = '#1e293b';
@@ -424,7 +414,6 @@ export default function AdminSettingsPage() {
     setPrimaryColor(defaultPrimary);
     setPrimaryHoverColor(defaultPrimaryHover);
     setAccentColor(defaultAccent);
-    setSidebarIconColor(defaultSidebarIcon);
     setBackgroundColor(defaultBg);
     setCardBackgroundColor(defaultCard);
     setCardBorderColor(defaultBorder);
@@ -445,8 +434,6 @@ export default function AdminSettingsPage() {
       accentEmerald: defaultAccent,
       accentColor: defaultAccent,
       accent: defaultAccent,
-      sidebarIconColor: defaultSidebarIcon,
-      sidebarIcon: defaultSidebarIcon,
       backgroundColor: defaultBg,
       backgroundDark: defaultBg,
       cardBackground: defaultCard,
@@ -543,9 +530,9 @@ export default function AdminSettingsPage() {
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">
-        {/* TAB 1: BRANDING */}
+        {/* TAB 1 CONTENT: SITE IDENTITY & BRANDING */}
         <div className={activeTab === 'branding' ? 'space-y-6' : 'hidden'}>
-          {/* APPLICATION NAME */}
+          {/* SECTION 1: SITE NAME */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
             style={{ 
@@ -575,7 +562,7 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
-          {/* TITLEBAR BRAND ICON */}
+          {/* SECTION 2: TITLEBAR BRAND ICON */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
             style={{ 
@@ -689,7 +676,7 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
-          {/* FAVICON */}
+          {/* SECTION 3: FAVICON */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
             style={{ 
@@ -808,9 +795,9 @@ export default function AdminSettingsPage() {
           </div>
         </div>
 
-        {/* TAB 2: THEME */}
+        {/* TAB 2 CONTENT: THEME */}
         <div className={activeTab === 'theme' ? 'space-y-6' : 'hidden'}>
-          {/* THEME COLOR & PALETTE SETTINGS */}
+          {/* COMPLETE THEME COLOR & PALETTE SETTINGS */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-6 text-xs" 
             style={{ 
@@ -827,7 +814,7 @@ export default function AdminSettingsPage() {
                   </h2>
                 </div>
                 <p className="text-[11px] mt-1" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('admin.themeSettingsDesc', 'Customize primary accents, interactive hovers, navigation icons, surfaces, borders, and typography.')}
+                  {t('admin.themeSettingsDesc', 'Customize primary accents, interactive hovers, viewport tones, card surfaces, borders, and typography.')}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
@@ -838,10 +825,6 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.accent', 'Accent')}:</span>
                   <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: accentColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.sidebarIcon', 'Sidebar Icon')}:</span>
-                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: sidebarIconColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.bg', 'Bg')}:</span>
@@ -878,8 +861,8 @@ export default function AdminSettingsPage() {
                       <div className="flex items-center gap-1">
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.primary }} />
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.accent }} />
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.sidebarIcon || preset.accent }} />
                         <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.background, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
+                        <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.card, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
                       </div>
                       <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
                         {preset.name}
@@ -890,12 +873,12 @@ export default function AdminSettingsPage() {
               </div>
             </div>
 
-            {/* Brand & Interaction Colors */}
+            {/* Core Colors Group */}
             <div className="space-y-3 pt-2">
               <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>
                 {t('admin.brandColors', 'Brand & Interaction Colors')}
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {/* Primary Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
@@ -908,7 +891,7 @@ export default function AdminSettingsPage() {
                       onChange={(e) => {
                         const val = e.target.value;
                         setPrimaryColor(val);
-                        applyColorsLocally(val, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                        applyColorsLocally(val, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                       }}
                       className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                       style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -920,7 +903,7 @@ export default function AdminSettingsPage() {
                         const val = e.target.value;
                         setPrimaryColor(val);
                         if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(val, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                          applyColorsLocally(val, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
                       placeholder="#E05638"
@@ -949,7 +932,7 @@ export default function AdminSettingsPage() {
                       onChange={(e) => {
                         const val = e.target.value;
                         setPrimaryHoverColor(val);
-                        applyColorsLocally(primaryColor, val, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                        applyColorsLocally(primaryColor, val, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                       }}
                       className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                       style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -961,7 +944,7 @@ export default function AdminSettingsPage() {
                         const val = e.target.value;
                         setPrimaryHoverColor(val);
                         if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, val, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                          applyColorsLocally(primaryColor, val, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
                       placeholder="#c94529"
@@ -990,7 +973,7 @@ export default function AdminSettingsPage() {
                       onChange={(e) => {
                         const val = e.target.value;
                         setAccentColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, val, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                        applyColorsLocally(primaryColor, primaryHoverColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                       }}
                       className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                       style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -1002,7 +985,7 @@ export default function AdminSettingsPage() {
                         const val = e.target.value;
                         setAccentColor(val);
                         if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, val, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                          applyColorsLocally(primaryColor, primaryHoverColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
                       placeholder="#10b981"
@@ -1016,47 +999,6 @@ export default function AdminSettingsPage() {
                   </div>
                   <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
                     {t('admin.accentColorDesc', 'Badges, success alerts, and secondary accents.')}
-                  </span>
-                </div>
-
-                {/* Sidebar & Nav Icon Color */}
-                <div className="space-y-1.5">
-                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    {t('admin.sidebarIconColor', 'Sidebar Icon Color')}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="color" 
-                      value={sidebarIconColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSidebarIconColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                      }}
-                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                      style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
-                    />
-                    <input 
-                      type="text" 
-                      value={sidebarIconColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSidebarIconColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                        }
-                      }}
-                      placeholder="#10b981"
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                      style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                        borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
-                      }}
-                    />
-                  </div>
-                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {t('admin.sidebarIconColorDesc', 'Icons for navigation and categories in the sidebar.')}
                   </span>
                 </div>
               </div>
@@ -1080,7 +1022,7 @@ export default function AdminSettingsPage() {
                       onChange={(e) => {
                         const val = e.target.value;
                         setBackgroundColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                       }}
                       className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                       style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -1092,7 +1034,7 @@ export default function AdminSettingsPage() {
                         const val = e.target.value;
                         setBackgroundColor(val);
                         if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
                       placeholder="#070b13"
@@ -1121,7 +1063,7 @@ export default function AdminSettingsPage() {
                       onChange={(e) => {
                         const val = e.target.value;
                         setCardBackgroundColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
                       }}
                       className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                       style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -1133,7 +1075,7 @@ export default function AdminSettingsPage() {
                         const val = e.target.value;
                         setCardBackgroundColor(val);
                         if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
+                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
                         }
                       }}
                       placeholder="#0b0f17"
@@ -1162,7 +1104,7 @@ export default function AdminSettingsPage() {
                       onChange={(e) => {
                         const val = e.target.value;
                         setCardBorderColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
                       }}
                       className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                       style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -1174,7 +1116,7 @@ export default function AdminSettingsPage() {
                         const val = e.target.value;
                         setCardBorderColor(val);
                         if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
+                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
                         }
                       }}
                       placeholder="#1e293b"
@@ -1203,7 +1145,7 @@ export default function AdminSettingsPage() {
                       onChange={(e) => {
                         const val = e.target.value;
                         setSecondaryTextColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
                       }}
                       className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                       style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -1215,7 +1157,7 @@ export default function AdminSettingsPage() {
                         const val = e.target.value;
                         setSecondaryTextColor(val);
                         if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
+                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
                         }
                       }}
                       placeholder="#94a3b8"
@@ -1235,7 +1177,7 @@ export default function AdminSettingsPage() {
             </div>
 
             {/* Interactive Live Component Preview */}
-            <div className="pt-3 border-t space-y-3" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+            <div className="pt-3 border-t space-y-2" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
               <span className="font-bold text-[11px] block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
                 {t('admin.previewTitle', 'Full Interactive Component Preview:')}
               </span>
@@ -1246,7 +1188,6 @@ export default function AdminSettingsPage() {
                   borderColor: isDayMode ? '#cbd5e1' : cardBorderColor 
                 }}
               >
-                {/* Surface Card Preview */}
                 <div 
                   className="p-4 rounded-2xl border transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md"
                   style={{ 
@@ -1285,46 +1226,6 @@ export default function AdminSettingsPage() {
                     </button>
                   </div>
                 </div>
-
-                {/* Sidebar Navigation Item Live Preview */}
-                <div 
-                  className="p-3.5 rounded-2xl border transition-colors flex items-center justify-between gap-3 shadow-sm"
-                  style={{ 
-                    backgroundColor: isDayMode ? '#ffffff' : cardBackgroundColor, 
-                    borderColor: isDayMode ? '#e2e8f0' : cardBorderColor 
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div 
-                      className="p-2 rounded-xl flex items-center justify-center transition-colors shadow-xs"
-                      style={{ 
-                        backgroundColor: `${sidebarIconColor}18`,
-                        border: `1px solid ${sidebarIconColor}33`,
-                        color: sidebarIconColor 
-                      }}
-                    >
-                      <Utensils className="h-4 w-4" style={{ color: sidebarIconColor }} />
-                    </div>
-                    <div>
-                      <div className="text-xs font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                        {t('admin.sidebarIconPreview', 'Sidebar Icon Color Preview')}
-                      </div>
-                      <p className="text-[10px]" style={{ color: isDayMode ? '#64748b' : secondaryTextColor }}>
-                        {t('admin.sidebarIconPreviewDesc', 'Reflects live on Dashboard, Chef, Pantry, and Plan icons.')}
-                      </p>
-                    </div>
-                  </div>
-                  <span 
-                    className="text-[10px] px-2.5 py-1 rounded-lg font-mono font-bold"
-                    style={{ 
-                      backgroundColor: `${sidebarIconColor}18`, 
-                      color: sidebarIconColor,
-                      border: `1px solid ${sidebarIconColor}33` 
-                    }}
-                  >
-                    {sidebarIconColor}
-                  </span>
-                </div>
               </div>
             </div>
           </div>
@@ -1357,3 +1258,8 @@ export default function AdminSettingsPage() {
     </div>
   );
 }
+"""
+
+with open(admin_page_path, 'w', encoding='utf-8') as f:
+    f.write(admin_page_code)
+print(f"✓ Successfully moved Theme Color & Palette Settings to 'Theme' tab at: {admin_page_path}")

@@ -1,8 +1,31 @@
-'use client';
+import os
+import glob
 
+# 1. Locate Sidebar.tsx
+candidates = [
+    'components/Sidebar.tsx',
+    'src/components/Sidebar.tsx',
+    'apps/web/src/components/Sidebar.tsx',
+    'apps/web/components/Sidebar.tsx'
+]
+
+sidebar_path = next((c for c in candidates if os.path.exists(c)), None)
+
+if not sidebar_path:
+    matches = glob.glob('**/Sidebar.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        sidebar_path = matches[0]
+
+if not sidebar_path:
+    print("❌ Error: Could not locate Sidebar.tsx.")
+    exit(1)
+
+# 2. Write updated Sidebar.tsx with dynamic primary color bindings
+sidebar_code = """'use client';
 import packageInfo from '../../package.json';
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import Link from 'next/navigation' && false ? null : require('next/link').default;
 import { usePathname } from 'next/navigation';
 import { 
   Home, 
@@ -186,7 +209,6 @@ export default function Sidebar() {
     window.addEventListener('zecratary_languages_updated', handleLangSync);
     window.addEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
     window.addEventListener('zecratary_theme_changed', handleThemeModeSync);
-    window.addEventListener('zecratary_theme_updated', handleThemeModeSync);
     window.addEventListener('storage', handleSiteSync);
     window.addEventListener('storage', handleLangSync);
 
@@ -197,7 +219,6 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_languages_updated', handleLangSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
       window.removeEventListener('zecratary_theme_changed', handleThemeModeSync);
-      window.removeEventListener('zecratary_theme_updated', handleThemeModeSync);
       window.removeEventListener('storage', handleSiteSync);
       window.removeEventListener('storage', handleLangSync);
     };
@@ -211,7 +232,6 @@ export default function Sidebar() {
       localStorage.setItem('zecratary_theme_mode', nextMode ? 'dark' : 'light');
       window.dispatchEvent(new Event('zecratary_theme_mode_changed'));
       window.dispatchEvent(new Event('zecratary_theme_changed'));
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
     }
   };
 
@@ -244,7 +264,7 @@ export default function Sidebar() {
 
   const showCollapsed = isCollapsed && !isOpen;
 
-  // Active styles harmonize with dynamic primary color
+  // Active styles harmonize with the dynamic primary color
   const navClass = (href: string) => `
     w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 select-none
     ${isActive(href)
@@ -601,3 +621,9 @@ export default function Sidebar() {
     </>
   );
 }
+"""
+
+with open(sidebar_path, 'w', encoding='utf-8') as f:
+    f.write(sidebar_code)
+
+print(f"✓ Successfully updated Sidebar icons to dynamic primary color at: {sidebar_path}")

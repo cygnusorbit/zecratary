@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.0.5",
+  "version": "7.0.6",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -105,7 +105,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.0.5",
+  "version": "7.0.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -12686,6 +12686,29 @@ export default function AdminSettingsPage() {
   const titlebarFileRef = useRef<HTMLInputElement>(null);
   const faviconFileRef = useRef<HTMLInputElement>(null);
 
+  // Maintain active colors in a ref to decouple mode-switching from the render loop
+  const colorsRef = useRef({
+    primary: primaryColor,
+    primaryHover: primaryHoverColor,
+    accent: accentColor,
+    background: backgroundColor,
+    card: cardBackgroundColor,
+    border: cardBorderColor,
+    textSecondary: secondaryTextColor,
+  });
+
+  useEffect(() => {
+    colorsRef.current = {
+      primary: primaryColor,
+      primaryHover: primaryHoverColor,
+      accent: accentColor,
+      background: backgroundColor,
+      card: cardBackgroundColor,
+      border: cardBorderColor,
+      textSecondary: secondaryTextColor,
+    };
+  }, [primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor]);
+
   const applyColorsLocally = (
     primary: string, 
     hover: string, 
@@ -12697,9 +12720,11 @@ export default function AdminSettingsPage() {
   ) => {
     applyThemeToDocument({
       primary,
+      primaryColor: primary,
       primaryHover: hover,
       accentEmerald: accent,
       accentColor: accent,
+      accent: accent,
       backgroundColor: bg,
       backgroundDark: bg,
       cardBackground: card,
@@ -12708,66 +12733,7 @@ export default function AdminSettingsPage() {
     });
   };
 
-  const syncTheme = useCallback(() => {
-    try {
-      const mode = localStorage.getItem('zecratary_theme_mode');
-      const day = mode === 'light';
-      setIsDayMode(day);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      let p = primaryColor;
-      let ph = primaryHoverColor;
-      let ac = accentColor;
-      let bg = backgroundColor;
-      let card = cardBackgroundColor;
-      let border = cardBorderColor;
-      let textSec = secondaryTextColor;
-
-      if (stored) {
-        const c = JSON.parse(stored);
-        if (c.primary || c.primaryColor) p = c.primary || c.primaryColor;
-        if (c.primaryHover) ph = c.primaryHover;
-        if (c.accentEmerald || c.accentColor || c.accent) ac = c.accentEmerald || c.accentColor || c.accent;
-        if (c.backgroundColor || c.backgroundDark) bg = c.backgroundColor || c.backgroundDark;
-        if (c.cardBackground) card = c.cardBackground;
-        if (c.cardBorder) border = c.cardBorder;
-        if (c.textSecondary) textSec = c.textSecondary;
-
-        setPrimaryColor(p);
-        setPrimaryHoverColor(ph);
-        setAccentColor(ac);
-        setBackgroundColor(bg);
-        setCardBackgroundColor(card);
-        setCardBorderColor(border);
-        setSecondaryTextColor(textSec);
-      }
-
-      applyThemeToDocument({
-        primary: p,
-        primaryHover: ph,
-        accentEmerald: ac,
-        backgroundColor: bg,
-        cardBackground: card,
-        cardBorder: border,
-        textSecondary: textSec
-      });
-    } catch (_) {}
-  }, [primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor]);
-
-  useEffect(() => {
-    syncTheme();
-    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
-    window.addEventListener('zecratary_theme_changed', syncTheme);
-    window.addEventListener('zecratary_theme_updated', syncTheme);
-    window.addEventListener('storage', syncTheme);
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
-      window.removeEventListener('zecratary_theme_changed', syncTheme);
-      window.removeEventListener('zecratary_theme_updated', syncTheme);
-      window.removeEventListener('storage', syncTheme);
-    };
-  }, [syncTheme]);
-
+  // Initial load: Auth, Site Config, Theme Colors
   useEffect(() => {
     initAuthStorage();
     const active = getCurrentUser();
@@ -12780,11 +12746,52 @@ export default function AdminSettingsPage() {
     setFaviconEmoji(cfg.faviconEmoji);
     setFaviconImage(cfg.faviconImage);
 
+    try {
+      const mode = localStorage.getItem('zecratary_theme_mode');
+      setIsDayMode(mode === 'light');
+    } catch (_) {}
+
+    try {
+      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      if (stored) {
+        const c = JSON.parse(stored);
+        const p = c.primary || c.primaryColor || '#E05638';
+        const ph = c.primaryHover || '#c94529';
+        const ac = c.accentEmerald || c.accentColor || c.accent || '#10b981';
+        const bg = c.backgroundColor || c.backgroundDark || '#070b13';
+        const card = c.cardBackground || '#0b0f17';
+        const border = c.cardBorder || '#1e293b';
+        const textSec = c.textSecondary || '#94a3b8';
+
+        setPrimaryColor(p);
+        setPrimaryHoverColor(ph);
+        setAccentColor(ac);
+        setBackgroundColor(bg);
+        setCardBackgroundColor(card);
+        setCardBorderColor(border);
+        setSecondaryTextColor(textSec);
+
+        applyThemeToDocument({
+          primary: p,
+          primaryColor: p,
+          primaryHover: ph,
+          accentEmerald: ac,
+          accentColor: ac,
+          accent: ac,
+          backgroundColor: bg,
+          backgroundDark: bg,
+          cardBackground: card,
+          cardBorder: border,
+          textSecondary: textSec,
+        });
+      }
+    } catch (_) {}
+
     fetch('/api/system-settings', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        if (data?.success && data.settings?.themeColors) {
-          const tc = data.settings.themeColors;
+        const tc = data?.settings?.themeColors || data?.themeColors;
+        if (data?.success && tc) {
           const p = tc.primary || tc.primaryColor || '#E05638';
           const ph = tc.primaryHover || '#c94529';
           const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
@@ -12793,16 +12800,58 @@ export default function AdminSettingsPage() {
           const border = tc.cardBorder || '#1e293b';
           const textSec = tc.textSecondary || '#94a3b8';
 
-          setPrimaryColor(p);
-          setPrimaryHoverColor(ph);
-          setAccentColor(ac);
-          setBackgroundColor(bg);
-          setCardBackgroundColor(card);
-          setCardBorderColor(border);
-          setSecondaryTextColor(textSec);
+          if (!localStorage.getItem('zecratary_theme_colors')) {
+            setPrimaryColor(p);
+            setPrimaryHoverColor(ph);
+            setAccentColor(ac);
+            setBackgroundColor(bg);
+            setCardBackgroundColor(card);
+            setCardBorderColor(border);
+            setSecondaryTextColor(textSec);
+
+            applyThemeToDocument({
+              primary: p,
+              primaryColor: p,
+              primaryHover: ph,
+              accentEmerald: ac,
+              backgroundColor: bg,
+              cardBackground: card,
+              cardBorder: border,
+              textSecondary: textSec,
+            });
+          }
         }
       })
       .catch(() => {});
+  }, []);
+
+  // Theme mode listener without state reset cycle
+  useEffect(() => {
+    const handleModeChange = () => {
+      try {
+        const mode = localStorage.getItem('zecratary_theme_mode');
+        const day = mode === 'light';
+        setIsDayMode(day);
+        const cur = colorsRef.current;
+        applyThemeToDocument({
+          primary: cur.primary,
+          primaryHover: cur.primaryHover,
+          accentEmerald: cur.accent,
+          accentColor: cur.accent,
+          accent: cur.accent,
+          backgroundColor: cur.background,
+          backgroundDark: cur.background,
+          cardBackground: cur.card,
+          cardBorder: cur.border,
+          textSecondary: cur.textSecondary,
+        });
+      } catch (_) {}
+    };
+
+    window.addEventListener('zecratary_theme_mode_changed', handleModeChange);
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', handleModeChange);
+    };
   }, []);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, target: 'titlebar' | 'favicon') => {
@@ -12883,40 +12932,50 @@ export default function AdminSettingsPage() {
   const handleResetDefaults = () => {
     if (!confirm(t('admin.confirmReset', 'Reset branding and theme settings to defaults?'))) return;
 
-    setSiteName(DEFAULT_SITE_NAME);
-    setTitlebarEmoji(DEFAULT_SITE_ICON);
+    const defaultName = DEFAULT_SITE_NAME;
+    const defaultIcon = DEFAULT_SITE_ICON;
+    const defaultPrimary = '#E05638';
+    const defaultPrimaryHover = '#c94529';
+    const defaultAccent = '#10b981';
+    const defaultBg = '#070b13';
+    const defaultCard = '#0b0f17';
+    const defaultBorder = '#1e293b';
+    const defaultTextSec = '#94a3b8';
+
+    setSiteName(defaultName);
+    setTitlebarEmoji(defaultIcon);
     setTitlebarImage('');
-    setFaviconEmoji(DEFAULT_SITE_ICON);
+    setFaviconEmoji(defaultIcon);
     setFaviconImage('');
 
-    setPrimaryColor('#E05638');
-    setPrimaryHoverColor('#c94529');
-    setAccentColor('#10b981');
-    setBackgroundColor('#070b13');
-    setCardBackgroundColor('#0b0f17');
-    setCardBorderColor('#1e293b');
-    setSecondaryTextColor('#94a3b8');
+    setPrimaryColor(defaultPrimary);
+    setPrimaryHoverColor(defaultPrimaryHover);
+    setAccentColor(defaultAccent);
+    setBackgroundColor(defaultBg);
+    setCardBackgroundColor(defaultCard);
+    setCardBorderColor(defaultBorder);
+    setSecondaryTextColor(defaultTextSec);
 
     saveSiteConfig({
-      siteName: DEFAULT_SITE_NAME,
-      titlebarEmoji: DEFAULT_SITE_ICON,
+      siteName: defaultName,
+      titlebarEmoji: defaultIcon,
       titlebarImage: '',
-      faviconEmoji: DEFAULT_SITE_ICON,
+      faviconEmoji: defaultIcon,
       faviconImage: ''
     });
 
     const defaultColors = {
-      primary: '#E05638',
-      primaryColor: '#E05638',
-      primaryHover: '#c94529',
-      accentEmerald: '#10b981',
-      accentColor: '#10b981',
-      accent: '#10b981',
-      backgroundColor: '#070b13',
-      backgroundDark: '#070b13',
-      cardBackground: '#0b0f17',
-      cardBorder: '#1e293b',
-      textSecondary: '#94a3b8'
+      primary: defaultPrimary,
+      primaryColor: defaultPrimary,
+      primaryHover: defaultPrimaryHover,
+      accentEmerald: defaultAccent,
+      accentColor: defaultAccent,
+      accent: defaultAccent,
+      backgroundColor: defaultBg,
+      backgroundDark: defaultBg,
+      cardBackground: defaultCard,
+      cardBorder: defaultBorder,
+      textSecondary: defaultTextSec
     };
 
     saveThemeColors(defaultColors);
@@ -12961,57 +13020,7 @@ export default function AdminSettingsPage() {
         )}
       </div>
 
-      {/* QUICK ADMIN NAVIGATION CARDS */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-        <Link 
-          href="/admin/ai-settings" 
-          className="p-3 rounded-2xl border transition hover:opacity-80 flex items-center gap-2.5 font-bold"
-          style={{ 
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-            color: isDayMode ? '#0f172a' : '#ffffff'
-          }}
-        >
-          <Cpu className="h-4 w-4 text-[var(--color-primary)]" />
-          <span>{t('admin.nav.aiSettings', 'AI Settings')}</span>
-        </Link>
-        <Link 
-          href="/admin/users" 
-          className="p-3 rounded-2xl border transition hover:opacity-80 flex items-center gap-2.5 font-bold"
-          style={{ 
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-            color: isDayMode ? '#0f172a' : '#ffffff'
-          }}
-        >
-          <Users className="h-4 w-4 text-[var(--color-primary)]" />
-          <span>{t('admin.nav.users', 'Users')}</span>
-        </Link>
-        <Link 
-          href="/admin/plans" 
-          className="p-3 rounded-2xl border transition hover:opacity-80 flex items-center gap-2.5 font-bold"
-          style={{ 
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-            color: isDayMode ? '#0f172a' : '#ffffff'
-          }}
-        >
-          <CreditCard className="h-4 w-4 text-[var(--color-primary)]" />
-          <span>{t('admin.nav.plans', 'Plans')}</span>
-        </Link>
-        <Link 
-          href="/admin/social-login-setting" 
-          className="p-3 rounded-2xl border transition hover:opacity-80 flex items-center gap-2.5 font-bold"
-          style={{ 
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-            color: isDayMode ? '#0f172a' : '#ffffff'
-          }}
-        >
-          <Key className="h-4 w-4 text-[var(--color-primary)]" />
-          <span>{t('admin.nav.socialLogin', 'Social Login')}</span>
-        </Link>
-      </div>
+      
 
       <form onSubmit={handleSave} className="space-y-6">
         {/* SECTION 1: SITE NAME */}
@@ -13136,8 +13145,9 @@ export default function AdminSettingsPage() {
                     type="color" 
                     value={primaryColor} 
                     onChange={(e) => {
-                      setPrimaryColor(e.target.value);
-                      applyColorsLocally(e.target.value, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      const val = e.target.value;
+                      setPrimaryColor(val);
+                      applyColorsLocally(val, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                     }}
                     className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                     style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -13146,8 +13156,11 @@ export default function AdminSettingsPage() {
                     type="text" 
                     value={primaryColor} 
                     onChange={(e) => {
-                      setPrimaryColor(e.target.value);
-                      applyColorsLocally(e.target.value, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      const val = e.target.value;
+                      setPrimaryColor(val);
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        applyColorsLocally(val, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      }
                     }}
                     placeholder="#E05638"
                     className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
@@ -13173,8 +13186,9 @@ export default function AdminSettingsPage() {
                     type="color" 
                     value={primaryHoverColor} 
                     onChange={(e) => {
-                      setPrimaryHoverColor(e.target.value);
-                      applyColorsLocally(primaryColor, e.target.value, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      const val = e.target.value;
+                      setPrimaryHoverColor(val);
+                      applyColorsLocally(primaryColor, val, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                     }}
                     className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                     style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -13183,8 +13197,11 @@ export default function AdminSettingsPage() {
                     type="text" 
                     value={primaryHoverColor} 
                     onChange={(e) => {
-                      setPrimaryHoverColor(e.target.value);
-                      applyColorsLocally(primaryColor, e.target.value, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      const val = e.target.value;
+                      setPrimaryHoverColor(val);
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        applyColorsLocally(primaryColor, val, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      }
                     }}
                     placeholder="#c94529"
                     className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
@@ -13210,8 +13227,9 @@ export default function AdminSettingsPage() {
                     type="color" 
                     value={accentColor} 
                     onChange={(e) => {
-                      setAccentColor(e.target.value);
-                      applyColorsLocally(primaryColor, primaryHoverColor, e.target.value, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      const val = e.target.value;
+                      setAccentColor(val);
+                      applyColorsLocally(primaryColor, primaryHoverColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                     }}
                     className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                     style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -13220,8 +13238,11 @@ export default function AdminSettingsPage() {
                     type="text" 
                     value={accentColor} 
                     onChange={(e) => {
-                      setAccentColor(e.target.value);
-                      applyColorsLocally(primaryColor, primaryHoverColor, e.target.value, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      const val = e.target.value;
+                      setAccentColor(val);
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        applyColorsLocally(primaryColor, primaryHoverColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      }
                     }}
                     placeholder="#10b981"
                     className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
@@ -13255,8 +13276,9 @@ export default function AdminSettingsPage() {
                     type="color" 
                     value={backgroundColor} 
                     onChange={(e) => {
-                      setBackgroundColor(e.target.value);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, e.target.value, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      const val = e.target.value;
+                      setBackgroundColor(val);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                     }}
                     className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                     style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -13265,8 +13287,11 @@ export default function AdminSettingsPage() {
                     type="text" 
                     value={backgroundColor} 
                     onChange={(e) => {
-                      setBackgroundColor(e.target.value);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, e.target.value, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      const val = e.target.value;
+                      setBackgroundColor(val);
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      }
                     }}
                     placeholder="#070b13"
                     className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
@@ -13292,8 +13317,9 @@ export default function AdminSettingsPage() {
                     type="color" 
                     value={cardBackgroundColor} 
                     onChange={(e) => {
-                      setCardBackgroundColor(e.target.value);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, e.target.value, cardBorderColor, secondaryTextColor);
+                      const val = e.target.value;
+                      setCardBackgroundColor(val);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
                     }}
                     className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                     style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -13302,8 +13328,11 @@ export default function AdminSettingsPage() {
                     type="text" 
                     value={cardBackgroundColor} 
                     onChange={(e) => {
-                      setCardBackgroundColor(e.target.value);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, e.target.value, cardBorderColor, secondaryTextColor);
+                      const val = e.target.value;
+                      setCardBackgroundColor(val);
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
+                      }
                     }}
                     placeholder="#0b0f17"
                     className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
@@ -13329,8 +13358,9 @@ export default function AdminSettingsPage() {
                     type="color" 
                     value={cardBorderColor} 
                     onChange={(e) => {
-                      setCardBorderColor(e.target.value);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, e.target.value, secondaryTextColor);
+                      const val = e.target.value;
+                      setCardBorderColor(val);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
                     }}
                     className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                     style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -13339,8 +13369,11 @@ export default function AdminSettingsPage() {
                     type="text" 
                     value={cardBorderColor} 
                     onChange={(e) => {
-                      setCardBorderColor(e.target.value);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, e.target.value, secondaryTextColor);
+                      const val = e.target.value;
+                      setCardBorderColor(val);
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
+                      }
                     }}
                     placeholder="#1e293b"
                     className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
@@ -13366,8 +13399,9 @@ export default function AdminSettingsPage() {
                     type="color" 
                     value={secondaryTextColor} 
                     onChange={(e) => {
-                      setSecondaryTextColor(e.target.value);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, e.target.value);
+                      const val = e.target.value;
+                      setSecondaryTextColor(val);
+                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
                     }}
                     className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
                     style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
@@ -13376,8 +13410,11 @@ export default function AdminSettingsPage() {
                     type="text" 
                     value={secondaryTextColor} 
                     onChange={(e) => {
-                      setSecondaryTextColor(e.target.value);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, e.target.value);
+                      const val = e.target.value;
+                      setSecondaryTextColor(val);
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
+                      }
                     }}
                     placeholder="#94a3b8"
                     className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
@@ -40172,16 +40209,22 @@ export function applyThemeToDocument(colors: ThemeColors | null | undefined): vo
   const primaryHover = colors.primaryHover;
   const accent = colors.accentEmerald || colors.accentColor || colors.accent;
   const bg = colors.backgroundColor || colors.backgroundDark;
+  const card = colors.cardBackground;
+  const border = colors.cardBorder;
+  const textSec = colors.textSecondary;
 
   if (primary) {
     root.style.setProperty('--color-primary', primary);
+    root.style.setProperty('--primary', primary);
   }
   if (primaryHover) {
     root.style.setProperty('--color-primary-hover', primaryHover);
+    root.style.setProperty('--primary-hover', primaryHover);
   }
   if (accent) {
     root.style.setProperty('--color-emerald', accent);
     root.style.setProperty('--color-accent', accent);
+    root.style.setProperty('--accent', accent);
   }
 
   if (isDayMode) {
@@ -40195,6 +40238,7 @@ export function applyThemeToDocument(colors: ThemeColors | null | undefined): vo
     root.style.setProperty('--color-border-dark', '#e2e8f0');
     root.style.setProperty('--color-text', '#0f172a');
     root.style.setProperty('--color-text-secondary', '#64748b');
+    root.style.setProperty('--color-inner-dark', '#f1f5f9');
     if (document.body) {
       document.body.style.backgroundColor = '#f8fafc';
       document.body.style.color = '#0f172a';
@@ -40205,20 +40249,21 @@ export function applyThemeToDocument(colors: ThemeColors | null | undefined): vo
     if (bg) {
       root.style.setProperty('--color-bg', bg);
       root.style.setProperty('--color-bg-dark', bg);
+      root.style.setProperty('--color-inner-dark', bg);
       if (document.body) {
         document.body.style.backgroundColor = bg;
       }
     }
-    if (colors.cardBackground) {
-      root.style.setProperty('--color-card', colors.cardBackground);
-      root.style.setProperty('--color-card-dark', colors.cardBackground);
+    if (card) {
+      root.style.setProperty('--color-card', card);
+      root.style.setProperty('--color-card-dark', card);
     }
-    if (colors.cardBorder) {
-      root.style.setProperty('--color-border', colors.cardBorder);
-      root.style.setProperty('--color-border-dark', colors.cardBorder);
+    if (border) {
+      root.style.setProperty('--color-border', border);
+      root.style.setProperty('--color-border-dark', border);
     }
-    if (colors.textSecondary) {
-      root.style.setProperty('--color-text-secondary', colors.textSecondary);
+    if (textSec) {
+      root.style.setProperty('--color-text-secondary', textSec);
     }
     if (document.body) {
       document.body.style.color = '#ffffff';
@@ -40242,7 +40287,7 @@ export function saveThemeColors(colors: ThemeColors): void {
     fetch('/api/system-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ themeColors: colors })
+      body: JSON.stringify({ themeColors: colors, settings: { themeColors: colors } })
     }).catch(() => {});
   } catch (_) {}
 }
@@ -40261,8 +40306,8 @@ export async function fetchAndApplyServerTheme(): Promise<void> {
     const res = await fetch('/api/system-settings', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      if (data.success && data.settings?.themeColors) {
-        const colors = data.settings.themeColors;
+      const colors = data?.settings?.themeColors || data?.themeColors;
+      if (data.success && colors) {
         localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
         applyThemeToDocument(colors);
         window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: colors }));

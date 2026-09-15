@@ -5,6 +5,8 @@ export interface ThemeColors {
   accentEmerald?: string;
   accentColor?: string;
   accent?: string;
+  sidebarIcon?: string;
+  sidebarIconColor?: string;
   backgroundColor?: string;
   backgroundDark?: string;
   cardBackground?: string;
@@ -13,17 +15,18 @@ export interface ThemeColors {
 }
 
 export function applyThemeToDocument(colors: ThemeColors | null | undefined): void {
-  if (!colors || typeof document === 'undefined') return;
+  if (typeof document === 'undefined') return;
   const root = document.documentElement;
   const isDayMode = localStorage.getItem('zecratary_theme_mode') === 'light';
 
-  const primary = colors.primary || colors.primaryColor;
-  const primaryHover = colors.primaryHover;
-  const accent = colors.accentEmerald || colors.accentColor || colors.accent;
-  const bg = colors.backgroundColor || colors.backgroundDark;
-  const card = colors.cardBackground;
-  const border = colors.cardBorder;
-  const textSec = colors.textSecondary;
+  const primary = colors?.primary || colors?.primaryColor;
+  const primaryHover = colors?.primaryHover;
+  const accent = colors?.accentEmerald || colors?.accentColor || colors?.accent;
+  const sidebarIcon = colors?.sidebarIconColor || colors?.sidebarIcon || accent || '#10b981';
+  const bg = colors?.backgroundColor || colors?.backgroundDark;
+  const card = colors?.cardBackground;
+  const border = colors?.cardBorder;
+  const textSec = colors?.textSecondary;
 
   if (primary) {
     root.style.setProperty('--color-primary', primary);
@@ -37,6 +40,10 @@ export function applyThemeToDocument(colors: ThemeColors | null | undefined): vo
     root.style.setProperty('--color-emerald', accent);
     root.style.setProperty('--color-accent', accent);
     root.style.setProperty('--accent', accent);
+  }
+  if (sidebarIcon) {
+    root.style.setProperty('--color-sidebar-icon', sidebarIcon);
+    root.style.setProperty('--sidebar-icon', sidebarIcon);
   }
 
   if (isDayMode) {

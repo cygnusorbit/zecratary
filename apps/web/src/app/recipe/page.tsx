@@ -453,7 +453,7 @@ export default function SavedRecipesPage() {
       <div className="flex items-center justify-between pt-2">
         <div>
           <h1 className="text-3xl font-black text-[#E05638] tracking-tight">Saved Recipes</h1>
-          <p className="text-emerald-400 text-xs mt-1 font-semibold">Your collection of favorite recipes ({recipes.length})</p>
+          <p className="text-[var(--color-sidebar-icon,#10b981)] text-xs mt-1 font-semibold">Your collection of favorite recipes ({recipes.length})</p>
         </div>
         <Link className="bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg shadow-[#E05638]/20" href="/manual">
           <UploadCloud className="h-4 w-4"/> Create Recipe
@@ -473,7 +473,7 @@ export default function SavedRecipesPage() {
               className="w-full bg-[#070b13] border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-[#E05638]"
             />
           </div>
-          <button className="border border-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 bg-[#070b13] text-emerald-400">
+          <button className="border border-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 bg-[#070b13] text-[var(--color-sidebar-icon,#10b981)]">
             <SlidersHorizontal className="h-4 w-4"/> Filter
           </button>
         </div>
@@ -665,7 +665,7 @@ export default function SavedRecipesPage() {
                           <div className="absolute left-0 top-full mt-2 w-64 bg-[#0d131f] border border-slate-700/80 rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in" onClick={(e) => e.stopPropagation()}>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1.5 flex items-center justify-between">
                               <span>Select Cookbook</span>
-                              <Link className="text-emerald-400 hover:underline" href="/books">Manage</Link>
+                              <Link className="text-[var(--color-sidebar-icon,#10b981)] hover:underline" href="/books">Manage</Link>
                             </div>
 
                             <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
@@ -843,7 +843,7 @@ export default function SavedRecipesPage() {
                         </div>
                       )}
                       {selectedRecipe.note && !isNoteOpen && (
-                        <p className="text-xs text-emerald-400 italic">Note: "{selectedRecipe.note}"</p>
+                        <p className="text-xs text-[var(--color-sidebar-icon,#10b981)] italic">Note: "{selectedRecipe.note}"</p>
                       )}
                     </div>
                   </div>
@@ -865,7 +865,7 @@ export default function SavedRecipesPage() {
                         </span>
                       </a>
                     </div>
-                    <p className="text-emerald-500 italic text-[11px] font-medium">Recipe imported from external source</p>
+                    <p className="text-[var(--color-sidebar-icon,#10b981)] italic text-[11px] font-medium">Recipe imported from external source</p>
                   </div>
 
                   <div className="border-t border-slate-800/80 mx-5" />
@@ -1241,7 +1241,7 @@ export default function SavedRecipesPage() {
                             </select>
 
                             {isReorderingIngredients ? (
-                              <div className="p-2 text-emerald-400 cursor-grab"><GripVertical className="h-4 w-4"/></div>
+                              <div className="p-2 text-[var(--color-sidebar-icon,#10b981)] cursor-grab"><GripVertical className="h-4 w-4"/></div>
                             ) : (
                               <button
                                 type="button"
@@ -1333,7 +1333,7 @@ export default function SavedRecipesPage() {
                             />
 
                             {isReorderingSteps ? (
-                              <div className="p-2 text-emerald-400 cursor-grab mt-1"><GripVertical className="h-4 w-4"/></div>
+                              <div className="p-2 text-[var(--color-sidebar-icon,#10b981)] cursor-grab mt-1"><GripVertical className="h-4 w-4"/></div>
                             ) : (
                               <button
                                 type="button"

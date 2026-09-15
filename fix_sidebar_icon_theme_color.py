@@ -1,4 +1,171 @@
-'use client';
+import os
+import glob
+import re
+
+# 1. Locate App Router directory
+candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/admin/page.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        app_dir = os.path.dirname(os.path.dirname(matches[0]))
+
+if not app_dir:
+    print("❌ Error: Could not locate App Router directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+lib_dir = os.path.join(base_dir, 'lib')
+os.makedirs(lib_dir, exist_ok=True)
+
+# 2. Update lib/themeConfig.ts to support sidebarIconColor and CSS variables
+theme_config_path = os.path.join(lib_dir, 'themeConfig.ts')
+theme_config_code = """export interface ThemeColors {
+  primary?: string;
+  primaryColor?: string;
+  primaryHover?: string;
+  accentEmerald?: string;
+  accentColor?: string;
+  accent?: string;
+  sidebarIcon?: string;
+  sidebarIconColor?: string;
+  backgroundColor?: string;
+  backgroundDark?: string;
+  cardBackground?: string;
+  cardBorder?: string;
+  textSecondary?: string;
+}
+
+export function applyThemeToDocument(colors: ThemeColors | null | undefined): void {
+  if (!colors || typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const isDayMode = localStorage.getItem('zecratary_theme_mode') === 'light';
+
+  const primary = colors.primary || colors.primaryColor;
+  const primaryHover = colors.primaryHover;
+  const accent = colors.accentEmerald || colors.accentColor || colors.accent;
+  const sidebarIcon = colors.sidebarIconColor || colors.sidebarIcon || accent || '#10b981';
+  const bg = colors.backgroundColor || colors.backgroundDark;
+  const card = colors.cardBackground;
+  const border = colors.cardBorder;
+  const textSec = colors.textSecondary;
+
+  if (primary) {
+    root.style.setProperty('--color-primary', primary);
+    root.style.setProperty('--primary', primary);
+  }
+  if (primaryHover) {
+    root.style.setProperty('--color-primary-hover', primaryHover);
+    root.style.setProperty('--primary-hover', primaryHover);
+  }
+  if (accent) {
+    root.style.setProperty('--color-emerald', accent);
+    root.style.setProperty('--color-accent', accent);
+    root.style.setProperty('--accent', accent);
+  }
+  if (sidebarIcon) {
+    root.style.setProperty('--color-sidebar-icon', sidebarIcon);
+    root.style.setProperty('--sidebar-icon', sidebarIcon);
+  }
+
+  if (isDayMode) {
+    root.classList.remove('dark');
+    root.classList.add('light');
+    root.style.setProperty('--color-bg', '#f8fafc');
+    root.style.setProperty('--color-bg-dark', '#f8fafc');
+    root.style.setProperty('--color-card', '#ffffff');
+    root.style.setProperty('--color-card-dark', '#ffffff');
+    root.style.setProperty('--color-border', '#e2e8f0');
+    root.style.setProperty('--color-border-dark', '#e2e8f0');
+    root.style.setProperty('--color-text', '#0f172a');
+    root.style.setProperty('--color-text-secondary', '#64748b');
+    root.style.setProperty('--color-inner-dark', '#f1f5f9');
+    if (document.body) {
+      document.body.style.backgroundColor = '#f8fafc';
+      document.body.style.color = '#0f172a';
+    }
+  } else {
+    root.classList.remove('light');
+    root.classList.add('dark');
+    if (bg) {
+      root.style.setProperty('--color-bg', bg);
+      root.style.setProperty('--color-bg-dark', bg);
+      root.style.setProperty('--color-inner-dark', bg);
+      if (document.body) {
+        document.body.style.backgroundColor = bg;
+      }
+    }
+    if (card) {
+      root.style.setProperty('--color-card', card);
+      root.style.setProperty('--color-card-dark', card);
+    }
+    if (border) {
+      root.style.setProperty('--color-border', border);
+      root.style.setProperty('--color-border-dark', border);
+    }
+    if (textSec) {
+      root.style.setProperty('--color-text-secondary', textSec);
+    }
+    if (document.body) {
+      document.body.style.color = '#ffffff';
+    }
+  }
+}
+
+export function saveThemeColors(colors: ThemeColors): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
+    localStorage.setItem('zecratary_theme_config', JSON.stringify(colors));
+  } catch (_) {}
+
+  applyThemeToDocument(colors);
+  window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: colors }));
+  window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
+  window.dispatchEvent(new Event('storage'));
+
+  try {
+    fetch('/api/system-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeColors: colors, settings: { themeColors: colors } })
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+export async function fetchAndApplyServerTheme(): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const cached = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+    if (cached) {
+      applyThemeToDocument(JSON.parse(cached));
+    }
+  } catch (_) {}
+
+  try {
+    const res = await fetch('/api/system-settings', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      const colors = data?.settings?.themeColors || data?.themeColors;
+      if (data.success && colors) {
+        localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
+        applyThemeToDocument(colors);
+        window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: colors }));
+      }
+    }
+  } catch (_) {}
+}
+"""
+with open(theme_config_path, 'w', encoding='utf-8') as f:
+    f.write(theme_config_code)
+print(f"✓ Updated themeConfig helper at: {theme_config_path}")
+
+# 3. Update app/admin/page.tsx with Sidebar Icon Color picker in the Theme tab
+admin_page_path = os.path.join(app_dir, 'admin', 'page.tsx')
+admin_page_code = """'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -191,7 +358,7 @@ export default function AdminSettingsPage() {
     });
   };
 
-  // Initial load: Auth, Site Config, Theme Colors
+  // Initial load
   useEffect(() => {
     initAuthStorage();
     const active = getCurrentUser();
@@ -1056,7 +1223,7 @@ export default function AdminSettingsPage() {
                     />
                   </div>
                   <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {t('admin.sidebarIconColorDesc', 'Icons for navigation and categories in the sidebar.')}
+                    {t('admin.sidebarIconColorDesc', 'Navigation and menu icon color in the sidebar.')}
                   </span>
                 </div>
               </div>
@@ -1307,10 +1474,10 @@ export default function AdminSettingsPage() {
                     </div>
                     <div>
                       <div className="text-xs font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                        {t('admin.sidebarIconPreview', 'Sidebar Icon Color Preview')}
+                        {t('admin.sidebarIconPreview', 'Sidebar Navigation Icon Preview')}
                       </div>
                       <p className="text-[10px]" style={{ color: isDayMode ? '#64748b' : secondaryTextColor }}>
-                        {t('admin.sidebarIconPreviewDesc', 'Reflects live on Dashboard, Chef, Pantry, and Plan icons.')}
+                        {t('admin.sidebarIconPreviewDesc', 'Reflects on Dashboard, Chef, Pantry, and Plan icons.')}
                       </p>
                     </div>
                   </div>
@@ -1357,3 +1524,70 @@ export default function AdminSettingsPage() {
     </div>
   );
 }
+"""
+with open(admin_page_path, 'w', encoding='utf-8') as f:
+    f.write(admin_page_code)
+print(f"✓ Updated /admin page with Sidebar Icon Color control at: {admin_page_path}")
+
+# 4. Update Sidebar.tsx to use dynamic --color-sidebar-icon variable
+sidebar_matches = glob.glob('**/Sidebar.tsx', recursive=True)
+sidebar_matches = [m for m in sidebar_matches if 'node_modules' not in m and '.next' not in m]
+
+if not sidebar_matches:
+    print("❌ Error: Could not locate Sidebar.tsx.")
+    exit(1)
+
+sidebar_path = sidebar_matches[0]
+with open(sidebar_path, 'r', encoding='utf-8') as f:
+    sidebar_code = f.read()
+
+# Replace hardcoded text-emerald-400 / text-emerald-700 on navigation items with dynamic style & class
+nav_icons = ['Home', 'MessageSquare', 'UploadCloud', 'SquarePen', 'BookOpen', 'Book', 'Package', 'ShoppingCart', 'Calendar', 'LayoutTemplate']
+
+for icon in nav_icons:
+    pattern = rf'<{icon}\s+className=\{`h-4 w-4 shrink-0 \$\{{isDarkMode \? [\'"]text-emerald-400[\'"] : [\'"]text-emerald-700[\'"]\}}`\}\s*/>'
+    replacement = f'<{icon} className="h-4 w-4 shrink-0 text-[var(--color-sidebar-icon,#10b981)]" style={{{{ color: "var(--color-sidebar-icon, #10b981)" }}}} />'
+    sidebar_code = re.sub(pattern, replacement, sidebar_code)
+
+# Add event listeners for zecratary_theme_changed to keep Sidebar dynamically reactive
+if 'zecratary_theme_changed' not in sidebar_code:
+    hook_marker = "window.addEventListener('zecratary_site_settings_changed', handleSiteSync);"
+    if hook_marker in sidebar_code:
+        theme_listener_code = """window.addEventListener('zecratary_site_settings_changed', handleSiteSync);
+    window.addEventListener('zecratary_theme_changed', handleSiteSync);
+    window.addEventListener('zecratary_theme_updated', handleSiteSync);"""
+        sidebar_code = sidebar_code.replace(hook_marker, theme_listener_code)
+
+    cleanup_marker = "window.removeEventListener('zecratary_site_settings_changed', handleSiteSync);"
+    if cleanup_marker in sidebar_code:
+        cleanup_replacement = """window.removeEventListener('zecratary_site_settings_changed', handleSiteSync);
+      window.removeEventListener('zecratary_theme_changed', handleSiteSync);
+      window.removeEventListener('zecratary_theme_updated', handleSiteSync);"""
+        sidebar_code = sidebar_code.replace(cleanup_marker, cleanup_replacement)
+
+with open(sidebar_path, 'w', encoding='utf-8') as f:
+    f.write(sidebar_code)
+print(f"✓ Connected all navigation icons in {sidebar_path} to var(--color-sidebar-icon)")
+
+# 5. Register CSS fallback token in globals.css
+css_candidates = glob.glob('**/globals.css', recursive=True) + glob.glob('**/global.css', recursive=True)
+css_candidates = [f for f in css_candidates if 'node_modules' not in f and '.next' not in f]
+
+for css_file in css_candidates:
+    try:
+        with open(css_file, 'r', encoding='utf-8') as f:
+            css_data = f.read()
+        if '--color-sidebar-icon' not in css_data:
+            css_token = """
+/* Theme Token: Sidebar Navigation Icon Color */
+:root {
+  --color-sidebar-icon: #10b981;
+}
+"""
+            with open(css_file, 'a', encoding='utf-8') as f:
+                f.write(css_token)
+            print(f"✓ Registered default --color-sidebar-icon token in {css_file}")
+    except Exception:
+        pass
+
+print("\n🚀 Sidebar navigation icon theme settings installed successfully!")

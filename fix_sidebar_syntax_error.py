@@ -1,4 +1,28 @@
-'use client';
+import os
+import glob
+
+# 1. Locate Sidebar.tsx
+candidates = [
+    'apps/web/src/components/Sidebar.tsx',
+    'src/components/Sidebar.tsx',
+    'components/Sidebar.tsx',
+    'apps/web/components/Sidebar.tsx'
+]
+
+sidebar_path = next((c for c in candidates if os.path.exists(c)), None)
+
+if not sidebar_path:
+    matches = glob.glob('**/Sidebar.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        sidebar_path = matches[0]
+
+if not sidebar_path:
+    print("❌ Error: Could not locate Sidebar.tsx.")
+    exit(1)
+
+# 2. Write valid Sidebar.tsx with clean import and dynamic primary color icons
+sidebar_code = """'use client';
 
 import packageInfo from '../../package.json';
 import { useState, useEffect } from 'react';
@@ -601,3 +625,9 @@ export default function Sidebar() {
     </>
   );
 }
+"""
+
+with open(sidebar_path, 'w', encoding='utf-8') as f:
+    f.write(sidebar_code)
+
+print(f"✓ Fixed syntax error and updated Sidebar icons to dynamic primary color at: {sidebar_path}")

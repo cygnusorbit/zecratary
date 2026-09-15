@@ -79,7 +79,7 @@ export default function PackagePage() {
             <div className={`w-4 h-4 bg-[#E05638] rounded-full transition-transform ${billingCycle === 'yearly' ? 'translate-x-6' : 'translate-x-0'}`} />
           </button>
           <span className={`text-xs font-bold flex items-center gap-1.5 ${billingCycle === 'yearly' ? 'text-white' : 'text-slate-400'}`}>
-            Yearly <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30">Save 20%</span>
+            Yearly <span className="text-[10px] bg-emerald-500/20 text-[var(--color-sidebar-icon,#10b981)] px-2 py-0.5 rounded-full border border-emerald-500/30">Save 20%</span>
           </span>
         </div>
       </div>
@@ -115,7 +115,7 @@ export default function PackagePage() {
                 <ul className="space-y-2.5 text-xs text-slate-300">
                   {plan.features.map((feat, fIdx) => (
                     <li key={fIdx} className="flex items-center gap-2.5">
-                      <div className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                      <div className="w-4 h-4 rounded-full bg-emerald-500/20 text-[var(--color-sidebar-icon,#10b981)] flex items-center justify-center shrink-0">
                         <Check className="h-3 w-3" />
                       </div>
                       <span>{feat}</span>
