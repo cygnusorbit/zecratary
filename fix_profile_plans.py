@@ -1,4 +1,26 @@
-// Generated / Updated by AI Collaborator
+import os
+import glob
+
+# 1. Locate profile page file
+candidates = [
+    'apps/web/src/app/profile/page.tsx',
+    'src/app/profile/page.tsx',
+    'apps/web/app/profile/page.tsx',
+    'app/profile/page.tsx'
+]
+
+profile_path = next((p for p in candidates if os.path.exists(p)), None)
+if not profile_path:
+    matches = glob.glob('**/profile/page.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        profile_path = matches[0]
+
+if not profile_path:
+    print("❌ Error: Could not locate profile/page.tsx")
+    exit(1)
+
+content = """// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -7,7 +29,7 @@ import {
   User as UserIcon, Mail, Lock, CheckCircle, 
   AlertCircle, Calendar, LogOut, Check, CreditCard,
   Zap, Sparkles, CheckCircle2, RefreshCw, Shield,
-  Clock, Cpu, Repeat, Link2, Unlink, Key
+  Clock, Activity, Cpu, Repeat, Link2, Unlink, Key
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -69,53 +91,96 @@ interface TokenUsageData {
   reimburseFrequency: 'once' | 'weekly' | 'monthly';
 }
 
-const SYSTEM_DEFAULT_FREE_PLAN: SubscriptionPlanItem = {
-  id: 'preset_taster',
-  name: 'Taster',
-  slug: 'taster',
-  description: 'Free tier with standard features',
-  priceCents: 0,
-  priceFormatted: 'Free',
-  interval: 'MONTH',
-  isFree: true,
-  badge: '',
-  saveBadge: '',
-  buttonText: 'Switch to Free',
-  buttonTheme: 'orange',
-  features: [
-    'Create up to 5 AI-powered recipes per month',
-    'Personal recipe library (25 total recipes)',
-    'Smart ingredient repurposing',
-    'Automated shopping list creation',
-    'Direct online grocery shopping links',
-    'Meal planner',
-    'Ingredient photo recognition'
-  ],
-  aiRecipeLimit: 5,
-  recipeLibraryLimit: 25,
-  socialScrapeLimit: 5,
-  canViewMacros: false,
-  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
-  tokenLimit: 50000,
-  tokenReimburseFrequency: 'monthly'
-};
+const DEFAULT_TASTER_FEATURES = [
+  'Create up to 5 AI-powered recipes per month',
+  'Personal recipe library (25 total recipes)',
+  'Smart ingredient repurposing',
+  'Automated shopping list creation',
+  'Direct online grocery shopping links',
+  'Meal planner',
+  'Ingredient photo recognition'
+];
+
+const DEFAULT_PRO_FEATURES = [
+  'Unlimited AI-powered recipe generation',
+  'Unlimited recipe library',
+  'Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, carbohydrates)'
+];
+
+const DEFAULT_PLANS: SubscriptionPlanItem[] = [
+  {
+    id: 'taster',
+    name: 'Taster',
+    slug: 'taster',
+    description: 'Free tier with standard features',
+    priceCents: 0,
+    priceFormatted: 'Free',
+    interval: 'MONTH',
+    isFree: true,
+    badge: '',
+    saveBadge: '',
+    buttonText: 'Active Plan',
+    buttonTheme: 'orange',
+    features: DEFAULT_TASTER_FEATURES,
+    tokenLimit: 50000,
+    tokenReimburseFrequency: 'monthly'
+  },
+  {
+    id: 'nutrition-pro-monthly',
+    name: 'Nutrition Pro',
+    slug: 'nutrition-pro-monthly',
+    description: 'Full premium access, billed monthly',
+    priceCents: 899,
+    priceFormatted: '$8.99/mo',
+    interval: 'MONTH',
+    isFree: false,
+    badge: 'Billed Immediately',
+    saveBadge: '',
+    buttonText: 'Choose Plan',
+    buttonTheme: 'green',
+    features: DEFAULT_PRO_FEATURES,
+    tokenLimit: 1000000,
+    tokenReimburseFrequency: 'monthly'
+  },
+  {
+    id: 'nutrition-pro-annual',
+    name: 'Nutrition Pro',
+    slug: 'nutrition-pro-annual',
+    description: 'Best value - all premium features, billed annually',
+    priceCents: 5999,
+    priceFormatted: '$59.99/yr',
+    interval: 'YEAR',
+    isFree: false,
+    badge: '7-Day Free Trial',
+    saveBadge: 'Save 44%',
+    subPrice: '$5.00/month',
+    strikethroughPrice: '$8.99/month',
+    buttonText: 'Choose Plan',
+    buttonTheme: 'green',
+    features: DEFAULT_PRO_FEATURES,
+    tokenLimit: 1000000,
+    tokenReimburseFrequency: 'monthly'
+  }
+];
 
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
-  if (!planInput) return '';
+  if (!planInput) return 'taster';
   let raw = '';
   if (Array.isArray(planInput)) {
-    raw = planInput[0] ? String(planInput[0]).trim() : '';
+    raw = planInput[0] ? String(planInput[0]).trim() : 'taster';
   } else if (typeof planInput === 'string') {
     if (planInput.includes(',')) {
       const parts = planInput.split(',').map(s => s.trim()).filter(Boolean);
-      raw = parts[0] || '';
+      raw = parts[0] || 'taster';
     } else {
       raw = planInput.trim();
     }
   } else {
     raw = String(planInput).trim();
   }
-  return raw.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const clean = raw.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  if (!clean || clean === 'free' || clean === 'taster') return 'taster';
+  return clean;
 };
 
 const calculateRenewalExpiry = (startDate: Date = new Date(), interval?: 'MONTH' | 'YEAR'): string => {
@@ -144,9 +209,8 @@ export default function ProfilePage() {
 
   const [processingSocial, setProcessingSocial] = useState<SocialProvider | null>(null);
 
-  // Dynamic Plans state with default free tier preserved
-  const [plans, setPlans] = useState<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
-  const plansRef = useRef<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
+  const [plans, setPlans] = useState<SubscriptionPlanItem[]>(DEFAULT_PLANS);
+  const plansRef = useRef<SubscriptionPlanItem[]>(DEFAULT_PLANS);
   plansRef.current = plans;
   const isFetchingPlansRef = useRef(false);
 
@@ -236,53 +300,142 @@ export default function ProfilePage() {
     };
   }, [applySavedTheme]);
 
-  const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem): boolean => {
-    if (!user) return false;
+  const syncPlansFromAdmin = useCallback(async () => {
+    if (isFetchingPlansRef.current) return;
+    isFetchingPlansRef.current = true;
+    const plansMap = new Map<string, SubscriptionPlanItem>();
 
-    const rawUser = user as any;
-    const userPlanRaw = rawUser.planId || rawUser.subscriptionPlan || rawUser.subscriptionTier || rawUser.planSlug || '';
-    const cleanUserPlan = sanitizeSinglePlan(userPlanRaw);
-    const planSlug = sanitizeSinglePlan(plan.slug);
-    const planId = sanitizeSinglePlan(plan.id);
-
-    if (rawUser.planId && (rawUser.planId === plan.id || rawUser.planId === plan.slug)) {
-      return true;
-    }
-
-    if (cleanUserPlan === planSlug || cleanUserPlan === planId) {
-      return true;
-    }
-
-    const isUserFree = !cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || cleanUserPlan.includes('free');
-    if (isUserFree && plan.isFree) {
-      const defaultSlug = typeof window !== 'undefined' ? localStorage.getItem('zecratary_default_plan_slug') || 'taster' : 'taster';
-      if (!cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || planSlug === defaultSlug || planId === defaultSlug || cleanUserPlan === planSlug) {
-        return true;
+    try {
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const serverConfigs = data.configs || data.plans;
+        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
+          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
+        }
       }
+    } catch (_) {}
+    finally {
+      isFetchingPlansRef.current = false;
     }
 
-    const userInterval = (rawUser.planInterval || (cleanUserPlan.includes('annual') || cleanUserPlan.includes('year') ? 'YEAR' : cleanUserPlan.includes('monthly') || cleanUserPlan.includes('month') ? 'MONTH' : '')).toUpperCase();
-    const planInterval = (plan.interval || '').toUpperCase();
+    try {
+      const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
+      if (rawConfigs) {
+        const configs = JSON.parse(rawConfigs);
+        if (Array.isArray(configs) && configs.length > 0) {
+          configs.forEach((cfg: any) => {
+            const rawSlug = (cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
+            const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
+            const isFree = cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0);
+            
+            let planFeatures = Array.isArray(cfg.features) && cfg.features.length > 0 ? cfg.features : null;
+            if (!planFeatures || planFeatures.length < (isFree ? 7 : 3)) {
+              planFeatures = isFree ? DEFAULT_TASTER_FEATURES : DEFAULT_PRO_FEATURES;
+            }
 
-    const cleanUserBase = cleanUserPlan.replace(/-(monthly|annual|free)$/i, '');
-    const cleanPlanBase = planSlug.replace(/-(monthly|annual|free)$/i, '');
+            const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
+            const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
 
-    if (cleanUserBase && cleanPlanBase && cleanUserBase === cleanPlanBase) {
-      if (plan.isFree) return true;
-      if (userInterval && planInterval) return userInterval === planInterval;
-      return true;
-    }
+            if (isFree) {
+              const freeSlug = cleanBaseSlug.includes('taster') ? 'taster' : cleanBaseSlug;
+              plansMap.set(freeSlug, {
+                id: cfg.id || freeSlug,
+                name: cfg.name,
+                slug: freeSlug,
+                description: cfg.description || cfg.descriptionMonthly || 'Free tier with standard features',
+                priceCents: 0,
+                priceFormatted: 'Free',
+                interval: 'MONTH',
+                isFree: true,
+                badge: cfg.badge || '',
+                saveBadge: '',
+                buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
+                buttonTheme: 'orange',
+                features: planFeatures,
+                aiRecipeLimit: cfg.aiRecipeLimit,
+                recipeLibraryLimit: cfg.recipeLibraryLimit,
+                socialScrapeLimit: cfg.socialScrapeLimit,
+                canViewMacros: cfg.canViewMacros,
+                tokenLimit,
+                tokenReimburseFrequency,
+              });
+            } else {
+              if (cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0) {
+                const monthlySlug = `${cleanBaseSlug}-monthly`;
+                const mPrice = Number(cfg.monthlyPriceDollars);
+                plansMap.set(monthlySlug, {
+                  id: `${cfg.id || cleanBaseSlug}-monthly`,
+                  name: cfg.name,
+                  slug: monthlySlug,
+                  description: cfg.descriptionMonthly || cfg.description || `Full access to ${cfg.name}, billed monthly`,
+                  priceCents: Math.round(mPrice * 100),
+                  priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
+                  interval: 'MONTH',
+                  isFree: false,
+                  badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
+                  saveBadge: '',
+                  buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+                  buttonTheme: 'green',
+                  features: planFeatures,
+                  aiRecipeLimit: cfg.aiRecipeLimit,
+                  recipeLibraryLimit: cfg.recipeLibraryLimit,
+                  socialScrapeLimit: cfg.socialScrapeLimit,
+                  canViewMacros: cfg.canViewMacros,
+                  tokenLimit,
+                  tokenReimburseFrequency,
+                });
+              }
 
-    return false;
-  }, [user]);
+              if (cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0) {
+                const annualSlug = `${cleanBaseSlug}-annual`;
+                const aPrice = Number(cfg.annualPriceDollars);
+                const mEquivalent = (aPrice / 12).toFixed(2);
+                plansMap.set(annualSlug, {
+                  id: `${cfg.id || cleanBaseSlug}-annual`,
+                  name: cfg.name,
+                  slug: annualSlug,
+                  description: cfg.descriptionAnnual || cfg.description || `Best value - all ${cfg.name} features, billed annually`,
+                  priceCents: Math.round(aPrice * 100),
+                  priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
+                  interval: 'YEAR',
+                  isFree: false,
+                  badge: cfg.annualBadge || 'Best Value',
+                  saveBadge: cfg.saveBadge || 'Save 44%',
+                  subPrice: `${currencySymbol}${mEquivalent}/month`,
+                  strikethroughPrice: cfg.monthlyPriceDollars ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
+                  buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+                  buttonTheme: 'green',
+                  features: planFeatures,
+                  aiRecipeLimit: cfg.aiRecipeLimit,
+                  recipeLibraryLimit: cfg.recipeLibraryLimit,
+                  socialScrapeLimit: cfg.socialScrapeLimit,
+                  canViewMacros: cfg.canViewMacros,
+                  tokenLimit,
+                  tokenReimburseFrequency,
+                });
+              }
+            }
+          });
+        }
+      }
+    } catch (e) {}
+
+    // Always preserve baseline DEFAULT_PLANS
+    DEFAULT_PLANS.forEach(p => {
+      if (!plansMap.has(p.slug) && !plansMap.has(p.id)) {
+        plansMap.set(p.slug, p);
+      }
+    });
+
+    const mergedPlans = Array.from(plansMap.values());
+    plansRef.current = mergedPlans;
+    setPlans(mergedPlans);
+  }, [currencySymbol, t]);
 
   const syncActivePlanTokens = useCallback((activeUserPlanSlug: string, currentPlans: SubscriptionPlanItem[]) => {
     const cleanSlug = sanitizeSinglePlan(activeUserPlanSlug).toLowerCase();
-    const matchedPlan = currentPlans.find(p => 
-      p.slug.toLowerCase() === cleanSlug || 
-      p.id.toLowerCase() === cleanSlug ||
-      p.slug.toLowerCase().replace(/-(monthly|annual|free)$/i, '') === cleanSlug.replace(/-(monthly|annual|free)$/i, '')
-    );
+    const matchedPlan = currentPlans.find(p => p.slug.toLowerCase() === cleanSlug || p.id.toLowerCase() === cleanSlug);
 
     let assignedLimit = 50000;
     let assignedFrequency: 'once' | 'weekly' | 'monthly' = 'monthly';
@@ -294,6 +447,8 @@ export default function ProfilePage() {
       if (matchedPlan.tokenReimburseFrequency) {
         assignedFrequency = matchedPlan.tokenReimburseFrequency;
       }
+    } else if (cleanSlug.includes('pro') || cleanSlug.includes('annual')) {
+      assignedLimit = 1000000;
     }
 
     try {
@@ -312,203 +467,48 @@ export default function ProfilePage() {
     } catch (_) {}
   }, []);
 
-  // Synchronize available subscription plans dynamically from /admin/plans & storage
-  const syncPlansFromAdmin = useCallback(async () => {
-    if (isFetchingPlansRef.current) return;
-    isFetchingPlansRef.current = true;
+  const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem): boolean => {
+    if (!user) return false;
 
-    try {
-      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const serverConfigs = Array.isArray(data) ? data : (data.configs || data.plans || data.packages);
-        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
-          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
-        }
-      }
-    } catch (_) {}
-    finally {
-      isFetchingPlansRef.current = false;
+    const rawUser = user as any;
+    const userPlanRaw = rawUser.subscriptionPlan || rawUser.subscriptionTier || rawUser.planSlug || '';
+    const userPlan = sanitizeSinglePlan(userPlanRaw);
+    const targetSlug = sanitizeSinglePlan(plan.slug || plan.id || '');
+    const isPlanFree = Boolean(plan.isFree || plan.priceCents === 0);
+
+    const isUserFree = !userPlan || userPlan === 'taster' || userPlan === 'free' || userPlan.includes('free');
+    if (isUserFree) {
+      return isPlanFree || targetSlug === 'taster' || targetSlug.includes('taster');
     }
 
-    const plansMap = new Map<string, SubscriptionPlanItem>();
+    if (isPlanFree) return false;
 
-    try {
-      const rawConfigs = typeof window !== 'undefined' ? localStorage.getItem('zecratary_subscription_configs') : null;
-      let configs: any[] = [];
-      if (rawConfigs) {
-        const parsed = JSON.parse(rawConfigs);
-        if (Array.isArray(parsed)) configs = parsed;
-      }
-
-      // Check if any free plan exists in custom configs
-      const hasFree = configs.some((cfg: any) => 
-        cfg && (
-          cfg.isFree === true || 
-          cfg.slug === 'taster' || 
-          cfg.id === 'preset_taster' || 
-          (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0)
-        )
-      );
-
-      // If no free plan was configured in storage or server, dynamically prepend the system default free plan
-      if (!hasFree) {
-        configs.unshift({
-          id: SYSTEM_DEFAULT_FREE_PLAN.id,
-          name: SYSTEM_DEFAULT_FREE_PLAN.name,
-          slug: SYSTEM_DEFAULT_FREE_PLAN.slug,
-          isFree: true,
-          isDefault: true,
-          monthlyPriceDollars: 0,
-          annualPriceDollars: 0,
-          monthlyBadge: '',
-          annualBadge: '',
-          trialBadge: '',
-          descriptionMonthly: SYSTEM_DEFAULT_FREE_PLAN.description,
-          descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
-          buttonText: t('switchToFreeBtn') || 'Switch to Free',
-          features: SYSTEM_DEFAULT_FREE_PLAN.features,
-          tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
-          tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
-          aiRecipeLimit: SYSTEM_DEFAULT_FREE_PLAN.aiRecipeLimit,
-          recipeLibraryLimit: SYSTEM_DEFAULT_FREE_PLAN.recipeLibraryLimit,
-          socialScrapeLimit: SYSTEM_DEFAULT_FREE_PLAN.socialScrapeLimit,
-          canViewMacros: SYSTEM_DEFAULT_FREE_PLAN.canViewMacros,
-          allowedAiModels: SYSTEM_DEFAULT_FREE_PLAN.allowedAiModels
-        });
-      }
-
-      configs.forEach((cfg: any) => {
-        if (!cfg || !cfg.name) return;
-
-        let planFeatures: string[] = [];
-        if (Array.isArray(cfg.features) && cfg.features.length > 0) {
-          planFeatures = cfg.features.map((f: any) => String(f).trim()).filter(Boolean);
-        } else if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim()) {
-          planFeatures = cfg.featuresText.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
-        } else if (typeof cfg.descriptionMonthly === 'string' && cfg.descriptionMonthly.trim()) {
-          planFeatures = [cfg.descriptionMonthly.trim()];
-        }
-
-        const isFree = Boolean(
-          cfg.isFree || 
-          ((Number(cfg.monthlyPriceDollars) === 0 || cfg.monthlyPriceDollars === undefined) && 
-           (Number(cfg.annualPriceDollars) === 0 || cfg.annualPriceDollars === undefined))
-        );
-
-        const rawSlug = (cfg.slug || cfg.id || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
-        const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
-        const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
-        const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
-
-        if (isFree) {
-          const freeSlug = cleanBaseSlug || 'free';
-          plansMap.set(freeSlug, {
-            id: cfg.id || freeSlug,
-            name: cfg.name,
-            slug: freeSlug,
-            description: cfg.descriptionMonthly || cfg.descriptionAnnual || cfg.description || 'Free tier with standard features',
-            priceCents: 0,
-            priceFormatted: 'Free',
-            interval: 'MONTH',
-            isFree: true,
-            badge: cfg.badge || cfg.monthlyBadge || '',
-            saveBadge: '',
-            buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
-            buttonTheme: 'orange',
-            features: planFeatures,
-            aiRecipeLimit: cfg.aiRecipeLimit,
-            recipeLibraryLimit: cfg.recipeLibraryLimit,
-            socialScrapeLimit: cfg.socialScrapeLimit,
-            canViewMacros: Boolean(cfg.canViewMacros),
-            allowedAiModels: cfg.allowedAiModels,
-            tokenLimit,
-            tokenReimburseFrequency,
-          });
-        } else {
-          const hasMonthly = cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0;
-          const hasAnnual = cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0;
-
-          if (hasMonthly || !hasAnnual) {
-            const mPrice = Number(cfg.monthlyPriceDollars || 0);
-            const monthlySlug = `${cleanBaseSlug}-monthly`;
-            plansMap.set(monthlySlug, {
-              id: `${cfg.id || cleanBaseSlug}-monthly`,
-              name: cfg.name,
-              slug: monthlySlug,
-              description: cfg.descriptionMonthly || cfg.description || `Full access to ${cfg.name}, billed monthly`,
-              priceCents: Math.round(mPrice * 100),
-              priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
-              interval: 'MONTH',
-              isFree: false,
-              badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
-              saveBadge: '',
-              buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-              buttonTheme: 'green',
-              features: planFeatures,
-              aiRecipeLimit: cfg.aiRecipeLimit,
-              recipeLibraryLimit: cfg.recipeLibraryLimit,
-              socialScrapeLimit: cfg.socialScrapeLimit,
-              canViewMacros: Boolean(cfg.canViewMacros),
-              allowedAiModels: cfg.allowedAiModels,
-              tokenLimit,
-              tokenReimburseFrequency,
-            });
-          }
-
-          if (hasAnnual) {
-            const aPrice = Number(cfg.annualPriceDollars || 0);
-            const annualSlug = `${cleanBaseSlug}-annual`;
-            const mEquivalent = (aPrice / 12).toFixed(2);
-            plansMap.set(annualSlug, {
-              id: `${cfg.id || cleanBaseSlug}-annual`,
-              name: cfg.name,
-              slug: annualSlug,
-              description: cfg.descriptionAnnual || cfg.description || `Best value - all ${cfg.name} features, billed annually`,
-              priceCents: Math.round(aPrice * 100),
-              priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
-              interval: 'YEAR',
-              isFree: false,
-              badge: cfg.trialBadge || cfg.annualBadge || 'Best Value',
-              saveBadge: cfg.annualBadge || '',
-              subPrice: `${currencySymbol}${mEquivalent}/month`,
-              strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
-              buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-              buttonTheme: 'green',
-              features: planFeatures,
-              aiRecipeLimit: cfg.aiRecipeLimit,
-              recipeLibraryLimit: cfg.recipeLibraryLimit,
-              socialScrapeLimit: cfg.socialScrapeLimit,
-              canViewMacros: Boolean(cfg.canViewMacros),
-              allowedAiModels: cfg.allowedAiModels,
-              tokenLimit,
-              tokenReimburseFrequency,
-            });
-          }
-        }
-      });
-    } catch (e) {}
-
-    const dynamicPlans = Array.from(plansMap.values());
-    plansRef.current = dynamicPlans;
-    setPlans(dynamicPlans);
-
-    const rawUser = typeof window !== 'undefined' ? localStorage.getItem('zecratary_current_user') : null;
-    if (rawUser) {
-      try {
-        const u = JSON.parse(rawUser);
-        const uPlan = sanitizeSinglePlan(u.subscriptionPlan || u.subscriptionTier || u.planSlug || '');
-        syncActivePlanTokens(uPlan, dynamicPlans);
-      } catch (_) {}
+    if (userPlan === targetSlug || (plan.id && sanitizeSinglePlan(plan.id) === userPlan)) {
+      return true;
     }
-  }, [currencySymbol, syncActivePlanTokens, t]);
+
+    const userInterval = (rawUser.planInterval || (userPlan.includes('annual') || userPlan.includes('year') ? 'YEAR' : userPlan.includes('monthly') || userPlan.includes('month') ? 'MONTH' : '')).toUpperCase();
+    const planInterval = (plan.interval || (targetSlug.includes('annual') || targetSlug.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
+
+    const cleanUserBase = userPlan.replace(/-(monthly|annual|free)$/i, '');
+    const cleanTargetBase = targetSlug.replace(/-(monthly|annual|free)$/i, '');
+
+    if (cleanUserBase === cleanTargetBase || userPlan.includes(cleanTargetBase) || targetSlug.includes(cleanUserBase)) {
+      if (userInterval && planInterval) {
+        return userInterval === planInterval;
+      }
+      return true;
+    }
+
+    return false;
+  }, [user]);
 
   const reloadActiveUser = useCallback(() => {
     initAuthStorage();
     let active = getCurrentUser() as ExtendedUser | null;
 
     if (!active && typeof document !== 'undefined') {
-      const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
+      const match = document.cookie.match(/(?:^|;\\s*)zecratary_session=([^;]+)/);
       if (match && match[1]) {
         try {
           const cookieData = JSON.parse(decodeURIComponent(match[1]));
@@ -542,7 +542,7 @@ export default function ProfilePage() {
           matchedUser = { 
             ...active, 
             ...fresh,
-            subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || fresh.planSlug || fresh.planId || 'taster')
+            subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || (fresh.role === 'admin' ? 'nutrition-pro-annual' : 'taster'))
           };
           try {
             localStorage.setItem('zecratary_current_user', JSON.stringify(matchedUser));
@@ -580,7 +580,7 @@ export default function ProfilePage() {
           (matchedUser as any).expiryDate = latestActiveTx.expiryDate;
           (matchedUser as any).planExpiryDate = latestActiveTx.expiryDate;
         } else if (userTxs.length > 0 && userTxs[0].status === 'refunded') {
-          matchedUser.subscriptionPlan = '';
+          matchedUser.subscriptionPlan = 'taster';
           (matchedUser as any).expiryDate = '';
           (matchedUser as any).planExpiryDate = '';
         }
@@ -591,8 +591,8 @@ export default function ProfilePage() {
     setName(matchedUser.name || '');
     setEmail(matchedUser.email || '');
 
-    const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).subscriptionTier || (matchedUser as any).planSlug || '');
-    syncActivePlanTokens(userPlan, plansRef.current);
+    const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).subscriptionTier || '').toLowerCase();
+    syncActivePlanTokens(userPlan, plansRef.current.length > 0 ? plansRef.current : DEFAULT_PLANS);
   }, [router, syncActivePlanTokens]);
 
   useEffect(() => {
@@ -616,11 +616,6 @@ export default function ProfilePage() {
     window.addEventListener('zecratary_plans_updated', handleSyncEvent);
     window.addEventListener('zecratary_users_updated', handleSyncEvent);
     window.addEventListener('zecratary_payment_updated', handleSyncEvent);
-    window.addEventListener('storage', (e) => {
-      if (!e.key || e.key === 'zecratary_subscription_configs' || e.key === 'zecratary_users' || e.key === 'zecratary_payment_transactions') {
-        handleSyncEvent();
-      }
-    });
 
     return () => {
       window.removeEventListener('zecratary_plans_updated', handleSyncEvent);
@@ -686,54 +681,64 @@ export default function ProfilePage() {
   };
 
   const userPlanBadge = useMemo(() => {
-    const rawKey = ((user as any)?.subscriptionPlan || (user as any)?.subscriptionTier || (user as any)?.planSlug || (user as any)?.planId || '').toLowerCase().trim();
+    const rawKey = ((user as any)?.subscriptionPlan || (user as any)?.subscriptionTier || (user as any)?.planSlug || '').toLowerCase().trim();
     const planKey = sanitizeSinglePlan(rawKey);
 
-    const matched = plans.find(p => checkIsCurrentPlan(p));
+    if (!planKey || planKey === 'taster' || planKey.includes('free')) {
+      return {
+        label: t('freeTierNoExpiry') || 'Taster (Free)',
+        bg: 'rgba(16, 185, 129, 0.15)',
+        border: 'var(--color-emerald, #10b981)',
+        color: 'var(--color-emerald, #10b981)',
+        icon: Sparkles
+      };
+    }
+
+    const matched = plans.find(p => p.slug.toLowerCase() === planKey || p.id.toLowerCase() === planKey);
+
     if (matched) {
-      const isAnnual = matched.interval === 'YEAR';
+      if (matched.isFree) {
+        return {
+          label: `${matched.name} (Free)`,
+          bg: 'rgba(16, 185, 129, 0.15)',
+          border: 'var(--color-emerald, #10b981)',
+          color: 'var(--color-emerald, #10b981)',
+          icon: Sparkles
+        };
+      }
+      if (matched.interval === 'YEAR' || planKey.includes('annual')) {
+        return {
+          label: `${matched.name} (Annual)`,
+          bg: 'rgba(59, 130, 246, 0.15)',
+          border: '#3b82f6',
+          color: '#60a5fa',
+          icon: Zap
+        };
+      }
       return {
-        label: `${matched.name}${matched.isFree ? ' (Free)' : isAnnual ? ' (Annual)' : ' (Monthly)'}`,
-        bg: matched.isFree 
-          ? 'rgba(16, 185, 129, 0.15)' 
-          : isAnnual 
-          ? 'rgba(59, 130, 246, 0.15)' 
-          : 'rgba(224, 86, 56, 0.15)',
-        border: matched.isFree 
-          ? 'var(--color-emerald, #10b981)' 
-          : isAnnual 
-          ? '#3b82f6' 
-          : 'var(--color-primary, #E05638)',
-        color: matched.isFree 
-          ? 'var(--color-emerald, #10b981)' 
-          : isAnnual 
-          ? '#60a5fa' 
-          : 'var(--color-primary, #E05638)',
-        icon: matched.isFree ? Sparkles : Zap,
-        matchedPlan: matched
+        label: `${matched.name} (Monthly)`,
+        bg: 'rgba(224, 86, 56, 0.15)',
+        border: 'var(--color-primary, #E05638)',
+        color: 'var(--color-primary, #E05638)',
+        icon: Zap
       };
     }
 
-    const userPlanName = (user as any)?.planName;
-    if (userPlanName) {
-      return {
-        label: userPlanName,
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
-        icon: Sparkles,
-        matchedPlan: null
-      };
-    }
+    const userInterval = (((user as any)?.planInterval || '')).toUpperCase();
+    const isAnnual = userInterval === 'YEAR' || planKey.includes('annual') || planKey.includes('year');
+    const matchedByBase = plans.find(p => {
+      const pBase = p.slug.toLowerCase().replace(/-(monthly|annual)$/, '');
+      const kBase = planKey.replace(/-(monthly|annual)$/, '');
+      return pBase === kBase && (isAnnual ? p.interval === 'YEAR' : p.interval === 'MONTH');
+    });
 
-    if (!planKey || planKey === 'free' || planKey.includes('free') || planKey === 'taster') {
+    if (matchedByBase) {
       return {
-        label: t('freeTierNoExpiry') || 'Free Tier',
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
-        icon: Sparkles,
-        matchedPlan: null
+        label: `${matchedByBase.name} (${isAnnual ? 'Annual' : 'Monthly'})`,
+        bg: isAnnual ? 'rgba(59, 130, 246, 0.15)' : 'rgba(224, 86, 56, 0.15)',
+        border: isAnnual ? '#3b82f6' : 'var(--color-primary, #E05638)',
+        color: isAnnual ? '#60a5fa' : 'var(--color-primary, #E05638)',
+        icon: Zap
       };
     }
 
@@ -747,10 +752,9 @@ export default function ProfilePage() {
       bg: 'rgba(224, 86, 56, 0.15)',
       border: 'var(--color-primary, #E05638)',
       color: 'var(--color-primary, #E05638)',
-      icon: Zap,
-      matchedPlan: null
+      icon: Zap
     };
-  }, [user, plans, checkIsCurrentPlan, t]);
+  }, [user, plans, t]);
 
   const handleUpdateProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -854,6 +858,7 @@ export default function ProfilePage() {
     try {
       const isFree = plan.priceCents === 0 || plan.isFree;
       const targetSlug = sanitizeSinglePlan(plan.slug);
+      const currentPlanSlug = sanitizeSinglePlan((user as any).subscriptionPlan || (user as any).subscriptionTier);
       const userEmail = user.email.toLowerCase();
 
       if (checkIsCurrentPlan(plan)) {
@@ -909,7 +914,6 @@ export default function ProfilePage() {
         subscriptionPlan: targetSlug,
         subscriptionTier: targetSlug,
         planSlug: targetSlug,
-        planId: plan.id,
         planName: `${plan.name}${isFree ? ' (Free)' : plan.interval === 'YEAR' ? ' (Annual)' : ' (Monthly)'}`,
         planInterval: plan.interval,
         subscriptionStatus: 'active',
@@ -932,7 +936,7 @@ export default function ProfilePage() {
       window.dispatchEvent(new Event('zecratary_users_updated'));
 
       setSuccessMsg(isFree 
-        ? `Switched to ${plan.name}!` 
+        ? `Switched to free ${plan.name}!` 
         : `Plan changed successfully to ${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})!`
       );
       setTimeout(() => setSuccessMsg(''), 5000);
@@ -1670,194 +1674,187 @@ export default function ProfilePage() {
         </div>
 
         {/* ALL AVAILABLE PLANS GRID */}
-        {filteredPlans.length === 0 ? (
-          <div 
-            className="p-8 text-center rounded-2xl border text-xs"
-            style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#64748b' : '#94a3b8'
-            }}
-          >
-            No plans configured in admin yet. Go to <Link href="/admin/plans" className="font-bold underline text-[var(--color-primary)]">Admin Plans</Link> to create plans.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
-            {filteredPlans.map((plan) => {
-              const isCurrent = checkIsCurrentPlan(plan);
-              const isFree = plan.priceCents === 0 || plan.isFree;
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
+          {filteredPlans.map((plan) => {
+            const isCurrent = checkIsCurrentPlan(plan);
+            const isFree = plan.priceCents === 0 || plan.isFree;
 
-              return (
-                <div 
-                  key={plan.id || plan.slug}
-                  className={`rounded-3xl p-6 border-2 relative flex flex-col justify-between shadow-xl transition-all duration-200 ${
-                    isCurrent 
-                      ? 'ring-4 ring-emerald-500/25 scale-[1.02]' 
-                      : 'hover:scale-[1.01]'
-                  }`}
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isCurrent 
-                      ? 'var(--color-emerald, #10b981)' 
-                      : (plan.badge ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'))
-                  }}
-                >
-                  {(isCurrent || plan.saveBadge || plan.badge) && (
-                    <div 
-                      className="absolute -top-3.5 right-6 px-3 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-md flex items-center gap-1 z-10"
-                      style={{
-                        backgroundColor: isCurrent 
-                          ? 'var(--color-emerald, #10b981)' 
-                          : (plan.saveBadge ? 'var(--color-emerald, #10b981)' : 'var(--color-primary, #E05638)')
-                      }}
-                    >
+            return (
+              <div 
+                key={plan.id || plan.slug}
+                className={`rounded-3xl p-6 border-2 relative flex flex-col justify-between shadow-xl transition-all duration-200 ${
+                  isCurrent 
+                    ? 'ring-4 ring-emerald-500/25 scale-[1.02]' 
+                    : 'hover:scale-[1.01]'
+                }`}
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isCurrent 
+                    ? 'var(--color-emerald, #10b981)' 
+                    : (plan.badge ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'))
+                }}
+              >
+                {(isCurrent || plan.saveBadge || plan.badge) && (
+                  <div 
+                    className="absolute -top-3.5 right-6 px-3 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-md flex items-center gap-1 z-10"
+                    style={{
+                      backgroundColor: isCurrent 
+                        ? 'var(--color-emerald, #10b981)' 
+                        : (plan.saveBadge ? 'var(--color-emerald, #10b981)' : 'var(--color-primary, #E05638)')
+                    }}
+                  >
+                    {isCurrent ? (
+                      <>
+                        <CheckCircle2 className="h-3 w-3" /> {t('currentPlanBadge') || 'Current Active Plan'}
+                      </>
+                    ) : (
+                      plan.saveBadge || plan.badge
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                          {plan.name}
+                        </h3>
+                        <span 
+                          className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border"
+                          style={{
+                            backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
+                            borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                            color: isDayMode ? '#475569' : '#94a3b8'
+                          }}
+                        >
+                          {plan.isFree ? 'Free' : plan.interval === 'YEAR' ? 'Annual' : 'Monthly'}
+                        </span>
+                      </div>
+
                       {isCurrent ? (
-                        <>
-                          <CheckCircle2 className="h-3 w-3" /> {t('currentPlanBadge') || 'Current Active Plan'}
-                        </>
+                        <span 
+                          className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border flex items-center gap-1"
+                          style={{
+                            backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+                            borderColor: 'var(--color-emerald, #10b981)',
+                            color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                          }}
+                        >
+                          <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                          {t('activeStatus') || 'Active'}
+                        </span>
                       ) : (
-                        plan.saveBadge || plan.badge
+                        <span 
+                          className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border"
+                          style={{
+                            backgroundColor: isDayMode ? '#f8fafc' : 'rgba(148, 163, 184, 0.1)',
+                            borderColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                            color: isDayMode ? '#64748b' : '#94a3b8'
+                          }}
+                        >
+                          Available
+                        </span>
                       )}
                     </div>
-                  )}
+                    <p className="text-xs font-medium mt-1 min-h-[32px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      {plan.description}
+                    </p>
+                  </div>
 
-                  <div className="space-y-4">
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                            {plan.name}
-                          </h3>
-                          <span 
-                            className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border"
-                            style={{
-                              backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
-                              borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                              color: isDayMode ? '#475569' : '#94a3b8'
-                            }}
-                          >
-                            {plan.isFree ? 'Free' : plan.interval === 'YEAR' ? 'Annual' : 'Monthly'}
-                          </span>
-                        </div>
+                  <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-orange-400 bg-orange-950/40 border border-orange-500/30 px-3 py-1.5 rounded-xl w-fit shadow-xs">
+                    <Cpu className="h-3.5 w-3.5" />
+                    <span>{plan.tokenLimit === -1 ? 'Unlimited Tokens' : `${(plan.tokenLimit || 0).toLocaleString()} Tokens`}</span>
+                    <span className="text-[10px] font-sans font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      ({plan.tokenReimburseFrequency === 'once' ? 'Once' : plan.tokenReimburseFrequency === 'weekly' ? 'Weekly' : 'Monthly'})
+                    </span>
+                  </div>
 
-                        {isCurrent ? (
-                          <span 
-                            className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border flex items-center gap-1"
-                            style={{
-                              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                              borderColor: 'var(--color-emerald, #10b981)',
-                              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                            }}
-                          >
-                            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-                            {t('activeStatus') || 'Active'}
-                          </span>
-                        ) : (
-                          <span 
-                            className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border"
-                            style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : 'rgba(148, 163, 184, 0.1)',
-                              borderColor: isDayMode ? '#e2e8f0' : '#1e293b',
-                              color: isDayMode ? '#64748b' : '#94a3b8'
-                            }}
-                          >
-                            Available
-                          </span>
+                  <div>
+                    {isFree ? (
+                      <div className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                        {t('free') || 'Free'}
+                      </div>
+                    ) : (
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                          {currencySymbol}{(plan.priceCents / 100).toFixed(2)}
+                        </span>
+                        <span className="text-xs font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                          /{plan.interval === 'YEAR' ? (t('perYear') || 'year') : (t('perMonth') || 'month')}
+                        </span>
+                      </div>
+                    )}
+
+                    {!isFree && plan.interval === 'YEAR' && plan.subPrice && (
+                      <div className="text-[11px] font-medium mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                        <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>{plan.subPrice}</span>{' '}
+                        {plan.strikethroughPrice && (
+                          <span className="line-through" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{plan.strikethroughPrice}</span>
                         )}
                       </div>
-                      <p className="text-xs font-medium mt-1 min-h-[32px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                        {plan.description}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-orange-400 bg-orange-950/40 border border-orange-500/30 px-3 py-1.5 rounded-xl w-fit shadow-xs">
-                      <Cpu className="h-3.5 w-3.5" />
-                      <span>{plan.tokenLimit === -1 ? 'Unlimited Tokens' : `${(plan.tokenLimit || 0).toLocaleString()} Tokens`}</span>
-                      <span className="text-[10px] font-sans font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                        ({plan.tokenReimburseFrequency === 'once' ? 'Once' : plan.tokenReimburseFrequency === 'weekly' ? 'Weekly' : 'Monthly'})
-                      </span>
-                    </div>
-
-                    <div>
-                      {isFree ? (
-                        <div className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
-                          {t('free') || 'Free'}
-                        </div>
-                      ) : (
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
-                            {currencySymbol}{(plan.priceCents / 100).toFixed(2)}
-                          </span>
-                          <span className="text-xs font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                            /{plan.interval === 'YEAR' ? (t('perYear') || 'year') : (t('perMonth') || 'month')}
-                          </span>
-                        </div>
-                      )}
-
-                      {!isFree && plan.interval === 'YEAR' && plan.subPrice && (
-                        <div className="text-[11px] font-medium mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                          <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>{plan.subPrice}</span>{' '}
-                          {plan.strikethroughPrice && (
-                            <span className="line-through" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{plan.strikethroughPrice}</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="pt-2 border-t space-y-2 text-xs font-semibold" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)', color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                      {plan.features && plan.features.length > 0 ? (
-                        plan.features.map((f, i) => (
-                          <div key={i} className="flex items-start gap-2">
-                            <Check className="h-4 w-4 shrink-0 mt-0.5 text-emerald-500 dark:text-emerald-400" />
-                            <span className="leading-snug">{f}</span>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="italic text-[11px]" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('includesFullTierFeatureAccess') || 'Includes full tier feature access.'}</div>
-                      )}
-                    </div>
+                    )}
                   </div>
 
-                  <div className="pt-6 mt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-                    <button
-                      type="button"
-                      disabled={isCurrent || paymentLoading === plan.id}
-                      onClick={() => handleSelectPlan(plan)}
-                      className="w-full py-3 rounded-2xl text-xs font-black text-white transition shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                      style={{
-                        backgroundColor: isCurrent 
-                          ? 'var(--color-emerald, #10b981)' 
-                          : 'var(--color-primary, #E05638)'
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)';
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)';
-                      }}
-                    >
-                      {paymentLoading === plan.id ? (
-                        <>
-                          <RefreshCw className="h-4 w-4 animate-spin" /> {t('processing') || 'Processing...'}
-                        </>
-                      ) : isCurrent ? (
-                        <>
-                          <CheckCircle2 className="h-4 w-4" /> {t('currentActivePlan') || 'Current Active Plan'}
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-4 w-4" /> {isFree ? (t('switchToFreeBtn') || 'Switch to Free') : `${t('changeToPlanPrefix') || 'Change to '}${plan.name}`}
-                        </>
-                      )}
-                    </button>
+                  <div className="pt-2 border-t space-y-2 text-xs font-semibold" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)', color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {plan.features && plan.features.length > 0 ? (
+                      plan.features.map((f, i) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <Check className="h-4 w-4 shrink-0 mt-0.5 text-emerald-500 dark:text-emerald-400" />
+                          <span className="leading-snug">{f}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="italic text-[11px]" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('includesFullTierFeatureAccess') || 'Includes full tier feature access.'}</div>
+                    )}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
+
+                <div className="pt-6 mt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                  <button
+                    type="button"
+                    disabled={isCurrent || paymentLoading === plan.id}
+                    onClick={() => handleSelectPlan(plan)}
+                    className="w-full py-3 rounded-2xl text-xs font-black text-white transition shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    style={{
+                      backgroundColor: isCurrent 
+                        ? 'var(--color-emerald, #10b981)' 
+                        : 'var(--color-primary, #E05638)'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)';
+                    }}
+                  >
+                    {paymentLoading === plan.id ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin" /> {t('processing') || 'Processing...'}
+                      </>
+                    ) : isCurrent ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4" /> {t('currentActivePlan') || 'Current Active Plan'}
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4" /> {isFree ? (t('switchToFreeBtn') || 'Switch to Free') : `${t('changeToPlanPrefix') || 'Change to '}${plan.name}`}
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
     </div>
   );
 }
+"""
+
+with open(profile_path, 'w', encoding='utf-8') as f:
+    f.write(content)
+
+print(f"✓ Successfully updated profile plans handling at: {profile_path}")

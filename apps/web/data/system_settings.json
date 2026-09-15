@@ -19,40 +19,68 @@
   "aiModel": "gemini-1.5-flash",
   "plans": [
     {
-      "id": "taster",
-      "name": "Taster",
-      "slug": "taster",
-      "isFree": true,
-      "monthlyPriceDollars": 0,
-      "annualPriceDollars": 0,
-      "tokenLimit": 500,
-      "tokenReimburseFrequency": "monthly",
-      "description": "Free tier with standard features",
-      "featuresText": "",
+      "id": "plan_1789402605070",
+      "name": "Nutrition Pro",
+      "slug": "nutrition-pro",
+      "isFree": false,
+      "isDefault": false,
+      "monthlyPriceDollars": 8.99,
+      "annualPriceDollars": 59.99,
+      "monthlyBadge": "Billed Immediately",
+      "annualBadge": "Save 44%",
+      "trialBadge": "7-Day Free Trial",
+      "descriptionMonthly": "Full premium access, billed monthly",
+      "descriptionAnnual": "Best value - all premium features, billed annually",
+      "buttonText": "Choose Plan",
+      "aiRecipeLimit": -1,
+      "recipeLibraryLimit": -1,
+      "socialScrapeLimit": -1,
+      "canViewMacros": true,
       "allowedAiModels": [
-        "gemini-3.6-flash"
+        "gemini-3.6-flash",
+        "gpt-4o"
       ],
-      "isDefault": true,
-      "features": []
+      "featuresText": "Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)",
+      "tokenLimit": 1000000,
+      "tokenReimburseFrequency": "monthly",
+      "features": [
+        "Unlimited AI-powered recipe generation",
+        "Unlimited recipe library",
+        "Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)"
+      ]
     }
   ],
   "subscriptionConfigs": [
     {
-      "id": "taster",
-      "name": "Taster",
-      "slug": "taster",
-      "isFree": true,
-      "monthlyPriceDollars": 0,
-      "annualPriceDollars": 0,
-      "tokenLimit": 500,
-      "tokenReimburseFrequency": "monthly",
-      "description": "Free tier with standard features",
-      "featuresText": "",
+      "id": "plan_1789402605070",
+      "name": "Nutrition Pro",
+      "slug": "nutrition-pro",
+      "isFree": false,
+      "isDefault": false,
+      "monthlyPriceDollars": 8.99,
+      "annualPriceDollars": 59.99,
+      "monthlyBadge": "Billed Immediately",
+      "annualBadge": "Save 44%",
+      "trialBadge": "7-Day Free Trial",
+      "descriptionMonthly": "Full premium access, billed monthly",
+      "descriptionAnnual": "Best value - all premium features, billed annually",
+      "buttonText": "Choose Plan",
+      "aiRecipeLimit": -1,
+      "recipeLibraryLimit": -1,
+      "socialScrapeLimit": -1,
+      "canViewMacros": true,
       "allowedAiModels": [
-        "gemini-3.6-flash"
+        "gemini-3.6-flash",
+        "gpt-4o"
       ],
-      "isDefault": true,
-      "features": []
+      "featuresText": "Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)",
+      "tokenLimit": 1000000,
+      "tokenReimburseFrequency": "monthly",
+      "features": [
+        "Unlimited AI-powered recipe generation",
+        "Unlimited recipe library",
+        "Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)"
+      ]
     }
   ],
   "siteSettings": {

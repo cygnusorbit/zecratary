@@ -1,14 +1,24 @@
 [
   {
-    "id": "usr_google_mu1flp5z",
+    "id": "usr_google_mu19hxvu",
     "name": "cygnusorbit",
     "email": "ed1226@gmail.com",
     "password": "password123",
     "role": "user",
-    "subscriptionPlan": "nutrition-pro-max",
-    "subscriptionTier": "nutrition-pro-max",
-    "createdAt": "2026-09-14T16:02:32.999Z",
-    "avatar": "https://lh3.googleusercontent.com/a/ACg8ocJMUfGHR6gzjK1YpyJbqmWWgaKL6fJNjOSREHSJAbyaHMuKfg=s96-c"
+    "subscriptionPlan": "nutrition-pro-monthly",
+    "subscriptionTier": "taster",
+    "createdAt": "2026-09-14T13:11:39.978Z",
+    "avatar": "https://lh3.googleusercontent.com/a/ACg8ocJMUfGHR6gzjK1YpyJbqmWWgaKL6fJNjOSREHSJAbyaHMuKfg=s96-c",
+    "linkedProviders": [
+      "google"
+    ],
+    "planName": "Nutrition Pro (Monthly)",
+    "planInterval": "MONTH",
+    "subscriptionStatus": "active",
+    "lastPaymentDate": "2026-09-14T16:17:44.621Z",
+    "planExpiryDate": "2026-10-14T16:17:44.621Z",
+    "expiryDate": "2026-10-14T16:17:44.621Z",
+    "updatedAt": "2026-09-14T16:17:44.621Z"
   },
   {
     "id": "usr_1789391472150_gjur",
@@ -25,8 +35,19 @@
     "name": "Administrator",
     "email": "admin@foodieprep.com",
     "role": "admin",
-    "subscriptionPlan": "nutrition-pro-annual",
-    "subscriptionTier": "nutrition-pro-annual",
-    "createdAt": "2026-09-14T10:03:06.343Z"
+    "subscriptionPlan": "taster",
+    "subscriptionTier": "taster",
+    "createdAt": "2026-09-14T10:03:06.343Z",
+    "password": "admin",
+    "linkedProviders": [],
+    "planName": "Taster (Free)",
+    "planInterval": "MONTH",
+    "subscriptionStatus": "active",
+    "lastPaymentDate": "",
+    "planExpiryDate": "",
+    "expiryDate": "",
+    "updatedAt": "2026-09-15T03:45:00.669Z",
+    "planSlug": "taster",
+    "planId": "preset_taster"
   }
 ]

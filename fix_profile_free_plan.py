@@ -1,4 +1,26 @@
-// Generated / Updated by AI Collaborator
+import os
+import glob
+
+# 1. Locate profile page.tsx
+candidates = [
+    'apps/web/src/app/profile/page.tsx',
+    'src/app/profile/page.tsx',
+    'apps/web/app/profile/page.tsx',
+    'app/profile/page.tsx'
+]
+
+profile_path = next((p for p in candidates if os.path.exists(p)), None)
+if not profile_path:
+    matches = glob.glob('**/profile/page.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        profile_path = matches[0]
+
+if not profile_path:
+    print("❌ Error: Could not locate profile/page.tsx")
+    exit(1)
+
+content = r"""// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -1861,3 +1883,9 @@ export default function ProfilePage() {
     </div>
   );
 }
+"""
+
+with open(profile_path, 'w', encoding='utf-8') as f:
+    f.write(content)
+
+print(f"✓ Successfully resolved missing Free Plan at: {profile_path}")

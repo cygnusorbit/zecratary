@@ -1,4 +1,26 @@
-// Generated / Updated by AI Collaborator
+import os
+import glob
+
+# 1. Locate profile page file
+candidates = [
+    'apps/web/src/app/profile/page.tsx',
+    'src/app/profile/page.tsx',
+    'apps/web/app/profile/page.tsx',
+    'app/profile/page.tsx'
+]
+
+profile_path = next((p for p in candidates if os.path.exists(p)), None)
+if not profile_path:
+    matches = glob.glob('**/profile/page.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        profile_path = matches[0]
+
+if not profile_path:
+    print("❌ Error: Could not locate profile/page.tsx")
+    exit(1)
+
+content = """// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -7,7 +29,7 @@ import {
   User as UserIcon, Mail, Lock, CheckCircle, 
   AlertCircle, Calendar, LogOut, Check, CreditCard,
   Zap, Sparkles, CheckCircle2, RefreshCw, Shield,
-  Clock, Cpu, Repeat, Link2, Unlink, Key
+  Clock, Activity, Cpu, Repeat, Link2, Unlink, Key
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -69,37 +91,6 @@ interface TokenUsageData {
   reimburseFrequency: 'once' | 'weekly' | 'monthly';
 }
 
-const SYSTEM_DEFAULT_FREE_PLAN: SubscriptionPlanItem = {
-  id: 'preset_taster',
-  name: 'Taster',
-  slug: 'taster',
-  description: 'Free tier with standard features',
-  priceCents: 0,
-  priceFormatted: 'Free',
-  interval: 'MONTH',
-  isFree: true,
-  badge: '',
-  saveBadge: '',
-  buttonText: 'Switch to Free',
-  buttonTheme: 'orange',
-  features: [
-    'Create up to 5 AI-powered recipes per month',
-    'Personal recipe library (25 total recipes)',
-    'Smart ingredient repurposing',
-    'Automated shopping list creation',
-    'Direct online grocery shopping links',
-    'Meal planner',
-    'Ingredient photo recognition'
-  ],
-  aiRecipeLimit: 5,
-  recipeLibraryLimit: 25,
-  socialScrapeLimit: 5,
-  canViewMacros: false,
-  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
-  tokenLimit: 50000,
-  tokenReimburseFrequency: 'monthly'
-};
-
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
   if (!planInput) return '';
   let raw = '';
@@ -144,9 +135,9 @@ export default function ProfilePage() {
 
   const [processingSocial, setProcessingSocial] = useState<SocialProvider | null>(null);
 
-  // Dynamic Plans state with default free tier preserved
-  const [plans, setPlans] = useState<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
-  const plansRef = useRef<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
+  // Dynamic Plans state directly synchronized with /admin/plans
+  const [plans, setPlans] = useState<SubscriptionPlanItem[]>([]);
+  const plansRef = useRef<SubscriptionPlanItem[]>([]);
   plansRef.current = plans;
   const isFetchingPlansRef = useRef(false);
 
@@ -236,6 +227,153 @@ export default function ProfilePage() {
     };
   }, [applySavedTheme]);
 
+  // Synchronize available subscription plans dynamically from /admin/plans & storage (No hardcoded plans)
+  const syncPlansFromAdmin = useCallback(async () => {
+    if (isFetchingPlansRef.current) return;
+    isFetchingPlansRef.current = true;
+
+    try {
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const serverConfigs = Array.isArray(data) ? data : (data.configs || data.plans || data.packages);
+        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
+          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
+        }
+      }
+    } catch (_) {}
+    finally {
+      isFetchingPlansRef.current = false;
+    }
+
+    const plansMap = new Map<string, SubscriptionPlanItem>();
+
+    try {
+      const rawConfigs = typeof window !== 'undefined' ? localStorage.getItem('zecratary_subscription_configs') : null;
+      let configs: any[] = [];
+      if (rawConfigs) {
+        const parsed = JSON.parse(rawConfigs);
+        if (Array.isArray(parsed)) configs = parsed;
+      }
+
+      if (configs.length > 0) {
+        configs.forEach((cfg: any) => {
+          if (!cfg || !cfg.name) return;
+
+          let planFeatures: string[] = [];
+          if (Array.isArray(cfg.features) && cfg.features.length > 0) {
+            planFeatures = cfg.features.map((f: any) => String(f).trim()).filter(Boolean);
+          } else if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim()) {
+            planFeatures = cfg.featuresText.split('\n').map((s: string) => s.trim()).filter(Boolean);
+          } else if (typeof cfg.descriptionMonthly === 'string' && cfg.descriptionMonthly.trim()) {
+            planFeatures = [cfg.descriptionMonthly.trim()];
+          }
+
+          const isFree = Boolean(
+            cfg.isFree || 
+            ((Number(cfg.monthlyPriceDollars) === 0 || cfg.monthlyPriceDollars === undefined) && 
+             (Number(cfg.annualPriceDollars) === 0 || cfg.annualPriceDollars === undefined))
+          );
+
+          const rawSlug = (cfg.slug || cfg.id || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
+          const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
+          const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
+          const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
+
+          if (isFree) {
+            const freeSlug = cleanBaseSlug || 'free';
+            plansMap.set(freeSlug, {
+              id: cfg.id || freeSlug,
+              name: cfg.name,
+              slug: freeSlug,
+              description: cfg.descriptionMonthly || cfg.descriptionAnnual || cfg.description || 'Free tier with standard features',
+              priceCents: 0,
+              priceFormatted: 'Free',
+              interval: 'MONTH',
+              isFree: true,
+              badge: cfg.badge || cfg.monthlyBadge || '',
+              saveBadge: '',
+              buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
+              buttonTheme: 'orange',
+              features: planFeatures,
+              aiRecipeLimit: cfg.aiRecipeLimit,
+              recipeLibraryLimit: cfg.recipeLibraryLimit,
+              socialScrapeLimit: cfg.socialScrapeLimit,
+              canViewMacros: Boolean(cfg.canViewMacros),
+              allowedAiModels: cfg.allowedAiModels,
+              tokenLimit,
+              tokenReimburseFrequency,
+            });
+          } else {
+            const hasMonthly = cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0;
+            const hasAnnual = cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0;
+
+            if (hasMonthly || !hasAnnual) {
+              const mPrice = Number(cfg.monthlyPriceDollars || 0);
+              const monthlySlug = `${cleanBaseSlug}-monthly`;
+              plansMap.set(monthlySlug, {
+                id: `${cfg.id || cleanBaseSlug}-monthly`,
+                name: cfg.name,
+                slug: monthlySlug,
+                description: cfg.descriptionMonthly || cfg.description || `Full access to ${cfg.name}, billed monthly`,
+                priceCents: Math.round(mPrice * 100),
+                priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
+                interval: 'MONTH',
+                isFree: false,
+                badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
+                saveBadge: '',
+                buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+                buttonTheme: 'green',
+                features: planFeatures,
+                aiRecipeLimit: cfg.aiRecipeLimit,
+                recipeLibraryLimit: cfg.recipeLibraryLimit,
+                socialScrapeLimit: cfg.socialScrapeLimit,
+                canViewMacros: Boolean(cfg.canViewMacros),
+                allowedAiModels: cfg.allowedAiModels,
+                tokenLimit,
+                tokenReimburseFrequency,
+              });
+            }
+
+            if (hasAnnual) {
+              const aPrice = Number(cfg.annualPriceDollars || 0);
+              const annualSlug = `${cleanBaseSlug}-annual`;
+              const mEquivalent = (aPrice / 12).toFixed(2);
+              plansMap.set(annualSlug, {
+                id: `${cfg.id || cleanBaseSlug}-annual`,
+                name: cfg.name,
+                slug: annualSlug,
+                description: cfg.descriptionAnnual || cfg.description || `Best value - all ${cfg.name} features, billed annually`,
+                priceCents: Math.round(aPrice * 100),
+                priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
+                interval: 'YEAR',
+                isFree: false,
+                badge: cfg.trialBadge || cfg.annualBadge || 'Best Value',
+                saveBadge: cfg.annualBadge || '',
+                subPrice: `${currencySymbol}${mEquivalent}/month`,
+                strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
+                buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+                buttonTheme: 'green',
+                features: planFeatures,
+                aiRecipeLimit: cfg.aiRecipeLimit,
+                recipeLibraryLimit: cfg.recipeLibraryLimit,
+                socialScrapeLimit: cfg.socialScrapeLimit,
+                canViewMacros: Boolean(cfg.canViewMacros),
+                allowedAiModels: cfg.allowedAiModels,
+                tokenLimit,
+                tokenReimburseFrequency,
+              });
+            }
+          }
+        });
+      }
+    } catch (e) {}
+
+    const dynamicPlans = Array.from(plansMap.values());
+    plansRef.current = dynamicPlans;
+    setPlans(dynamicPlans);
+  }, [currencySymbol, t]);
+
   const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem): boolean => {
     if (!user) return false;
 
@@ -253,14 +391,6 @@ export default function ProfilePage() {
       return true;
     }
 
-    const isUserFree = !cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || cleanUserPlan.includes('free');
-    if (isUserFree && plan.isFree) {
-      const defaultSlug = typeof window !== 'undefined' ? localStorage.getItem('zecratary_default_plan_slug') || 'taster' : 'taster';
-      if (!cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || planSlug === defaultSlug || planId === defaultSlug || cleanUserPlan === planSlug) {
-        return true;
-      }
-    }
-
     const userInterval = (rawUser.planInterval || (cleanUserPlan.includes('annual') || cleanUserPlan.includes('year') ? 'YEAR' : cleanUserPlan.includes('monthly') || cleanUserPlan.includes('month') ? 'MONTH' : '')).toUpperCase();
     const planInterval = (plan.interval || '').toUpperCase();
 
@@ -271,6 +401,14 @@ export default function ProfilePage() {
       if (plan.isFree) return true;
       if (userInterval && planInterval) return userInterval === planInterval;
       return true;
+    }
+
+    const isUserFree = !cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || cleanUserPlan.includes('free');
+    if (isUserFree && plan.isFree) {
+      const defaultSlug = typeof window !== 'undefined' ? localStorage.getItem('zecratary_default_plan_slug') || 'taster' : 'taster';
+      if (planSlug === defaultSlug || planId === defaultSlug || cleanUserPlan === planSlug) {
+        return true;
+      }
     }
 
     return false;
@@ -312,203 +450,12 @@ export default function ProfilePage() {
     } catch (_) {}
   }, []);
 
-  // Synchronize available subscription plans dynamically from /admin/plans & storage
-  const syncPlansFromAdmin = useCallback(async () => {
-    if (isFetchingPlansRef.current) return;
-    isFetchingPlansRef.current = true;
-
-    try {
-      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const serverConfigs = Array.isArray(data) ? data : (data.configs || data.plans || data.packages);
-        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
-          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
-        }
-      }
-    } catch (_) {}
-    finally {
-      isFetchingPlansRef.current = false;
-    }
-
-    const plansMap = new Map<string, SubscriptionPlanItem>();
-
-    try {
-      const rawConfigs = typeof window !== 'undefined' ? localStorage.getItem('zecratary_subscription_configs') : null;
-      let configs: any[] = [];
-      if (rawConfigs) {
-        const parsed = JSON.parse(rawConfigs);
-        if (Array.isArray(parsed)) configs = parsed;
-      }
-
-      // Check if any free plan exists in custom configs
-      const hasFree = configs.some((cfg: any) => 
-        cfg && (
-          cfg.isFree === true || 
-          cfg.slug === 'taster' || 
-          cfg.id === 'preset_taster' || 
-          (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0)
-        )
-      );
-
-      // If no free plan was configured in storage or server, dynamically prepend the system default free plan
-      if (!hasFree) {
-        configs.unshift({
-          id: SYSTEM_DEFAULT_FREE_PLAN.id,
-          name: SYSTEM_DEFAULT_FREE_PLAN.name,
-          slug: SYSTEM_DEFAULT_FREE_PLAN.slug,
-          isFree: true,
-          isDefault: true,
-          monthlyPriceDollars: 0,
-          annualPriceDollars: 0,
-          monthlyBadge: '',
-          annualBadge: '',
-          trialBadge: '',
-          descriptionMonthly: SYSTEM_DEFAULT_FREE_PLAN.description,
-          descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
-          buttonText: t('switchToFreeBtn') || 'Switch to Free',
-          features: SYSTEM_DEFAULT_FREE_PLAN.features,
-          tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
-          tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
-          aiRecipeLimit: SYSTEM_DEFAULT_FREE_PLAN.aiRecipeLimit,
-          recipeLibraryLimit: SYSTEM_DEFAULT_FREE_PLAN.recipeLibraryLimit,
-          socialScrapeLimit: SYSTEM_DEFAULT_FREE_PLAN.socialScrapeLimit,
-          canViewMacros: SYSTEM_DEFAULT_FREE_PLAN.canViewMacros,
-          allowedAiModels: SYSTEM_DEFAULT_FREE_PLAN.allowedAiModels
-        });
-      }
-
-      configs.forEach((cfg: any) => {
-        if (!cfg || !cfg.name) return;
-
-        let planFeatures: string[] = [];
-        if (Array.isArray(cfg.features) && cfg.features.length > 0) {
-          planFeatures = cfg.features.map((f: any) => String(f).trim()).filter(Boolean);
-        } else if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim()) {
-          planFeatures = cfg.featuresText.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
-        } else if (typeof cfg.descriptionMonthly === 'string' && cfg.descriptionMonthly.trim()) {
-          planFeatures = [cfg.descriptionMonthly.trim()];
-        }
-
-        const isFree = Boolean(
-          cfg.isFree || 
-          ((Number(cfg.monthlyPriceDollars) === 0 || cfg.monthlyPriceDollars === undefined) && 
-           (Number(cfg.annualPriceDollars) === 0 || cfg.annualPriceDollars === undefined))
-        );
-
-        const rawSlug = (cfg.slug || cfg.id || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
-        const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
-        const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
-        const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
-
-        if (isFree) {
-          const freeSlug = cleanBaseSlug || 'free';
-          plansMap.set(freeSlug, {
-            id: cfg.id || freeSlug,
-            name: cfg.name,
-            slug: freeSlug,
-            description: cfg.descriptionMonthly || cfg.descriptionAnnual || cfg.description || 'Free tier with standard features',
-            priceCents: 0,
-            priceFormatted: 'Free',
-            interval: 'MONTH',
-            isFree: true,
-            badge: cfg.badge || cfg.monthlyBadge || '',
-            saveBadge: '',
-            buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
-            buttonTheme: 'orange',
-            features: planFeatures,
-            aiRecipeLimit: cfg.aiRecipeLimit,
-            recipeLibraryLimit: cfg.recipeLibraryLimit,
-            socialScrapeLimit: cfg.socialScrapeLimit,
-            canViewMacros: Boolean(cfg.canViewMacros),
-            allowedAiModels: cfg.allowedAiModels,
-            tokenLimit,
-            tokenReimburseFrequency,
-          });
-        } else {
-          const hasMonthly = cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0;
-          const hasAnnual = cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0;
-
-          if (hasMonthly || !hasAnnual) {
-            const mPrice = Number(cfg.monthlyPriceDollars || 0);
-            const monthlySlug = `${cleanBaseSlug}-monthly`;
-            plansMap.set(monthlySlug, {
-              id: `${cfg.id || cleanBaseSlug}-monthly`,
-              name: cfg.name,
-              slug: monthlySlug,
-              description: cfg.descriptionMonthly || cfg.description || `Full access to ${cfg.name}, billed monthly`,
-              priceCents: Math.round(mPrice * 100),
-              priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
-              interval: 'MONTH',
-              isFree: false,
-              badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
-              saveBadge: '',
-              buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-              buttonTheme: 'green',
-              features: planFeatures,
-              aiRecipeLimit: cfg.aiRecipeLimit,
-              recipeLibraryLimit: cfg.recipeLibraryLimit,
-              socialScrapeLimit: cfg.socialScrapeLimit,
-              canViewMacros: Boolean(cfg.canViewMacros),
-              allowedAiModels: cfg.allowedAiModels,
-              tokenLimit,
-              tokenReimburseFrequency,
-            });
-          }
-
-          if (hasAnnual) {
-            const aPrice = Number(cfg.annualPriceDollars || 0);
-            const annualSlug = `${cleanBaseSlug}-annual`;
-            const mEquivalent = (aPrice / 12).toFixed(2);
-            plansMap.set(annualSlug, {
-              id: `${cfg.id || cleanBaseSlug}-annual`,
-              name: cfg.name,
-              slug: annualSlug,
-              description: cfg.descriptionAnnual || cfg.description || `Best value - all ${cfg.name} features, billed annually`,
-              priceCents: Math.round(aPrice * 100),
-              priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
-              interval: 'YEAR',
-              isFree: false,
-              badge: cfg.trialBadge || cfg.annualBadge || 'Best Value',
-              saveBadge: cfg.annualBadge || '',
-              subPrice: `${currencySymbol}${mEquivalent}/month`,
-              strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
-              buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-              buttonTheme: 'green',
-              features: planFeatures,
-              aiRecipeLimit: cfg.aiRecipeLimit,
-              recipeLibraryLimit: cfg.recipeLibraryLimit,
-              socialScrapeLimit: cfg.socialScrapeLimit,
-              canViewMacros: Boolean(cfg.canViewMacros),
-              allowedAiModels: cfg.allowedAiModels,
-              tokenLimit,
-              tokenReimburseFrequency,
-            });
-          }
-        }
-      });
-    } catch (e) {}
-
-    const dynamicPlans = Array.from(plansMap.values());
-    plansRef.current = dynamicPlans;
-    setPlans(dynamicPlans);
-
-    const rawUser = typeof window !== 'undefined' ? localStorage.getItem('zecratary_current_user') : null;
-    if (rawUser) {
-      try {
-        const u = JSON.parse(rawUser);
-        const uPlan = sanitizeSinglePlan(u.subscriptionPlan || u.subscriptionTier || u.planSlug || '');
-        syncActivePlanTokens(uPlan, dynamicPlans);
-      } catch (_) {}
-    }
-  }, [currencySymbol, syncActivePlanTokens, t]);
-
   const reloadActiveUser = useCallback(() => {
     initAuthStorage();
     let active = getCurrentUser() as ExtendedUser | null;
 
     if (!active && typeof document !== 'undefined') {
-      const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
+      const match = document.cookie.match(/(?:^|;\\s*)zecratary_session=([^;]+)/);
       if (match && match[1]) {
         try {
           const cookieData = JSON.parse(decodeURIComponent(match[1]));
@@ -1861,3 +1808,9 @@ export default function ProfilePage() {
     </div>
   );
 }
+"""
+
+with open(profile_path, 'w', encoding='utf-8') as f:
+    f.write(content)
+
+print(f"✓ Successfully updated Profile page with dynamic plan syncing at: {profile_path}")
