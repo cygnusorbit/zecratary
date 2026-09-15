@@ -32,23 +32,46 @@ export function applyThemeToDocument(colors: ThemeColors | null | undefined): vo
     root.style.setProperty('--color-emerald', accent);
     root.style.setProperty('--color-accent', accent);
   }
-  if (bg && !isDayMode) {
-    root.style.setProperty('--color-bg', bg);
-    root.style.setProperty('--color-bg-dark', bg);
+
+  if (isDayMode) {
+    root.classList.remove('dark');
+    root.classList.add('light');
+    root.style.setProperty('--color-bg', '#f8fafc');
+    root.style.setProperty('--color-bg-dark', '#f8fafc');
+    root.style.setProperty('--color-card', '#ffffff');
+    root.style.setProperty('--color-card-dark', '#ffffff');
+    root.style.setProperty('--color-border', '#e2e8f0');
+    root.style.setProperty('--color-border-dark', '#e2e8f0');
+    root.style.setProperty('--color-text', '#0f172a');
+    root.style.setProperty('--color-text-secondary', '#64748b');
     if (document.body) {
-      document.body.style.backgroundColor = bg;
+      document.body.style.backgroundColor = '#f8fafc';
+      document.body.style.color = '#0f172a';
     }
-  }
-  if (colors.cardBackground && !isDayMode) {
-    root.style.setProperty('--color-card', colors.cardBackground);
-    root.style.setProperty('--color-card-dark', colors.cardBackground);
-  }
-  if (colors.cardBorder && !isDayMode) {
-    root.style.setProperty('--color-border', colors.cardBorder);
-    root.style.setProperty('--color-border-dark', colors.cardBorder);
-  }
-  if (colors.textSecondary && !isDayMode) {
-    root.style.setProperty('--color-text-secondary', colors.textSecondary);
+  } else {
+    root.classList.remove('light');
+    root.classList.add('dark');
+    if (bg) {
+      root.style.setProperty('--color-bg', bg);
+      root.style.setProperty('--color-bg-dark', bg);
+      if (document.body) {
+        document.body.style.backgroundColor = bg;
+      }
+    }
+    if (colors.cardBackground) {
+      root.style.setProperty('--color-card', colors.cardBackground);
+      root.style.setProperty('--color-card-dark', colors.cardBackground);
+    }
+    if (colors.cardBorder) {
+      root.style.setProperty('--color-border', colors.cardBorder);
+      root.style.setProperty('--color-border-dark', colors.cardBorder);
+    }
+    if (colors.textSecondary) {
+      root.style.setProperty('--color-text-secondary', colors.textSecondary);
+    }
+    if (document.body) {
+      document.body.style.color = '#ffffff';
+    }
   }
 }
 

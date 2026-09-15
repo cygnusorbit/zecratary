@@ -1,4 +1,30 @@
-'use client';
+import os
+import glob
+
+# 1. Locate App Router directory
+candidates = [
+    'apps/web/src/app',
+    'src/app',
+    'apps/web/app',
+    'app'
+]
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/admin/social-login-setting/page.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        app_dir = os.path.dirname(os.path.dirname(os.path.dirname(matches[0])))
+
+if not app_dir:
+    print("❌ Error: Could not locate App Router directory.")
+    exit(1)
+
+target_dir = os.path.join(app_dir, 'admin', 'social-login-setting')
+os.makedirs(target_dir, exist_ok=True)
+target_path = os.path.join(target_dir, 'page.tsx')
+
+social_code = """'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -663,3 +689,9 @@ export default function SocialLoginSettingPage() {
     </div>
   );
 }
+"""
+
+with open(target_path, 'w', encoding='utf-8') as f:
+    f.write(social_code)
+
+print(f"✓ Successfully fixed Day Mode for /admin/social-login-setting at: {target_path}")

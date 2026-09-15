@@ -1,4 +1,35 @@
-'use client';
+import os
+import glob
+
+# 1. Locate App Router directory
+candidates = [
+    'apps/web/src/app',
+    'src/app',
+    'apps/web/app',
+    'app'
+]
+
+app_dir = None
+for c in candidates:
+    if os.path.exists(c) and (
+        os.path.exists(os.path.join(c, 'admin')) or 
+        os.path.exists(os.path.join(c, 'layout.tsx'))
+    ):
+        app_dir = c
+        break
+
+if not app_dir:
+    matches = glob.glob('**/admin/users/page.tsx', recursive=True)
+    if matches:
+        app_dir = os.path.dirname(os.path.dirname(os.path.dirname(matches[0])))
+
+if not app_dir:
+    app_dir = 'apps/web/src/app' if os.path.exists('apps/web/src') else 'src/app'
+
+dest_path = os.path.join(app_dir, 'admin', 'users', 'page.tsx')
+os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+users_page_code = """'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -382,7 +413,7 @@ export default function AdminUserManagementPage() {
         `"${(u.createdAt || '').replace(/"/g, '""')}"`
       ]);
 
-      const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+      const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\\r\\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -2112,3 +2143,9 @@ export default function AdminUserManagementPage() {
     </div>
   );
 }
+"""
+
+with open(dest_path, 'w', encoding='utf-8') as f:
+    f.write(users_page_code)
+
+print(f"✓ Fixed Day Mode on /admin/users page at: {dest_path}")

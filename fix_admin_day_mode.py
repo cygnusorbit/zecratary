@@ -1,4 +1,155 @@
-'use client';
+import os
+import glob
+
+# 1. Locate App Router directory
+candidates = ['apps/web/src/app', 'src/app', 'apps/web/app', 'app']
+app_dir = next((c for c in candidates if os.path.exists(c)), None)
+
+if not app_dir:
+    matches = glob.glob('**/admin/page.tsx', recursive=True)
+    matches = [m for m in matches if 'node_modules' not in m and '.next' not in m]
+    if matches:
+        app_dir = os.path.dirname(os.path.dirname(matches[0]))
+
+if not app_dir:
+    print("❌ Error: Could not locate App Router directory.")
+    exit(1)
+
+base_dir = os.path.dirname(app_dir)
+lib_dir = os.path.join(base_dir, 'lib')
+os.makedirs(lib_dir, exist_ok=True)
+
+# 2. Update lib/themeConfig.ts to ensure clean Day/Night mode token switching
+theme_config_path = os.path.join(lib_dir, 'themeConfig.ts')
+theme_config_code = """export interface ThemeColors {
+  primary?: string;
+  primaryColor?: string;
+  primaryHover?: string;
+  accentEmerald?: string;
+  accentColor?: string;
+  accent?: string;
+  backgroundColor?: string;
+  backgroundDark?: string;
+  cardBackground?: string;
+  cardBorder?: string;
+  textSecondary?: string;
+}
+
+export function applyThemeToDocument(colors: ThemeColors | null | undefined): void {
+  if (!colors || typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const isDayMode = localStorage.getItem('zecratary_theme_mode') === 'light';
+
+  const primary = colors.primary || colors.primaryColor;
+  const primaryHover = colors.primaryHover;
+  const accent = colors.accentEmerald || colors.accentColor || colors.accent;
+  const bg = colors.backgroundColor || colors.backgroundDark;
+
+  if (primary) {
+    root.style.setProperty('--color-primary', primary);
+  }
+  if (primaryHover) {
+    root.style.setProperty('--color-primary-hover', primaryHover);
+  }
+  if (accent) {
+    root.style.setProperty('--color-emerald', accent);
+    root.style.setProperty('--color-accent', accent);
+  }
+
+  if (isDayMode) {
+    root.classList.remove('dark');
+    root.classList.add('light');
+    root.style.setProperty('--color-bg', '#f8fafc');
+    root.style.setProperty('--color-bg-dark', '#f8fafc');
+    root.style.setProperty('--color-card', '#ffffff');
+    root.style.setProperty('--color-card-dark', '#ffffff');
+    root.style.setProperty('--color-border', '#e2e8f0');
+    root.style.setProperty('--color-border-dark', '#e2e8f0');
+    root.style.setProperty('--color-text', '#0f172a');
+    root.style.setProperty('--color-text-secondary', '#64748b');
+    if (document.body) {
+      document.body.style.backgroundColor = '#f8fafc';
+      document.body.style.color = '#0f172a';
+    }
+  } else {
+    root.classList.remove('light');
+    root.classList.add('dark');
+    if (bg) {
+      root.style.setProperty('--color-bg', bg);
+      root.style.setProperty('--color-bg-dark', bg);
+      if (document.body) {
+        document.body.style.backgroundColor = bg;
+      }
+    }
+    if (colors.cardBackground) {
+      root.style.setProperty('--color-card', colors.cardBackground);
+      root.style.setProperty('--color-card-dark', colors.cardBackground);
+    }
+    if (colors.cardBorder) {
+      root.style.setProperty('--color-border', colors.cardBorder);
+      root.style.setProperty('--color-border-dark', colors.cardBorder);
+    }
+    if (colors.textSecondary) {
+      root.style.setProperty('--color-text-secondary', colors.textSecondary);
+    }
+    if (document.body) {
+      document.body.style.color = '#ffffff';
+    }
+  }
+}
+
+export function saveThemeColors(colors: ThemeColors): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
+    localStorage.setItem('zecratary_theme_config', JSON.stringify(colors));
+  } catch (_) {}
+
+  applyThemeToDocument(colors);
+  window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: colors }));
+  window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
+  window.dispatchEvent(new Event('storage'));
+
+  try {
+    fetch('/api/system-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeColors: colors })
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+export async function fetchAndApplyServerTheme(): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const cached = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+    if (cached) {
+      applyThemeToDocument(JSON.parse(cached));
+    }
+  } catch (_) {}
+
+  try {
+    const res = await fetch('/api/system-settings', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.settings?.themeColors) {
+        const colors = data.settings.themeColors;
+        localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
+        applyThemeToDocument(colors);
+        window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: colors }));
+      }
+    }
+  } catch (_) {}
+}
+"""
+with open(theme_config_path, 'w', encoding='utf-8') as f:
+    f.write(theme_config_code)
+print(f"✓ Updated themeConfig helper at: {theme_config_path}")
+
+# 3. Update app/admin/page.tsx with Day Mode reactivity and Localization
+admin_page_path = os.path.join(app_dir, 'admin', 'page.tsx')
+admin_page_code = """'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -1151,3 +1302,10 @@ export default function AdminSettingsPage() {
     </div>
   );
 }
+"""
+
+with open(admin_page_path, 'w', encoding='utf-8') as f:
+    f.write(admin_page_code)
+print(f"✓ Fixed Day Mode on /admin page at: {admin_page_path}")
+
+print("\n🚀 /admin Day Mode fix applied successfully!")
