@@ -1,102 +1,6 @@
 {
   "admin@foodieprep.com": [
     {
-      "id": "rec_1789446277758_t4lp",
-      "userId": "usr_admin_default",
-      "createdBy": "admin@foodieprep.com",
-      "creatorName": "Administrator",
-      "title": "Mayonnaise",
-      "name": "Mayonnaise",
-      "imageUrl": "/uploads/recipes/import-1789446277739-9azxyg.jpg",
-      "image": "/uploads/recipes/import-1789446277739-9azxyg.jpg",
-      "category": "Main Dish",
-      "recipeType": "Main Dish",
-      "tags": [
-        "Main Dish",
-        "Imported"
-      ],
-      "servings": 4,
-      "prepTimeMinutes": 20,
-      "cookTimeMinutes": 25,
-      "prepTime": "20 mins",
-      "cookTime": "25 mins",
-      "ingredients": [
-        {
-          "id": "ing_1789446277751_0",
-          "amount": "1",
-          "quantity": "1",
-          "unit": "unit",
-          "item": "egg yolk (from a large egg (~50 - 55g / 2 oz), fridge cold is fine)",
-          "name": "egg yolk (from a large egg (~50 - 55g / 2 oz), fridge cold is fine)",
-          "category": "Meat and Seafood"
-        },
-        {
-          "id": "ing_1789446277751_1",
-          "amount": "1 1/2",
-          "quantity": "1 1/2",
-          "unit": "tsp",
-          "item": "lemon juice (or white wine vinegar or apple cider vinegar, plus more as desired)",
-          "name": "lemon juice (or white wine vinegar or apple cider vinegar, plus more as desired)",
-          "category": "Produce"
-        },
-        {
-          "id": "ing_1789446277751_2",
-          "amount": "1/2",
-          "quantity": "1/2",
-          "unit": "tsp",
-          "item": "Dijon mustard ((substitute yellow mustard, not hot English mustard))",
-          "name": "Dijon mustard ((substitute yellow mustard, not hot English mustard))",
-          "category": "Condiments and Sauces"
-        },
-        {
-          "id": "ing_1789446277751_3",
-          "amount": "1/4",
-          "quantity": "1/4",
-          "unit": "tsp",
-          "item": "heaped cooking salt / kosher salt",
-          "name": "heaped cooking salt / kosher salt",
-          "category": "Pantry Staples"
-        },
-        {
-          "id": "ing_1789446277751_4",
-          "amount": "1",
-          "quantity": "1",
-          "unit": "unit",
-          "item": "Pinch white pepper ((substitute black pepper - but they will be visible))",
-          "name": "Pinch white pepper ((substitute black pepper - but they will be visible))",
-          "category": "Produce"
-        },
-        {
-          "id": "ing_1789446277751_5",
-          "amount": "2/3",
-          "quantity": "2/3",
-          "unit": "cup",
-          "item": "grapeseed oil or other plain flavoured oil (, or up to 50% extra virgin olive oil (Note 1))",
-          "name": "grapeseed oil or other plain flavoured oil (, or up to 50% extra virgin olive oil (Note 1))",
-          "category": "Condiments and Sauces"
-        }
-      ],
-      "instructions": [
-        "Mix yolk - Use a small to medium bowl. If it's too big, the mixture will be too thinly spread at the start for the yolk and oil to catch on the beater. Place everything except the oil in a bowl. Give it a quick beat with an electric beater to combine the ingredients.",
-        "Slow pour and constant beating - With the electric beater running on medium-high (speed 8 of 10), start pouring in the oil in a thin, steady stream. Aim for the beaters so it's mixed in straight away and move the beater around the bowl as needed to beat the oil in. Continue with the remaining oil in the same thin stream, pausing the pour whenever needed to give the mayonnaise a chance to catch up and absorb the oil before adding more.",
-        "Finish by hand - Stop beating once all the oil is added and beaten in, do not keep beating unnecessarily (it can make it split). Use a rubber spatula to scoop around the bowl to catch any residual oil splatters and mix it in.",
-        "Voila! Homemade mayonnaise! It should be the consistency of softened butter. Use as you do shop-bought mayonnaise, though it's so beautiful you could even just spread it on warm bread like butter (Try it. It's amazing!)",
-        "Follow the same steps as the electric beater but use a hand whisk instead. While constantly whisking, pour the oil in a thin steady stream onto the spot where the whisk is moving. Set your bowl on a damp tea towel to stop it from moving."
-      ],
-      "steps": [
-        "Mix yolk - Use a small to medium bowl. If it's too big, the mixture will be too thinly spread at the start for the yolk and oil to catch on the beater. Place everything except the oil in a bowl. Give it a quick beat with an electric beater to combine the ingredients.",
-        "Slow pour and constant beating - With the electric beater running on medium-high (speed 8 of 10), start pouring in the oil in a thin, steady stream. Aim for the beaters so it's mixed in straight away and move the beater around the bowl as needed to beat the oil in. Continue with the remaining oil in the same thin stream, pausing the pour whenever needed to give the mayonnaise a chance to catch up and absorb the oil before adding more.",
-        "Finish by hand - Stop beating once all the oil is added and beaten in, do not keep beating unnecessarily (it can make it split). Use a rubber spatula to scoop around the bowl to catch any residual oil splatters and mix it in.",
-        "Voila! Homemade mayonnaise! It should be the consistency of softened butter. Use as you do shop-bought mayonnaise, though it's so beautiful you could even just spread it on warm bread like butter (Try it. It's amazing!)",
-        "Follow the same steps as the electric beater but use a hand whisk instead. While constantly whisking, pour the oil in a thin steady stream onto the spot where the whisk is moving. Set your bowl on a damp tea towel to stop it from moving."
-      ],
-      "sourceUrl": "https://www.recipetineats.com/mayonnaise-recipe/",
-      "isFavorite": false,
-      "isCooked": false,
-      "rating": 0,
-      "createdAt": "2026-09-15T04:24:37.758Z"
-    },
-    {
       "id": "rec_1789446039870_bm1m",
       "userId": "usr_admin_1",
       "createdBy": "admin@foodieprep.com",
@@ -255,6 +159,102 @@
       "isCooked": false,
       "rating": 0,
       "createdAt": "2026-09-15T04:20:39.870Z"
+    },
+    {
+      "id": "rec_1789446277758_t4lp",
+      "userId": "usr_admin_default",
+      "createdBy": "admin@foodieprep.com",
+      "creatorName": "Administrator",
+      "title": "Mayonnaise",
+      "name": "Mayonnaise",
+      "imageUrl": "/uploads/recipes/import-1789446277739-9azxyg.jpg",
+      "image": "/uploads/recipes/import-1789446277739-9azxyg.jpg",
+      "category": "Main Dish",
+      "recipeType": "Main Dish",
+      "tags": [
+        "Main Dish",
+        "Imported"
+      ],
+      "servings": 4,
+      "prepTimeMinutes": 20,
+      "cookTimeMinutes": 25,
+      "prepTime": "20 mins",
+      "cookTime": "25 mins",
+      "ingredients": [
+        {
+          "id": "ing_1789446277751_0",
+          "amount": "1",
+          "quantity": "1",
+          "unit": "unit",
+          "item": "egg yolk (from a large egg (~50 - 55g / 2 oz), fridge cold is fine)",
+          "name": "egg yolk (from a large egg (~50 - 55g / 2 oz), fridge cold is fine)",
+          "category": "Meat and Seafood"
+        },
+        {
+          "id": "ing_1789446277751_1",
+          "amount": "1 1/2",
+          "quantity": "1 1/2",
+          "unit": "tsp",
+          "item": "lemon juice (or white wine vinegar or apple cider vinegar, plus more as desired)",
+          "name": "lemon juice (or white wine vinegar or apple cider vinegar, plus more as desired)",
+          "category": "Produce"
+        },
+        {
+          "id": "ing_1789446277751_2",
+          "amount": "1/2",
+          "quantity": "1/2",
+          "unit": "tsp",
+          "item": "Dijon mustard ((substitute yellow mustard, not hot English mustard))",
+          "name": "Dijon mustard ((substitute yellow mustard, not hot English mustard))",
+          "category": "Condiments and Sauces"
+        },
+        {
+          "id": "ing_1789446277751_3",
+          "amount": "1/4",
+          "quantity": "1/4",
+          "unit": "tsp",
+          "item": "heaped cooking salt / kosher salt",
+          "name": "heaped cooking salt / kosher salt",
+          "category": "Pantry Staples"
+        },
+        {
+          "id": "ing_1789446277751_4",
+          "amount": "1",
+          "quantity": "1",
+          "unit": "unit",
+          "item": "Pinch white pepper ((substitute black pepper - but they will be visible))",
+          "name": "Pinch white pepper ((substitute black pepper - but they will be visible))",
+          "category": "Produce"
+        },
+        {
+          "id": "ing_1789446277751_5",
+          "amount": "2/3",
+          "quantity": "2/3",
+          "unit": "cup",
+          "item": "grapeseed oil or other plain flavoured oil (, or up to 50% extra virgin olive oil (Note 1))",
+          "name": "grapeseed oil or other plain flavoured oil (, or up to 50% extra virgin olive oil (Note 1))",
+          "category": "Condiments and Sauces"
+        }
+      ],
+      "instructions": [
+        "Mix yolk - Use a small to medium bowl. If it's too big, the mixture will be too thinly spread at the start for the yolk and oil to catch on the beater. Place everything except the oil in a bowl. Give it a quick beat with an electric beater to combine the ingredients.",
+        "Slow pour and constant beating - With the electric beater running on medium-high (speed 8 of 10), start pouring in the oil in a thin, steady stream. Aim for the beaters so it's mixed in straight away and move the beater around the bowl as needed to beat the oil in. Continue with the remaining oil in the same thin stream, pausing the pour whenever needed to give the mayonnaise a chance to catch up and absorb the oil before adding more.",
+        "Finish by hand - Stop beating once all the oil is added and beaten in, do not keep beating unnecessarily (it can make it split). Use a rubber spatula to scoop around the bowl to catch any residual oil splatters and mix it in.",
+        "Voila! Homemade mayonnaise! It should be the consistency of softened butter. Use as you do shop-bought mayonnaise, though it's so beautiful you could even just spread it on warm bread like butter (Try it. It's amazing!)",
+        "Follow the same steps as the electric beater but use a hand whisk instead. While constantly whisking, pour the oil in a thin steady stream onto the spot where the whisk is moving. Set your bowl on a damp tea towel to stop it from moving."
+      ],
+      "steps": [
+        "Mix yolk - Use a small to medium bowl. If it's too big, the mixture will be too thinly spread at the start for the yolk and oil to catch on the beater. Place everything except the oil in a bowl. Give it a quick beat with an electric beater to combine the ingredients.",
+        "Slow pour and constant beating - With the electric beater running on medium-high (speed 8 of 10), start pouring in the oil in a thin, steady stream. Aim for the beaters so it's mixed in straight away and move the beater around the bowl as needed to beat the oil in. Continue with the remaining oil in the same thin stream, pausing the pour whenever needed to give the mayonnaise a chance to catch up and absorb the oil before adding more.",
+        "Finish by hand - Stop beating once all the oil is added and beaten in, do not keep beating unnecessarily (it can make it split). Use a rubber spatula to scoop around the bowl to catch any residual oil splatters and mix it in.",
+        "Voila! Homemade mayonnaise! It should be the consistency of softened butter. Use as you do shop-bought mayonnaise, though it's so beautiful you could even just spread it on warm bread like butter (Try it. It's amazing!)",
+        "Follow the same steps as the electric beater but use a hand whisk instead. While constantly whisking, pour the oil in a thin steady stream onto the spot where the whisk is moving. Set your bowl on a damp tea towel to stop it from moving."
+      ],
+      "sourceUrl": "https://www.recipetineats.com/mayonnaise-recipe/",
+      "isFavorite": false,
+      "isCooked": false,
+      "rating": 0,
+      "createdAt": "2026-09-15T04:24:37.758Z"
     },
     {
       "id": "rec_1789446701520_tm25",

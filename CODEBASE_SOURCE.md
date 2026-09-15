@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.0.6",
+  "version": "7.0.7",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -105,7 +105,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.0.6",
+  "version": "7.0.7",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -1151,6 +1151,11 @@ body:has(#register-page-root) [class*="h-screen"] {
   border: none !important;
 }
 
+
+/* Dynamic Sidebar Navigation Icon Token */
+:root {
+  --color-sidebar-icon: #10b981;
+}
 
 ```
 
@@ -11418,7 +11423,7 @@ export default function SavedRecipesPage() {
       <div className="flex items-center justify-between pt-2">
         <div>
           <h1 className="text-3xl font-black text-[#E05638] tracking-tight">Saved Recipes</h1>
-          <p className="text-emerald-400 text-xs mt-1 font-semibold">Your collection of favorite recipes ({recipes.length})</p>
+          <p className="text-[var(--color-sidebar-icon,#10b981)] text-xs mt-1 font-semibold">Your collection of favorite recipes ({recipes.length})</p>
         </div>
         <Link className="bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg shadow-[#E05638]/20" href="/manual">
           <UploadCloud className="h-4 w-4"/> Create Recipe
@@ -11438,7 +11443,7 @@ export default function SavedRecipesPage() {
               className="w-full bg-[#070b13] border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-[#E05638]"
             />
           </div>
-          <button className="border border-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 bg-[#070b13] text-emerald-400">
+          <button className="border border-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 bg-[#070b13] text-[var(--color-sidebar-icon,#10b981)]">
             <SlidersHorizontal className="h-4 w-4"/> Filter
           </button>
         </div>
@@ -11630,7 +11635,7 @@ export default function SavedRecipesPage() {
                           <div className="absolute left-0 top-full mt-2 w-64 bg-[#0d131f] border border-slate-700/80 rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in" onClick={(e) => e.stopPropagation()}>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1.5 flex items-center justify-between">
                               <span>Select Cookbook</span>
-                              <Link className="text-emerald-400 hover:underline" href="/books">Manage</Link>
+                              <Link className="text-[var(--color-sidebar-icon,#10b981)] hover:underline" href="/books">Manage</Link>
                             </div>
 
                             <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
@@ -11808,7 +11813,7 @@ export default function SavedRecipesPage() {
                         </div>
                       )}
                       {selectedRecipe.note && !isNoteOpen && (
-                        <p className="text-xs text-emerald-400 italic">Note: "{selectedRecipe.note}"</p>
+                        <p className="text-xs text-[var(--color-sidebar-icon,#10b981)] italic">Note: "{selectedRecipe.note}"</p>
                       )}
                     </div>
                   </div>
@@ -11830,7 +11835,7 @@ export default function SavedRecipesPage() {
                         </span>
                       </a>
                     </div>
-                    <p className="text-emerald-500 italic text-[11px] font-medium">Recipe imported from external source</p>
+                    <p className="text-[var(--color-sidebar-icon,#10b981)] italic text-[11px] font-medium">Recipe imported from external source</p>
                   </div>
 
                   <div className="border-t border-slate-800/80 mx-5" />
@@ -12206,7 +12211,7 @@ export default function SavedRecipesPage() {
                             </select>
 
                             {isReorderingIngredients ? (
-                              <div className="p-2 text-emerald-400 cursor-grab"><GripVertical className="h-4 w-4"/></div>
+                              <div className="p-2 text-[var(--color-sidebar-icon,#10b981)] cursor-grab"><GripVertical className="h-4 w-4"/></div>
                             ) : (
                               <button
                                 type="button"
@@ -12298,7 +12303,7 @@ export default function SavedRecipesPage() {
                             />
 
                             {isReorderingSteps ? (
-                              <div className="p-2 text-emerald-400 cursor-grab mt-1"><GripVertical className="h-4 w-4"/></div>
+                              <div className="p-2 text-[var(--color-sidebar-icon,#10b981)] cursor-grab mt-1"><GripVertical className="h-4 w-4"/></div>
                             ) : (
                               <button
                                 type="button"
@@ -12576,7 +12581,9 @@ import {
   Utensils, 
   Tag, 
   Key,
-  Languages
+  Languages,
+  LayoutGrid,
+  BookOpen
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { 
@@ -12596,6 +12603,7 @@ const PRESET_PALETTES = [
     primary: '#E05638', 
     primaryHover: '#c94529', 
     accent: '#10b981', 
+    sidebarIcon: '#10b981',
     background: '#070b13',
     card: '#0b0f17',
     border: '#1e293b',
@@ -12606,6 +12614,7 @@ const PRESET_PALETTES = [
     primary: '#10b981', 
     primaryHover: '#059669', 
     accent: '#3b82f6', 
+    sidebarIcon: '#10b981',
     background: '#06130d',
     card: '#0a1d14',
     border: '#133526',
@@ -12616,6 +12625,7 @@ const PRESET_PALETTES = [
     primary: '#2563eb', 
     primaryHover: '#1d4ed8', 
     accent: '#10b981', 
+    sidebarIcon: '#38bdf8',
     background: '#080d1a',
     card: '#0c152b',
     border: '#1e293b',
@@ -12626,6 +12636,7 @@ const PRESET_PALETTES = [
     primary: '#8b5cf6', 
     primaryHover: '#7c3aed', 
     accent: '#ec4899', 
+    sidebarIcon: '#c084fc',
     background: '#0f081c',
     card: '#180d2e',
     border: '#2a1650',
@@ -12636,6 +12647,7 @@ const PRESET_PALETTES = [
     primary: '#f59e0b', 
     primaryHover: '#d97706', 
     accent: '#10b981', 
+    sidebarIcon: '#fbbf24',
     background: '#120d04',
     card: '#1c1507',
     border: '#36270a',
@@ -12646,6 +12658,7 @@ const PRESET_PALETTES = [
     primary: '#38bdf8', 
     primaryHover: '#0284c7', 
     accent: '#a855f7', 
+    sidebarIcon: '#38bdf8',
     background: '#020617',
     card: '#080e22',
     border: '#172554',
@@ -12663,6 +12676,7 @@ export default function AdminSettingsPage() {
     return fallback;
   }, [translate]);
 
+  const [activeTab, setActiveTab] = useState<'branding' | 'theme'>('branding');
   const [user, setUser] = useState<User | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [saved, setSaved] = useState<boolean>(false);
@@ -12678,6 +12692,7 @@ export default function AdminSettingsPage() {
   const [primaryColor, setPrimaryColor] = useState<string>('#E05638');
   const [primaryHoverColor, setPrimaryHoverColor] = useState<string>('#c94529');
   const [accentColor, setAccentColor] = useState<string>('#10b981');
+  const [sidebarIconColor, setSidebarIconColor] = useState<string>('#10b981');
   const [backgroundColor, setBackgroundColor] = useState<string>('#070b13');
   const [cardBackgroundColor, setCardBackgroundColor] = useState<string>('#0b0f17');
   const [cardBorderColor, setCardBorderColor] = useState<string>('#1e293b');
@@ -12686,11 +12701,12 @@ export default function AdminSettingsPage() {
   const titlebarFileRef = useRef<HTMLInputElement>(null);
   const faviconFileRef = useRef<HTMLInputElement>(null);
 
-  // Maintain active colors in a ref to decouple mode-switching from the render loop
+  // Decoupled state reference to avoid stale closures in listeners
   const colorsRef = useRef({
     primary: primaryColor,
     primaryHover: primaryHoverColor,
     accent: accentColor,
+    sidebarIcon: sidebarIconColor,
     background: backgroundColor,
     card: cardBackgroundColor,
     border: cardBorderColor,
@@ -12702,17 +12718,19 @@ export default function AdminSettingsPage() {
       primary: primaryColor,
       primaryHover: primaryHoverColor,
       accent: accentColor,
+      sidebarIcon: sidebarIconColor,
       background: backgroundColor,
       card: cardBackgroundColor,
       border: cardBorderColor,
       textSecondary: secondaryTextColor,
     };
-  }, [primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor]);
+  }, [primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor]);
 
   const applyColorsLocally = (
     primary: string, 
     hover: string, 
     accent: string, 
+    sidebarIcon: string,
     bg: string,
     card: string,
     border: string,
@@ -12725,6 +12743,8 @@ export default function AdminSettingsPage() {
       accentEmerald: accent,
       accentColor: accent,
       accent: accent,
+      sidebarIconColor: sidebarIcon,
+      sidebarIcon: sidebarIcon,
       backgroundColor: bg,
       backgroundDark: bg,
       cardBackground: card,
@@ -12758,6 +12778,7 @@ export default function AdminSettingsPage() {
         const p = c.primary || c.primaryColor || '#E05638';
         const ph = c.primaryHover || '#c94529';
         const ac = c.accentEmerald || c.accentColor || c.accent || '#10b981';
+        const sbi = c.sidebarIconColor || c.sidebarIcon || ac || '#10b981';
         const bg = c.backgroundColor || c.backgroundDark || '#070b13';
         const card = c.cardBackground || '#0b0f17';
         const border = c.cardBorder || '#1e293b';
@@ -12766,6 +12787,7 @@ export default function AdminSettingsPage() {
         setPrimaryColor(p);
         setPrimaryHoverColor(ph);
         setAccentColor(ac);
+        setSidebarIconColor(sbi);
         setBackgroundColor(bg);
         setCardBackgroundColor(card);
         setCardBorderColor(border);
@@ -12778,6 +12800,8 @@ export default function AdminSettingsPage() {
           accentEmerald: ac,
           accentColor: ac,
           accent: ac,
+          sidebarIconColor: sbi,
+          sidebarIcon: sbi,
           backgroundColor: bg,
           backgroundDark: bg,
           cardBackground: card,
@@ -12795,6 +12819,7 @@ export default function AdminSettingsPage() {
           const p = tc.primary || tc.primaryColor || '#E05638';
           const ph = tc.primaryHover || '#c94529';
           const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
+          const sbi = tc.sidebarIconColor || tc.sidebarIcon || ac || '#10b981';
           const bg = tc.backgroundColor || tc.backgroundDark || '#070b13';
           const card = tc.cardBackground || '#0b0f17';
           const border = tc.cardBorder || '#1e293b';
@@ -12804,6 +12829,7 @@ export default function AdminSettingsPage() {
             setPrimaryColor(p);
             setPrimaryHoverColor(ph);
             setAccentColor(ac);
+            setSidebarIconColor(sbi);
             setBackgroundColor(bg);
             setCardBackgroundColor(card);
             setCardBorderColor(border);
@@ -12814,6 +12840,8 @@ export default function AdminSettingsPage() {
               primaryColor: p,
               primaryHover: ph,
               accentEmerald: ac,
+              sidebarIconColor: sbi,
+              sidebarIcon: sbi,
               backgroundColor: bg,
               cardBackground: card,
               cardBorder: border,
@@ -12825,7 +12853,7 @@ export default function AdminSettingsPage() {
       .catch(() => {});
   }, []);
 
-  // Theme mode listener without state reset cycle
+  // Theme mode change listener
   useEffect(() => {
     const handleModeChange = () => {
       try {
@@ -12839,6 +12867,8 @@ export default function AdminSettingsPage() {
           accentEmerald: cur.accent,
           accentColor: cur.accent,
           accent: cur.accent,
+          sidebarIconColor: cur.sidebarIcon,
+          sidebarIcon: cur.sidebarIcon,
           backgroundColor: cur.background,
           backgroundDark: cur.background,
           cardBackground: cur.card,
@@ -12881,6 +12911,7 @@ export default function AdminSettingsPage() {
     setPrimaryColor(preset.primary);
     setPrimaryHoverColor(preset.primaryHover);
     setAccentColor(preset.accent);
+    setSidebarIconColor(preset.sidebarIcon || preset.accent);
     setBackgroundColor(preset.background);
     setCardBackgroundColor(preset.card);
     setCardBorderColor(preset.border);
@@ -12890,6 +12921,7 @@ export default function AdminSettingsPage() {
       preset.primary, 
       preset.primaryHover, 
       preset.accent, 
+      preset.sidebarIcon || preset.accent,
       preset.background,
       preset.card,
       preset.border,
@@ -12916,6 +12948,8 @@ export default function AdminSettingsPage() {
       accentEmerald: accentColor,
       accentColor: accentColor,
       accent: accentColor,
+      sidebarIconColor: sidebarIconColor,
+      sidebarIcon: sidebarIconColor,
       backgroundColor: backgroundColor,
       backgroundDark: backgroundColor,
       cardBackground: cardBackgroundColor,
@@ -12937,6 +12971,7 @@ export default function AdminSettingsPage() {
     const defaultPrimary = '#E05638';
     const defaultPrimaryHover = '#c94529';
     const defaultAccent = '#10b981';
+    const defaultSidebarIcon = '#10b981';
     const defaultBg = '#070b13';
     const defaultCard = '#0b0f17';
     const defaultBorder = '#1e293b';
@@ -12951,6 +12986,7 @@ export default function AdminSettingsPage() {
     setPrimaryColor(defaultPrimary);
     setPrimaryHoverColor(defaultPrimaryHover);
     setAccentColor(defaultAccent);
+    setSidebarIconColor(defaultSidebarIcon);
     setBackgroundColor(defaultBg);
     setCardBackgroundColor(defaultCard);
     setCardBorderColor(defaultBorder);
@@ -12971,6 +13007,8 @@ export default function AdminSettingsPage() {
       accentEmerald: defaultAccent,
       accentColor: defaultAccent,
       accent: defaultAccent,
+      sidebarIconColor: defaultSidebarIcon,
+      sidebarIcon: defaultSidebarIcon,
       backgroundColor: defaultBg,
       backgroundDark: defaultBg,
       cardBackground: defaultCard,
@@ -12989,7 +13027,7 @@ export default function AdminSettingsPage() {
 
   return (
     <div 
-      className="max-w-5xl mx-auto space-y-8 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="max-w-5xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
       style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
     >
       {/* HEADER */}
@@ -13020,700 +13058,836 @@ export default function AdminSettingsPage() {
         )}
       </div>
 
-      
+      {/* TABS NAVIGATION */}
+      <div 
+        className="flex items-center gap-2 border-b pb-3" 
+        style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+      >
+        <button
+          type="button"
+          onClick={() => setActiveTab('branding')}
+          className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer border shadow-xs"
+          style={{
+            backgroundColor: activeTab === 'branding' 
+              ? (isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)') 
+              : 'transparent',
+            borderColor: activeTab === 'branding' 
+              ? (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)') 
+              : 'transparent',
+            color: activeTab === 'branding' 
+              ? 'var(--color-primary, #E05638)' 
+              : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+          }}
+        >
+          <ShieldCheck className="h-4 w-4" />
+          <span>{t('admin.tabBranding', 'Site Identity & Branding')}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('theme')}
+          className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer border shadow-xs"
+          style={{
+            backgroundColor: activeTab === 'theme' 
+              ? (isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)') 
+              : 'transparent',
+            borderColor: activeTab === 'theme' 
+              ? (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)') 
+              : 'transparent',
+            color: activeTab === 'theme' 
+              ? 'var(--color-primary, #E05638)' 
+              : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+          }}
+        >
+          <Palette className="h-4 w-4" />
+          <span>{t('admin.tabTheme', 'Theme')}</span>
+        </button>
+      </div>
 
       <form onSubmit={handleSave} className="space-y-6">
-        {/* SECTION 1: SITE NAME */}
-        <div 
-          className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
-          style={{ 
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
-          }}
-        >
-          <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            {t('admin.appName', 'Application Name')}
-          </h2>
-          <div>
-            <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-              {t('admin.displayName', 'Display Name')}
-            </label>
-            <input 
-              type="text" 
-              value={siteName} 
-              onChange={(e) => setSiteName(e.target.value)} 
-              placeholder="e.g. Zecratary" 
-              className="w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
-              style={{ 
-                backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
-                borderColor: isDayMode ? '#cbd5e1' : '#1e293b', 
-                color: isDayMode ? '#0f172a' : '#ffffff' 
-              }} 
-            />
-          </div>
-        </div>
-
-        {/* SECTION 2: EXTENDED THEME COLOR CONFIGURATION */}
-        <div 
-          className="border rounded-3xl p-6 shadow-xl space-y-6 text-xs" 
-          style={{ 
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
-          }}
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        {/* TAB 1: BRANDING */}
+        <div className={activeTab === 'branding' ? 'space-y-6' : 'hidden'}>
+          {/* APPLICATION NAME */}
+          <div 
+            className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
+            style={{ 
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
+            }}
+          >
+            <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              {t('admin.appName', 'Application Name')}
+            </h2>
             <div>
-              <div className="flex items-center gap-2">
-                <Palette className="h-4 w-4 text-[var(--color-primary)]" />
-                <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  {t('admin.themeSettings', 'Complete Theme Color & Palette Settings')}
-                </h2>
-              </div>
-              <p className="text-[11px] mt-1" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('admin.themeSettingsDesc', 'Customize primary accents, interactive hovers, viewport tones, card surfaces, borders, and typography.')}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.primary', 'Primary')}:</span>
-                <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: primaryColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.accent', 'Accent')}:</span>
-                <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: accentColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.bg', 'Bg')}:</span>
-                <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: backgroundColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.card', 'Card')}:</span>
-                <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: cardBackgroundColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Presets */}
-          <div className="space-y-2">
-            <label className="block font-bold text-[11px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-              {t('admin.coordinatedPalettes', 'Coordinated Palettes & Tones')}
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
-              {PRESET_PALETTES.map((preset) => {
-                const isSelected = primaryColor.toLowerCase() === preset.primary.toLowerCase() && backgroundColor.toLowerCase() === preset.background.toLowerCase();
-                return (
-                  <button
-                    key={preset.name}
-                    type="button"
-                    onClick={() => handleSelectPreset(preset)}
-                    className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1.5 transition text-left cursor-pointer ${
-                      isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
-                    }`}
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                      borderColor: isSelected ? 'var(--color-primary)' : isDayMode ? '#cbd5e1' : '#1e293b'
-                    }}
-                  >
-                    <div className="flex items-center gap-1">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.primary }} />
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.accent }} />
-                      <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.background, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
-                      <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.card, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
-                    </div>
-                    <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                      {preset.name}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Core Colors Group */}
-          <div className="space-y-3 pt-2">
-            <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>
-              {t('admin.brandColors', 'Brand & Interaction Colors')}
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* Primary Color */}
-              <div className="space-y-1.5">
-                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('admin.primaryBrandColor', 'Primary Brand Color')}
-                </label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="color" 
-                    value={primaryColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setPrimaryColor(val);
-                      applyColorsLocally(val, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                    }}
-                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
-                  />
-                  <input 
-                    type="text" 
-                    value={primaryColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setPrimaryColor(val);
-                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                        applyColorsLocally(val, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                      }
-                    }}
-                    placeholder="#E05638"
-                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                  />
-                </div>
-                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('admin.primaryBrandColorDesc', 'Brand highlights, buttons, and headers.')}
-                </span>
-              </div>
-
-              {/* Primary Hover Color */}
-              <div className="space-y-1.5">
-                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('admin.primaryHoverColor', 'Primary Hover Color')}
-                </label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="color" 
-                    value={primaryHoverColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setPrimaryHoverColor(val);
-                      applyColorsLocally(primaryColor, val, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                    }}
-                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
-                  />
-                  <input 
-                    type="text" 
-                    value={primaryHoverColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setPrimaryHoverColor(val);
-                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                        applyColorsLocally(primaryColor, val, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                      }
-                    }}
-                    placeholder="#c94529"
-                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                  />
-                </div>
-                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('admin.primaryHoverColorDesc', 'Hover and focus states for buttons.')}
-                </span>
-              </div>
-
-              {/* Accent Color */}
-              <div className="space-y-1.5">
-                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('admin.accentColor', 'Accent / Success Color')}
-                </label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="color" 
-                    value={accentColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setAccentColor(val);
-                      applyColorsLocally(primaryColor, primaryHoverColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                    }}
-                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
-                  />
-                  <input 
-                    type="text" 
-                    value={accentColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setAccentColor(val);
-                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                        applyColorsLocally(primaryColor, primaryHoverColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                      }
-                    }}
-                    placeholder="#10b981"
-                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                  />
-                </div>
-                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('admin.accentColorDesc', 'Badges, success alerts, and secondary accents.')}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Surfaces & Container Colors Group */}
-          <div className="space-y-3 pt-2">
-            <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>
-              {t('admin.surfacesBordersTypography', 'Surfaces, Borders & Typography')}
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-              {/* Background Color */}
-              <div className="space-y-1.5">
-                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('admin.pageBackground', 'Page Background')}
-                </label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="color" 
-                    value={backgroundColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setBackgroundColor(val);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                    }}
-                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
-                  />
-                  <input 
-                    type="text" 
-                    value={backgroundColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setBackgroundColor(val);
-                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                      }
-                    }}
-                    placeholder="#070b13"
-                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                  />
-                </div>
-                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('admin.pageBackgroundDesc', 'Root viewport background in night mode.')}
-                </span>
-              </div>
-
-              {/* Card / Surface Background */}
-              <div className="space-y-1.5">
-                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('admin.cardBackground', 'Card / Surface Background')}
-                </label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="color" 
-                    value={cardBackgroundColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCardBackgroundColor(val);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
-                    }}
-                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
-                  />
-                  <input 
-                    type="text" 
-                    value={cardBackgroundColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCardBackgroundColor(val);
-                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
-                      }
-                    }}
-                    placeholder="#0b0f17"
-                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                  />
-                </div>
-                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('admin.cardBackgroundDesc', 'Cards, modals, and container panels.')}
-                </span>
-              </div>
-
-              {/* Card / Container Border Color */}
-              <div className="space-y-1.5">
-                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('admin.containerBorderColor', 'Container Border Color')}
-                </label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="color" 
-                    value={cardBorderColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCardBorderColor(val);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
-                    }}
-                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
-                  />
-                  <input 
-                    type="text" 
-                    value={cardBorderColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCardBorderColor(val);
-                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
-                      }
-                    }}
-                    placeholder="#1e293b"
-                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                  />
-                </div>
-                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('admin.containerBorderColorDesc', 'Borders, dividers, and outlines.')}
-                </span>
-              </div>
-
-              {/* Secondary Subtitle Text Color */}
-              <div className="space-y-1.5">
-                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('admin.mutedSubtitleText', 'Muted / Subtitle Text')}
-                </label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="color" 
-                    value={secondaryTextColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSecondaryTextColor(val);
-                      applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
-                    }}
-                    className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                    style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
-                  />
-                  <input 
-                    type="text" 
-                    value={secondaryTextColor} 
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSecondaryTextColor(val);
-                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
-                      }
-                    }}
-                    placeholder="#94a3b8"
-                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                    style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
-                    }}
-                  />
-                </div>
-                <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('admin.mutedSubtitleTextDesc', 'Descriptions and helper captions.')}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Interactive Live Component Preview */}
-          <div className="pt-3 border-t space-y-2" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-            <span className="font-bold text-[11px] block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-              {t('admin.previewTitle', 'Full Interactive Component Preview:')}
-            </span>
-            <div 
-              className="p-5 rounded-3xl border transition-colors space-y-3" 
-              style={{ 
-                backgroundColor: isDayMode ? '#f8fafc' : backgroundColor, 
-                borderColor: isDayMode ? '#cbd5e1' : cardBorderColor 
-              }}
-            >
-              <div 
-                className="p-4 rounded-2xl border transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md"
-                style={{ 
-                  backgroundColor: isDayMode ? '#ffffff' : cardBackgroundColor, 
-                  borderColor: isDayMode ? '#e2e8f0' : cardBorderColor 
-                }}
-              >
-                <div className="space-y-0.5">
-                  <div className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    {t('admin.surfaceCardPreview', 'Surface Card Preview')}
-                  </div>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : secondaryTextColor }}>
-                    {t('admin.surfaceCardPreviewDesc', 'This demonstrates your secondary text color, card surface, and card border.')}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <div 
-                    className="px-2.5 py-1 rounded-xl border text-[10px] font-extrabold flex items-center gap-1"
-                    style={{ 
-                      backgroundColor: `${accentColor}18`, 
-                      borderColor: `${accentColor}40`, 
-                      color: accentColor 
-                    }}
-                  >
-                    <CheckCircle2 className="h-3 w-3" /> {t('common.active', 'Active')}
-                  </div>
-                  <button 
-                    type="button" 
-                    className="px-3.5 py-1.5 rounded-xl text-white font-extrabold text-xs shadow-md transition"
-                    style={{ backgroundColor: primaryColor }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = primaryHoverColor)}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = primaryColor)}
-                  >
-                    {t('common.actionButton', 'Action Button')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* SECTION 3: TITLEBAR BRAND ICON */}
-        <div 
-          className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
-          style={{ 
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
-          }}
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                {t('admin.titlebarIcon', 'Titlebar & Sidebar Brand Icon')}
-              </h2>
-              <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('admin.titlebarIconDesc', 'Upload an image logo. If no image is uploaded or if removed, the system defaults to the emoji below.')}
-              </p>
-            </div>
-            <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border w-fit ${
-              isTitlebarImageActive 
-                ? (isDayMode ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400')
-                : (isDayMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-amber-500/10 border-amber-500/30 text-amber-400')
-            }`}>
-              {isTitlebarImageActive ? t('admin.activeUploadedImage', 'Active: Uploaded Image') : t('admin.activeDefaultEmoji', 'Active: Default Emoji')}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
-            <div className="space-y-2">
-              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('admin.customLogoImage', 'Custom Logo Image (PNG, JPG, SVG, WebP)')}
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('admin.displayName', 'Display Name')}
               </label>
               <input 
-                type="file" 
-                ref={titlebarFileRef} 
-                onChange={(e) => handleFileUpload(e, 'titlebar')} 
-                accept="image/*" 
-                className="hidden" 
+                type="text" 
+                value={siteName} 
+                onChange={(e) => setSiteName(e.target.value)} 
+                placeholder="e.g. Zecratary" 
+                className="w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
+                style={{ 
+                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
+                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b', 
+                  color: isDayMode ? '#0f172a' : '#ffffff' 
+                }} 
               />
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => titlebarFileRef.current?.click()}
-                  className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80"
-                  style={{ 
-                    backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d', 
-                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                >
-                  <Upload className="h-4 w-4" /> {t('common.uploadImage', 'Upload Image')}
-                </button>
-                {titlebarImage && (
-                  <button
-                    type="button"
-                    onClick={() => setTitlebarImage('')}
-                    className={`px-3 py-2 border rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition ${
-                      isDayMode 
-                        ? 'text-red-600 border-red-300 hover:bg-red-50' 
-                        : 'text-red-400 border-red-500/30 hover:bg-red-500/10'
-                    }`}
-                  >
-                    <Trash2 className="h-4 w-4" /> {t('admin.revertToEmoji', 'Revert to Emoji')}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('admin.defaultEmojiFallback', 'Default Emoji (Fallback)')}
-              </label>
-              <div className="flex items-center gap-3">
-                <input 
-                  type="text" 
-                  value={titlebarEmoji} 
-                  onChange={(e) => setTitlebarEmoji(e.target.value)} 
-                  maxLength={4} 
-                  className="w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
-                  style={{ 
-                    backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
-                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b', 
-                    color: isDayMode ? '#0f172a' : '#ffffff' 
-                  }} 
-                />
-                <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('admin.defaultEmojiDesc', 'Used whenever no custom image is supplied.')}
-                </span>
-              </div>
             </div>
           </div>
 
-          <div className="pt-2 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-            <span className="font-bold text-[11px] block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-              {t('admin.sidebarHeaderPreview', 'Sidebar & Header Preview:')}
-            </span>
-            <div 
-              className="flex items-center gap-2.5 p-3 rounded-2xl border w-fit" 
-              style={{ 
-                backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
-                borderColor: isDayMode ? '#e2e8f0' : '#1e293b' 
-              }}
-            >
-              {isTitlebarImageActive ? (
-                <img src={titlebarImage} alt="Titlebar Logo" className="w-7 h-7 object-contain rounded" />
-              ) : (
-                <span className="text-2xl">{titlebarEmoji || DEFAULT_SITE_ICON}</span>
-              )}
-              <span className="text-base font-black tracking-tight text-[var(--color-primary)]">
-                {siteName || DEFAULT_SITE_NAME}
+          {/* TITLEBAR BRAND ICON */}
+          <div 
+            className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
+            style={{ 
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
+            }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {t('admin.titlebarIcon', 'Titlebar & Sidebar Brand Icon')}
+                </h2>
+                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('admin.titlebarIconDesc', 'Upload an image logo. If no image is uploaded or if removed, the system defaults to the emoji below.')}
+                </p>
+              </div>
+              <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border w-fit ${
+                isTitlebarImageActive 
+                  ? (isDayMode ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400')
+                  : (isDayMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-amber-500/10 border-amber-500/30 text-amber-400')
+              }`}>
+                {isTitlebarImageActive ? t('admin.activeUploadedImage', 'Active: Uploaded Image') : t('admin.activeDefaultEmoji', 'Active: Default Emoji')}
               </span>
             </div>
-          </div>
-        </div>
 
-        {/* SECTION 4: FAVICON */}
-        <div 
-          className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
-          style={{ 
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
-          }}
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                {t('admin.browserFavicon', 'Browser Favicon')}
-              </h2>
-              <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('admin.browserFaviconDesc', 'Upload an icon for browser tabs (PNG, ICO, SVG). If no image is uploaded, defaults to emoji.')}
-              </p>
-            </div>
-            <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border w-fit ${
-              isFaviconImageActive 
-                ? (isDayMode ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400')
-                : (isDayMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-amber-500/10 border-amber-500/30 text-amber-400')
-            }`}>
-              {isFaviconImageActive ? t('admin.activeUploadedFavicon', 'Active: Uploaded Favicon') : t('admin.activeDefaultEmoji', 'Active: Default Emoji')}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
-            <div className="space-y-2">
-              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('admin.customFaviconImage', 'Custom Favicon Image (PNG, ICO, SVG, WebP)')}
-              </label>
-              <input 
-                type="file" 
-                ref={faviconFileRef} 
-                onChange={(e) => handleFileUpload(e, 'favicon')} 
-                accept="image/*" 
-                className="hidden" 
-              />
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => faviconFileRef.current?.click()}
-                  className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80"
-                  style={{ 
-                    backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d', 
-                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
-                  }}
-                >
-                  <Upload className="h-4 w-4" /> {t('common.uploadFavicon', 'Upload Favicon')}
-                </button>
-                {faviconImage && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
+              <div className="space-y-2">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.customLogoImage', 'Custom Logo Image (PNG, JPG, SVG, WebP)')}
+                </label>
+                <input 
+                  type="file" 
+                  ref={titlebarFileRef} 
+                  onChange={(e) => handleFileUpload(e, 'titlebar')} 
+                  accept="image/*" 
+                  className="hidden" 
+                />
+                <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setFaviconImage('')}
-                    className={`px-3 py-2 border rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition ${
-                      isDayMode 
-                        ? 'text-red-600 border-red-300 hover:bg-red-50' 
-                        : 'text-red-400 border-red-500/30 hover:bg-red-500/10'
-                    }`}
+                    onClick={() => titlebarFileRef.current?.click()}
+                    className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80"
+                    style={{ 
+                      backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d', 
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
                   >
-                    <Trash2 className="h-4 w-4" /> {t('admin.revertToEmoji', 'Revert to Emoji')}
+                    <Upload className="h-4 w-4" /> {t('common.uploadImage', 'Upload Image')}
                   </button>
-                )}
+                  {titlebarImage && (
+                    <button
+                      type="button"
+                      onClick={() => setTitlebarImage('')}
+                      className={`px-3 py-2 border rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition ${
+                        isDayMode 
+                          ? 'text-red-600 border-red-300 hover:bg-red-50' 
+                          : 'text-red-400 border-red-500/30 hover:bg-red-500/10'
+                      }`}
+                    >
+                      <Trash2 className="h-4 w-4" /> {t('admin.revertToEmoji', 'Revert to Emoji')}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.defaultEmojiFallback', 'Default Emoji (Fallback)')}
+                </label>
+                <div className="flex items-center gap-3">
+                  <input 
+                    type="text" 
+                    value={titlebarEmoji} 
+                    onChange={(e) => setTitlebarEmoji(e.target.value)} 
+                    maxLength={4} 
+                    className="w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
+                    style={{ 
+                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b', 
+                      color: isDayMode ? '#0f172a' : '#ffffff' 
+                    }} 
+                  />
+                  <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('admin.defaultEmojiDesc', 'Used whenever no custom image is supplied.')}
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('admin.defaultFaviconEmoji', 'Default Favicon Emoji (Fallback)')}
-              </label>
-              <div className="flex items-center gap-3">
-                <input 
-                  type="text" 
-                  value={faviconEmoji} 
-                  onChange={(e) => setFaviconEmoji(e.target.value)} 
-                  maxLength={4} 
-                  className="w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
-                  style={{ 
-                    backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
-                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b', 
-                    color: isDayMode ? '#0f172a' : '#ffffff' 
-                  }} 
-                />
-                <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('admin.defaultFaviconDesc', 'Converts dynamically into an SVG favicon if no image is uploaded.')}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-            <span className="font-bold text-[11px] block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-              {t('admin.browserTabPreview', 'Browser Tab Appearance Preview:')}
-            </span>
-            <div 
-              className="max-w-xs border rounded-t-xl px-3 py-2 flex items-center justify-between gap-2 shadow-sm"
-              style={{ 
-                backgroundColor: isDayMode ? '#e2e8f0' : '#141b2d', 
-                borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            >
-              <div className="flex items-center gap-2 truncate">
-                {isFaviconImageActive ? (
-                  <img src={faviconImage} alt="Favicon Preview" className="w-4 h-4 object-contain rounded shrink-0" />
+            <div className="pt-2 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+              <span className="font-bold text-[11px] block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('admin.sidebarHeaderPreview', 'Sidebar & Header Preview:')}
+              </span>
+              <div 
+                className="flex items-center gap-2.5 p-3 rounded-2xl border w-fit" 
+                style={{ 
+                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
+                  borderColor: isDayMode ? '#e2e8f0' : '#1e293b' 
+                }} 
+              >
+                {isTitlebarImageActive ? (
+                  <img src={titlebarImage} alt="Titlebar Logo" className="w-7 h-7 object-contain rounded" />
                 ) : (
-                  <span className="text-sm shrink-0">{faviconEmoji || titlebarEmoji || DEFAULT_SITE_ICON}</span>
+                  <span className="text-2xl">{titlebarEmoji || DEFAULT_SITE_ICON}</span>
                 )}
-                <span className="text-xs font-bold truncate">
+                <span className="text-base font-black tracking-tight text-[var(--color-primary)]">
                   {siteName || DEFAULT_SITE_NAME}
                 </span>
               </div>
-              <span className="text-xs opacity-50">✕</span>
+            </div>
+          </div>
+
+          {/* FAVICON */}
+          <div 
+            className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
+            style={{ 
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
+            }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {t('admin.browserFavicon', 'Browser Favicon')}
+                </h2>
+                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('admin.browserFaviconDesc', 'Upload an icon for browser tabs (PNG, ICO, SVG). If no image is uploaded, defaults to emoji.')}
+                </p>
+              </div>
+              <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border w-fit ${
+                isFaviconImageActive 
+                  ? (isDayMode ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400')
+                  : (isDayMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-amber-500/10 border-amber-500/30 text-amber-400')
+              }`}>
+                {isFaviconImageActive ? t('admin.activeUploadedFavicon', 'Active: Uploaded Favicon') : t('admin.activeDefaultEmoji', 'Active: Default Emoji')}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
+              <div className="space-y-2">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.customFaviconImage', 'Custom Favicon Image (PNG, ICO, SVG, WebP)')}
+                </label>
+                <input 
+                  type="file" 
+                  ref={faviconFileRef} 
+                  onChange={(e) => handleFileUpload(e, 'favicon')} 
+                  accept="image/*" 
+                  className="hidden" 
+                />
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => faviconFileRef.current?.click()}
+                    className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80"
+                    style={{ 
+                      backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d', 
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  >
+                    <Upload className="h-4 w-4" /> {t('common.uploadFavicon', 'Upload Favicon')}
+                  </button>
+                  {faviconImage && (
+                    <button
+                      type="button"
+                      onClick={() => setFaviconImage('')}
+                      className={`px-3 py-2 border rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition ${
+                        isDayMode 
+                          ? 'text-red-600 border-red-300 hover:bg-red-50' 
+                          : 'text-red-400 border-red-500/30 hover:bg-red-500/10'
+                      }`}
+                    >
+                      <Trash2 className="h-4 w-4" /> {t('admin.revertToEmoji', 'Revert to Emoji')}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('admin.defaultFaviconEmoji', 'Default Favicon Emoji (Fallback)')}
+                </label>
+                <div className="flex items-center gap-3">
+                  <input 
+                    type="text" 
+                    value={faviconEmoji} 
+                    onChange={(e) => setFaviconEmoji(e.target.value)} 
+                    maxLength={4} 
+                    className="w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
+                    style={{ 
+                      backgroundColor: isDayMode ? '#f8fafc' : '#070b13', 
+                      borderColor: isDayMode ? '#cbd5e1' : '#1e293b', 
+                      color: isDayMode ? '#0f172a' : '#ffffff' 
+                    }} 
+                  />
+                  <span className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('admin.defaultFaviconDesc', 'Converts dynamically into an SVG favicon if no image is uploaded.')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+              <span className="font-bold text-[11px] block mb-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('admin.browserTabPreview', 'Browser Tab Appearance Preview:')}
+              </span>
+              <div 
+                className="max-w-xs border rounded-t-xl px-3 py-2 flex items-center justify-between gap-2 shadow-sm"
+                style={{ 
+                  backgroundColor: isDayMode ? '#e2e8f0' : '#141b2d', 
+                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  {isFaviconImageActive ? (
+                    <img src={faviconImage} alt="Favicon Preview" className="w-4 h-4 object-contain rounded shrink-0" />
+                  ) : (
+                    <span className="text-sm shrink-0">{faviconEmoji || titlebarEmoji || DEFAULT_SITE_ICON}</span>
+                  )}
+                  <span className="text-xs font-bold truncate">
+                    {siteName || DEFAULT_SITE_NAME}
+                  </span>
+                </div>
+                <span className="text-xs opacity-50">✕</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* TAB 2: THEME */}
+        <div className={activeTab === 'theme' ? 'space-y-6' : 'hidden'}>
+          {/* THEME COLOR & PALETTE SETTINGS */}
+          <div 
+            className="border rounded-3xl p-6 shadow-xl space-y-6 text-xs" 
+            style={{ 
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', 
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' 
+            }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Palette className="h-4 w-4 text-[var(--color-primary)]" />
+                  <h2 className="text-sm font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    {t('admin.themeSettings', 'Complete Theme Color & Palette Settings')}
+                  </h2>
+                </div>
+                <p className="text-[11px] mt-1" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('admin.themeSettingsDesc', 'Customize primary accents, interactive hovers, navigation icons, surfaces, borders, and typography.')}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.primary', 'Primary')}:</span>
+                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: primaryColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.accent', 'Accent')}:</span>
+                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: accentColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.sidebarIcon', 'Sidebar Icon')}:</span>
+                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: sidebarIconColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.bg', 'Bg')}:</span>
+                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: backgroundColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('admin.card', 'Card')}:</span>
+                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: cardBackgroundColor, borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }} />
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Presets */}
+            <div className="space-y-2">
+              <label className="block font-bold text-[11px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                {t('admin.coordinatedPalettes', 'Coordinated Palettes & Tones')}
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+                {PRESET_PALETTES.map((preset) => {
+                  const isSelected = primaryColor.toLowerCase() === preset.primary.toLowerCase() && backgroundColor.toLowerCase() === preset.background.toLowerCase();
+                  return (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => handleSelectPreset(preset)}
+                      className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1.5 transition text-left cursor-pointer ${
+                        isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
+                      }`}
+                      style={{
+                        backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                        borderColor: isSelected ? 'var(--color-primary)' : isDayMode ? '#cbd5e1' : '#1e293b'
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.primary }} />
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.accent }} />
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.sidebarIcon || preset.accent }} />
+                        <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.background, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
+                      </div>
+                      <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                        {preset.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Brand & Interaction Colors */}
+            <div className="space-y-3 pt-2">
+              <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>
+                {t('admin.brandColors', 'Brand & Interaction Colors')}
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                {/* Primary Color */}
+                <div className="space-y-1.5">
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('admin.primaryBrandColor', 'Primary Brand Color')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="color" 
+                      value={primaryColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPrimaryColor(val);
+                        applyColorsLocally(val, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      }}
+                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                      style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                    />
+                    <input 
+                      type="text" 
+                      value={primaryColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPrimaryColor(val);
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          applyColorsLocally(val, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                        }
+                      }}
+                      placeholder="#E05638"
+                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      style={{
+                        backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                        borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    />
+                  </div>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('admin.primaryBrandColorDesc', 'Brand highlights, buttons, and headers.')}
+                  </span>
+                </div>
+
+                {/* Primary Hover Color */}
+                <div className="space-y-1.5">
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('admin.primaryHoverColor', 'Primary Hover Color')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="color" 
+                      value={primaryHoverColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPrimaryHoverColor(val);
+                        applyColorsLocally(primaryColor, val, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      }}
+                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                      style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                    />
+                    <input 
+                      type="text" 
+                      value={primaryHoverColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPrimaryHoverColor(val);
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          applyColorsLocally(primaryColor, val, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                        }
+                      }}
+                      placeholder="#c94529"
+                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      style={{
+                        backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                        borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    />
+                  </div>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('admin.primaryHoverColorDesc', 'Hover and focus states for buttons.')}
+                  </span>
+                </div>
+
+                {/* Accent Color */}
+                <div className="space-y-1.5">
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('admin.accentColor', 'Accent / Success Color')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="color" 
+                      value={accentColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setAccentColor(val);
+                        applyColorsLocally(primaryColor, primaryHoverColor, val, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      }}
+                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                      style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                    />
+                    <input 
+                      type="text" 
+                      value={accentColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setAccentColor(val);
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          applyColorsLocally(primaryColor, primaryHoverColor, val, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                        }
+                      }}
+                      placeholder="#10b981"
+                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      style={{
+                        backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                        borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    />
+                  </div>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('admin.accentColorDesc', 'Badges, success alerts, and secondary accents.')}
+                  </span>
+                </div>
+
+                {/* Sidebar & Nav Icon Color */}
+                <div className="space-y-1.5">
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('admin.sidebarIconColor', 'Sidebar Icon Color')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="color" 
+                      value={sidebarIconColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSidebarIconColor(val);
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      }}
+                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                      style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                    />
+                    <input 
+                      type="text" 
+                      value={sidebarIconColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSidebarIconColor(val);
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                        }
+                      }}
+                      placeholder="#10b981"
+                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      style={{
+                        backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                        borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    />
+                  </div>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('admin.sidebarIconColorDesc', 'Icons for navigation and categories in the sidebar.')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Surfaces & Container Colors Group */}
+            <div className="space-y-3 pt-2">
+              <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>
+                {t('admin.surfacesBordersTypography', 'Surfaces, Borders & Typography')}
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                {/* Background Color */}
+                <div className="space-y-1.5">
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('admin.pageBackground', 'Page Background')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="color" 
+                      value={backgroundColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBackgroundColor(val);
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                      }}
+                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                      style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                    />
+                    <input 
+                      type="text" 
+                      value={backgroundColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBackgroundColor(val);
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
+                        }
+                      }}
+                      placeholder="#070b13"
+                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      style={{
+                        backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                        borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    />
+                  </div>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('admin.pageBackgroundDesc', 'Root viewport background in night mode.')}
+                  </span>
+                </div>
+
+                {/* Card / Surface Background */}
+                <div className="space-y-1.5">
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('admin.cardBackground', 'Card / Surface Background')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="color" 
+                      value={cardBackgroundColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCardBackgroundColor(val);
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
+                      }}
+                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                      style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                    />
+                    <input 
+                      type="text" 
+                      value={cardBackgroundColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCardBackgroundColor(val);
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
+                        }
+                      }}
+                      placeholder="#0b0f17"
+                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      style={{
+                        backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                        borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    />
+                  </div>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('admin.cardBackgroundDesc', 'Cards, modals, and container panels.')}
+                  </span>
+                </div>
+
+                {/* Card / Container Border Color */}
+                <div className="space-y-1.5">
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('admin.containerBorderColor', 'Container Border Color')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="color" 
+                      value={cardBorderColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCardBorderColor(val);
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
+                      }}
+                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                      style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                    />
+                    <input 
+                      type="text" 
+                      value={cardBorderColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCardBorderColor(val);
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
+                        }
+                      }}
+                      placeholder="#1e293b"
+                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      style={{
+                        backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                        borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    />
+                  </div>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('admin.containerBorderColorDesc', 'Borders, dividers, and outlines.')}
+                  </span>
+                </div>
+
+                {/* Secondary Subtitle Text Color */}
+                <div className="space-y-1.5">
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('admin.mutedSubtitleText', 'Muted / Subtitle Text')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="color" 
+                      value={secondaryTextColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSecondaryTextColor(val);
+                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
+                      }}
+                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
+                      style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}
+                    />
+                    <input 
+                      type="text" 
+                      value={secondaryTextColor} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSecondaryTextColor(val);
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
+                        }
+                      }}
+                      placeholder="#94a3b8"
+                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      style={{
+                        backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
+                        borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    />
+                  </div>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('admin.mutedSubtitleTextDesc', 'Descriptions and helper captions.')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Interactive Live Component Preview */}
+            <div className="pt-3 border-t space-y-3" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+              <span className="font-bold text-[11px] block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('admin.previewTitle', 'Full Interactive Component Preview:')}
+              </span>
+              <div 
+                className="p-5 rounded-3xl border transition-colors space-y-3" 
+                style={{ 
+                  backgroundColor: isDayMode ? '#f8fafc' : backgroundColor, 
+                  borderColor: isDayMode ? '#cbd5e1' : cardBorderColor 
+                }}
+              >
+                {/* Surface Card Preview */}
+                <div 
+                  className="p-4 rounded-2xl border transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md"
+                  style={{ 
+                    backgroundColor: isDayMode ? '#ffffff' : cardBackgroundColor, 
+                    borderColor: isDayMode ? '#e2e8f0' : cardBorderColor 
+                  }}
+                >
+                  <div className="space-y-0.5">
+                    <div className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      {t('admin.surfaceCardPreview', 'Surface Card Preview')}
+                    </div>
+                    <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : secondaryTextColor }}>
+                      {t('admin.surfaceCardPreviewDesc', 'This demonstrates your secondary text color, card surface, and card border.')}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div 
+                      className="px-2.5 py-1 rounded-xl border text-[10px] font-extrabold flex items-center gap-1"
+                      style={{ 
+                        backgroundColor: `${accentColor}18`, 
+                        borderColor: `${accentColor}40`, 
+                        color: accentColor 
+                      }}
+                    >
+                      <CheckCircle2 className="h-3 w-3" /> {t('common.active', 'Active')}
+                    </div>
+                    <button 
+                      type="button" 
+                      className="px-3.5 py-1.5 rounded-xl text-white font-extrabold text-xs shadow-md transition cursor-pointer"
+                      style={{ backgroundColor: primaryColor }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = primaryHoverColor)}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = primaryColor)}
+                    >
+                      {t('common.actionButton', 'Action Button')}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sidebar Navigation Item Live Preview */}
+                <div 
+                  className="p-3.5 rounded-2xl border transition-colors flex items-center justify-between gap-3 shadow-sm"
+                  style={{ 
+                    backgroundColor: isDayMode ? '#ffffff' : cardBackgroundColor, 
+                    borderColor: isDayMode ? '#e2e8f0' : cardBorderColor 
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div 
+                      className="p-2 rounded-xl flex items-center justify-center transition-colors shadow-xs"
+                      style={{ 
+                        backgroundColor: `${sidebarIconColor}18`,
+                        border: `1px solid ${sidebarIconColor}33`,
+                        color: sidebarIconColor 
+                      }}
+                    >
+                      <Utensils className="h-4 w-4" style={{ color: sidebarIconColor }} />
+                    </div>
+                    <div>
+                      <div className="text-xs font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                        {t('admin.sidebarIconPreview', 'Sidebar Icon Color Preview')}
+                      </div>
+                      <p className="text-[10px]" style={{ color: isDayMode ? '#64748b' : secondaryTextColor }}>
+                        {t('admin.sidebarIconPreviewDesc', 'Reflects live on Dashboard, Chef, Pantry, and Plan icons.')}
+                      </p>
+                    </div>
+                  </div>
+                  <span 
+                    className="text-[10px] px-2.5 py-1 rounded-lg font-mono font-bold"
+                    style={{ 
+                      backgroundColor: `${sidebarIconColor}18`, 
+                      color: sidebarIconColor,
+                      border: `1px solid ${sidebarIconColor}33` 
+                    }}
+                  >
+                    {sidebarIconColor}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -13723,7 +13897,7 @@ export default function AdminSettingsPage() {
           <button
             type="button"
             onClick={handleResetDefaults}
-            className="px-4 py-2.5 border rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition hover:opacity-80"
+            className="px-4 py-2.5 border rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition hover:opacity-80 shadow-xs"
             style={{ 
               backgroundColor: isDayMode ? '#ffffff' : '#0b0f17',
               borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
@@ -13738,7 +13912,7 @@ export default function AdminSettingsPage() {
             className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            <CheckCircle2 className="h-4 w-4" /> {t('admin.saveBrandingSettings', 'Save Branding Settings')}
+            <CheckCircle2 className="h-4 w-4" /> {activeTab === 'theme' ? t('admin.saveThemeSettings', 'Save Theme Settings') : t('admin.saveBrandingSettings', 'Save Branding Settings')}
           </button>
         </div>
       </form>
@@ -39205,7 +39379,7 @@ export default function PackagePage() {
             <div className={`w-4 h-4 bg-[#E05638] rounded-full transition-transform ${billingCycle === 'yearly' ? 'translate-x-6' : 'translate-x-0'}`} />
           </button>
           <span className={`text-xs font-bold flex items-center gap-1.5 ${billingCycle === 'yearly' ? 'text-white' : 'text-slate-400'}`}>
-            Yearly <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30">Save 20%</span>
+            Yearly <span className="text-[10px] bg-emerald-500/20 text-[var(--color-sidebar-icon,#10b981)] px-2 py-0.5 rounded-full border border-emerald-500/30">Save 20%</span>
           </span>
         </div>
       </div>
@@ -39241,7 +39415,7 @@ export default function PackagePage() {
                 <ul className="space-y-2.5 text-xs text-slate-300">
                   {plan.features.map((feat, fIdx) => (
                     <li key={fIdx} className="flex items-center gap-2.5">
-                      <div className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                      <div className="w-4 h-4 rounded-full bg-emerald-500/20 text-[var(--color-sidebar-icon,#10b981)] flex items-center justify-center shrink-0">
                         <Check className="h-3 w-3" />
                       </div>
                       <span>{feat}</span>
@@ -39484,6 +39658,7 @@ export default function AiQuotaBar() {
 ## File: `apps/web/src/components/Sidebar.tsx`
 ```typescript
 'use client';
+
 import packageInfo from '../../package.json';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -39660,10 +39835,17 @@ export default function Sidebar() {
       updateFavicon(getSiteIcon());
     };
     const handleLangSync = () => loadLanguagesFromAdmin();
+    const handleThemeModeSync = () => {
+      const isDark = localStorage.getItem('zecratary_theme_mode') !== 'light';
+      setIsDarkMode(isDark);
+    };
 
     window.addEventListener('zecratary_auth_changed', handleAuthChange);
     window.addEventListener('zecratary_site_settings_changed', handleSiteSync);
     window.addEventListener('zecratary_languages_updated', handleLangSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
+    window.addEventListener('zecratary_theme_changed', handleThemeModeSync);
+    window.addEventListener('zecratary_theme_updated', handleThemeModeSync);
     window.addEventListener('storage', handleSiteSync);
     window.addEventListener('storage', handleLangSync);
 
@@ -39672,6 +39854,9 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_auth_changed', handleAuthChange);
       window.removeEventListener('zecratary_site_settings_changed', handleSiteSync);
       window.removeEventListener('zecratary_languages_updated', handleLangSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
+      window.removeEventListener('zecratary_theme_changed', handleThemeModeSync);
+      window.removeEventListener('zecratary_theme_updated', handleThemeModeSync);
       window.removeEventListener('storage', handleSiteSync);
       window.removeEventListener('storage', handleLangSync);
     };
@@ -39685,6 +39870,7 @@ export default function Sidebar() {
       localStorage.setItem('zecratary_theme_mode', nextMode ? 'dark' : 'light');
       window.dispatchEvent(new Event('zecratary_theme_mode_changed'));
       window.dispatchEvent(new Event('zecratary_theme_changed'));
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     }
   };
 
@@ -39717,20 +39903,20 @@ export default function Sidebar() {
 
   const showCollapsed = isCollapsed && !isOpen;
 
-  // Darker sidebar item styles when in day mode
+  // Active styles harmonize with dynamic primary color
   const navClass = (href: string) => `
     w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 select-none
     ${isActive(href)
       ? isDarkMode
-        ? 'bg-[#1c3a27] text-emerald-300 border border-emerald-500/30 shadow-md font-bold'
-        : 'bg-emerald-100 text-emerald-900 border border-emerald-300 shadow-sm font-bold'
+        ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30 shadow-md font-bold'
+        : 'bg-[var(--color-primary)]/10 text-slate-900 border border-[var(--color-primary)]/40 shadow-sm font-bold'
       : isDarkMode
         ? 'text-slate-300 hover:text-white hover:bg-[#141b2d]/50'
         : 'text-slate-800 hover:text-slate-950 hover:bg-slate-200/80 font-bold'
     }
   `;
 
-    const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
+  const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
 
   return (
@@ -39834,7 +40020,7 @@ export default function Sidebar() {
           <nav className="space-y-1">
             {/* DASHBOARD */}
             <Link href="/dashboard" className={navClass('/dashboard')} title={t('dashboard')}>
-              <Home className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />
+              <Home className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('dashboard')}</span>}
             </Link>
 
@@ -39849,15 +40035,15 @@ export default function Sidebar() {
               </div>
             )}
             <Link href="/chef" className={navClass('/chef')} title={t('chefAi')}>
-              <MessageSquare className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />
+              <MessageSquare className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('chefAi')}</span>}
             </Link>
             <Link href="/import" className={navClass('/import')} title={t('import')}>
-              <UploadCloud className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />
+              <UploadCloud className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('import')}</span>}
             </Link>
             <Link href="/manual" className={navClass('/manual')} title={t('manual')}>
-              <SquarePen className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />
+              <SquarePen className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
             </Link>
 
@@ -39872,21 +40058,21 @@ export default function Sidebar() {
               </div>
             )}
             <Link href="/saved" className={navClass('/saved')} title={t('savedRecipes')}>
-              <BookOpen className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />
+              <BookOpen className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
             </Link>
             <Link href="/books" className={navClass('/books')} title={t('books')}>
-              <Book className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />
+              <Book className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('books')}</span>}
             </Link>
             <Link href="/pantry" className={navClass('/pantry')}>
-              <Package className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />
+              <Package className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
             </Link>
 
             {/* PLAN SECTION */}
             {showCollapsed ? (
-              <div  title={t('plan')} />
+              <div title={t('plan')} />
             ) : (
               <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${
                 isDarkMode ? 'text-slate-500' : 'text-slate-600'
@@ -39895,15 +40081,15 @@ export default function Sidebar() {
               </div>
             )}
             <Link href="/shopping" className={navClass('/shopping')} title={t('shoppingList')}>
-              <ShoppingCart className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />
+              <ShoppingCart className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('shoppingList')}</span>}
             </Link>
             <Link href="/planner" className={navClass('/planner')}>
-              <Calendar className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />
+              <Calendar className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('planner')}</span>}
             </Link>
             <Link href="/templates" className={navClass('/templates')}>
-              <LayoutTemplate className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`} />
+              <LayoutTemplate className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
             </Link>
 
@@ -39967,7 +40153,7 @@ export default function Sidebar() {
           {/* QUICK LANGUAGE SELECTOR & DARK MODE TOGGLE */}
           {showCollapsed ? (
             <div className="flex flex-col items-center gap-2 p-1">
-              <div className={`relative flex items-center justify-center p-2 rounded-xl border border-[var(--color-border)] text-base cursor-pointer hover:border-emerald-500/40 transition ${
+              <div className={`relative flex items-center justify-center p-2 rounded-xl border border-[var(--color-border)] text-base cursor-pointer hover:border-[var(--color-primary)]/50 transition ${
                 isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
               }`} title={availableLanguages.find((l) => l.code === locale)?.name || 'Language'}>
                 <span>{availableLanguages.find((l) => l.code === locale)?.flag || '🌐'}</span>
@@ -39993,7 +40179,7 @@ export default function Sidebar() {
                 title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                 aria-label="Toggle Theme Mode"
               >
-                {isDarkMode ? <Moon className="h-4 w-4 text-[#E05638]" /> : <Sun className="h-4 w-4 text-amber-500" />}
+                {isDarkMode ? <Moon className="h-4 w-4 text-[var(--color-primary)]" /> : <Sun className="h-4 w-4 text-amber-500" />}
               </button>
             </div>
           ) : (
@@ -40024,7 +40210,7 @@ export default function Sidebar() {
                 title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                 aria-label="Toggle Theme Mode"
               >
-                {isDarkMode ? <Moon className="h-4 w-4 text-[#E05638]" /> : <Sun className="h-4 w-4 text-amber-500" />}
+                {isDarkMode ? <Moon className="h-4 w-4 text-[var(--color-primary)]" /> : <Sun className="h-4 w-4 text-amber-500" />}
               </button>
             </div>
           )}
@@ -40193,6 +40379,8 @@ export interface ThemeColors {
   accentEmerald?: string;
   accentColor?: string;
   accent?: string;
+  sidebarIcon?: string;
+  sidebarIconColor?: string;
   backgroundColor?: string;
   backgroundDark?: string;
   cardBackground?: string;
@@ -40201,17 +40389,18 @@ export interface ThemeColors {
 }
 
 export function applyThemeToDocument(colors: ThemeColors | null | undefined): void {
-  if (!colors || typeof document === 'undefined') return;
+  if (typeof document === 'undefined') return;
   const root = document.documentElement;
   const isDayMode = localStorage.getItem('zecratary_theme_mode') === 'light';
 
-  const primary = colors.primary || colors.primaryColor;
-  const primaryHover = colors.primaryHover;
-  const accent = colors.accentEmerald || colors.accentColor || colors.accent;
-  const bg = colors.backgroundColor || colors.backgroundDark;
-  const card = colors.cardBackground;
-  const border = colors.cardBorder;
-  const textSec = colors.textSecondary;
+  const primary = colors?.primary || colors?.primaryColor;
+  const primaryHover = colors?.primaryHover;
+  const accent = colors?.accentEmerald || colors?.accentColor || colors?.accent;
+  const sidebarIcon = colors?.sidebarIconColor || colors?.sidebarIcon || accent || '#10b981';
+  const bg = colors?.backgroundColor || colors?.backgroundDark;
+  const card = colors?.cardBackground;
+  const border = colors?.cardBorder;
+  const textSec = colors?.textSecondary;
 
   if (primary) {
     root.style.setProperty('--color-primary', primary);
@@ -40225,6 +40414,10 @@ export function applyThemeToDocument(colors: ThemeColors | null | undefined): vo
     root.style.setProperty('--color-emerald', accent);
     root.style.setProperty('--color-accent', accent);
     root.style.setProperty('--accent', accent);
+  }
+  if (sidebarIcon) {
+    root.style.setProperty('--color-sidebar-icon', sidebarIcon);
+    root.style.setProperty('--sidebar-icon', sidebarIcon);
   }
 
   if (isDayMode) {
