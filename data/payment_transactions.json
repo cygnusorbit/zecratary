@@ -1,22 +1,22 @@
 [
   {
-    "id": "tx_mu3urst1rok",
-    "customerName": "cygnusorbit",
-    "customerEmail": "ed1226@gmail.com",
-    "planName": "Nutrition Pro (Annual)",
-    "planSlug": "nutrition-pro-annual",
-    "amount": 59.99,
+    "id": "tx_mu3zunj14k0",
+    "customerName": "Administrator",
+    "customerEmail": "admin@foodieprep.com",
+    "planName": "Nutrition Pro Max (Monthly)",
+    "planSlug": "nutrition-pro-max-monthly",
+    "amount": 18.99,
     "currency": "USD",
     "gateway": "stripe",
     "status": "succeeded",
     "testMode": true,
-    "createdAt": "2026-09-16T12:00:00.000Z",
-    "expiryDate": "2027-09-16T23:59:59.000Z"
+    "createdAt": "2026-09-16T11:04:55.453Z",
+    "expiryDate": "2026-10-16T11:04:55.427Z"
   },
   {
-    "id": "tx_mu3uraki1km",
-    "customerName": "cygnusorbit",
-    "customerEmail": "ed1226@gmail.com",
+    "id": "tx_mu3zu94my0n",
+    "customerName": "Administrator",
+    "customerEmail": "admin@foodieprep.com",
     "planName": "Nutrition Pro (Annual)",
     "planSlug": "nutrition-pro-annual",
     "amount": "59.99",
@@ -25,13 +25,13 @@
     "status": "refunded",
     "failureReason": null,
     "testMode": true,
-    "expiryDate": "2026-09-16T08:42:44.184Z",
-    "createdAt": "2026-09-16T12:00:00.000Z"
+    "expiryDate": "2026-09-16T11:04:55.439Z",
+    "createdAt": "2026-09-16T11:04:36.790Z"
   },
   {
-    "id": "tx_mu3unkaq9gk",
-    "customerName": "cygnusorbit",
-    "customerEmail": "ed1226@gmail.com",
+    "id": "tx_mu3ztvxstw8",
+    "customerName": "Administrator",
+    "customerEmail": "admin@foodieprep.com",
     "planName": "Nutrition Pro (Monthly)",
     "planSlug": "nutrition-pro-monthly",
     "amount": "8.99",
@@ -40,23 +40,8 @@
     "status": "refunded",
     "failureReason": null,
     "testMode": true,
-    "expiryDate": "2026-09-16T08:42:20.546Z",
-    "createdAt": "2026-09-16T12:00:00.000Z"
-  },
-  {
-    "id": "tx_mu3uk3sazqc",
-    "customerName": "cygnusorbit",
-    "customerEmail": "ed1226@gmail.com",
-    "planName": "Nutrition Pro (Monthly)",
-    "planSlug": "nutrition-pro-monthly",
-    "amount": "8.99",
-    "currency": "USD",
-    "gateway": "stripe",
-    "status": "refunded",
-    "failureReason": null,
-    "testMode": true,
-    "expiryDate": "2026-09-16T08:39:26.535Z",
-    "createdAt": "2026-09-16T12:00:00.000Z"
+    "expiryDate": "2026-09-16T11:04:36.751Z",
+    "createdAt": "2026-09-16T11:04:19.696Z"
   },
   {
     "id": "tx_demo_101",

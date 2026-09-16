@@ -1,5 +1,15 @@
 [
   {
+    "id": "usr_admin_1",
+    "name": "System Administrator",
+    "email": "admin@zecratary.com",
+    "role": "admin",
+    "subscriptionPlan": "nutrition-pro-monthly",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "planExpiryDate": "2026-10-16T23:59:59.000Z",
+    "expiryDate": "2026-10-16T23:59:59.000Z"
+  },
+  {
     "id": "usr_google_mu19hxvu",
     "name": "cygnusorbit",
     "email": "ed1226@gmail.com",
@@ -33,24 +43,24 @@
     "expiryDate": "2026-10-16T23:59:59.000Z"
   },
   {
-    "id": "usr_admin_1",
+    "id": "usr_admin_default",
     "name": "Administrator",
     "email": "admin@foodieprep.com",
     "role": "admin",
-    "subscriptionPlan": "taster",
-    "subscriptionTier": "taster",
-    "createdAt": "2026-09-14T10:03:06.343Z",
+    "subscriptionPlan": "nutrition-pro-max-monthly",
+    "subscriptionTier": "nutrition-pro-max-monthly",
+    "createdAt": "2026-01-01T00:00:00.000Z",
     "password": "admin",
     "linkedProviders": [],
-    "planName": "Taster (Free)",
+    "planName": "Nutrition Pro Max (Monthly)",
     "planInterval": "MONTH",
     "subscriptionStatus": "active",
-    "lastPaymentDate": "",
-    "planExpiryDate": "",
-    "expiryDate": "",
-    "updatedAt": "2026-09-15T03:45:00.669Z",
-    "planSlug": "taster",
-    "planId": "preset_taster"
+    "lastPaymentDate": "2026-09-16T11:04:55.476Z",
+    "planExpiryDate": "2026-10-16T11:04:55.427Z",
+    "expiryDate": "2026-10-16T11:04:55.427Z",
+    "updatedAt": "2026-09-16T11:04:55.476Z",
+    "planSlug": "nutrition-pro-max-monthly",
+    "planId": "plan_1789555772317-monthly"
   },
   {
     "id": "usr_demo_user",
