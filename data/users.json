@@ -6,5 +6,13 @@
     "role": "admin",
     "subscriptionPlan": "nutrition-pro-annual",
     "createdAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "usr_demo_user",
+    "name": "Jordan Smith",
+    "email": "jordan@example.com",
+    "role": "user",
+    "subscriptionPlan": "taster",
+    "createdAt": "2026-02-15T10:00:00.000Z"
   }
 ]

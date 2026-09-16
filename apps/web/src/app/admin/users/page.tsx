@@ -6,11 +6,15 @@ import {
   Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
   Search, CheckCircle, AlertCircle, X, ShieldAlert, Check,
   ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
-  Users, CreditCard, Zap, Sparkles, Download
+  Users, CreditCard, Zap, Sparkles, Download, RefreshCw
 } from 'lucide-react';
-import { getCurrentUser, logoutUser, initAuthStorage } from '@/lib/auth';
+import { getCurrentUser, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 import { applyThemeToDocument } from '@/lib/themeConfig';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings 
+} from '@/lib/adminSync';
 
 interface AppUser {
   id: string;
@@ -43,7 +47,10 @@ type SortOrder = 'asc' | 'desc';
 const ITEMS_PER_PAGE = 10;
 
 export default function AdminUserManagementPage() {
-  const { t, locale } = useTranslation() || {};
+  const langContext = useTranslation();
+  const t = langContext?.t;
+  const locale = langContext?.locale;
+
   const tr = useCallback((key: string, fallback: string): string => {
     if (typeof t === 'function') {
       const val = t(key);
@@ -58,13 +65,10 @@ export default function AdminUserManagementPage() {
   const [search, setSearch] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Selected User IDs for Export
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-
-  // Prevent recursive fetch storms
-  const isFetchingUsersRef = useRef(false);
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Admin Table Sorting & Pagination State
   const [adminSortField, setAdminSortField] = useState<SortField>('createdAt');
@@ -98,7 +102,7 @@ export default function AdminUserManagementPage() {
   // Helper: Strictly identify primary root administrator (usr_admin_1)
   const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
     if (!targetUser) return false;
-    return targetUser.id === 'usr_admin_1';
+    return targetUser.id === 'usr_admin_1' || targetUser.email?.toLowerCase() === 'admin@zecratary.com';
   }, []);
 
   const isEditingFirstAdmin = useMemo(() => {
@@ -110,10 +114,12 @@ export default function AdminUserManagementPage() {
   const syncTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const day = mode === 'light';
+      const day = mode === 'light' || mode === 'day';
       setIsDayMode(day);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       if (stored) {
         applyThemeToDocument(JSON.parse(stored));
       } else {
@@ -137,89 +143,48 @@ export default function AdminUserManagementPage() {
     };
   }, [syncTheme]);
 
-  // Synchronize System Packages
+  // Load Plans from Server API (Zero LocalStorage)
   const loadPlans = useCallback(async () => {
     let parsedPlans: PlanOption[] = [];
 
     try {
-      const rawConfigs = null;
-      if (rawConfigs) {
-        const configs = JSON.parse(rawConfigs);
-        if (Array.isArray(configs) && configs.length > 0) {
-          configs.forEach((cfg: any) => {
-            const isZeroCost = cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0);
-            
-            if (isZeroCost) {
-              parsedPlans.push({
-                id: cfg.id || cfg.slug,
-                name: `${cfg.name} (Free)`,
-                slug: cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                priceFormatted: 'Free',
-                isFree: true,
-              });
-            } else {
-              if (cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0) {
-                const mPrice = Number(cfg.monthlyPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-monthly`,
-                  name: `${cfg.name} (Monthly)`,
-                  slug: `${cfg.slug}-monthly`,
-                  priceFormatted: `$${mPrice.toFixed(2)}/mo`,
-                  interval: 'MONTH',
-                  isFree: false,
-                });
-              }
-              if (cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0) {
-                const aPrice = Number(cfg.annualPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-annual`,
-                  name: `${cfg.name} (Annual)`,
-                  slug: `${cfg.slug}-annual`,
-                  priceFormatted: `$${aPrice.toFixed(2)}/yr`,
-                  interval: 'YEAR',
-                  isFree: false,
-                });
-              }
-            }
+      const serverSettings = await fetchServerAdminSettings();
+      if (serverSettings && Array.isArray(serverSettings.subscriptionPlans) && serverSettings.subscriptionPlans.length > 0) {
+        serverSettings.subscriptionPlans.forEach((cfg: any) => {
+          const isZeroCost = cfg.price === 0 || cfg.isFree;
+          const price = Number(cfg.price || 0);
+          const interval = cfg.interval ? (cfg.interval.toLowerCase().includes('year') ? 'YEAR' : 'MONTH') : 'MONTH';
+
+          parsedPlans.push({
+            id: cfg.id || cfg.slug,
+            name: `${cfg.name} (Free)`,
+            slug: cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+            priceFormatted: isZeroCost ? 'Free' : `$${price.toFixed(2)}${interval === 'YEAR' ? '/yr' : '/mo'}`,
+            interval,
+            isFree: isZeroCost,
           });
-        }
+        });
       }
-    } catch (e) {}
+    } catch (_) {}
 
     if (parsedPlans.length === 0) {
       try {
-        const rawPlans = null;
-        if (rawPlans) {
-          const directPlans = JSON.parse(rawPlans);
-          if (Array.isArray(directPlans) && directPlans.length > 0) {
-            parsedPlans = directPlans.map((p: any) => ({
+        const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const plansList = Array.isArray(data) ? data : (data?.plans || data?.packages);
+          if (Array.isArray(plansList) && plansList.length > 0) {
+            parsedPlans = plansList.map((p: any) => ({
               id: p.id || p.slug,
               name: p.name,
               slug: p.slug,
               priceFormatted: p.priceCents === 0 ? 'Free' : `$${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`,
               interval: p.interval,
-              isFree: p.priceCents === 0,
+              isFree: p.priceCents === 0 || p.price === 0,
             }));
           }
         }
-      } catch (e) {}
-    }
-
-    if (parsedPlans.length === 0) {
-      try {
-        const res = await fetch('/api/admin/plans');
-        const data = await res.json();
-        if (data.success && Array.isArray(data.plans) && data.plans.length > 0) {
-          parsedPlans = data.plans.map((p: any) => ({
-            id: p.id || p.slug,
-            name: p.name,
-            slug: p.slug,
-            priceFormatted: p.priceCents === 0 ? 'Free' : `$${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`,
-            interval: p.interval,
-            isFree: p.priceCents === 0,
-          }));
-        }
-      } catch (e) {}
+      } catch (_) {}
     }
 
     if (parsedPlans.length > 0) {
@@ -229,70 +194,72 @@ export default function AdminUserManagementPage() {
     }
   }, []);
 
-  // Safe Non-Looping User Fetcher
+  // Hydrate Users Exclusively from Server Storage with Self-Healing Guarantee
   const loadUsers = useCallback(async () => {
-    if (isFetchingUsersRef.current) return;
-    isFetchingUsersRef.current = true;
+    setIsLoading(true);
+    purgeLegacyBrowserAdminStorage();
 
     try {
-      let localList: AppUser[] = [];
-      const raw = localStorage.getItem('zecratary_users');
-      if (raw) {
-        try { localList = JSON.parse(raw); } catch (_) {}
-      }
-
-      let deletedSet = new Set<string>();
-      try {
-        const rawDel = localStorage.getItem('zecratary_deleted_users');
-        if (rawDel) {
-          const parsed: string[] = JSON.parse(rawDel);
-          deletedSet = new Set(parsed.map((s) => s.toLowerCase().trim()));
-        }
-      } catch (_) {}
-
-      localList = localList.filter((u) => {
-        if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
-        if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
-        return true;
-      });
-
-      const res = await fetch('/api/admin/users', { cache: 'no-store' });
+      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
-          const serverUsers: AppUser[] = data.users.filter((u: any) => {
-            if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
-            if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
-            return true;
-          });
+          let list: AppUser[] = [...data.users];
 
-          const mergedMap = new Map<string, AppUser>();
-          serverUsers.forEach((u) => {
-            if (u && u.email) mergedMap.set(u.email.toLowerCase(), u);
-          });
-          localList.forEach((u) => {
-            if (u && u.email) {
-              const existing = mergedMap.get(u.email.toLowerCase()) || {};
-              mergedMap.set(u.email.toLowerCase(), { ...existing, ...u });
-            }
-          });
+          // Self-Healing 1: Ensure primary root admin exists
+          const hasRootAdmin = list.some(
+            (u) => u.id === 'usr_admin_1' || u.email?.toLowerCase() === 'admin@zecratary.com'
+          );
 
-          const merged = Array.from(mergedMap.values());
-          setUsers(merged);
-
-          const newSerialized = JSON.stringify(merged);
-          if (raw !== newSerialized) {
-            localStorage.setItem('zecratary_users', newSerialized);
+          if (!hasRootAdmin) {
+            const rootAdmin: AppUser = {
+              id: 'usr_admin_1',
+              name: 'System Administrator',
+              email: 'admin@zecratary.com',
+              role: 'admin',
+              subscriptionPlan: 'nutrition-pro-annual',
+              createdAt: '2026-01-01T00:00:00.000Z'
+            };
+            list.unshift(rootAdmin);
+            fetch('/api/admin/users', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(rootAdmin)
+            }).catch(() => {});
           }
+
+          // Self-Healing 2: If active user is admin, ensure they are in the list
+          const activeSession = getCurrentUser();
+          if (activeSession && (activeSession.role || '').toLowerCase() === 'admin') {
+            const inList = list.some(
+              (u) => (u.id && u.id === activeSession.id) || (u.email && u.email.toLowerCase() === activeSession.email.toLowerCase())
+            );
+            if (!inList) {
+              const activeAdminObj: AppUser = {
+                id: activeSession.id || 'usr_' + Date.now().toString(36),
+                name: activeSession.name || 'Administrator',
+                email: activeSession.email,
+                role: 'admin',
+                subscriptionPlan: activeSession.subscriptionPlan || 'nutrition-pro-annual',
+                createdAt: activeSession.createdAt || new Date().toISOString()
+              };
+              list.push(activeAdminObj);
+              fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(activeAdminObj)
+              }).catch(() => {});
+            }
+          }
+
+          setUsers(list);
           return;
         }
       }
-
-      setUsers(localList);
     } catch (err) {
-      console.error('Failed to load users:', err);
+      console.error('Failed to load users from server:', err);
     } finally {
-      isFetchingUsersRef.current = false;
+      setIsLoading(false);
     }
   }, []);
 
@@ -304,38 +271,21 @@ export default function AdminUserManagementPage() {
     loadUsers();
     loadPlans();
 
-    const handleSync = (e?: Event) => {
-      if (e && 'key' in e) {
-        const sEvt = e as StorageEvent;
-        if (sEvt.key && sEvt.key !== 'zecratary_users' && sEvt.key !== 'zecratary_subscription_plans' && sEvt.key !== 'zecratary_deleted_users') {
-          return;
-        }
-      }
-
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      syncTimeoutRef.current = setTimeout(() => {
-        loadUsers();
-        loadPlans();
-      }, 400);
+    const handleSync = () => {
+      loadUsers();
+      loadPlans();
     };
 
-    window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_users_updated', handleSync);
     window.addEventListener('zecratary_plans_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_users_updated', handleSync);
       window.removeEventListener('zecratary_plans_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
   }, [loadUsers, loadPlans, tr]);
-
-  const saveUsersList = (updated: AppUser[]) => {
-    setUsers(updated);
-    localStorage.setItem('zecratary_users', JSON.stringify(updated));
-    window.dispatchEvent(new Event('zecratary_users_updated'));
-  };
 
   const showToast = (msg: string) => {
     setFeedbackMsg(msg);
@@ -415,14 +365,14 @@ export default function AdminUserManagementPage() {
     }
   };
 
-  // Filter & Sort for Admins
+  // Case-Insensitive Filter & Sort for Admins
   const processedAdmins = useMemo(() => {
-    const admins = users.filter((u) => u.role === 'admin');
+    const admins = users.filter((u) => (u.role || '').toLowerCase() === 'admin');
     const filtered = admins.filter(
       (u) =>
         !search.trim() ||
-        u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-        u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.name || '').toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.email || '').toLowerCase().includes(search.toLowerCase().trim()) ||
         (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
     );
 
@@ -441,14 +391,14 @@ export default function AdminUserManagementPage() {
     });
   }, [users, search, adminSortField, adminSortOrder]);
 
-  // Filter & Sort for Standard Users
+  // Case-Insensitive Filter & Sort for Standard Users
   const processedStandardUsers = useMemo(() => {
-    const standardUsers = users.filter((u) => u.role === 'user');
+    const standardUsers = users.filter((u) => (u.role || '').toLowerCase() !== 'admin');
     const filtered = standardUsers.filter(
       (u) =>
         !search.trim() ||
-        u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-        u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.name || '').toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.email || '').toLowerCase().includes(search.toLowerCase().trim()) ||
         (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
     );
 
@@ -547,7 +497,7 @@ export default function AdminUserManagementPage() {
     const assignedPlan = addSubscriptionPlan || (addRole === 'admin' ? 'nutrition-pro-annual' : 'taster');
 
     const newUser: AppUser = {
-      id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      id: 'usr_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
       name: cleanName,
       email: cleanEmail,
       password: addPassword,
@@ -557,26 +507,33 @@ export default function AdminUserManagementPage() {
     };
 
     try {
-      const rawDel = localStorage.getItem('zecratary_deleted_users');
-      if (rawDel) {
-        const delList: string[] = JSON.parse(rawDel);
-        const filteredDel = delList.filter((s) => s.toLowerCase().trim() !== cleanEmail && s !== newUser.id);
-        localStorage.setItem('zecratary_deleted_users', JSON.stringify(filteredDel));
-      }
-    } catch (_) {}
-
-    try {
-      await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newUser),
       });
-    } catch (_) {}
 
-    const updated = [newUser, ...users.filter((u) => !u.email || u.email.toLowerCase() !== cleanEmail)];
-    saveUsersList(updated);
-    setShowAddModal(false);
-    showToast(`${tr('admin.users.userCreatedPrefix', 'User')} "${newUser.name}" ${tr('admin.users.userCreatedSuffix', 'created successfully!')}`);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Server error creating user');
+      }
+
+      const data = await res.json();
+      if (data.users && Array.isArray(data.users)) {
+        setUsers(data.users);
+      } else {
+        setUsers((prev) => [newUser, ...prev.filter((u) => u.email.toLowerCase() !== cleanEmail)]);
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
+
+      setShowAddModal(false);
+      showToast(`${tr('admin.users.userCreatedPrefix', 'User')} "${newUser.name}" ${tr('admin.users.userCreatedSuffix', 'created successfully!')}`);
+    } catch (err: any) {
+      setAddError(err.message || 'Failed to persist new user');
+    }
   };
 
   // Edit User Modal
@@ -591,7 +548,7 @@ export default function AdminUserManagementPage() {
     setShowEditModal(true);
   };
 
-  const handleEditUserSubmit = (e: React.FormEvent) => {
+  const handleEditUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUserId) return;
     setEditError('');
@@ -612,49 +569,56 @@ export default function AdminUserManagementPage() {
 
     const targetUser = users.find((u) => u.id === editingUserId);
     const isFirstAdmin = isFirstAdminUser(targetUser);
-
     const finalRole: 'admin' | 'user' = isFirstAdmin ? 'admin' : editRole;
 
-    const updated = users.map((u) => {
-      if (u.id === editingUserId) {
-        return {
-          ...u,
-          name: cleanName,
-          email: cleanEmail,
-          password: editPassword ? editPassword : u.password,
-          role: finalRole,
-          subscriptionPlan: editSubscriptionPlan
-        };
-      }
-      return u;
-    });
+    const updatedUser: AppUser = {
+      id: editingUserId,
+      name: cleanName,
+      email: cleanEmail,
+      password: editPassword ? editPassword : targetUser?.password,
+      role: finalRole,
+      subscriptionPlan: editSubscriptionPlan,
+      createdAt: targetUser?.createdAt || new Date().toISOString()
+    };
 
-    saveUsersList(updated);
-
-    const editedTarget = updated.find((u) => u.id === editingUserId);
-    if (editedTarget) {
-      fetch('/api/admin/users', {
+    try {
+      const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editedTarget),
-      }).catch(() => {});
-    }
+        body: JSON.stringify(updatedUser),
+      });
 
-    if (currentUser?.id === editingUserId) {
-      const activeUserUpdated = {
-        ...currentUser,
-        name: cleanName,
-        email: cleanEmail,
-        role: finalRole,
-        subscriptionPlan: editSubscriptionPlan
-      };
-      localStorage.setItem('zecratary_current_user', JSON.stringify(activeUserUpdated));
-      setCurrentUser(activeUserUpdated);
-      window.dispatchEvent(new Event('zecratary_auth_changed'));
-    }
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Server error updating user');
+      }
 
-    setShowEditModal(false);
-    showToast(`${tr('admin.users.userUpdatedPrefix', 'User')} "${cleanName}" ${tr('admin.users.userUpdatedSuffix', 'updated successfully!')}`);
+      const data = await res.json();
+      if (data.users && Array.isArray(data.users)) {
+        setUsers(data.users);
+      } else {
+        setUsers((prev) => prev.map((u) => (u.id === editingUserId ? updatedUser : u)));
+      }
+
+      if (currentUser?.id === editingUserId) {
+        setCurrentUser({
+          ...currentUser,
+          name: cleanName,
+          email: cleanEmail,
+          role: finalRole,
+          subscriptionPlan: editSubscriptionPlan
+        });
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
+
+      setShowEditModal(false);
+      showToast(`${tr('admin.users.userUpdatedPrefix', 'User')} "${cleanName}" ${tr('admin.users.userUpdatedSuffix', 'updated successfully!')}`);
+    } catch (err: any) {
+      setEditError(err.message || 'Failed to update user');
+    }
   };
 
   // Safe Deletion Handler
@@ -666,7 +630,7 @@ export default function AdminUserManagementPage() {
       return;
     }
 
-    if (isFirstAdminUser && isFirstAdminUser(targetUser)) {
+    if (isFirstAdminUser(targetUser)) {
       alert(tr('admin.users.cannotDeletePrimary', 'The primary system administrator account cannot be deleted.'));
       return;
     }
@@ -677,27 +641,25 @@ export default function AdminUserManagementPage() {
     try {
       const cleanEmail = userEmail.toLowerCase().trim();
 
-      try {
-        const rawDel = localStorage.getItem('zecratary_deleted_users');
-        const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
-        if (cleanEmail && !delList.includes(cleanEmail)) delList.push(cleanEmail);
-        if (id && !delList.includes(id)) delList.push(id);
-        localStorage.setItem('zecratary_deleted_users', JSON.stringify(delList));
-      } catch (_) {}
-
-      const updated = users.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail));
-      setUsers(updated);
-      setSelectedUserIds((prev) => prev.filter((uid) => uid !== id));
-      localStorage.setItem('zecratary_users', JSON.stringify(updated));
-
-      await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, email: cleanEmail }),
-      }).catch(() => {});
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Server error deleting user');
+      }
+
+      setUsers((prev) => prev.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail)));
+      setSelectedUserIds((prev) => prev.filter((uid) => uid !== id));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
 
       showToast(`${tr('admin.users.userDeletedPrefix', 'User')} "${displayName}" ${tr('admin.users.userDeletedSuffix', 'has been deleted.')}`);
-      window.dispatchEvent(new Event('zecratary_users_updated'));
     } catch (err: any) {
       console.error('Failed to delete user:', err);
       showToast(tr('admin.users.deleteFail', 'Failed to delete user: ') + (err?.message || 'Server error'));
@@ -797,7 +759,6 @@ export default function AdminUserManagementPage() {
       className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
       style={{ color: cText }}
     >
-      
       {/* ACCESS WARNING FOR NON-ADMINS */}
       {currentUser && currentUser.role !== 'admin' && (
         <div 
@@ -851,6 +812,23 @@ export default function AdminUserManagementPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* RELOAD BUTTON */}
+          <button
+            type="button"
+            onClick={loadUsers}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            style={{
+              backgroundColor: cCardBg,
+              borderColor: cInputBorder,
+              color: cText
+            }}
+            title="Reload users from server database"
+          >
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>Reload</span>
+          </button>
+
           {/* EXPORT ACTION BUTTONS */}
           <button
             type="button"
@@ -1080,7 +1058,7 @@ export default function AdminUserManagementPage() {
                   </tr>
                 ) : (
                   paginatedAdmins.map((user) => {
-                    const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
+                    const isCurrent = currentUser?.id === user.id || currentUser?.email?.toLowerCase() === user.email?.toLowerCase();
                     const isPrimary = isFirstAdminUser(user);
                     const isSelected = selectedUserIds.includes(user.id);
                     const planBadge = getPlanBadge(user.subscriptionPlan);
@@ -1112,7 +1090,7 @@ export default function AdminUserManagementPage() {
                               color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                             }}
                           >
-                            {user.name.charAt(0).toUpperCase()}
+                            {(user.name || 'A').charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
@@ -1396,7 +1374,7 @@ export default function AdminUserManagementPage() {
                   </tr>
                 ) : (
                   paginatedStandardUsers.map((user) => {
-                    const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
+                    const isCurrent = currentUser?.id === user.id || currentUser?.email?.toLowerCase() === user.email?.toLowerCase();
                     const isSelected = selectedUserIds.includes(user.id);
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
@@ -1427,7 +1405,7 @@ export default function AdminUserManagementPage() {
                               color: 'var(--color-primary, #E05638)'
                             }}
                           >
-                            {user.name.charAt(0).toUpperCase()}
+                            {(user.name || 'U').charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">

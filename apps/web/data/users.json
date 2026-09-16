@@ -49,5 +49,13 @@
     "updatedAt": "2026-09-15T03:45:00.669Z",
     "planSlug": "taster",
     "planId": "preset_taster"
+  },
+  {
+    "id": "usr_demo_user",
+    "name": "Jordan Smith",
+    "email": "jordan@example.com",
+    "role": "user",
+    "subscriptionPlan": "taster",
+    "createdAt": "2026-02-15T10:00:00.000Z"
   }
 ]
