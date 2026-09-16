@@ -45,23 +45,29 @@ function writeJsonFile<T>(filename: string, data: T): void {
   }
 }
 
+let cachedPool: any = null;
 async function getDbClient() {
   const connUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (!connUrl) return null;
-  try {
-    const { Pool } = await import('pg');
-    return new Pool({
-      connectionString: connUrl,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
-      connectionTimeoutMillis: 3000
-    });
-  } catch (_) {
-    return null;
+  if (!cachedPool) {
+    try {
+      const { Pool } = await import('pg');
+      cachedPool = new Pool({
+        connectionString: connUrl,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+        connectionTimeoutMillis: 3000,
+        max: 5
+      });
+    } catch (_) {
+      return null;
+    }
   }
+  return cachedPool;
 }
 
 async function ensurePlanExists(pool: any, slug: string, name: string, amount: number) {
-  const cleanSlug = (slug || 'taster').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  if (!pool) return slug;
+  const cleanSlug = (slug || 'taster').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
   const cleanName = name || cleanSlug;
   try {
     const check = await pool.query('SELECT id FROM subscription_plans WHERE slug = $1', [cleanSlug]);
@@ -69,7 +75,8 @@ async function ensurePlanExists(pool: any, slug: string, name: string, amount: n
       await pool.query(`
         INSERT INTO subscription_plans (id, name, slug, monthly_price_dollars, annual_price_dollars, is_free)
         VALUES ($1, $2, $3, $4, $5, $6)
-      `, ['plan_' + cleanSlug + '_' + Date.now(), cleanName, cleanSlug, amount || 0, 0, false]);
+        ON CONFLICT DO NOTHING;
+      `, ['plan_' + cleanSlug + '_' + Date.now().toString(36), cleanName, cleanSlug, amount || 0, 0, false]);
     }
   } catch (err) {
     console.warn('[DB Plan Auto-Seed Warning]:', err);
@@ -96,12 +103,26 @@ export async function GET() {
         settings = settingsRes.rows[0].payment_settings || DEFAULT_SETTINGS;
         if (settingsRes.rows[0].currency) settings.currency = settingsRes.rows[0].currency;
       }
-      const txRes = await pool.query('SELECT id, customer_name as "customerName", customer_email as "customerEmail", plan_name as "planName", plan_slug as "planSlug", amount, currency, gateway, status, failure_reason as "failureReason", test_mode as "testMode", expiry_date as "expiryDate", created_at as "createdAt" FROM payment_transactions ORDER BY created_at DESC');
-      await pool.end();
+      const txRes = await pool.query(`
+        SELECT 
+          id, 
+          customer_name as "customerName", 
+          customer_email as "customerEmail", 
+          plan_name as "planName", 
+          plan_slug as "planSlug", 
+          amount, 
+          currency, 
+          gateway, 
+          status, 
+          failure_reason as "failureReason", 
+          test_mode as "testMode", 
+          expiry_date as "expiryDate", 
+          created_at as "createdAt" 
+        FROM payment_transactions 
+        ORDER BY created_at DESC
+      `);
       return NextResponse.json({ success: true, settings, transactions: txRes.rows }, { headers: { 'Cache-Control': 'no-store' } });
-    } catch (err) {
-      await pool.end().catch(() => {});
-    }
+    } catch (_) {}
   }
 
   const adminSettings = readJsonFile('admin_settings.json', {} as any);
@@ -125,7 +146,6 @@ export async function POST(req: NextRequest) {
             VALUES ('primary_settings', $1, NOW())
             ON CONFLICT (id) DO UPDATE SET payment_settings = EXCLUDED.payment_settings, updated_at = NOW();
           `, [JSON.stringify(body)]);
-          await pool.end();
         } catch (_) {}
       }
       return NextResponse.json({ success: true, message: 'Stripe Gateway enabled and verified.' });
@@ -147,7 +167,7 @@ export async function POST(req: NextRequest) {
             ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status;
           `, [
             newTx.id,
-            newTx.customerName,
+            newTx.customerName || 'Customer',
             cleanEmail,
             planName,
             planSlug,
@@ -160,10 +180,8 @@ export async function POST(req: NextRequest) {
             newTx.expiryDate || null,
             newTx.createdAt || new Date().toISOString()
           ]);
-          await pool.end();
         } catch (dbErr: any) {
-          await pool.end().catch(() => {});
-          throw dbErr;
+          console.error('[Payment API DB Error]:', dbErr);
         }
       }
 
@@ -195,8 +213,8 @@ export async function POST(req: NextRequest) {
             WHERE id = $1;
           `, [
             updatedTx.id,
-            updatedTx.customerName,
-            updatedTx.customerEmail.toLowerCase().trim(),
+            updatedTx.customerName || 'Customer',
+            (updatedTx.customerEmail || '').toLowerCase().trim(),
             planName,
             planSlug,
             updatedTx.amount || 0,
@@ -206,10 +224,8 @@ export async function POST(req: NextRequest) {
             updatedTx.failureReason || null,
             updatedTx.expiryDate || null
           ]);
-          await pool.end();
         } catch (dbErr: any) {
-          await pool.end().catch(() => {});
-          throw dbErr;
+          console.error('[Payment API DB Error]:', dbErr);
         }
       }
 
@@ -227,7 +243,6 @@ export async function POST(req: NextRequest) {
           VALUES ('primary_settings', $1, $2, NOW())
           ON CONFLICT (id) DO UPDATE SET payment_settings = EXCLUDED.payment_settings, currency = EXCLUDED.currency, updated_at = NOW();
         `, [JSON.stringify(body), body.currency || 'USD']);
-        await pool.end();
       } catch (_) {}
     }
 
@@ -256,10 +271,7 @@ export async function DELETE(req: NextRequest) {
     if (pool) {
       try {
         await pool.query("DELETE FROM payment_transactions WHERE id = $1", [id]);
-        await pool.end();
-      } catch (_) {
-        await pool.end().catch(() => {});
-      }
+      } catch (_) {}
     }
 
     const transactions = readJsonFile('payment_transactions.json', [] as any[]);
