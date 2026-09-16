@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.1.2",
+  "version": "7.1.3",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -105,7 +105,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.1.2",
+  "version": "7.1.3",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -18216,6 +18216,7 @@ export default function RecipeTypeAdminPage() {
 ## File: `apps/web/src/app/admin/payment/page.tsx`
 ```typescript
 'use client';
+
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { 
@@ -18227,6 +18228,11 @@ import {
   ShieldAlert, Ban, ArrowUpRight, AlertTriangle
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 interface PaymentTransaction {
   id: string;
@@ -18362,7 +18368,10 @@ const calculateDefaultExpiry = (startDateStr: string, interval?: string): string
 };
 
 export default function AdminPaymentPage() {
-  const { t, version } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+  const version = langContext?.version;
+
   const [activeTab, setActiveTab] = useState<'history' | 'settings'>('history');
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
   const [availablePlans, setAvailablePlans] = useState<PlanOption[]>(DEFAULT_AVAILABLE_PLANS);
@@ -18440,14 +18449,16 @@ export default function AdminPaymentPage() {
     }
   }, [feedback]);
 
-  // Dynamic Theme Synchronization & Day Mode Inversion
+  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -18486,7 +18497,7 @@ export default function AdminPaymentPage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -18522,9 +18533,9 @@ export default function AdminPaymentPage() {
     const stripeActive = config.activeGateway === 'stripe' || config.activeGateway === 'both' || config.stripe.enabled;
     const paypalActive = config.activeGateway === 'paypal' || config.activeGateway === 'both' || config.paypal.enabled;
 
-    if (stripeActive) list.push({ id: 'stripe', label: `Stripe ${config.testMode ? `(${t('sandboxTest') || 'Test Mode'})` : `(${t('liveProduction') || 'Live'})`}` });
+    if (stripeActive) list.push({ id: 'stripe', label: `Stripe ${config.testMode ? `(${t('sandboxTest', 'Test Mode')})` : `(${t('liveProduction', 'Live')})`}` });
     if (paypalActive) list.push({ id: 'paypal', label: `PayPal ${config.paypal.environment === 'sandbox' ? '(Sandbox)' : '(Live)'}` });
-    list.push({ id: 'manual', label: t('gatewayManual') || 'Manual' });
+    list.push({ id: 'manual', label: t('gatewayManual', 'Manual') });
     return list;
   }, [config, t]);
 
@@ -18532,73 +18543,48 @@ export default function AdminPaymentPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
-  const loadPlans = useCallback(() => {
+  // Load Plans from Server Settings API (Zero LocalStorage)
+  const loadPlans = useCallback(async () => {
     let parsedPlans: PlanOption[] = [];
     try {
-      const rawConfigs = null;
-      if (rawConfigs) {
-        const configs = JSON.parse(rawConfigs);
-        if (Array.isArray(configs) && configs.length > 0) {
-          configs.forEach((cfg: any) => {
-            const isZeroCost = cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0);
-            if (isZeroCost) {
-              parsedPlans.push({
-                id: cfg.id || cfg.slug,
-                name: `${cfg.name} (Free)`,
-                slug: cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                priceFormatted: 'Free',
-                priceDollars: 0,
-                isFree: true,
-              });
-            } else {
-              if (cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0) {
-                const mPrice = Number(cfg.monthlyPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-monthly`,
-                  name: `${cfg.name} (Monthly)`,
-                  slug: `${cfg.slug}-monthly`,
-                  priceFormatted: `${activeCurrencySymbol}${mPrice.toFixed(2)}/mo`,
-                  priceDollars: mPrice,
-                  interval: 'MONTH',
-                  isFree: false,
-                });
-              }
-              if (cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0) {
-                const aPrice = Number(cfg.annualPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-annual`,
-                  name: `${cfg.name} (Annual)`,
-                  slug: `${cfg.slug}-annual`,
-                  priceFormatted: `${activeCurrencySymbol}${aPrice.toFixed(2)}/yr`,
-                  priceDollars: aPrice,
-                  interval: 'YEAR',
-                  isFree: false,
-                });
-              }
-            }
+      const serverData = await fetchServerAdminSettings();
+      if (serverData && Array.isArray(serverData.subscriptionPlans) && serverData.subscriptionPlans.length > 0) {
+        serverData.subscriptionPlans.forEach((cfg: any) => {
+          const isZeroCost = cfg.price === 0 || cfg.isFree;
+          const price = Number(cfg.price || 0);
+          const interval = cfg.interval ? (cfg.interval.toLowerCase().includes('year') ? 'YEAR' : 'MONTH') : 'MONTH';
+
+          parsedPlans.push({
+            id: cfg.id || cfg.slug,
+            name: cfg.name + (isZeroCost ? ' (Free)' : ` (${interval === 'YEAR' ? 'Annual' : 'Monthly'})`),
+            slug: cfg.slug || cfg.id,
+            priceFormatted: isZeroCost ? 'Free' : `${activeCurrencySymbol}${price.toFixed(2)}${interval === 'YEAR' ? '/yr' : '/mo'}`,
+            priceDollars: price,
+            interval,
+            isFree: isZeroCost,
           });
-        }
+        });
       }
-    } catch (e) {}
+    } catch (_) {}
 
     if (parsedPlans.length === 0) {
       try {
-        const rawPlans = null;
-        if (rawPlans) {
-          const directPlans = JSON.parse(rawPlans);
-          if (Array.isArray(directPlans) && directPlans.length > 0) {
-            parsedPlans = directPlans.map((p: any) => ({
+        const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.plans) && data.plans.length > 0) {
+            parsedPlans = data.plans.map((p: any) => ({
               id: p.id || p.slug,
               name: p.name + (p.interval ? ` (${p.interval === 'YEAR' ? 'Annual' : 'Monthly'})` : ''),
               slug: p.slug,
               priceFormatted: p.priceCents === 0 ? 'Free' : `${activeCurrencySymbol}${(p.priceCents / 100).toFixed(2)}`,
-              priceDollars: p.priceCents ? p.priceCents / 100 : 0,
+              priceDollars: p.priceCents ? p.priceCents / 100 : (p.price || 0),
               interval: p.interval,
-              isFree: p.priceCents === 0,
+              isFree: p.priceCents === 0 || p.price === 0,
             }));
           }
         }
-      } catch (e) {}
+      } catch (_) {}
     }
 
     if (parsedPlans.length > 0) {
@@ -18608,13 +18594,14 @@ export default function AdminPaymentPage() {
     }
   }, [activeCurrencySymbol]);
 
-  const loadUsers = useCallback(() => {
+  // Load Registered Users from Server API (Zero LocalStorage)
+  const loadUsers = useCallback(async () => {
     try {
-      const rawUsers = localStorage.getItem('zecratary_users');
-      if (rawUsers) {
-        const parsed = JSON.parse(rawUsers);
-        if (Array.isArray(parsed)) {
-          const normalized = parsed.map((u: any) => ({
+      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.users)) {
+          const normalized = data.users.map((u: any) => ({
             ...u,
             subscriptionPlan: sanitizeSinglePlan(u.subscriptionPlan)
           }));
@@ -18624,76 +18611,59 @@ export default function AdminPaymentPage() {
           }
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Failed to load users from server:', e);
+    }
   }, [selectedUserId]);
 
+  // Hydrate Payments & Gateways Exclusively from Server Storage (Zero LocalStorage)
   const fetchData = async () => {
     setLoading(true);
+    purgeLegacyBrowserAdminStorage();
     try {
-      const localTxs = localStorage.getItem('zecratary_payment_transactions');
-      const localSettings = localStorage.getItem('zecratary_payment_settings');
-
-      if (localTxs) {
-        try { setTransactions(JSON.parse(localTxs)); } catch (_) {}
-      }
-      if (localSettings) {
-        try { setConfig(JSON.parse(localSettings)); } catch (_) {}
-      }
-
-      const res = await fetch('/api/admin/payment');
-      const data = await res.json();
-      if (data.success) {
-        if (!localTxs && data.transactions) {
-          setTransactions(data.transactions);
-          localStorage.setItem('zecratary_payment_transactions', JSON.stringify(data.transactions));
-        }
-        if (!localSettings && data.settings) {
-          setConfig(data.settings);
-          localStorage.setItem('zecratary_payment_settings', JSON.stringify(data.settings));
+      const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (Array.isArray(data.transactions)) {
+            setTransactions(data.transactions);
+          }
+          if (data.settings) {
+            setConfig(data.settings);
+          }
         }
       }
     } catch (e) {
-      const local = localStorage.getItem('zecratary_payment_settings');
-      if (local) {
-        try { setConfig(JSON.parse(local)); } catch (_) {}
-      }
+      console.error('Failed to load server payment data:', e);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    document.title = `${t('paymentManagerTitle') || 'Payment Manager'} - Admin`;
+    document.title = `${t('paymentManagerTitle', 'Payment Manager')} - Admin`;
     fetchData();
     loadUsers();
+    loadPlans();
 
     const handleSync = () => {
       loadUsers();
-      const localSettings = localStorage.getItem('zecratary_payment_settings');
-      if (localSettings) {
-        try {
-          const parsed = JSON.parse(localSettings);
-          setConfig((prev) => ({ ...prev, ...parsed }));
-        } catch (err) {}
-      }
+      loadPlans();
+      fetchData();
     };
 
     window.addEventListener('zecratary_plans_updated', handleSync);
     window.addEventListener('zecratary_users_updated', handleSync);
     window.addEventListener('zecratary_payment_updated', handleSync);
-    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_plans_updated', handleSync);
       window.removeEventListener('zecratary_users_updated', handleSync);
       window.removeEventListener('zecratary_payment_updated', handleSync);
-      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [t, version, loadUsers]);
-
-  useEffect(() => {
-    loadPlans();
-  }, [loadPlans]);
+  }, [t, version, loadUsers, loadPlans]);
 
   const currentSelectedUser = useMemo(() => {
     return registeredUsers.find((u) => u.id === selectedUserId) || null;
@@ -18752,25 +18722,29 @@ export default function AdminPaymentPage() {
       currency: newCurrency,
     };
     setConfig(updatedConfig);
-    localStorage.setItem('zecratary_payment_settings', JSON.stringify(updatedConfig));
-    localStorage.setItem('zecratary_currency', newCurrency);
-    window.dispatchEvent(new Event('zecratary_payment_updated'));
-    window.dispatchEvent(new Event('storage'));
 
+    // Save directly to server API & Server Store (Zero LocalStorage)
+    await persistServerAdminSettings({ currency: newCurrency, paymentSettings: updatedConfig });
     try {
       await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedConfig),
       });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+
       setFeedback({
         type: 'success',
-        msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) and saved!`,
+        msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) and saved to server!`,
       });
-    } catch (err) {
+    } catch (err: any) {
       setFeedback({
-        type: 'success',
-        msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) locally.`,
+        type: 'error',
+        msg: `Failed to persist currency: ${err.message || 'Server error'}`,
       });
     }
   };
@@ -18857,35 +18831,36 @@ export default function AdminPaymentPage() {
   };
 
   const handleCancelPlan = async (tx: PaymentTransaction) => {
-    const confirmMsg = (t('confirmCancelPlanFor') || 'Are you sure you want to cancel plan');
+    const confirmMsg = t('confirmCancelPlanFor', 'Are you sure you want to cancel plan');
     if (!window.confirm(`${confirmMsg} "${tx.planName}" for ${tx.customerName}?`)) {
       return;
     }
 
-    const updatedTxs = transactions.map((tItem) => {
-      if (tItem.id === tx.id) {
-        return { ...tItem, status: 'refunded' as const, expiryDate: new Date().toISOString() };
-      }
-      return tItem;
+    const updatedTx: PaymentTransaction = { ...tx, status: 'refunded', expiryDate: new Date().toISOString() };
+
+    // Update Transaction on Server
+    await fetch('/api/admin/payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update_transaction', transaction: updatedTx }),
     });
 
-    setTransactions(updatedTxs);
-    localStorage.setItem('zecratary_payment_transactions', JSON.stringify(updatedTxs));
+    // Update User Account on Server via /api/admin/users
+    const targetUser = registeredUsers.find((u) => u.email.toLowerCase() === tx.customerEmail.toLowerCase());
+    if (targetUser) {
+      await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...targetUser, subscriptionPlan: 'taster' }),
+      }).catch(() => {});
+    }
 
-    const rawUsers = localStorage.getItem('zecratary_users');
-    if (rawUsers) {
-      try {
-        const usersArr = JSON.parse(rawUsers);
-        const updatedUsers = usersArr.map((u: any) => {
-          if (u.email.toLowerCase() === tx.customerEmail.toLowerCase()) {
-            return { ...u, subscriptionPlan: 'taster' };
-          }
-          return { ...u, subscriptionPlan: sanitizeSinglePlan(u.subscriptionPlan) };
-        });
-        localStorage.setItem('zecratary_users', JSON.stringify(updatedUsers));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('storage'));
-      } catch (err) {}
+    setTransactions((prev) => prev.map((item) => (item.id === tx.id ? updatedTx : item)));
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_users_updated'));
+      window.dispatchEvent(new Event('zecratary_payment_updated'));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
     }
 
     setFeedback({
@@ -18900,7 +18875,7 @@ export default function AdminPaymentPage() {
     setModalError('');
 
     if (!editCustomerName.trim() || !editCustomerEmail.trim()) {
-      setModalError(t('customerNameEmailRequired') || 'Please enter customer name and valid email.');
+      setModalError(t('customerNameEmailRequired', 'Please enter customer name and valid email.'));
       return;
     }
 
@@ -18939,41 +18914,23 @@ export default function AdminPaymentPage() {
         body: JSON.stringify({ action: 'update_transaction', transaction: updatedTx }),
       });
 
-      const updatedTxs = transactions.map((tItem) => {
-        if (tItem.id === updatedTx.id) return updatedTx;
-        if (
-          isSucceeded(normalizedStatus) &&
-          tItem.customerEmail.toLowerCase() === cleanEmail &&
-          (isSucceeded(tItem.status) || isPending(tItem.status))
-        ) {
-          return {
-            ...tItem,
-            status: 'refunded' as const,
-            expiryDate: new Date().toISOString()
-          };
-        }
-        return tItem;
-      });
-
-      setTransactions(updatedTxs);
-      localStorage.setItem('zecratary_payment_transactions', JSON.stringify(updatedTxs));
-
       if (editSyncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        if (rawUsers) {
-          try {
-            const usersArr = JSON.parse(rawUsers);
-            const synced = usersArr.map((u: any) => {
-              if (u.email.toLowerCase() === cleanEmail) {
-                return { ...u, subscriptionPlan: singlePlanSlug };
-              }
-              return { ...u, subscriptionPlan: sanitizeSinglePlan(u.subscriptionPlan) };
-            });
-            localStorage.setItem('zecratary_users', JSON.stringify(synced));
-            window.dispatchEvent(new Event('zecratary_users_updated'));
-            window.dispatchEvent(new Event('storage'));
-          } catch (err) {}
+        const targetUser = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
+        if (targetUser) {
+          await fetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...targetUser, subscriptionPlan: singlePlanSlug }),
+          }).catch(() => {});
         }
+      }
+
+      await fetchData();
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
 
       setEditingTx(null);
@@ -18987,7 +18944,7 @@ export default function AdminPaymentPage() {
   };
 
   const handleDeleteTransaction = async (id: string, customerName: string) => {
-    const confirmMsg = (t('confirmDeletePaymentFor') || 'Are you sure you want to delete payment record for');
+    const confirmMsg = t('confirmDeletePaymentFor', 'Are you sure you want to delete payment record for');
     if (!window.confirm(`${confirmMsg} ${customerName}?`)) {
       return;
     }
@@ -18997,10 +18954,13 @@ export default function AdminPaymentPage() {
         method: 'DELETE',
       });
 
-      const updatedTxs = transactions.filter((tItem) => tItem.id !== id);
-      setTransactions(updatedTxs);
+      setTransactions((prev) => prev.filter((tItem) => tItem.id !== id));
       setSelectedTxIds((prev) => prev.filter((item) => item !== id));
-      localStorage.setItem('zecratary_payment_transactions', JSON.stringify(updatedTxs));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
 
       setFeedback({
         type: 'success',
@@ -19016,7 +18976,7 @@ export default function AdminPaymentPage() {
 
   const handleBulkDeleteUsers = async () => {
     if (selectedTxIds.length === 0) return;
-    const confirmTmpl = (t('confirmRemovePayments') || 'Are you sure you want to remove {count} selected payment record(s)?');
+    const confirmTmpl = t('confirmRemovePayments', 'Are you sure you want to remove {count} selected payment record(s)?');
     if (!window.confirm(confirmTmpl.replace('{count}', String(selectedTxIds.length)))) {
       return;
     }
@@ -19027,12 +18987,13 @@ export default function AdminPaymentPage() {
       );
 
       const count = selectedTxIds.length;
-      const updatedTxs = transactions.filter((tItem) => !selectedTxIds.includes(tItem.id));
-      setTransactions(updatedTxs);
-      localStorage.setItem('zecratary_payment_transactions', JSON.stringify(updatedTxs));
+      setTransactions((prev) => prev.filter((tItem) => !selectedTxIds.includes(tItem.id)));
       setSelectedTxIds([]);
-      window.dispatchEvent(new Event('zecratary_payment_updated'));
-      window.dispatchEvent(new Event('storage'));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
 
       setFeedback({
         type: 'success',
@@ -19057,7 +19018,7 @@ export default function AdminPaymentPage() {
 
     const targetUser = registeredUsers.find((u) => u.id === selectedUserId);
     if (!targetUser) {
-      setModalError(t('selectValidUserError') || 'Please select a valid user.');
+      setModalError(t('selectValidUserError', 'Please select a valid user.'));
       return;
     }
 
@@ -19100,46 +19061,25 @@ export default function AdminPaymentPage() {
         body: JSON.stringify({ action: 'add_transaction', transaction: newTx }),
       });
 
-      const updatedTxs = transactions.map((tItem) => {
-        if (
-          isSucceeded(normalizedStatus) &&
-          tItem.customerEmail.toLowerCase() === customerEmail &&
-          (isSucceeded(tItem.status) || isPending(tItem.status))
-        ) {
-          return {
-            ...tItem,
-            status: 'refunded' as const,
-            expiryDate: new Date().toISOString(),
-          };
-        }
-        return tItem;
-      });
-
-      updatedTxs.unshift(newTx);
-      setTransactions(updatedTxs);
-      localStorage.setItem('zecratary_payment_transactions', JSON.stringify(updatedTxs));
-
       if (syncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        if (rawUsers) {
-          try {
-            const usersArr = JSON.parse(rawUsers);
-            const updatedUsers = usersArr.map((u: any) => {
-              if (u.email.toLowerCase() === customerEmail) {
-                return { 
-                  ...u, 
-                  subscriptionPlan: singlePlanSlug,
-                  planExpiryDate: formattedExpiryDate,
-                  expiryDate: formattedExpiryDate
-                };
-              }
-              return { ...u, subscriptionPlan: sanitizeSinglePlan(u.subscriptionPlan) };
-            });
-            localStorage.setItem('zecratary_users', JSON.stringify(updatedUsers));
-            window.dispatchEvent(new Event('zecratary_users_updated'));
-            window.dispatchEvent(new Event('storage'));
-          } catch (err) {}
-        }
+        await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            ...targetUser, 
+            subscriptionPlan: singlePlanSlug,
+            planExpiryDate: formattedExpiryDate,
+            expiryDate: formattedExpiryDate
+          }),
+        }).catch(() => {});
+      }
+
+      await fetchData();
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
 
       setShowAddModal(false);
@@ -19251,8 +19191,11 @@ export default function AdminPaymentPage() {
             stripe: { ...config.stripe, enabled: true } 
           };
           setConfig(updated);
-          localStorage.setItem('zecratary_payment_settings', JSON.stringify(updated));
-          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          await persistServerAdminSettings({ paymentSettings: updated });
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('zecratary_payment_updated'));
+            window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+          }
           setFeedback({ type: 'success', msg: data.message || 'Stripe account connected successfully!' });
         }
       } else {
@@ -19265,8 +19208,11 @@ export default function AdminPaymentPage() {
         stripe: { ...config.stripe, enabled: true } 
       };
       setConfig(updated);
-      localStorage.setItem('zecratary_payment_settings', JSON.stringify(updated));
-      window.dispatchEvent(new Event('zecratary_payment_updated'));
+      await persistServerAdminSettings({ paymentSettings: updated });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
       setFeedback({ type: 'success', msg: 'Stripe Gateway enabled and verified.' });
     } finally {
       setConnectingStripe(false);
@@ -19285,31 +19231,43 @@ export default function AdminPaymentPage() {
     };
 
     try {
+      // 1. Direct Server Persistence via /api/admin/payment
       const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedConfig),
       });
       const data = await res.json();
+
+      // 2. Dual Server Store Persistence (Zero LocalStorage)
+      await persistServerAdminSettings({
+        paymentSettings: updatedConfig,
+        currency: updatedConfig.currency
+      });
+
       if (data.success) {
         setConfig(updatedConfig);
-        localStorage.setItem('zecratary_payment_settings', JSON.stringify(updatedConfig));
-        localStorage.setItem('zecratary_currency', updatedConfig.currency);
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('storage'));
-        loadPlans();
-        setFeedback({ type: 'success', msg: 'Gateway settings and currency saved successfully!' });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+        await loadPlans();
+        setFeedback({ type: 'success', msg: 'Gateway settings and currency saved successfully to server!' });
       } else {
         setFeedback({ type: 'error', msg: data.error || 'Failed to save settings.' });
       }
     } catch (e: any) {
+      await persistServerAdminSettings({
+        paymentSettings: updatedConfig,
+        currency: updatedConfig.currency
+      });
       setConfig(updatedConfig);
-      localStorage.setItem('zecratary_payment_settings', JSON.stringify(updatedConfig));
-      localStorage.setItem('zecratary_currency', updatedConfig.currency);
-      window.dispatchEvent(new Event('zecratary_payment_updated'));
-      window.dispatchEvent(new Event('storage'));
-      loadPlans();
-      setFeedback({ type: 'success', msg: 'Settings cached and synchronized locally.' });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+      await loadPlans();
+      setFeedback({ type: 'success', msg: 'Settings saved to server.' });
     } finally {
       setLoading(false);
     }
@@ -19375,10 +19333,10 @@ export default function AdminPaymentPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('paymentManagerTitle') || 'Payment Manager'}
+            {t('paymentManagerTitle', 'Payment Manager')}
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('paymentManagerSubtitle') || 'Manage payment transactions, Stripe/PayPal webhooks, and gateway currencies.'}
+            {t('paymentManagerSubtitle', 'Manage payment transactions, Stripe/PayPal webhooks, and gateway currencies.')}
           </p>
         </div>
 
@@ -19391,7 +19349,7 @@ export default function AdminPaymentPage() {
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
           >
-            <PlusCircle className="h-4 w-4" /> {t('addPaymentBtn') || 'Add Payment'}
+            <PlusCircle className="h-4 w-4" /> {t('addPaymentBtn', 'Add Payment')}
           </button>
           <Link
             href="/admin/plans"
@@ -19402,7 +19360,7 @@ export default function AdminPaymentPage() {
               color: isDayMode ? '#0f172a' : '#cbd5e1'
             }}
           >
-            <Zap className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('managePlans') || 'Manage Plans'}
+            <Zap className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('managePlans', 'Manage Plans')}
           </Link>
         </div>
       </div>
@@ -19424,7 +19382,7 @@ export default function AdminPaymentPage() {
             color: activeTab === 'history' ? '#ffffff' : (isDayMode ? '#64748b' : '#94a3b8')
           }}
         >
-          <History className="h-4 w-4" /> {t('paymentHistoryTab') || 'Payment History'}
+          <History className="h-4 w-4" /> {t('paymentHistoryTab', 'Payment History')}
         </button>
         <button
           type="button"
@@ -19435,7 +19393,7 @@ export default function AdminPaymentPage() {
             color: activeTab === 'settings' ? '#ffffff' : (isDayMode ? '#64748b' : '#94a3b8')
           }}
         >
-          <Sliders className="h-4 w-4" /> {t('gatewaySettingsTab') || 'Gateway Settings'}
+          <Sliders className="h-4 w-4" /> {t('gatewaySettingsTab', 'Gateway Settings')}
         </button>
       </div>
 
@@ -19467,7 +19425,7 @@ export default function AdminPaymentPage() {
           >
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1.5 font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                <Activity className="h-4 w-4 text-emerald-500 animate-pulse" /> {t('gatewayEngine') || 'Gateway Engine'}
+                <Activity className="h-4 w-4 text-emerald-500 animate-pulse" /> {t('gatewayEngine', 'Gateway Engine')}
               </span>
               <span 
                 className="font-extrabold uppercase px-2.5 py-0.5 rounded text-[11px] border"
@@ -19489,18 +19447,18 @@ export default function AdminPaymentPage() {
                   color: config.testMode ? (isDayMode ? '#b45309' : '#fbbf24') : (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)')
                 }}
               >
-                {config.testMode ? (t('sandboxTest') || 'Sandbox Test') : (t('liveProduction') || 'Live Production')}
+                {config.testMode ? t('sandboxTest', 'Sandbox Test') : t('liveProduction', 'Live Production')}
               </span>
             </div>
 
             <div className="flex items-center gap-4 font-semibold text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
               <div>
-                {t('currencyLabel') || 'Currency:'} <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{config.currency} ({activeCurrencySymbol})</span>
+                {t('currencyLabel', 'Currency:')} <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{config.currency} ({activeCurrencySymbol})</span>
               </div>
               <div>
-                {t('stripeLabel') || 'Stripe:'}{' '}
+                {t('stripeLabel', 'Stripe:')}{' '}
                 <span className={`font-bold ${config.stripeConnected ? (isDayMode ? 'text-emerald-600' : 'text-emerald-400') : (isDayMode ? 'text-slate-500' : 'text-slate-400')}`}>
-                  {config.stripeConnected ? (t('connectedStatus') || 'Connected') : (t('notConnectedStatus') || 'Not Connected')}
+                  {config.stripeConnected ? t('connectedStatus', 'Connected') : t('notConnectedStatus', 'Not Connected')}
                 </span>
               </div>
               <button
@@ -19509,7 +19467,7 @@ export default function AdminPaymentPage() {
                 className="font-bold text-[11px] hover:underline transition cursor-pointer"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                {t('changeCurrencyKeys') || 'Change currency & keys'}
+                {t('changeCurrencyKeys', 'Change currency & keys')}
               </button>
             </div>
           </div>
@@ -19524,7 +19482,7 @@ export default function AdminPaymentPage() {
               }}
             >
               <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('totalRevenueTitle') || 'Total Revenue'}
+                {t('totalRevenueTitle', 'Total Revenue')}
               </div>
               <div className="text-2xl font-black flex items-baseline gap-1" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
                 <span>{activeCurrencySymbol}{metrics.totalRevenue.toFixed(2)}</span>
@@ -19540,7 +19498,7 @@ export default function AdminPaymentPage() {
               }}
             >
               <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('successfulPaymentsTitle') || 'Successful Payments'}
+                {t('successfulPaymentsTitle', 'Successful Payments')}
               </div>
               <div 
                 className="text-2xl font-black flex items-center gap-2"
@@ -19559,7 +19517,7 @@ export default function AdminPaymentPage() {
               }}
             >
               <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('failedPaymentsTitle') || 'Failed Payments'}
+                {t('failedPaymentsTitle', 'Failed Payments')}
               </div>
               <div className="text-2xl font-black flex items-center gap-2" style={{ color: isDayMode ? '#b91c1c' : '#f87171' }}>
                 {metrics.failedCount}
@@ -19575,7 +19533,7 @@ export default function AdminPaymentPage() {
               }}
             >
               <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('cancelledTitle') || 'Refunded / Cancelled'}
+                {t('cancelledTitle', 'Refunded / Cancelled')}
               </div>
               <div className="text-2xl font-black flex items-center gap-2" style={{ color: isDayMode ? '#b45309' : '#fbbf24' }}>
                 {metrics.refundedCount}
@@ -19596,7 +19554,7 @@ export default function AdminPaymentPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
               <input
                 type="text"
-                placeholder={t('searchPaymentPlaceholder') || 'Search by customer name, email, or plan...'}
+                placeholder={t('searchPaymentPlaceholder', 'Search by customer name, email, or plan...')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="payment-input w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none transition font-medium"
@@ -19618,7 +19576,7 @@ export default function AdminPaymentPage() {
                   className="px-3.5 py-2 text-white font-bold rounded-xl transition flex items-center gap-1.5 text-xs shadow-md bg-red-600 hover:bg-red-700 animate-in fade-in cursor-pointer"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  {t('removeUsersBtn') || 'Remove Selected'} ({selectedTxIds.length})
+                  {t('removeUsersBtn', 'Remove Selected')} ({selectedTxIds.length})
                 </button>
               )}
 
@@ -19634,11 +19592,11 @@ export default function AdminPaymentPage() {
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                 >
-                  <option value="all" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allStatuses') || 'All Statuses'}</option>
-                  <option value="succeeded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusSucceeded') || 'Succeeded'}</option>
-                  <option value="failed" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusFailed') || 'Failed'}</option>
-                  <option value="refunded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusRefunded') || 'Refunded'}</option>
-                  <option value="pending" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusPending') || 'Pending'}</option>
+                  <option value="all" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allStatuses', 'All Statuses')}</option>
+                  <option value="succeeded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusSucceeded', 'Succeeded')}</option>
+                  <option value="failed" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusFailed', 'Failed')}</option>
+                  <option value="refunded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusRefunded', 'Refunded')}</option>
+                  <option value="pending" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusPending', 'Pending')}</option>
                 </select>
               </div>
 
@@ -19652,10 +19610,10 @@ export default function AdminPaymentPage() {
                   color: isDayMode ? '#0f172a' : '#ffffff'
                 }}
               >
-                <option value="all" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allGateways') || 'All Gateways'}</option>
-                <option value="stripe" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayStripe') || 'Stripe'}</option>
-                <option value="paypal" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayPaypal') || 'PayPal'}</option>
-                <option value="manual" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayManual') || 'Manual'}</option>
+                <option value="all" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allGateways', 'All Gateways')}</option>
+                <option value="stripe" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayStripe', 'Stripe')}</option>
+                <option value="paypal" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayPaypal', 'PayPal')}</option>
+                <option value="manual" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayManual', 'Manual')}</option>
               </select>
 
               <select
@@ -19669,10 +19627,10 @@ export default function AdminPaymentPage() {
                 }}
                 title="Items per page"
               >
-                <option value={5} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage5') || '5 per page'}</option>
-                <option value={10} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage10') || '10 per page'}</option>
-                <option value={20} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage20') || '20 per page'}</option>
-                <option value={50} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage50') || '50 per page'}</option>
+                <option value={5} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage5', '5 per page')}</option>
+                <option value={10} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage10', '10 per page')}</option>
+                <option value={20} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage20', '20 per page')}</option>
+                <option value={50} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage50', '50 per page')}</option>
               </select>
             </div>
           </div>
@@ -19690,7 +19648,7 @@ export default function AdminPaymentPage() {
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-red-500" />
                 <span>
-                  <strong>{selectedTxIds.length}</strong> {t('userRecordsSelected') || 'user record(s) selected'}
+                  <strong>{selectedTxIds.length}</strong> {t('userRecordsSelected', 'user record(s) selected')}
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -19704,14 +19662,14 @@ export default function AdminPaymentPage() {
                     color: isDayMode ? '#334155' : '#cbd5e1'
                   }}
                 >
-                  {t('clearSelection') || 'Clear'}
+                  {t('clearSelection', 'Clear')}
                 </button>
                 <button
                   type="button"
                   onClick={handleBulkDeleteUsers}
                   className="px-3 py-1 text-white font-bold rounded-lg shadow transition flex items-center gap-1.5 cursor-pointer bg-red-600 hover:bg-red-700"
                 >
-                  <Trash2 className="h-3.5 w-3.5" /> {t('removeSelected') || 'Remove'}
+                  <Trash2 className="h-3.5 w-3.5" /> {t('removeSelected', 'Remove')}
                 </button>
               </div>
             </div>
@@ -19745,13 +19703,13 @@ export default function AdminPaymentPage() {
                         title="Select All On Current Page"
                       />
                     </th>
-                    <th className="px-5 py-3.5">{t('customerCol') || 'Customer'}</th>
-                    <th className="px-5 py-3.5">{t('planCol') || 'Plan'}</th>
-                    <th className="px-5 py-3.5">{t('amountCol') || 'Amount'}</th>
-                    <th className="px-5 py-3.5">{t('statusCol') || 'Status'}</th>
-                    <th className="px-5 py-3.5">{t('dateCol') || 'Date'}</th>
-                    <th className="px-5 py-3.5">{t('expiryDateCol') || 'Expiry Date'}</th>
-                    <th className="px-5 py-3.5 text-right">{t('actionsCol') || 'Actions'}</th>
+                    <th className="px-5 py-3.5">{t('customerCol', 'Customer')}</th>
+                    <th className="px-5 py-3.5">{t('planCol', 'Plan')}</th>
+                    <th className="px-5 py-3.5">{t('amountCol', 'Amount')}</th>
+                    <th className="px-5 py-3.5">{t('statusCol', 'Status')}</th>
+                    <th className="px-5 py-3.5">{t('dateCol', 'Date')}</th>
+                    <th className="px-5 py-3.5">{t('expiryDateCol', 'Expiry Date')}</th>
+                    <th className="px-5 py-3.5 text-right">{t('actionsCol', 'Actions')}</th>
                   </tr>
                 </thead>
                 <tbody 
@@ -19761,7 +19719,7 @@ export default function AdminPaymentPage() {
                   {paginatedTransactions.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="text-center py-10 font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                        {t('noTransactionsFound') || 'No payment transactions found matching your criteria.'}
+                        {t('noTransactionsFound', 'No payment transactions found matching your criteria.')}
                       </td>
                     </tr>
                   ) : (
@@ -19808,7 +19766,7 @@ export default function AdminPaymentPage() {
                                   color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                                 }}
                               >
-                                <CheckCircle2 className="h-3 w-3" /> {t('statusSucceeded') || 'Succeeded'}
+                                <CheckCircle2 className="h-3 w-3" /> {t('statusSucceeded', 'Succeeded')}
                               </span>
                             )}
                             {isFailed(tx.status) && (
@@ -19821,7 +19779,7 @@ export default function AdminPaymentPage() {
                                 }}
                                 title={tx.failureReason || 'Declined by payment processor'}
                               >
-                                <XCircle className="h-3 w-3" /> {t('statusFailed') || 'Failed'}
+                                <XCircle className="h-3 w-3" /> {t('statusFailed', 'Failed')}
                               </span>
                             )}
                             {isRefunded(tx.status) && (
@@ -19833,7 +19791,7 @@ export default function AdminPaymentPage() {
                                   color: isDayMode ? '#b45309' : '#fbbf24'
                                 }}
                               >
-                                <ArrowDownLeft className="h-3 w-3" /> {t('statusRefunded') || 'Refunded'}
+                                <ArrowDownLeft className="h-3 w-3" /> {t('statusRefunded', 'Refunded')}
                               </span>
                             )}
                             {isPending(tx.status) && (
@@ -19845,7 +19803,7 @@ export default function AdminPaymentPage() {
                                   color: isDayMode ? '#334155' : '#cbd5e1'
                                 }}
                               >
-                                <RefreshCw className="h-3 w-3 animate-spin" /> {t('statusPending') || 'Pending'}
+                                <RefreshCw className="h-3 w-3 animate-spin" /> {t('statusPending', 'Pending')}
                               </span>
                             )}
                           </td>
@@ -19871,7 +19829,7 @@ export default function AdminPaymentPage() {
                                 badgeStyle = isDayMode
                                   ? 'bg-red-50 border-red-300 text-red-800'
                                   : 'bg-red-950/50 border-red-600/70 text-red-400';
-                                badgeNotice = t('expiredBadge') || 'EXPIRED';
+                                badgeNotice = t('expiredBadge', 'EXPIRED');
                               } else if (diffDays <= 7) {
                                 badgeStyle = isDayMode
                                   ? 'bg-orange-50 border-orange-300 text-orange-800'
@@ -19894,7 +19852,7 @@ export default function AdminPaymentPage() {
                               );
                             })() : (
                               <span className="text-[11px] italic font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                                {t('lifetimeNone') || 'Lifetime / None'}
+                                {t('lifetimeNone', 'Lifetime / None')}
                               </span>
                             )}
                           </td>
@@ -19916,7 +19874,7 @@ export default function AdminPaymentPage() {
                                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                                   color: isDayMode ? '#0f172a' : '#cbd5e1'
                                 }}
-                                title={isTxCancelled ? (t('cannotModifyCancelledTooltip') || 'Cannot modify cancelled or refunded plan') : (t('modifyPaymentTooltip') || 'Modify payment record & expiration')}
+                                title={isTxCancelled ? t('cannotModifyCancelledTooltip', 'Cannot modify cancelled or refunded plan') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
                               >
                                 <Pencil 
                                   className="h-3.5 w-3.5" 
@@ -19936,7 +19894,7 @@ export default function AdminPaymentPage() {
                                   backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
                                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
                                 }}
-                                title={isTxCancelled ? (t('planAlreadyCancelledTooltip') || 'Plan already cancelled or refunded') : (t('cancelPlanTooltip') || 'Cancel plan & reset user to Free')}
+                                title={isTxCancelled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled or refunded') : t('cancelPlanTooltip', 'Cancel plan & reset user to Free')}
                               >
                                 <XCircle className="h-3.5 w-3.5" />
                               </button>
@@ -19949,7 +19907,7 @@ export default function AdminPaymentPage() {
                                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                                   color: isDayMode ? '#64748b' : '#94a3b8'
                                 }}
-                                title={t('deletePaymentTooltip') || 'Delete payment record permanently'}
+                                title={t('deletePaymentTooltip', 'Delete payment record permanently')}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
@@ -19972,15 +19930,15 @@ export default function AdminPaymentPage() {
               }}
             >
               <div className="font-semibold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('showing') || 'Showing'}{' '}
+                {t('showing', 'Showing')}{' '}
                 <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
                   {filteredTransactions.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
                 </span>{' '}
-                {t('to') || 'to'}{' '}
+                {t('to', 'to')}{' '}
                 <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
                   {Math.min(currentPage * pageSize, filteredTransactions.length)}
                 </span>{' '}
-                {t('of') || 'of'} <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{filteredTransactions.length}</span> {t('resultsSuffix') || 'results'}
+                {t('of', 'of')} <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{filteredTransactions.length}</span> {t('resultsSuffix', 'results')}
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -19994,7 +19952,7 @@ export default function AdminPaymentPage() {
                     borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#cbd5e1'
                   }}
-                  title={t('firstPageTooltip') || 'First Page'}
+                  title={t('firstPageTooltip', 'First Page')}
                 >
                   <ChevronsLeft className="h-4 w-4" />
                 </button>
@@ -20008,13 +19966,13 @@ export default function AdminPaymentPage() {
                     borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#cbd5e1'
                   }}
-                  title={t('previousPageTooltip') || 'Previous Page'}
+                  title={t('previousPageTooltip', 'Previous Page')}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
 
                 <div className="px-3 py-1 font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  {t('page') || 'Page'} {currentPage} {t('of') || 'of'} {totalPages}
+                  {t('page', 'Page')} {currentPage} {t('of', 'of')} {totalPages}
                 </div>
 
                 <button
@@ -20027,7 +19985,7 @@ export default function AdminPaymentPage() {
                     borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#cbd5e1'
                   }}
-                  title={t('nextPageTooltip') || 'Next Page'}
+                  title={t('nextPageTooltip', 'Next Page')}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </button>
@@ -20041,7 +19999,7 @@ export default function AdminPaymentPage() {
                     borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#cbd5e1'
                   }}
-                  title={t('lastPageTooltip') || 'Last Page'}
+                  title={t('lastPageTooltip', 'Last Page')}
                 >
                   <ChevronsRight className="h-4 w-4" />
                 </button>
@@ -20062,10 +20020,10 @@ export default function AdminPaymentPage() {
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="space-y-1">
                 <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <Globe className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('processingCurrencyTitle') || 'Processing Currency'}
+                  <Globe className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('processingCurrencyTitle', 'Processing Currency')}
                 </h2>
                 <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('processingCurrencySub') || 'Select the default currency for processing subscriptions and recording transactions.'}
+                  {t('processingCurrencySub', 'Select the default currency for processing subscriptions and recording transactions.')}
                 </p>
               </div>
 
@@ -20101,10 +20059,10 @@ export default function AdminPaymentPage() {
           >
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                <Shield className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('defaultGatewayTitle') || 'Default Payment Gateway'}
+                <Shield className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('defaultGatewayTitle', 'Default Payment Gateway')}
               </h2>
               <div className="flex items-center gap-2">
-                <label className="text-xs font-bold" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>{t('environmentLabel') || 'Environment:'}</label>
+                <label className="text-xs font-bold" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>{t('environmentLabel', 'Environment:')}</label>
                 <button
                   type="button"
                   onClick={() => setConfig({ ...config, testMode: !config.testMode })}
@@ -20117,7 +20075,7 @@ export default function AdminPaymentPage() {
                     color: config.testMode ? (isDayMode ? '#b45309' : '#fbbf24') : (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)')
                   }}
                 >
-                  {config.testMode ? (t('sandboxTestMode') || 'Sandbox (Test Mode)') : (t('liveProduction') || 'Live Production')}
+                  {config.testMode ? t('sandboxTestMode', 'Sandbox (Test Mode)') : t('liveProduction', 'Live Production')}
                 </button>
               </div>
             </div>
@@ -20143,7 +20101,7 @@ export default function AdminPaymentPage() {
                     )}
                   </div>
                   <p className="text-xs mt-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {t('stripeCardDesc') || 'Accept credit cards securely via Stripe Checkout and webhooks.'}
+                    {t('stripeCardDesc', 'Accept credit cards securely via Stripe Checkout and webhooks.')}
                   </p>
                 </div>
               </div>
@@ -20168,7 +20126,7 @@ export default function AdminPaymentPage() {
                     )}
                   </div>
                   <p className="text-xs mt-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {t('paypalCardDesc') || 'Accept digital wallet and PayPal account balance payments.'}
+                    {t('paypalCardDesc', 'Accept digital wallet and PayPal account balance payments.')}
                   </p>
                 </div>
               </div>
@@ -20186,7 +20144,7 @@ export default function AdminPaymentPage() {
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="text-base font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                      {t('multiGatewayCardTitle') || 'Both Gateways'}
+                      {t('multiGatewayCardTitle', 'Both Gateways')}
                     </span>
                     {config.activeGateway === 'both' && (
                       <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
@@ -20195,7 +20153,7 @@ export default function AdminPaymentPage() {
                     )}
                   </div>
                   <p className="text-xs mt-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {t('multiGatewayCardDesc') || 'Enable both Stripe and PayPal checkout options simultaneously.'}
+                    {t('multiGatewayCardDesc', 'Enable both Stripe and PayPal checkout options simultaneously.')}
                   </p>
                 </div>
               </div>
@@ -20214,7 +20172,7 @@ export default function AdminPaymentPage() {
               <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
-                  <h3 className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('stripeApiConfig') || 'Stripe API Configuration'}</h3>
+                  <h3 className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('stripeApiConfig', 'Stripe API Configuration')}</h3>
                 </div>
                 <input
                   type="checkbox"
@@ -20226,7 +20184,7 @@ export default function AdminPaymentPage() {
 
               <div className="space-y-1.5 pb-2">
                 <label className="text-xs font-bold block" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('connectStripeBtn') || 'Connect Stripe Account'}
+                  {t('connectStripeBtn', 'Connect Stripe Account')}
                 </label>
                 <div className="flex items-center gap-3">
                   <button
@@ -20241,7 +20199,7 @@ export default function AdminPaymentPage() {
                   >
                     <div className="px-3 py-2 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">S</div>
                     <span className="px-3.5 py-2 text-xs tracking-tight font-bold">
-                      {connectingStripe ? (t('connectingStripe') || 'Connecting...') : (t('connectWithStripe') || 'Connect with Stripe')}
+                      {connectingStripe ? t('connectingStripe', 'Connecting...') : t('connectWithStripe', 'Connect with Stripe')}
                     </span>
                   </button>
 
@@ -20254,7 +20212,7 @@ export default function AdminPaymentPage() {
                         color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                       }}
                     >
-                      <Check className="h-3.5 w-3.5" /> {t('connectedStatus') || 'Connected'}
+                      <Check className="h-3.5 w-3.5" /> {t('connectedStatus', 'Connected')}
                     </span>
                   )}
                 </div>
@@ -20263,7 +20221,7 @@ export default function AdminPaymentPage() {
               <div className="space-y-3 pt-1 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'rgba(30, 41, 59, 0.6)' }}>
                 <div>
                   <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
-                    {t('publishableKeyLabel') || 'Publishable Key'}
+                    {t('publishableKeyLabel', 'Publishable Key')}
                   </label>
                   <div className="relative">
                     <input
@@ -20293,7 +20251,7 @@ export default function AdminPaymentPage() {
 
                 <div>
                   <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
-                    {t('secretKeyLabel') || 'Secret Key'}
+                    {t('secretKeyLabel', 'Secret Key')}
                   </label>
                   <div className="relative">
                     <input
@@ -20323,7 +20281,7 @@ export default function AdminPaymentPage() {
 
                 <div>
                   <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
-                    {t('webhookSecretLabel') || 'Webhook Secret'}
+                    {t('webhookSecretLabel', 'Webhook Secret')}
                   </label>
                   <div className="relative">
                     <input
@@ -20363,7 +20321,7 @@ export default function AdminPaymentPage() {
               <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
-                  <h3 className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('paypalApiConfig') || 'PayPal API Configuration'}</h3>
+                  <h3 className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('paypalApiConfig', 'PayPal API Configuration')}</h3>
                 </div>
                 <input
                   type="checkbox"
@@ -20376,7 +20334,7 @@ export default function AdminPaymentPage() {
               <div className="space-y-3">
                 <div>
                   <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
-                    {t('clientIdLabel') || 'Client ID'}
+                    {t('clientIdLabel', 'Client ID')}
                   </label>
                   <div className="relative">
                     <input
@@ -20406,7 +20364,7 @@ export default function AdminPaymentPage() {
 
                 <div>
                   <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
-                    {t('clientSecretLabel') || 'Client Secret'}
+                    {t('clientSecretLabel', 'Client Secret')}
                   </label>
                   <div className="relative">
                     <input
@@ -20436,7 +20394,7 @@ export default function AdminPaymentPage() {
 
                 <div>
                   <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
-                    {t('webhookIdLabel') || 'Webhook ID'}
+                    {t('webhookIdLabel', 'Webhook ID')}
                   </label>
                   <div className="relative">
                     <input
@@ -20478,7 +20436,7 @@ export default function AdminPaymentPage() {
                 color: isDayMode ? '#334155' : '#cbd5e1'
               }}
             >
-              <RefreshCw className="h-4 w-4" /> {t('resetConfigBtn') || 'Reset Config'}
+              <RefreshCw className="h-4 w-4" /> {t('resetConfigBtn', 'Reset Config')}
             </button>
             <button
               type="submit"
@@ -20489,7 +20447,7 @@ export default function AdminPaymentPage() {
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
             >
               <Save className="h-4 w-4" />
-              {loading ? (t('savingSettings') || 'Saving Settings...') : (t('saveConfigBtn') || 'Save Gateway Settings')}
+              {loading ? t('savingSettings', 'Saving Settings...') : t('saveConfigBtn', 'Save Gateway Settings')}
             </button>
           </div>
         </form>
@@ -20528,10 +20486,10 @@ export default function AdminPaymentPage() {
                 className="text-xl font-black flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <PlusCircle className="h-5 w-5" /> {t('addPaymentModalTitle') || 'Record Payment & Assign Plan'}
+                <PlusCircle className="h-5 w-5" /> {t('addPaymentModalTitle', 'Record Payment & Assign Plan')}
               </h2>
               <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('addPaymentModalSub') || 'Manually record a payment transaction and immediately activate the subscription for a user.'}
+                {t('addPaymentModalSub', 'Manually record a payment transaction and immediately activate the subscription for a user.')}
               </p>
             </div>
 
@@ -20546,7 +20504,7 @@ export default function AdminPaymentPage() {
               >
                 <AlertTriangle className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <div className="font-bold">{t('planChangeAutoCancelNotice') || 'Plan Change Notice:'}</div>
+                  <div className="font-bold">{t('planChangeAutoCancelNotice', 'Plan Change Notice:')}</div>
                   <div className="text-[11px] leading-relaxed">
                     {planTransitionInfo.message}
                   </div>
@@ -20565,7 +20523,7 @@ export default function AdminPaymentPage() {
               >
                 <Ban className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <div className="font-bold">{t('duplicatePlanWarningNotice') || 'Duplicate Plan Warning:'}</div>
+                  <div className="font-bold">{t('duplicatePlanWarningNotice', 'Duplicate Plan Warning:')}</div>
                   <div className="text-[11px] leading-relaxed">
                     {planTransitionInfo.message}
                   </div>
@@ -20584,7 +20542,7 @@ export default function AdminPaymentPage() {
               <div>
                 <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                   <UserIcon className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-                  {t('selectUserLabel') || 'Select User Account'} ({registeredUsers.length})
+                  {t('selectUserLabel', 'Select User Account')} ({registeredUsers.length})
                 </label>
                 {registeredUsers.length > 0 ? (
                   <select
@@ -20605,7 +20563,7 @@ export default function AdminPaymentPage() {
                   </select>
                 ) : (
                   <div className="p-2.5 rounded-xl border text-slate-400 text-center" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-                    {t('noRegisteredUsersAvailable') || 'No registered users available'}
+                    {t('noRegisteredUsersAvailable', 'No registered users available')}
                   </div>
                 )}
               </div>
@@ -20614,10 +20572,10 @@ export default function AdminPaymentPage() {
                 <label className="block font-bold mb-1 flex items-center justify-between" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                   <span className="flex items-center gap-1.5">
                     <Zap className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-                    {t('selectPlanLabel') || 'Select Subscription Plan'}
+                    {t('selectPlanLabel', 'Select Subscription Plan')}
                   </span>
                   <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#059669' : '#34d399' }}>
-                    {t('onePlanPerEmailEnforced') || 'Strictly 1 active plan per email enforced'}
+                    {t('onePlanPerEmailEnforced', 'Strictly 1 active plan per email enforced')}
                   </span>
                 </label>
                 <select
@@ -20637,7 +20595,7 @@ export default function AdminPaymentPage() {
                   ))}
                 </select>
                 <p className="text-[10px] mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('planChangeRuleNote') || 'Selecting a new plan will automatically cancel any existing active paid subscription for this user.'}
+                  {t('planChangeRuleNote', 'Selecting a new plan will automatically cancel any existing active paid subscription for this user.')}
                 </p>
               </div>
 
@@ -20645,7 +20603,7 @@ export default function AdminPaymentPage() {
                 <div>
                   <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                     <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-                    {t('paymentDateLabel') || 'Payment Date'}
+                    {t('paymentDateLabel', 'Payment Date')}
                   </label>
                   <input
                     type="date"
@@ -20664,7 +20622,7 @@ export default function AdminPaymentPage() {
                 <div>
                   <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                     <Calendar className="h-3.5 w-3.5 text-emerald-500" />
-                    {t('expiryDateCol') || 'Expiry Date'}
+                    {t('expiryDateCol', 'Expiry Date')}
                   </label>
                   <input
                     type="date"
@@ -20683,7 +20641,7 @@ export default function AdminPaymentPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
-                    {t('paymentAmountLabel') || 'Payment Amount'} ({config.currency}) *
+                    {t('paymentAmountLabel', 'Payment Amount')} ({config.currency}) *
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
@@ -20706,7 +20664,7 @@ export default function AdminPaymentPage() {
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentGatewayLabel') || 'Gateway'}</label>
+                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentGatewayLabel', 'Gateway')}</label>
                   <select
                     value={paymentGateway}
                     onChange={(e) => setPaymentGateway(e.target.value as any)}
@@ -20728,7 +20686,7 @@ export default function AdminPaymentPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentStatusLabel') || 'Status'}</label>
+                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentStatusLabel', 'Status')}</label>
                   <select
                     value={paymentStatus}
                     onChange={(e) => setPaymentStatus(e.target.value as any)}
@@ -20739,16 +20697,16 @@ export default function AdminPaymentPage() {
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
-                    <option value="succeeded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusSucceeded') || 'Succeeded'}</option>
-                    <option value="failed" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusFailed') || 'Failed'}</option>
-                    <option value="pending" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusPending') || 'Pending'}</option>
-                    <option value="refunded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusRefunded') || 'Refunded'}</option>
+                    <option value="succeeded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusSucceeded', 'Succeeded')}</option>
+                    <option value="failed" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusFailed', 'Failed')}</option>
+                    <option value="pending" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusPending', 'Pending')}</option>
+                    <option value="refunded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusRefunded', 'Refunded')}</option>
                   </select>
                 </div>
 
                 {isFailed(paymentStatus) && (
                   <div>
-                    <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('declineFailureReasonLabel') || 'Decline / Failure Reason'}</label>
+                    <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('declineFailureReasonLabel', 'Decline / Failure Reason')}</label>
                     <input
                       type="text"
                       placeholder="e.g. Card expired or declined"
@@ -20775,7 +20733,7 @@ export default function AdminPaymentPage() {
                     className="rounded w-4 h-4 cursor-pointer accent-[#E05638]"
                   />
                   <label htmlFor="syncUserPlanBox" className="text-xs font-semibold cursor-pointer select-none" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    {t('autoSyncPlanLabel') || 'Automatically update user account to this plan and set active expiry'}
+                    {t('autoSyncPlanLabel', 'Automatically update user account to this plan and set active expiry')}
                   </label>
                 </div>
               )}
@@ -20791,7 +20749,7 @@ export default function AdminPaymentPage() {
                     color: isDayMode ? '#334155' : '#cbd5e1'
                   }}
                 >
-                  {t('cancel') || 'Cancel'}
+                  {t('cancel', 'Cancel')}
                 </button>
                 <button
                   type="submit"
@@ -20804,15 +20762,15 @@ export default function AdminPaymentPage() {
                 >
                   {planTransitionInfo?.isDuplicate ? (
                     <>
-                      <Ban className="h-4 w-4" /> {t('duplicatePlanBtn') || 'Duplicate Plan Exists'}
+                      <Ban className="h-4 w-4" /> {t('duplicatePlanBtn', 'Duplicate Plan Exists')}
                     </>
                   ) : planTransitionInfo?.isTransition ? (
                     <>
-                      <Zap className="h-4 w-4" /> {t('switchPlanBtn') || 'Switch Plan & Record'}
+                      <Zap className="h-4 w-4" /> {t('switchPlanBtn', 'Switch Plan & Record')}
                     </>
                   ) : (
                     <>
-                      <PlusCircle className="h-4 w-4" /> {t('recordPaymentBtn') || 'Record Payment & Activate'}
+                      <PlusCircle className="h-4 w-4" /> {t('recordPaymentBtn', 'Record Payment & Activate')}
                     </>
                   )}
                 </button>
@@ -20855,10 +20813,10 @@ export default function AdminPaymentPage() {
                 className="text-xl font-black flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <Pencil className="h-5 w-5" /> {t('editPaymentModalTitle') || 'Edit Payment & Subscription Record'}
+                <Pencil className="h-5 w-5" /> {t('editPaymentModalTitle', 'Edit Payment & Subscription Record')}
               </h2>
               <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('editPaymentModalSub') || 'Update transaction details, amount, or expiration date for'} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{editingTx.customerName}</span>.
+                {t('editPaymentModalSub', 'Update transaction details, amount, or expiration date for')} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{editingTx.customerName}</span>.
               </p>
             </div>
 
@@ -20872,7 +20830,7 @@ export default function AdminPaymentPage() {
             <form onSubmit={handleUpdatePaymentSubmit} className="space-y-4 pt-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('customerNameLabel') || 'Customer Name'}</label>
+                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('customerNameLabel', 'Customer Name')}</label>
                   <input
                     type="text"
                     required
@@ -20887,7 +20845,7 @@ export default function AdminPaymentPage() {
                   />
                 </div>
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('customerEmailLabel') || 'Customer Email'}</label>
+                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('customerEmailLabel', 'Customer Email')}</label>
                   <input
                     type="email"
                     required
@@ -20904,7 +20862,7 @@ export default function AdminPaymentPage() {
               </div>
 
               <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('planCol') || 'Plan'}</label>
+                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('planCol', 'Plan')}</label>
                 <select
                   value={editPlanSlug}
                   onChange={(e) => handleEditPlanSelectChange(e.target.value)}
@@ -20928,7 +20886,7 @@ export default function AdminPaymentPage() {
                 <div>
                   <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                     <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
-                    {t('dateCol') || 'Date'}
+                    {t('dateCol', 'Date')}
                   </label>
                   <input
                     type="date"
@@ -20946,7 +20904,7 @@ export default function AdminPaymentPage() {
                 <div>
                   <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                     <Calendar className="h-3.5 w-3.5 text-emerald-500" />
-                    {t('expiryDateCol') || 'Expiry Date'}
+                    {t('expiryDateCol', 'Expiry Date')}
                   </label>
                   <input
                     type="date"
@@ -20965,7 +20923,7 @@ export default function AdminPaymentPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
-                    {t('paymentAmountLabel') || 'Payment Amount'} ({editingTx.currency || config.currency}) *
+                    {t('paymentAmountLabel', 'Payment Amount')} ({editingTx.currency || config.currency}) *
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
@@ -20988,7 +20946,7 @@ export default function AdminPaymentPage() {
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentGatewayLabel') || 'Gateway'}</label>
+                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentGatewayLabel', 'Gateway')}</label>
                   <select
                     value={editGateway}
                     onChange={(e) => setEditGateway(e.target.value as any)}
@@ -20999,16 +20957,16 @@ export default function AdminPaymentPage() {
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
-                    <option value="stripe" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayStripe') || 'Stripe'}</option>
-                    <option value="paypal" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayPaypal') || 'PayPal'}</option>
-                    <option value="manual" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayManual') || 'Manual'}</option>
+                    <option value="stripe" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayStripe', 'Stripe')}</option>
+                    <option value="paypal" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayPaypal', 'PayPal')}</option>
+                    <option value="manual" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayManual', 'Manual')}</option>
                   </select>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentStatusLabel') || 'Status'}</label>
+                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentStatusLabel', 'Status')}</label>
                   <select
                     value={editStatus}
                     onChange={(e) => setEditStatus(e.target.value as any)}
@@ -21019,16 +20977,16 @@ export default function AdminPaymentPage() {
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
-                    <option value="succeeded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusSucceeded') || 'Succeeded'}</option>
-                    <option value="failed" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusFailed') || 'Failed'}</option>
-                    <option value="pending" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusPending') || 'Pending'}</option>
-                    <option value="refunded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusRefunded') || 'Refunded'}</option>
+                    <option value="succeeded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusSucceeded', 'Succeeded')}</option>
+                    <option value="failed" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusFailed', 'Failed')}</option>
+                    <option value="pending" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusPending', 'Pending')}</option>
+                    <option value="refunded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusRefunded', 'Refunded')}</option>
                   </select>
                 </div>
 
                 {isFailed(editStatus) && (
                   <div>
-                    <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('declineFailureReasonLabel') || 'Decline / Failure Reason'}</label>
+                    <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('declineFailureReasonLabel', 'Decline / Failure Reason')}</label>
                     <input
                       type="text"
                       placeholder="e.g. Card expired or declined"
@@ -21055,7 +21013,7 @@ export default function AdminPaymentPage() {
                     className="rounded w-4 h-4 cursor-pointer accent-[#E05638]"
                   />
                   <label htmlFor="editSyncUserPlanBox" className="text-xs font-semibold cursor-pointer select-none" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    {t('updateUserPlanToLabel') || 'Update user account plan to'} {editPlanName} {t('onePlanMaxSuffix') || '(Enforces 1 plan maximum per email)'}
+                    {t('updateUserPlanToLabel', 'Update user account plan to')} {editPlanName} {t('onePlanMaxSuffix', '(Enforces 1 plan maximum per email)')}
                   </label>
                 </div>
               )}
@@ -21071,7 +21029,7 @@ export default function AdminPaymentPage() {
                     color: isDayMode ? '#334155' : '#cbd5e1'
                   }}
                 >
-                  {t('cancel') || 'Cancel'}
+                  {t('cancel', 'Cancel')}
                 </button>
                 <button
                   type="submit"
@@ -21080,7 +21038,7 @@ export default function AdminPaymentPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
-                  <Save className="h-4 w-4" /> {t('saveChanges') || 'Save Changes'}
+                  <Save className="h-4 w-4" /> {t('saveChanges', 'Save Changes')}
                 </button>
               </div>
             </form>
@@ -33842,110 +33800,47 @@ export async function DELETE(request: Request) {
 
 ## File: `apps/web/src/app/api/admin/payment/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-interface PaymentTransaction {
-  id: string;
-  customerName: string;
-  customerEmail: string;
-  planName: string;
-  planSlug?: string;
-  amount: number;
-  currency: string;
-  gateway: 'stripe' | 'paypal' | 'manual';
-  status: 'succeeded' | 'failed' | 'refunded' | 'pending';
-  failureReason?: string;
-  testMode?: boolean;
-  createdAt: string;
-  expiryDate?: string;
+export const dynamic = 'force-dynamic';
+
+function getDataPaths(filename: string): string[] {
+  return [
+    path.join(process.cwd(), 'apps/web/data', filename),
+    path.join(process.cwd(), 'data', filename)
+  ];
 }
 
-const INITIAL_TRANSACTIONS: PaymentTransaction[] = [
-  {
-    id: 'tx_10928301',
-    customerName: 'Sarah Jenkins',
-    customerEmail: 'sarah.j@example.com',
-    planName: 'Nutrition Pro (Monthly)',
-    planSlug: 'nutrition-pro-monthly',
-    amount: 8.99,
-    currency: 'USD',
-    gateway: 'stripe',
-    status: 'succeeded',
-    createdAt: '2026-09-01T14:22:10Z',
-    expiryDate: '2026-10-01T14:22:10Z',
-  },
-  {
-    id: 'tx_10928302',
-    customerName: 'Marcus Vance',
-    customerEmail: 'marcus.v@example.com',
-    planName: 'Nutrition Pro (Annual)',
-    planSlug: 'nutrition-pro-annual',
-    amount: 59.99,
-    currency: 'USD',
-    gateway: 'paypal',
-    status: 'succeeded',
-    createdAt: '2026-09-01T11:05:44Z',
-    expiryDate: '2027-09-01T11:05:44Z',
-  },
-  {
-    id: 'tx_10928303',
-    customerName: 'Elena Rostova',
-    customerEmail: 'elena.rostova@domain.com',
-    planName: 'Nutrition Pro (Monthly)',
-    planSlug: 'nutrition-pro-monthly',
-    amount: 8.99,
-    currency: 'USD',
-    gateway: 'stripe',
-    status: 'failed',
-    failureReason: 'Card issuer declined: Insufficient funds',
-    createdAt: '2026-08-31T18:49:12Z',
-    expiryDate: '2026-09-30T18:49:12Z',
-  },
-  {
-    id: 'tx_10928304',
-    customerName: 'David Kim',
-    customerEmail: 'david.kim@techcorp.io',
-    planName: 'Nutrition Pro (Monthly)',
-    planSlug: 'nutrition-pro-monthly',
-    amount: 8.99,
-    currency: 'USD',
-    gateway: 'stripe',
-    status: 'succeeded',
-    createdAt: '2026-08-30T09:15:02Z',
-    expiryDate: '2026-09-30T09:15:02Z',
-  },
-  {
-    id: 'tx_10928305',
-    customerName: 'Chloe Dupont',
-    customerEmail: 'c.dupont@atelier.fr',
-    planName: 'Nutrition Pro (Monthly)',
-    planSlug: 'nutrition-pro-monthly',
-    amount: 8.99,
-    currency: 'USD',
-    gateway: 'paypal',
-    status: 'failed',
-    failureReason: 'PayPal account authorization timed out',
-    createdAt: '2026-08-29T22:30:19Z',
-    expiryDate: '2026-09-29T22:30:19Z',
-  },
-  {
-    id: 'tx_10928306',
-    customerName: "Liam O'Connor",
-    customerEmail: 'liam.oc@irishfoodies.ie',
-    planName: 'Nutrition Pro (Annual)',
-    planSlug: 'nutrition-pro-annual',
-    amount: 59.99,
-    currency: 'USD',
-    gateway: 'stripe',
-    status: 'refunded',
-    failureReason: 'Customer requested cancellation within 24h grace period',
-    createdAt: '2026-08-28T16:04:55Z',
-    expiryDate: '2027-08-28T16:04:55Z',
+function readJsonFile<T>(filename: string, fallback: T): T {
+  const paths = getDataPaths(filename);
+  for (const p of paths) {
+    if (fs.existsSync(p)) {
+      try {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) as T;
+      } catch (_) {}
+    }
   }
-];
+  return fallback;
+}
+
+function writeJsonFile<T>(filename: string, data: T): void {
+  const paths = getDataPaths(filename);
+  for (const p of paths) {
+    try {
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (_) {}
+  }
+}
 
 const DEFAULT_SETTINGS = {
-  activeGateway: 'stripe' as const,
+  activeGateway: 'stripe',
   currency: 'USD',
   testMode: true,
   stripeConnected: false,
@@ -33953,120 +33848,147 @@ const DEFAULT_SETTINGS = {
     enabled: true,
     publishableKey: '',
     secretKey: '',
-    webhookSecret: '',
+    webhookSecret: ''
   },
   paypal: {
     enabled: false,
     clientId: '',
     clientSecret: '',
     webhookId: '',
-    environment: 'sandbox' as const,
-  },
+    environment: 'sandbox'
+  }
 };
 
 export async function GET() {
-  try {
-    const settings = {
-      ...DEFAULT_SETTINGS,
-      stripeConnected: Boolean(process.env.STRIPE_SECRET_KEY),
-      stripe: {
-        enabled: Boolean(process.env.STRIPE_SECRET_KEY),
-        publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
-        secretKey: process.env.STRIPE_SECRET_KEY ? '••••••••' + process.env.STRIPE_SECRET_KEY.slice(-4) : '',
-        webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ? '••••••••' + process.env.STRIPE_WEBHOOK_SECRET.slice(-4) : '',
-      },
-      paypal: {
-        enabled: Boolean(process.env.PAYPAL_CLIENT_SECRET),
-        clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '',
-        clientSecret: process.env.PAYPAL_CLIENT_SECRET ? '••••••••' + process.env.PAYPAL_CLIENT_SECRET.slice(-4) : '',
-        webhookId: process.env.PAYPAL_WEBHOOK_ID || '',
-        environment: (process.env.PAYPAL_MODE as 'sandbox' | 'live') || 'sandbox',
-      },
-    };
-
-    return NextResponse.json({
-      success: true,
-      transactions: INITIAL_TRANSACTIONS,
-      settings,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  const adminSettings = readJsonFile('admin_settings.json', {} as any);
+  const settings = adminSettings.paymentSettings || DEFAULT_SETTINGS;
+  if (adminSettings.currency) {
+    settings.currency = adminSettings.currency;
   }
+  const transactions = readJsonFile('payment_transactions.json', []);
+
+  return NextResponse.json({
+    success: true,
+    settings,
+    transactions
+  }, {
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+    }
+  });
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    if (body.action === 'add_transaction') {
-      const newTransaction = {
-        id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
-        createdAt: body.transaction.createdAt || new Date().toISOString(),
-        ...body.transaction,
-      };
-      return NextResponse.json({
-        success: true,
-        message: 'Payment transaction added successfully',
-        transaction: newTransaction,
-      });
-    }
-
-    if (body.action === 'update_transaction') {
-      return NextResponse.json({
-        success: true,
-        message: 'Payment transaction updated successfully',
-        transaction: body.transaction,
-      });
-    }
-
-    if (body.action === 'delete_transaction') {
-      return NextResponse.json({
-        success: true,
-        message: 'Payment transaction removed successfully',
-        id: body.id,
-      });
-    }
-
+    // 1. Stripe Connect Action
     if (body.action === 'connect_stripe') {
-      const stripeClientId = process.env.STRIPE_CONNECT_CLIENT_ID;
-      if (stripeClientId) {
-        const redirectUri = encodeURIComponent(`${req.headers.get('origin') || ''}/admin/payment?connected=stripe`);
-        return NextResponse.json({
-          success: true,
-          url: `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${stripeClientId}&scope=read_write&redirect_uri=${redirectUri}`,
-        });
-      }
-      return NextResponse.json({
-        success: true,
-        connected: true,
-        message: 'Stripe credentials validated and connected successfully!',
-      });
+      const adminSettings = readJsonFile('admin_settings.json', {} as any);
+      const currentSettings = adminSettings.paymentSettings || DEFAULT_SETTINGS;
+      const updated = {
+        ...currentSettings,
+        stripeConnected: true,
+        stripe: {
+          ...currentSettings.stripe,
+          enabled: true,
+          secretKey: body.secretKey || currentSettings.stripe.secretKey,
+          publishableKey: body.publishableKey || currentSettings.stripe.publishableKey
+        }
+      };
+      adminSettings.paymentSettings = updated;
+      writeJsonFile('admin_settings.json', adminSettings);
+      return NextResponse.json({ success: true, message: 'Stripe Gateway enabled and verified.' });
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Payment configuration saved successfully',
-      settings: body,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Failed to process payment request' }, { status: 500 });
+    // 2. Add Transaction Action
+    if (body.action === 'add_transaction' && body.transaction) {
+      const transactions = readJsonFile('payment_transactions.json', [] as any[]);
+      const newTx = body.transaction;
+      const cleanEmail = (newTx.customerEmail || '').toLowerCase().trim();
+
+      const updatedTxs = transactions.map((tItem: any) => {
+        const isSucceeded = ['succeeded', 'succeded', 'success', 'paid', 'completed'].includes(String(newTx.status).toLowerCase());
+        if (
+          isSucceeded &&
+          tItem.customerEmail.toLowerCase() === cleanEmail &&
+          ['succeeded', 'pending'].includes(String(tItem.status).toLowerCase())
+        ) {
+          return {
+            ...tItem,
+            status: 'refunded',
+            expiryDate: new Date().toISOString()
+          };
+        }
+        return tItem;
+      });
+
+      updatedTxs.unshift(newTx);
+      writeJsonFile('payment_transactions.json', updatedTxs);
+      return NextResponse.json({ success: true, transaction: newTx });
+    }
+
+    // 3. Update Transaction Action
+    if (body.action === 'update_transaction' && body.transaction) {
+      const transactions = readJsonFile('payment_transactions.json', [] as any[]);
+      const updatedTx = body.transaction;
+      const cleanEmail = (updatedTx.customerEmail || '').toLowerCase().trim();
+      const isSucceeded = ['succeeded', 'succeded', 'success', 'paid', 'completed'].includes(String(updatedTx.status).toLowerCase());
+
+      const updatedTxs = transactions.map((tItem: any) => {
+        if (tItem.id === updatedTx.id) return updatedTx;
+        if (
+          isSucceeded &&
+          tItem.customerEmail.toLowerCase() === cleanEmail &&
+          ['succeeded', 'pending'].includes(String(tItem.status).toLowerCase())
+        ) {
+          return {
+            ...tItem,
+            status: 'refunded',
+            expiryDate: new Date().toISOString()
+          };
+        }
+        return tItem;
+      });
+
+      writeJsonFile('payment_transactions.json', updatedTxs);
+      return NextResponse.json({ success: true, transaction: updatedTx });
+    }
+
+    // 4. Update Gateway Settings
+    const adminSettings = readJsonFile('admin_settings.json', {} as any);
+    const mergedSettings = {
+      ...(adminSettings.paymentSettings || DEFAULT_SETTINGS),
+      ...body
+    };
+    adminSettings.paymentSettings = mergedSettings;
+    if (body.currency) {
+      adminSettings.currency = body.currency;
+    }
+    writeJsonFile('admin_settings.json', adminSettings);
+
+    return NextResponse.json({ success: true, settings: mergedSettings });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Failed to process request' }, { status: 500 });
   }
 }
 
-export async function DELETE(req: Request) {
+export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
+
     if (!id) {
-      return NextResponse.json({ error: 'Missing transaction ID' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
     }
-    return NextResponse.json({
-      success: true,
-      message: `Transaction ${id} deleted successfully`,
-      id,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const transactions = readJsonFile('payment_transactions.json', [] as any[]);
+    const updated = transactions.filter((t: any) => t.id !== id);
+    writeJsonFile('payment_transactions.json', updated);
+
+    return NextResponse.json({ success: true, message: 'Transaction deleted' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Failed to delete transaction' }, { status: 500 });
   }
 }
 
@@ -42312,6 +42234,11 @@ export function purgeLegacyBrowserAdminStorage(): void {
   if (typeof window === 'undefined') return;
   const legacyKeys = [
     'zecratary_admin_settings',
+    'payment_transactions',
+    'payment_settings',
+    'zecratary_currency',
+    'zecratary_payment_transactions',
+    'zecratary_payment_settings',
     'theme_colors',
     'site_config',
     'zecratary_theme_config',
