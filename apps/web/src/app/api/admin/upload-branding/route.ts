@@ -1,69 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-function getUploadDirectories(): string[] {
-  const cwd = process.cwd();
-  const dirs: string[] = [];
-
-  const candidatePublics = [
-    path.join(cwd, 'apps', 'web', 'public'),
-    path.join(cwd, 'public'),
-    path.resolve(cwd, '..', 'public'),
-    path.resolve(cwd, '..', 'apps', 'web', 'public')
-  ];
-
-  for (const pub of candidatePublics) {
-    if (fs.existsSync(pub)) {
-      dirs.push(path.join(pub, 'uploads'));
-    }
-  }
-
-  if (dirs.length === 0) {
-    const fallback = fs.existsSync(path.join(cwd, 'apps', 'web'))
-      ? path.join(cwd, 'apps', 'web', 'public', 'uploads')
-      : path.join(cwd, 'public', 'uploads');
-    dirs.push(fallback);
-  }
-
-  return dirs;
-}
-
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
-    const targetType = (formData.get('type') as string) || 'branding';
+    const type = formData.get('type') as string; // 'titlebar' or 'favicon'
 
-    if (!file) {
-      return NextResponse.json({ success: false, error: 'No file provided' }, { status: 400 });
+    if (!file || !type) {
+      return NextResponse.json({ success: false, error: 'File and type are required' }, { status: 400 });
     }
 
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    const origExt = path.extname(file.name || '').toLowerCase() || '.png';
-    const cleanPrefix = targetType === 'favicon' ? 'favicon' : 'titlebar-logo';
-    const fileName = `${cleanPrefix}-${Date.now()}${origExt}`;
+    const uploadsDir = path.join(process.cwd(), 'apps/web/public/uploads');
+    const fallbackDir = path.join(process.cwd(), 'public/uploads');
+    const targetDir = fs.existsSync(path.dirname(uploadsDir)) ? uploadsDir : fallbackDir;
+    fs.makedirsSync ? fs.makedirsSync(targetDir) : fs.mkdirSync(targetDir, { recursive: true });
 
-    const uploadDirs = getUploadDirectories();
-    for (const uDir of uploadDirs) {
-      if (!fs.existsSync(uDir)) {
-        fs.mkdirSync(uDir, { recursive: true });
-      }
-      fs.writeFileSync(path.join(uDir, fileName), buffer);
+    const ext = path.extname(file.name) || '.png';
+    const filename = `${type}-logo-${Date.now()}${ext}`;
+    const filePath = path.join(targetDir, filename);
+
+    fs.writeFileSync(filePath, buffer);
+    const publicUrl = `/uploads/${filename}`;
+
+    // Update PostgreSQL admin_settings table directly
+    if (type === 'titlebar') {
+      await query(`
+        UPDATE admin_settings SET
+          titlebar_image = $1,
+          updated_at = NOW()
+        WHERE id = 'primary_settings'
+      `, [publicUrl]);
+    } else if (type === 'favicon') {
+      await query(`
+        UPDATE admin_settings SET
+          favicon_image = $1,
+          updated_at = NOW()
+        WHERE id = 'primary_settings'
+      `, [publicUrl]);
     }
 
-    const relativeUrl = `/uploads/${fileName}`;
     return NextResponse.json({
       success: true,
-      url: relativeUrl,
-      fileName
+      url: publicUrl,
+      message: `${type} branding image updated in PostgreSQL.`
     });
   } catch (err: any) {
-    console.error('Error uploading branding image:', err);
-    return NextResponse.json({ success: false, error: err.message || 'Upload failed' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }

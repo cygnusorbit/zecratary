@@ -17,11 +17,7 @@
     "recipeLibraryLimit": 25,
     "socialScrapeLimit": 5,
     "canViewMacros": false,
-    "allowedAiModels": [
-      "gemini-3.5-flash-lite",
-      "gpt-3.5-turbo"
-    ],
-    "featuresText": "Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition",
+    "allowedAiModels": "gemini-3.5-flash-lite,gpt-3.5-turbo",
     "features": [
       "Create up to 5 AI-powered recipes per month",
       "Personal recipe library (25 total recipes)",
@@ -31,12 +27,11 @@
       "Meal planner",
       "Ingredient photo recognition"
     ],
-    "tokenLimit": 500,
-    "tokenReimburseFrequency": "monthly",
-    "updatedAt": "2026-09-16T08:22:09.057Z"
+    "tokenLimit": 50000,
+    "tokenReimburseFrequency": "monthly"
   },
   {
-    "id": "plan_1789546898584",
+    "id": "plan_1789443873420",
     "name": "Nutrition Pro",
     "slug": "nutrition-pro",
     "isFree": false,
@@ -58,13 +53,12 @@
       "gpt-4o"
     ],
     "featuresText": "Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)",
-    "tokenLimit": 10000,
+    "tokenLimit": 1000000,
     "tokenReimburseFrequency": "monthly",
     "features": [
       "Unlimited AI-powered recipe generation",
       "Unlimited recipe library",
       "Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)"
-    ],
-    "updatedAt": "2026-09-16T08:21:52.363Z"
+    ]
   }
 ]

@@ -1,57 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function getSessionUser(req: NextRequest) {
-  const sessionCookie = req.cookies.get('zecratary_session')?.value;
-  if (!sessionCookie) return null;
-  try {
-    return JSON.parse(decodeURIComponent(sessionCookie));
-  } catch (_) {
-    try {
-      return JSON.parse(sessionCookie);
-    } catch (_) {
-      return null;
-    }
-  }
-}
-
 export async function GET(req: NextRequest) {
-  const user = getSessionUser(req);
-  const plan = (user?.subscriptionPlan || user?.subscriptionTier || 'taster').toLowerCase();
-  const isAdmin = Boolean(user?.role === 'admin' || user?.email?.toLowerCase().includes('admin'));
-  const isPro = isAdmin || plan.includes('pro') || plan.includes('annual') || plan.includes('monthly');
+  try {
+    const { searchParams } = new URL(req.url);
+    const email = searchParams.get('email')?.toLowerCase().trim();
+    const userId = searchParams.get('userId');
 
-  return NextResponse.json({
-    authenticated: Boolean(user),
-    plan,
-    isUnlimited: isPro,
-    monthlyRecipeLimit: isPro ? -1 : 5,
-  });
-}
+    let userRow: any = null;
+    if (email) {
+      const u = await query('SELECT * FROM users WHERE email = $1 LIMIT 1', [email]);
+      userRow = u[0];
+    } else if (userId) {
+      const u = await query('SELECT * FROM users WHERE id = $1 LIMIT 1', [userId]);
+      userRow = u[0];
+    }
 
-export async function POST(req: NextRequest) {
-  const user = getSessionUser(req);
-  const plan = (user?.subscriptionPlan || user?.subscriptionTier || 'taster').toLowerCase();
-  const isAdmin = Boolean(user?.role === 'admin' || user?.email?.toLowerCase().includes('admin'));
-  const isPro = isAdmin || plan.includes('pro') || plan.includes('annual') || plan.includes('monthly');
+    const planSlug = userRow?.subscription_plan || 'taster';
+    const planRows = await query('SELECT * FROM subscription_plans WHERE slug = $1 LIMIT 1', [planSlug]);
+    const plan = planRows[0] || {
+      ai_recipe_limit: 5,
+      recipe_library_limit: 25,
+      token_limit: 50000,
+      token_reimburse_frequency: 'monthly',
+      can_view_macros: false
+    };
 
-  const body = await req.json().catch(() => ({}));
-  const currentCount = Number(body.currentCount || 0);
+    // Calculate recipe count from PostgreSQL saved_recipes
+    let recipeCount = 0;
+    if (userRow?.id) {
+      const countRes = await query('SELECT COUNT(*) AS count FROM saved_recipes WHERE user_id = $1', [userRow.id]);
+      recipeCount = parseInt(countRes[0]?.count || '0', 10);
+    }
 
-  if (!isPro && currentCount >= 5) {
     return NextResponse.json({
-      allowed: false,
-      error: 'Monthly quota reached. Free Taster tier is limited to 5 AI recipe generations per month.',
-      upgradeRequired: true,
-      currentCount,
-      limit: 5
-    }, { status: 403 });
+      success: true,
+      plan: planSlug,
+      quota: {
+        aiRecipeLimit: plan.ai_recipe_limit,
+        recipeLibraryLimit: plan.recipe_library_limit,
+        recipesSaved: recipeCount,
+        tokenLimit: plan.token_limit,
+        tokenReimburseFrequency: plan.token_reimburse_frequency || 'monthly',
+        canViewMacros: Boolean(plan.can_view_macros),
+        allowedAiModels: plan.allowed_ai_models || 'gemini-3.6-flash'
+      }
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
-
-  return NextResponse.json({
-    allowed: true,
-    isUnlimited: isPro,
-    remaining: isPro ? -1 : Math.max(0, 5 - (currentCount + 1)),
-  });
 }

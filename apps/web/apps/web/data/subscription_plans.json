@@ -66,37 +66,5 @@
       "Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)"
     ],
     "updatedAt": "2026-09-16T08:21:52.363Z"
-  },
-  {
-    "id": "plan_1789555772317",
-    "name": "Nutrition Pro Max",
-    "slug": "nutrition-pro-max",
-    "isFree": false,
-    "isDefault": false,
-    "monthlyPriceDollars": 18.99,
-    "annualPriceDollars": 159.99,
-    "monthlyBadge": "Billed Immediately",
-    "annualBadge": "Save 44%",
-    "trialBadge": "7-Day Free Trial",
-    "descriptionMonthly": "Full premium access, billed monthly",
-    "descriptionAnnual": "Best value - all premium features, billed annually",
-    "buttonText": "Choose Plan",
-    "aiRecipeLimit": -1,
-    "recipeLibraryLimit": -1,
-    "socialScrapeLimit": -1,
-    "canViewMacros": true,
-    "allowedAiModels": [
-      "gemini-3.6-flash",
-      "gpt-4o"
-    ],
-    "featuresText": "Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)",
-    "tokenLimit": 1000000,
-    "tokenReimburseFrequency": "monthly",
-    "features": [
-      "Unlimited AI-powered recipe generation",
-      "Unlimited recipe library",
-      "Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)"
-    ],
-    "updatedAt": "2026-09-16T10:49:47.015Z"
   }
 ]

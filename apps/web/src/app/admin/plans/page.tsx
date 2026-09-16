@@ -284,7 +284,7 @@ export default function AdminSubscriptionPlans() {
     } catch (e) {
       console.error('Failed to fetch packages from server:', e);
     }
-    setPackages([{ ...DEFAULT_PRESET_TASTER }, { ...DEFAULT_PRESET_NUTRITION_PRO }]);
+    setPackages([{ ...DEFAULT_PRESET_TASTER }]);
   }, []);
 
   useEffect(() => {
@@ -500,7 +500,7 @@ export default function AdminSubscriptionPlans() {
     }
   };
 
-  const handleDeletePackage = async (pkg: SubscriptionPackageConfig) => {
+    const handleDeletePackage = async (pkg: SubscriptionPackageConfig) => {
     if (pkg.slug === 'taster' || pkg.id === 'preset_taster') {
       alert(t('tasterCannotDeleteAlert', 'The Taster plan is required as the default free fallback and cannot be deleted.'));
       return;
@@ -528,18 +528,23 @@ export default function AdminSubscriptionPlans() {
         handleStartNewPlan();
       }
 
-      // Issue DELETE request directly to server API
+      // 1. Issue DELETE request directly to server API
       const queryParams = new URLSearchParams();
       if (pkg.id) queryParams.set('id', pkg.id);
       if (pkg.slug) queryParams.set('slug', pkg.slug);
 
-      await fetch(`/api/admin/plans?${queryParams.toString()}`, { 
+      const delRes = await fetch(`/api/admin/plans?${queryParams.toString()}`, { 
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: pkg.id, slug: pkg.slug })
       });
 
-      // Synchronize deletion with server store (Zero LocalStorage)
+      if (!delRes.ok) {
+        const errData = await delRes.json().catch(() => null);
+        throw new Error(errData?.error || 'Failed to delete plan from database.');
+      }
+
+      // 2. Synchronize deletion with server settings
       await persistServerAdminSettings({ subscriptionPlans: updated });
 
       if (typeof window !== 'undefined') {
@@ -550,6 +555,7 @@ export default function AdminSubscriptionPlans() {
       setFeedback({ type: 'success', msg: `"${pkg.name}" ${t('packageDeletedSuccess', 'package deleted successfully.')}` });
     } catch (e: any) {
       setFeedback({ type: 'error', msg: e.message || t('errorDeletingPlan', 'Error deleting package.') });
+      await fetchPackages();
     } finally {
       setDeletingId(null);
     }

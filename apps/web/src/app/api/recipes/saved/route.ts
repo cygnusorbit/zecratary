@@ -1,149 +1,100 @@
-import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-function getAllSavedFiles(): string[] {
-  const root = process.cwd();
-  const candidates = [
-    path.join(root, 'data', 'saved_recipes.json'),
-    path.join(root, 'apps', 'web', 'data', 'saved_recipes.json'),
-    path.resolve(root, '..', 'data', 'saved_recipes.json'),
-    path.resolve(root, '..', 'apps', 'web', 'data', 'saved_recipes.json')
-  ];
-  return Array.from(new Set(candidates));
-}
-
-function readSavedStore(): Record<string, any[]> {
-  for (const f of getAllSavedFiles()) {
-    if (fs.existsSync(f)) {
-      try {
-        const raw = fs.readFileSync(f, 'utf-8');
-        if (raw.trim()) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-            return parsed;
-          }
-        }
-      } catch (_) {}
-    }
-  }
-  return {};
-}
-
-function writeSavedStore(store: Record<string, any[]>) {
-  const files = getAllSavedFiles();
-  const serialized = JSON.stringify(store, null, 2);
-  for (const f of files) {
-    try {
-      const dir = path.dirname(f);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(f, serialized, 'utf-8');
-    } catch (err) {
-      console.warn('Could not write to', f, err);
-    }
-  }
-}
-
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const userId = (searchParams.get('userId') || '').trim();
-    const email = (searchParams.get('email') || '').trim().toLowerCase();
+    const userId = searchParams.get('userId');
 
-    if (!userId && !email) {
-      return NextResponse.json({ success: false, error: 'User identifier is required' }, { status: 400 });
+    let rows;
+    if (userId) {
+      rows = await query(
+        'SELECT * FROM saved_recipes WHERE user_id = $1 OR is_public = TRUE ORDER BY created_at DESC',
+        [userId]
+      );
+    } else {
+      rows = await query('SELECT * FROM saved_recipes ORDER BY created_at DESC');
     }
 
-    const store = readSavedStore();
-    const cleanId = userId.toLowerCase();
-    
-    // Look up by email, ID, or normalized keys
-    let recipes = store[cleanId] || (email ? store[email] : null) || store[userId] || [];
-
-    if (!recipes || recipes.length === 0) {
-      // Search case-insensitively across store keys
-      for (const [k, list] of Object.entries(store)) {
-        const lowerK = k.toLowerCase();
-        if (lowerK === cleanId || (email && lowerK === email)) {
-          recipes = list;
-          break;
-        }
-      }
-    }
-
-    return new NextResponse(JSON.stringify({ success: true, recipes: recipes || [] }), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-      }
-    });
+    return NextResponse.json(
+      { success: true, recipes: rows },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { userId, email, recipe, recipes, recipeId, action } = body;
+    const id = body.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 
-    const key = (email || userId || '').trim().toLowerCase();
-    if (!key) {
-      return NextResponse.json({ success: false, error: 'User key is required' }, { status: 400 });
+    let validUserId = null;
+    if (body.userId) {
+      const userCheck = await query('SELECT 1 FROM users WHERE id = $1', [body.userId]);
+      if (userCheck.length > 0) validUserId = body.userId;
     }
 
-    const store = readSavedStore();
-    let current = store[key] || (userId ? store[userId.toLowerCase()] : []) || [];
+    await query(`
+      INSERT INTO saved_recipes (
+        id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+        servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        recipe_type = EXCLUDED.recipe_type,
+        cuisine = EXCLUDED.cuisine,
+        prep_time = EXCLUDED.prep_time,
+        cook_time = EXCLUDED.cook_time,
+        servings = EXCLUDED.servings,
+        difficulty = EXCLUDED.difficulty,
+        ingredients = EXCLUDED.ingredients,
+        directions = EXCLUDED.directions,
+        nutrition = EXCLUDED.nutrition,
+        tags = EXCLUDED.tags,
+        image_url = EXCLUDED.image_url,
+        is_public = EXCLUDED.is_public,
+        updated_at = NOW();
+    `, [
+      id,
+      validUserId,
+      body.title || 'Untitled Recipe',
+      body.description || '',
+      body.recipeType || body.category || 'General',
+      body.cuisine || '',
+      body.prepTime || '',
+      body.cookTime || '',
+      body.servings || '',
+      body.difficulty || '',
+      JSON.stringify(body.ingredients || []),
+      JSON.stringify(body.directions || body.instructions || []),
+      JSON.stringify(body.nutrition || body.macros || {}),
+      JSON.stringify(body.tags || []),
+      body.imageUrl || body.image || '',
+      Boolean(body.isPublic)
+    ]);
 
-    if (action === 'sync' && Array.isArray(recipes)) {
-      const map = new Map<string, any>();
-      current.forEach((r: any) => {
-        if (r) {
-          const rk = (r.id || r.title || r.name || JSON.stringify(r)).toString().trim().toLowerCase();
-          map.set(rk, r);
-        }
-      });
-      recipes.forEach((r: any) => {
-        if (r) {
-          const rk = (r.id || r.title || r.name || JSON.stringify(r)).toString().trim().toLowerCase();
-          map.set(rk, r);
-        }
-      });
-      current = Array.from(map.values());
-    } else if (action === 'remove') {
-      const target = (recipeId || (recipe && (recipe.id || recipe.title || recipe.name)) || '').toString().trim().toLowerCase();
-      current = current.filter((r: any) => {
-        const rk = (r.id || r.title || r.name || '').toString().trim().toLowerCase();
-        return rk !== target;
-      });
-    } else {
-      if (recipe) {
-        const rk = (recipe.id || recipe.title || recipe.name || '').toString().trim().toLowerCase();
-        const exists = current.some((r: any) => {
-          const existingKey = (r.id || r.title || r.name || '').toString().trim().toLowerCase();
-          return existingKey === rk;
-        });
-        if (!exists) {
-          current.unshift({ ...recipe, savedAt: recipe.savedAt || new Date().toISOString() });
-        }
-      }
+    return NextResponse.json({ success: true, id, message: 'Recipe saved to PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
     }
 
-    store[key] = current;
-    if (userId && userId.toLowerCase() !== key) {
-      store[userId.toLowerCase()] = current;
-    }
-    if (email && email.toLowerCase() !== key) {
-      store[email.toLowerCase()] = current;
-    }
-
-    writeSavedStore(store);
-
-    return NextResponse.json({ success: true, recipes: current });
+    await query('DELETE FROM saved_recipes WHERE id = $1', [id]);
+    return NextResponse.json({ success: true, message: 'Recipe removed from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

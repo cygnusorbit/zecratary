@@ -1,117 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function syncUserToStore(user: any): any {
-  const cwd = process.cwd();
-  const paths = [
-    path.join(cwd, 'apps/web/data/users.json'),
-    path.join(cwd, 'data/users.json')
-  ];
-
-  let resolvedUser = user;
-
-  for (const p of paths) {
-    try {
-      let usersList: any[] = [];
-      if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, 'utf-8');
-        usersList = JSON.parse(raw);
-        if (!Array.isArray(usersList)) usersList = [];
-      } else {
-        const dir = path.dirname(p);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      }
-
-      const existingIndex = usersList.findIndex(
-        (u) => u && u.email && u.email.toLowerCase() === user.email.toLowerCase()
-      );
-
-      if (existingIndex >= 0) {
-        usersList[existingIndex] = {
-          ...usersList[existingIndex],
-          name: user.name || usersList[existingIndex].name,
-          picture: user.picture || usersList[existingIndex].picture,
-          avatar: user.picture || usersList[existingIndex].avatar
-        };
-        resolvedUser = usersList[existingIndex];
-      } else {
-        usersList.unshift(user);
-      }
-
-      fs.writeFileSync(p, JSON.stringify(usersList, null, 2), 'utf-8');
-    } catch (err) {
-      console.error('[google-session] Error syncing user to store:', p, err);
-    }
-  }
-
-  return resolvedUser;
-}
-
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const body = await req.json();
-    const profile = body.profile;
-    const requestedCallback = body.callbackUrl;
-
-    if (!profile || !profile.email) {
-      return NextResponse.json({ error: 'Missing profile email' }, { status: 400 });
+    const sessionCookie = req.cookies.get('zecratary_session')?.value;
+    if (!sessionCookie) {
+      return NextResponse.json({ authenticated: false }, { status: 401 });
     }
 
-    const email = profile.email.toLowerCase().trim();
-    const name = profile.name || profile.given_name || email.split('@')[0];
-    const picture = profile.picture || '';
-    const googleId = profile.sub || profile.id || Date.now().toString();
-
-    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
-
-    const candidateUser = {
-      id: `usr_g_${googleId}`,
-      name,
-      email,
-      role: isEmailAdmin ? 'admin' : 'user',
-      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
-      picture,
-      avatar: picture,
-      createdAt: new Date().toISOString()
-    };
-
-    const finalUser = syncUserToStore(candidateUser);
-
-    // Prevent circular redirects to /login
-    let targetUrl = requestedCallback;
-    if (!targetUrl || targetUrl === '/login' || targetUrl.startsWith('/login?')) {
-      targetUrl = finalUser.role === 'admin' ? '/admin' : '/profile';
+    let parsed: any;
+    try {
+      parsed = JSON.parse(decodeURIComponent(sessionCookie));
+    } catch (_) {
+      parsed = JSON.parse(sessionCookie);
     }
 
-    const response = NextResponse.json({
-      success: true,
-      user: finalUser,
-      redirectUrl: targetUrl
-    });
+    if (!parsed?.email) {
+      return NextResponse.json({ authenticated: false }, { status: 401 });
+    }
 
-    const serializedUser = JSON.stringify(finalUser);
-    response.cookies.set('zecratary_current_user', serializedUser, {
-      path: '/',
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 86400 * 7
-    });
+    const rows = await query('SELECT id, name, email, role, subscription_plan AS "subscriptionPlan" FROM users WHERE email = $1 LIMIT 1', [parsed.email.toLowerCase().trim()]);
+    if (rows.length === 0) {
+      return NextResponse.json({ authenticated: false }, { status: 401 });
+    }
 
-    response.cookies.set('zecratary_auth_session', serializedUser, {
-      path: '/',
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 86400 * 7
-    });
-
-    return response;
+    return NextResponse.json({
+      authenticated: true,
+      user: rows[0]
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
-    console.error('[google-session] Error:', err);
-    return NextResponse.json({ error: err.message || 'Session creation failed' }, { status: 500 });
+    return NextResponse.json({ authenticated: false, error: err.message }, { status: 500 });
   }
 }

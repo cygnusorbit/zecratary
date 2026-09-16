@@ -1,7 +1,7 @@
 // Strict PostgreSQL Database Client
 // 100% Database Persistence - No JSON Fallback
 
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 
 let pgPool: Pool | null = null;
 
@@ -53,4 +53,9 @@ export async function transaction<T>(callback: (client: any) => Promise<T>): Pro
   } finally {
     client.release();
   }
+}
+
+// Parse PostgreSQL NUMERIC (OID 1700) directly into JavaScript numbers
+if (typeof types !== 'undefined' && types.setTypeParser) {
+  types.setTypeParser(1700, (val: string) => (val === null ? 0 : parseFloat(val)));
 }

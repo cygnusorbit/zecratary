@@ -57,7 +57,8 @@ export async function GET() {
     const plans = await query(`
       SELECT 
         id, name, slug, is_free AS "isFree", is_default AS "isDefault",
-        monthly_price_dollars AS "monthlyPriceDollars", annual_price_dollars AS "annualPriceDollars",
+        COALESCE(monthly_price_dollars, 0)::float AS "monthlyPriceDollars",
+        COALESCE(annual_price_dollars, 0)::float AS "annualPriceDollars",
         monthly_badge AS "monthlyBadge", annual_badge AS "annualBadge", trial_badge AS "trialBadge",
         description_monthly AS "descriptionMonthly", description_annual AS "descriptionAnnual",
         button_text AS "buttonText", ai_recipe_limit AS "aiRecipeLimit",
@@ -84,10 +85,45 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     if (Array.isArray(body.subscriptionPlans)) {
+      const activeSlugs = body.subscriptionPlans
+        .map((p: any) => (p?.slug || p?.id || p?.name || '').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-'))
+        .filter(Boolean);
+      activeSlugs.push('taster', 'preset_taster');
+
+      const activeIds = body.subscriptionPlans
+        .map((p: any) => (p?.id || '').trim())
+        .filter(Boolean);
+      activeIds.push('preset_taster', 'taster');
+
+      await query(`
+        UPDATE payment_transactions SET plan_slug = NULL 
+        WHERE plan_slug IS NOT NULL 
+          AND plan_slug != 'taster' 
+          AND plan_slug != 'preset_taster'
+          AND NOT (plan_slug = ANY($1::text[]));
+      `, [activeSlugs]);
+
+      await query(`
+        UPDATE users SET subscription_plan = 'taster' 
+        WHERE subscription_plan IS NOT NULL 
+          AND subscription_plan != 'taster' 
+          AND subscription_plan != 'preset_taster'
+          AND NOT (subscription_plan = ANY($1::text[]));
+      `, [activeSlugs]);
+
+      await query(`
+        DELETE FROM subscription_plans 
+        WHERE slug != 'taster' 
+          AND id != 'preset_taster'
+          AND NOT (slug = ANY($1::text[]))
+          AND NOT (id = ANY($2::text[]));
+      `, [activeSlugs, activeIds]);
+
       for (const p of body.subscriptionPlans) {
         if (!p) continue;
         const slug = (p.slug || p.id || p.name || 'plan').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
         const targetId = p.id || slug;
+        const isDefault = slug === 'taster' || targetId === 'preset_taster';
 
         const exists = await query('SELECT id FROM subscription_plans WHERE slug = $1', [slug]);
         if (exists.length > 0) {
@@ -100,13 +136,13 @@ export async function POST(req: NextRequest) {
               token_reimburse_frequency = $19, updated_at = NOW()
             WHERE slug = $20
           `, [
-            p.name, Boolean(p.isFree), Boolean(p.isDefault), p.monthlyPriceDollars || p.price || 0,
-            p.annualPriceDollars || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
+            p.name, Boolean(p.isFree), isDefault, Number(p.monthlyPriceDollars || p.price) || 0,
+            Number(p.annualPriceDollars) || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
             p.descriptionMonthly || p.description || '', p.descriptionAnnual || '', p.buttonText || 'Choose Plan',
             p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5, p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
             p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5, Boolean(p.canViewMacros),
-            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.5-flash-lite'),
-            JSON.stringify(p.features || []), p.tokenLimit || 50000, p.tokenReimburseFrequency || 'monthly', slug
+            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
+            JSON.stringify(p.features || []), Number(p.tokenLimit) || 50000, p.tokenReimburseFrequency || 'monthly', slug
           ]);
         } else {
           await query(`
@@ -117,13 +153,13 @@ export async function POST(req: NextRequest) {
               can_view_macros, allowed_ai_models, features, token_limit, token_reimburse_frequency, updated_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, NOW())
           `, [
-            targetId, p.name, slug, Boolean(p.isFree), Boolean(p.isDefault), p.monthlyPriceDollars || p.price || 0,
-            p.annualPriceDollars || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
+            targetId, p.name, slug, Boolean(p.isFree), isDefault, Number(p.monthlyPriceDollars || p.price) || 0,
+            Number(p.annualPriceDollars) || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
             p.descriptionMonthly || p.description || '', p.descriptionAnnual || '', p.buttonText || 'Choose Plan',
             p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5, p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
             p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5, Boolean(p.canViewMacros),
-            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.5-flash-lite'),
-            JSON.stringify(p.features || []), p.tokenLimit || 50000, p.tokenReimburseFrequency || 'monthly'
+            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
+            JSON.stringify(p.features || []), Number(p.tokenLimit) || 50000, p.tokenReimburseFrequency || 'monthly'
           ]);
         }
       }
@@ -145,7 +181,12 @@ export async function POST(req: NextRequest) {
     const paymentSettings = body.paymentSettings !== undefined ? body.paymentSettings : (current.payment_settings || {});
     const socialLogin = body.socialLogin !== undefined ? body.socialLogin : (current.social_login || {});
     const chefAiSettings = body.chefAiSettings !== undefined ? body.chefAiSettings : (current.chef_ai_settings || {});
-    const recipeTypes = body.recipeTypes !== undefined ? body.recipeTypes : (current.recipe_types || []);
+    const rawRecipeTypes = body.recipeTypes !== undefined ? body.recipeTypes : (body.settings?.recipeTypes !== undefined ? body.settings.recipeTypes : (body.types !== undefined ? body.types : (current.recipe_types || [])));
+    let recipeTypes = rawRecipeTypes;
+    if (typeof recipeTypes === 'string') {
+      try { recipeTypes = JSON.parse(recipeTypes); } catch (_) {}
+    }
+    if (!Array.isArray(recipeTypes)) recipeTypes = [];
     const ingredientCategories = body.ingredientCategories !== undefined ? body.ingredientCategories : (current.ingredient_categories || []);
     const supportedLanguages = body.supportedLanguages !== undefined ? body.supportedLanguages : (current.supported_languages || []);
 

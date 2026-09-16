@@ -106,28 +106,49 @@ export default function RecipeTypeAdminPage() {
     };
   }, [applyGlobalTheme]);
 
-  // Hydrate Recipe Types Exclusively from Server Storage
+  // Hydrate Recipe Types Exclusively from PostgreSQL Server Storage
   const loadTypesFromServer = useCallback(async () => {
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
+
+    let loadedTypes: string[] | null = null;
+
     try {
-      const serverData = await fetchServerAdminSettings();
-      if (serverData && Array.isArray(serverData.recipeTypes) && serverData.recipeTypes.length > 0) {
-        setRecipeTypes(serverData.recipeTypes);
-        setMemoryRecipeTypes(serverData.recipeTypes);
-      } else {
-        const fallback = getStoredRecipeTypes();
-        const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES;
-        setRecipeTypes(activeList);
-        setMemoryRecipeTypes(activeList);
+      // 1. Direct fetch from dedicated PostgreSQL recipe-type route
+      const res = await fetch('/api/admin/recipe-type?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data?.recipeTypes || data?.types);
+        if (Array.isArray(list) && list.length > 0) {
+          loadedTypes = list;
+        }
       }
-    } catch (err) {
-      console.error('[RecipeTypeAdminPage] Error loading server recipe types:', err);
-      const fallback = getStoredRecipeTypes();
-      setRecipeTypes(fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES);
-    } finally {
-      setIsLoading(false);
+    } catch (_) {}
+
+    // 2. Fallback to settings endpoint if needed
+    if (!loadedTypes || loadedTypes.length === 0) {
+      try {
+        const serverData = await fetchServerAdminSettings();
+        const list = (Array.isArray(serverData) ? serverData : null) ||
+                     (Array.isArray(serverData?.recipeTypes) ? serverData.recipeTypes : null) ||
+                     (Array.isArray(serverData?.settings?.recipeTypes) ? serverData.settings.recipeTypes : null);
+        if (Array.isArray(list) && list.length > 0) {
+          loadedTypes = list;
+        }
+      } catch (_) {}
     }
+
+    if (loadedTypes && loadedTypes.length > 0) {
+      setRecipeTypes(loadedTypes);
+      setMemoryRecipeTypes(loadedTypes);
+    } else {
+      const fallback = getStoredRecipeTypes();
+      const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES;
+      setRecipeTypes(activeList);
+      setMemoryRecipeTypes(activeList);
+    }
+
+    setIsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -135,19 +156,18 @@ export default function RecipeTypeAdminPage() {
     loadTypesFromServer();
 
     const handleSync = (e: any) => {
-      if (e?.detail && Array.isArray(e.detail)) {
+      if (e?.detail && Array.isArray(e.detail) && e.detail.length > 0) {
         setRecipeTypes(e.detail);
-      } else {
-        loadTypesFromServer();
+        setMemoryRecipeTypes(e.detail);
       }
     };
 
     window.addEventListener('zecratary_recipe_types_changed', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('zecratary_recipe_types_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_recipe_types_changed', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_recipe_types_updated', handleSync);
     };
   }, [t, version, loadTypesFromServer]);
 
@@ -156,13 +176,29 @@ export default function RecipeTypeAdminPage() {
     setTimeout(() => setFeedback(''), 3000);
   };
 
-  // Centralized Server-Backed Commit (Zero LocalStorage)
+  // Centralized Server-Backed Commit with Live Database Persistence
   const commitRecipeTypes = async (updated: string[]) => {
     setRecipeTypes(updated);
     setMemoryRecipeTypes(updated);
-    await saveRecipeTypes(updated);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+
+    try {
+      // 1. Save directly to dedicated PostgreSQL endpoint
+      const res = await fetch('/api/admin/recipe-type', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipeTypes: updated })
+      });
+
+      // 2. Also broadcast through shared helper
+      await saveRecipeTypes(updated);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_recipe_types_changed', { detail: updated }));
+        window.dispatchEvent(new CustomEvent('zecratary_recipe_types_updated', { detail: updated }));
+      }
+    } catch (err: any) {
+      console.error('[RecipeTypeAdminPage] Save error:', err);
+      notify(t('errorSaving', 'Error saving to database'));
     }
   };
 
