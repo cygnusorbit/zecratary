@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.1.3",
+  "version": "7.1.5",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -105,7 +105,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.1.3",
+  "version": "7.1.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -15836,6 +15836,11 @@ import {
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 interface SubscriptionPackageConfig {
   id: string;
@@ -15949,7 +15954,9 @@ const OPENAI_MODEL_VERSIONS = [
 ];
 
 export default function AdminSubscriptionPlans() {
-  const { t } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+
   const [mounted, setMounted] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [packages, setPackages] = useState<SubscriptionPackageConfig[]>([]);
@@ -15971,21 +15978,21 @@ export default function AdminSubscriptionPlans() {
     setMounted(true);
   }, []);
 
-  const syncWithAiSettings = useCallback(() => {
+  // Synchronize Active AI model directly from server store (Zero LocalStorage)
+  const syncWithAiSettings = useCallback(async () => {
     try {
-      const stored = localStorage.getItem('zecratary_chef_ai_settings') || 
-                     localStorage.getItem('zecratary_engine_config') || 
-                     localStorage.getItem('zecratary_settings');
-      if (stored) {
-        const c = JSON.parse(stored);
-        if (c.model) {
-          setActiveSettingsModel(c.model);
-          if (c.provider === 'openai' || c.model.startsWith('gpt')) {
+      const serverData = await fetchServerAdminSettings();
+      if (serverData) {
+        const c = serverData.chefAiSettings || serverData.aiSettings || serverData;
+        const resolvedModel = c.model || serverData.aiModel;
+        if (resolvedModel) {
+          setActiveSettingsModel(resolvedModel);
+          if (c.provider === 'openai' || resolvedModel.startsWith('gpt')) {
             setSelectedAiProvider('openai');
-            setSelectedAiVersion(c.model);
+            setSelectedAiVersion(resolvedModel);
           } else {
             setSelectedAiProvider('gemini');
-            setSelectedAiVersion(c.model);
+            setSelectedAiVersion(resolvedModel);
           }
         }
       }
@@ -15996,21 +16003,24 @@ export default function AdminSubscriptionPlans() {
     syncWithAiSettings();
     window.addEventListener('zecratary_settings_updated', syncWithAiSettings);
     window.addEventListener('zecratary_engine_config_updated', syncWithAiSettings);
-    window.addEventListener('storage', syncWithAiSettings);
+    window.addEventListener('zecratary_admin_settings_updated', syncWithAiSettings);
     return () => {
       window.removeEventListener('zecratary_settings_updated', syncWithAiSettings);
       window.removeEventListener('zecratary_engine_config_updated', syncWithAiSettings);
-      window.removeEventListener('storage', syncWithAiSettings);
+      window.removeEventListener('zecratary_admin_settings_updated', syncWithAiSettings);
     };
   }, [syncWithAiSettings]);
 
+  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -16049,7 +16059,7 @@ export default function AdminSubscriptionPlans() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -16070,21 +16080,17 @@ export default function AdminSubscriptionPlans() {
     };
   }, [applySavedTheme]);
 
-  const loadLocalPackages = useCallback((): SubscriptionPackageConfig[] => {
+  // Hydrate packages directly from server API (Zero LocalStorage)
+  const fetchPackages = useCallback(async () => {
+    purgeLegacyBrowserAdminStorage();
     try {
-      let deletedSlugs: string[] = [];
-      try {
-        const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
-        if (rawDel) deletedSlugs = JSON.parse(rawDel);
-      } catch (_) {}
-
-      const local = null;
-      if (local !== null) {
-        const parsed = JSON.parse(local);
-        if (Array.isArray(parsed)) {
-          const filtered = parsed.filter((p: any) => p && !deletedSlugs.includes(p.slug) && !deletedSlugs.includes(p.id));
-          const hasTaster = filtered.some((p) => p.slug === 'taster' || p.id === 'preset_taster');
-          let list = hasTaster ? filtered : [{ ...DEFAULT_PRESET_TASTER }, ...filtered];
+      const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        const serverConfigs = Array.isArray(data) ? data : (data?.packages || data?.plans || data?.configs);
+        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
+          const hasTaster = serverConfigs.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster');
+          let list = hasTaster ? serverConfigs : [{ ...DEFAULT_PRESET_TASTER }, ...serverConfigs];
 
           list = list.map((p: any) => ({
             ...p,
@@ -16099,42 +16105,15 @@ export default function AdminSubscriptionPlans() {
             isDefault: p.slug === 'taster' || p.id === 'preset_taster',
           }));
 
-          return list;
+          setPackages(list);
+          return;
         }
       }
-    } catch (e) {}
-    return [{ ...DEFAULT_PRESET_TASTER }];
-  }, []);
-
-  const fetchPackages = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        const serverConfigs = Array.isArray(data) ? data : (data?.configs || data?.plans || data?.packages);
-        if (Array.isArray(serverConfigs)) {
-          let deletedSlugs: string[] = [];
-          try {
-            const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
-            if (rawDel) deletedSlugs = JSON.parse(rawDel);
-          } catch (_) {}
-
-          const cleanConfigs = serverConfigs.filter((cfg: any) => {
-            if (!cfg) return false;
-            if (deletedSlugs.includes(cfg.slug) || deletedSlugs.includes(cfg.id)) return false;
-            return true;
-          });
-
-          /* Synced via /api/admin/settings */
-        }
-      }
-      const local = loadLocalPackages();
-      setPackages(local);
     } catch (e) {
-      const local = loadLocalPackages();
-      setPackages(local);
+      console.error('Failed to fetch packages from server:', e);
     }
-  }, [loadLocalPackages]);
+    setPackages([{ ...DEFAULT_PRESET_TASTER }, { ...DEFAULT_PRESET_NUTRITION_PRO }]);
+  }, []);
 
   useEffect(() => {
     if (!mounted) return;
@@ -16144,7 +16123,7 @@ export default function AdminSubscriptionPlans() {
     fetchPackages();
   }, [fetchPackages, mounted, t]);
 
-  const handleSetDefaultPlan = (targetPkg: SubscriptionPackageConfig) => {
+  const handleSetDefaultPlan = async (targetPkg: SubscriptionPackageConfig) => {
     const isTaster = targetPkg.id === 'preset_taster' || targetPkg.slug === 'taster';
     if (!isTaster) {
       alert(t('tasterPermanentDefaultAlert', 'The Taster plan (ID: preset_taster) is permanently locked as the system default plan and cannot be changed.'));
@@ -16157,11 +16136,17 @@ export default function AdminSubscriptionPlans() {
     }));
 
     setPackages(updated);
-    /* Synced via /api/admin/settings */
-    localStorage.setItem('zecratary_default_plan_slug', 'taster');
-    localStorage.setItem('zecratary_default_plan', 'taster');
-    window.dispatchEvent(new Event('zecratary_plans_updated'));
-    window.dispatchEvent(new Event('storage'));
+
+    // Save default plan directly to server store
+    await persistServerAdminSettings({
+      defaultPlanSlug: 'taster',
+      subscriptionPlans: updated
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_plans_updated'));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
 
     setFeedback({
       type: 'success',
@@ -16288,16 +16273,6 @@ export default function AdminSubscriptionPlans() {
         body: JSON.stringify(payload),
       });
 
-      // Clear any tombstone for this created/updated plan
-      try {
-        const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
-        if (rawDel) {
-          const delSlugs: string[] = JSON.parse(rawDel);
-          const cleanSlugs = delSlugs.filter((s) => s !== planId && s !== generatedSlug);
-          localStorage.setItem('zecratary_deleted_plan_slugs', JSON.stringify(cleanSlugs));
-        }
-      } catch (_) {}
-
       const updatedPlanItem: SubscriptionPackageConfig = {
         ...form,
         id: planId,
@@ -16331,9 +16306,14 @@ export default function AdminSubscriptionPlans() {
 
       updatedList = updatedList.map((p) => ({ ...p, isDefault: p.id === 'preset_taster' || p.slug === 'taster' }));
       setPackages(updatedList);
-      /* Synced via /api/admin/settings */
-      window.dispatchEvent(new Event('zecratary_plans_updated'));
-      window.dispatchEvent(new Event('storage'));
+
+      // Save directly to server settings (Zero LocalStorage)
+      await persistServerAdminSettings({ subscriptionPlans: updatedList });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_plans_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
 
       setFeedback({
         type: 'success',
@@ -16361,7 +16341,6 @@ export default function AdminSubscriptionPlans() {
     setFeedback(null);
 
     try {
-      // 1. Optimistically filter from state and localStorage
       const updated = packages.filter((p) => {
         const isMatchId = pkg.id && (p.id === pkg.id || p.slug === pkg.id);
         const isMatchSlug = pkg.slug && (p.slug === pkg.slug || p.id === pkg.slug);
@@ -16371,40 +16350,30 @@ export default function AdminSubscriptionPlans() {
         isDefault: p.slug === 'taster' || p.id === 'preset_taster',
       }));
 
-      // 2. Persist tombstone so any rogue sync won't restore the deleted plan
-      try {
-        const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
-        const delSlugs: string[] = rawDel ? JSON.parse(rawDel) : [];
-        if (pkg.slug && !delSlugs.includes(pkg.slug)) delSlugs.push(pkg.slug);
-        if (pkg.id && !delSlugs.includes(pkg.id)) delSlugs.push(pkg.id);
-        localStorage.setItem('zecratary_deleted_plan_slugs', JSON.stringify(delSlugs));
-      } catch (_) {}
-
-      /* Synced via /api/admin/settings */
       setPackages(updated);
 
       if (editingId === targetKey || editingId === pkg.id || editingId === pkg.slug || form.slug === pkg.slug) {
         handleStartNewPlan();
       }
 
-      // 3. Issue DELETE request to server API
-      try {
-        const queryParams = new URLSearchParams();
-        if (pkg.id) queryParams.set('id', pkg.id);
-        if (pkg.slug) queryParams.set('slug', pkg.slug);
+      // Issue DELETE request directly to server API
+      const queryParams = new URLSearchParams();
+      if (pkg.id) queryParams.set('id', pkg.id);
+      if (pkg.slug) queryParams.set('slug', pkg.slug);
 
-        await fetch(`/api/admin/plans?${queryParams.toString()}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: pkg.id, slug: pkg.slug })
-        });
-      } catch (apiErr) {
-        console.warn('Backend deletion call warning:', apiErr);
+      await fetch(`/api/admin/plans?${queryParams.toString()}`, { 
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pkg.id, slug: pkg.slug })
+      });
+
+      // Synchronize deletion with server store (Zero LocalStorage)
+      await persistServerAdminSettings({ subscriptionPlans: updated });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_plans_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
-
-      // 4. Dispatch sync event
-      window.dispatchEvent(new Event('zecratary_plans_updated'));
-      window.dispatchEvent(new Event('storage'));
 
       setFeedback({ type: 'success', msg: `"${pkg.name}" ${t('packageDeletedSuccess', 'package deleted successfully.')}` });
     } catch (e: any) {
@@ -17604,7 +17573,7 @@ export default function AdminSubscriptionPlans() {
                     )}
 
                     <p className="text-xs text-slate-600 font-medium mt-2">
-                      {form.descriptionMonthly || t('defaultMonthlyDesc', 'Full premium access, billed monthly')}
+                      {form.descriptionMonthly || t('defaultMonthlyDesc', 'Full kitchen access, billed monthly')}
                     </p>
                   </div>
                 ) : (
@@ -17683,24 +17652,39 @@ export default function AdminSubscriptionPlans() {
 ## File: `apps/web/src/app/admin/recipe-type/page.tsx`
 ```typescript
 'use client';
+
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   Utensils, Plus, Edit3, Trash2, Check, X, RotateCcw, 
   CheckCircle, ArrowLeft, MoreVertical, GripVertical, 
-  ArrowUpDown, ArrowUp, ArrowDown
+  ArrowUpDown, ArrowUp, ArrowDown, RefreshCw
 } from 'lucide-react';
-import { getStoredRecipeTypes, saveRecipeTypes, DEFAULT_RECIPE_TYPES } from '@/lib/recipe-types';
+import { 
+  getStoredRecipeTypes, 
+  saveRecipeTypes, 
+  setMemoryRecipeTypes, 
+  DEFAULT_RECIPE_TYPES 
+} from '@/lib/recipe-types';
 import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 export default function RecipeTypeAdminPage() {
-  const { t, version } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+  const version = langContext?.version;
+
   const [recipeTypes, setRecipeTypes] = useState<string[]>([]);
   const [newTypeName, setNewTypeName] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [feedback, setFeedback] = useState('');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   
   // Reposition / Reorder States
   const [isReordering, setIsReordering] = useState(false);
@@ -17710,10 +17694,12 @@ export default function RecipeTypeAdminPage() {
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined' 
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -17752,7 +17738,7 @@ export default function RecipeTypeAdminPage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -17773,27 +17759,64 @@ export default function RecipeTypeAdminPage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadTypes = () => {
-    setRecipeTypes(getStoredRecipeTypes());
-  };
+  // Hydrate Recipe Types Exclusively from Server Storage
+  const loadTypesFromServer = useCallback(async () => {
+    setIsLoading(true);
+    purgeLegacyBrowserAdminStorage();
+    try {
+      const serverData = await fetchServerAdminSettings();
+      if (serverData && Array.isArray(serverData.recipeTypes) && serverData.recipeTypes.length > 0) {
+        setRecipeTypes(serverData.recipeTypes);
+        setMemoryRecipeTypes(serverData.recipeTypes);
+      } else {
+        const fallback = getStoredRecipeTypes();
+        const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES;
+        setRecipeTypes(activeList);
+        setMemoryRecipeTypes(activeList);
+      }
+    } catch (err) {
+      console.error('[RecipeTypeAdminPage] Error loading server recipe types:', err);
+      const fallback = getStoredRecipeTypes();
+      setRecipeTypes(fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    document.title = `${t('recipeTypeTitle') || 'Recipe Types'} - Admin Console`;
-    loadTypes();
+    document.title = `${t('recipeTypeTitle', 'Recipe Types')} - ${t('adminConsole', 'Admin Console')}`;
+    loadTypesFromServer();
 
-    const handleSync = () => setRecipeTypes(getStoredRecipeTypes());
+    const handleSync = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setRecipeTypes(e.detail);
+      } else {
+        loadTypesFromServer();
+      }
+    };
+
     window.addEventListener('zecratary_recipe_types_changed', handleSync);
-    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_recipe_types_changed', handleSync);
-      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [t, version]);
+  }, [t, version, loadTypesFromServer]);
 
   const notify = (msg: string) => {
     setFeedback(msg);
     setTimeout(() => setFeedback(''), 3000);
+  };
+
+  // Centralized Server-Backed Commit (Zero LocalStorage)
+  const commitRecipeTypes = async (updated: string[]) => {
+    setRecipeTypes(updated);
+    setMemoryRecipeTypes(updated);
+    await saveRecipeTypes(updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
   };
 
   // Drag & Drop Handlers
@@ -17815,7 +17838,7 @@ export default function RecipeTypeAdminPage() {
 
   const handleDrop = () => {
     setDraggedIndex(null);
-    saveRecipeTypes(recipeTypes);
+    commitRecipeTypes(recipeTypes);
   };
 
   const moveType = (index: number, direction: 'up' | 'down') => {
@@ -17826,14 +17849,13 @@ export default function RecipeTypeAdminPage() {
     const temp = list[index];
     list[index] = list[targetIndex];
     list[targetIndex] = temp;
-    setRecipeTypes(list);
-    saveRecipeTypes(list);
+    commitRecipeTypes(list);
   };
 
   const toggleRepositionMode = () => {
     if (isReordering) {
-      saveRecipeTypes(recipeTypes);
-      notify(t('recipeTypeOrderSaved') || 'Recipe type order saved successfully!');
+      commitRecipeTypes(recipeTypes);
+      notify(t('recipeTypeOrderSaved', 'Recipe type order saved successfully!'));
       setIsReordering(false);
     } else {
       setEditingIndex(null);
@@ -17847,15 +17869,14 @@ export default function RecipeTypeAdminPage() {
     if (!clean) return;
 
     if (recipeTypes.some((tKey) => tKey.toLowerCase() === clean.toLowerCase())) {
-      alert(t('recipeTypeExists') || 'This recipe type already exists.');
+      alert(t('recipeTypeExists', 'This recipe type already exists.'));
       return;
     }
 
     const updated = [...recipeTypes, clean];
-    setRecipeTypes(updated);
-    saveRecipeTypes(updated);
+    commitRecipeTypes(updated);
     setNewTypeName('');
-    notify(`${t('recipeTypeAdded') || 'Added recipe type'} "${clean}"`);
+    notify(`${t('recipeTypeAdded', 'Added recipe type')} "${clean}"`);
   };
 
   const handleSaveEdit = (index: number) => {
@@ -17866,34 +17887,31 @@ export default function RecipeTypeAdminPage() {
       (tKey, i) => i !== index && tKey.toLowerCase() === clean.toLowerCase()
     );
     if (duplicate) {
-      alert(t('recipeTypeExists') || 'This recipe type already exists.');
+      alert(t('recipeTypeExists', 'This recipe type already exists.'));
       return;
     }
 
     const updated = [...recipeTypes];
     updated[index] = clean;
-    setRecipeTypes(updated);
-    saveRecipeTypes(updated);
+    commitRecipeTypes(updated);
     setEditingIndex(null);
     setEditingValue('');
-    notify(`${t('recipeTypeUpdated') || 'Updated recipe type'} "${clean}"`);
+    notify(`${t('recipeTypeUpdated', 'Updated recipe type')} "${clean}"`);
   };
 
   const handleDeleteType = (index: number, name: string) => {
-    const confirmMsg = t('confirmDeleteRecipeType') || 'Are you sure you want to delete recipe type';
+    const confirmMsg = t('confirmDeleteRecipeType', 'Are you sure you want to delete recipe type');
     if (!confirm(`${confirmMsg} "${name}"?`)) return;
     const updated = recipeTypes.filter((_, i) => i !== index);
-    setRecipeTypes(updated);
-    saveRecipeTypes(updated);
-    notify(`${t('recipeTypeRemoved') || 'Removed recipe type'} "${name}"`);
+    commitRecipeTypes(updated);
+    notify(`${t('recipeTypeRemoved', 'Removed recipe type')} "${name}"`);
   };
 
   const handleResetDefaults = () => {
-    if (!confirm(t('resetRecipeTypesConfirm') || 'Are you sure you want to reset recipe types to default?')) return;
-    setRecipeTypes(DEFAULT_RECIPE_TYPES);
-    saveRecipeTypes(DEFAULT_RECIPE_TYPES);
+    if (!confirm(t('resetRecipeTypesConfirm', 'Are you sure you want to reset recipe types to default?'))) return;
+    commitRecipeTypes(DEFAULT_RECIPE_TYPES);
     setIsReordering(false);
-    notify(t('resetRecipeTypesSuccess') || 'Recipe types reset to default successfully!');
+    notify(t('resetRecipeTypesSuccess', 'Recipe types reset to default successfully!'));
   };
 
   return (
@@ -17908,14 +17926,29 @@ export default function RecipeTypeAdminPage() {
       >
         <div>
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('recipeTypeTitle') || 'Recipe Types'}
+            {t('recipeTypeTitle', 'Recipe Types')}
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('recipeTypeSubtitle') || 'Manage custom recipe categories and types'}
+            {t('recipeTypeSubtitle', 'Manage custom recipe categories and types')}
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={loadTypesFromServer}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            style={{
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#334155' : '#cbd5e1'
+            }}
+            title="Reload from server store"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>{t('refreshBtn', 'Reload')}</span>
+          </button>
+
           <button
             onClick={handleResetDefaults}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
@@ -17933,7 +17966,7 @@ export default function RecipeTypeAdminPage() {
               e.currentTarget.style.color = isDayMode ? '#334155' : '#cbd5e1';
             }}
           >
-            <RotateCcw className="h-4 w-4" /> {t('resetDefaults') || 'Reset Defaults'}
+            <RotateCcw className="h-4 w-4" /> {t('resetDefaults', 'Reset Defaults')}
           </button>
         </div>
       </div>
@@ -17964,14 +17997,14 @@ export default function RecipeTypeAdminPage() {
         >
           <div className="flex items-center gap-2.5">
             <MoreVertical className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
-            <span>{t('repositionBannerRecipeType') || 'Drag items or use arrows to reorder recipe types. Click Done when finished.'}</span>
+            <span>{t('repositionBannerRecipeType', 'Drag items or use arrows to reorder recipe types. Click Done when finished.')}</span>
           </div>
           <button
             onClick={toggleRepositionMode}
             className="px-3 py-1 text-white font-bold rounded-lg transition text-[11px] shrink-0 cursor-pointer shadow-sm"
             style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
           >
-            {t('done') || 'Done'}
+            {t('done', 'Done')}
           </button>
         </div>
       )}
@@ -17986,13 +18019,13 @@ export default function RecipeTypeAdminPage() {
           }}
         >
           <h2 className="text-base font-extrabold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            <Plus className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addNewRecipeType') || 'Add New Recipe Type'}
+            <Plus className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addNewRecipeType', 'Add New Recipe Type')}
           </h2>
           <form onSubmit={handleAddType} className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               required
-              placeholder={t('recipeTypePlaceholder') || 'e.g. Soup, Salad, Curry...'}
+              placeholder={t('recipeTypePlaceholder', 'e.g. Soup, Salad, Curry...')}
               value={newTypeName}
               onChange={(e) => setNewTypeName(e.target.value)}
               className="flex-1 border rounded-xl px-4 py-3 text-sm outline-none transition"
@@ -18011,7 +18044,7 @@ export default function RecipeTypeAdminPage() {
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
             >
-              <Plus className="h-4 w-4" /> {t('addRecipeTypeBtn') || 'Add Recipe Type'}
+              <Plus className="h-4 w-4" /> {t('addRecipeTypeBtn', 'Add Recipe Type')}
             </button>
           </form>
         </div>
@@ -18031,7 +18064,7 @@ export default function RecipeTypeAdminPage() {
         >
           <div className="flex items-center gap-3">
             <span className="text-sm font-extrabold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              {t('activeRecipeTypes') || 'Active Recipe Types'} ({recipeTypes.length})
+              {t('activeRecipeTypes', 'Active Recipe Types')} ({recipeTypes.length})
             </span>
             <button
               type="button"
@@ -18049,17 +18082,17 @@ export default function RecipeTypeAdminPage() {
             >
               {isReordering ? (
                 <>
-                  <Check className="h-3.5 w-3.5 text-white" /> {t('doneRepositioning') || 'Done Repositioning'}
+                  <Check className="h-3.5 w-3.5 text-white" /> {t('doneRepositioning', 'Done Repositioning')}
                 </>
               ) : (
                 <>
-                  <ArrowUpDown className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('reposition') || 'Reposition'}
+                  <ArrowUpDown className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('reposition', 'Reposition')}
                 </>
               )}
             </button>
           </div>
           <span className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-            {isReordering ? (t('repositionActive') || 'Repositioning Mode Active') : (t('recipeTypeRealtimeSync') || 'Changes sync in real-time across recipe forms')}
+            {isReordering ? t('repositionActive', 'Repositioning Mode Active') : t('recipeTypeRealtimeSync', 'Changes sync in real-time across recipe forms')}
           </span>
         </div>
 
@@ -18112,7 +18145,7 @@ export default function RecipeTypeAdminPage() {
                         borderColor: 'var(--color-emerald, #10b981)',
                         color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                       }}
-                      title={t('save') || 'Save'}
+                      title={t('save', 'Save')}
                     >
                       <Check className="h-3.5 w-3.5" />
                     </button>
@@ -18124,7 +18157,7 @@ export default function RecipeTypeAdminPage() {
                         borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                         color: isDayMode ? '#334155' : '#cbd5e1'
                       }}
-                      title={t('cancel') || 'Cancel'}
+                      title={t('cancel', 'Cancel')}
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -18140,7 +18173,7 @@ export default function RecipeTypeAdminPage() {
                               onClick={() => moveType(idx, 'up')}
                               disabled={idx === 0}
                               className="p-0.5 hover:text-black disabled:opacity-20 cursor-pointer"
-                              title={t('moveUp') || 'Move Up'}
+                              title={t('moveUp', 'Move Up')}
                             >
                               <ArrowUp className="h-3 w-3" />
                             </button>
@@ -18149,7 +18182,7 @@ export default function RecipeTypeAdminPage() {
                               onClick={() => moveType(idx, 'down')}
                               disabled={idx === recipeTypes.length - 1}
                               className="p-0.5 hover:text-black disabled:opacity-20 cursor-pointer"
-                              title={t('moveDown') || 'Move Down'}
+                              title={t('moveDown', 'Move Down')}
                             >
                               <ArrowDown className="h-3 w-3" />
                             </button>
@@ -18157,7 +18190,7 @@ export default function RecipeTypeAdminPage() {
                           <div 
                             className="cursor-grab active:cursor-grabbing p-1" 
                             style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
-                            title={t('dragToReposition') || 'Click and drag to reposition'}
+                            title={t('dragToReposition', 'Click and drag to reposition')}
                           >
                             <MoreVertical className="h-4 w-4" />
                           </div>
@@ -18182,7 +18215,7 @@ export default function RecipeTypeAdminPage() {
                             borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                             color: isDayMode ? '#334155' : '#cbd5e1'
                           }}
-                          title={t('editRecipeTypeTooltip') || 'Edit Recipe Type'}
+                          title={t('editRecipeTypeTooltip', 'Edit Recipe Type')}
                         >
                           <Edit3 className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
                         </button>
@@ -18194,7 +18227,7 @@ export default function RecipeTypeAdminPage() {
                             borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                             color: isDayMode ? '#64748b' : '#94a3b8'
                           }}
-                          title={t('deleteRecipeTypeTooltip') || 'Delete Recipe Type'}
+                          title={t('deleteRecipeTypeTooltip', 'Delete Recipe Type')}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -22539,11 +22572,15 @@ import {
   Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
   Search, CheckCircle, AlertCircle, X, ShieldAlert, Check,
   ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
-  Users, CreditCard, Zap, Sparkles, Download
+  Users, CreditCard, Zap, Sparkles, Download, RefreshCw
 } from 'lucide-react';
-import { getCurrentUser, logoutUser, initAuthStorage } from '@/lib/auth';
+import { getCurrentUser, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 import { applyThemeToDocument } from '@/lib/themeConfig';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings 
+} from '@/lib/adminSync';
 
 interface AppUser {
   id: string;
@@ -22576,7 +22613,10 @@ type SortOrder = 'asc' | 'desc';
 const ITEMS_PER_PAGE = 10;
 
 export default function AdminUserManagementPage() {
-  const { t, locale } = useTranslation() || {};
+  const langContext = useTranslation();
+  const t = langContext?.t;
+  const locale = langContext?.locale;
+
   const tr = useCallback((key: string, fallback: string): string => {
     if (typeof t === 'function') {
       const val = t(key);
@@ -22591,13 +22631,10 @@ export default function AdminUserManagementPage() {
   const [search, setSearch] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Selected User IDs for Export
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-
-  // Prevent recursive fetch storms
-  const isFetchingUsersRef = useRef(false);
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Admin Table Sorting & Pagination State
   const [adminSortField, setAdminSortField] = useState<SortField>('createdAt');
@@ -22631,7 +22668,7 @@ export default function AdminUserManagementPage() {
   // Helper: Strictly identify primary root administrator (usr_admin_1)
   const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
     if (!targetUser) return false;
-    return targetUser.id === 'usr_admin_1';
+    return targetUser.id === 'usr_admin_1' || targetUser.email?.toLowerCase() === 'admin@zecratary.com';
   }, []);
 
   const isEditingFirstAdmin = useMemo(() => {
@@ -22643,10 +22680,12 @@ export default function AdminUserManagementPage() {
   const syncTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const day = mode === 'light';
+      const day = mode === 'light' || mode === 'day';
       setIsDayMode(day);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       if (stored) {
         applyThemeToDocument(JSON.parse(stored));
       } else {
@@ -22670,89 +22709,48 @@ export default function AdminUserManagementPage() {
     };
   }, [syncTheme]);
 
-  // Synchronize System Packages
+  // Load Plans from Server API (Zero LocalStorage)
   const loadPlans = useCallback(async () => {
     let parsedPlans: PlanOption[] = [];
 
     try {
-      const rawConfigs = null;
-      if (rawConfigs) {
-        const configs = JSON.parse(rawConfigs);
-        if (Array.isArray(configs) && configs.length > 0) {
-          configs.forEach((cfg: any) => {
-            const isZeroCost = cfg.isFree || (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0);
-            
-            if (isZeroCost) {
-              parsedPlans.push({
-                id: cfg.id || cfg.slug,
-                name: `${cfg.name} (Free)`,
-                slug: cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                priceFormatted: 'Free',
-                isFree: true,
-              });
-            } else {
-              if (cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0) {
-                const mPrice = Number(cfg.monthlyPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-monthly`,
-                  name: `${cfg.name} (Monthly)`,
-                  slug: `${cfg.slug}-monthly`,
-                  priceFormatted: `$${mPrice.toFixed(2)}/mo`,
-                  interval: 'MONTH',
-                  isFree: false,
-                });
-              }
-              if (cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0) {
-                const aPrice = Number(cfg.annualPriceDollars);
-                parsedPlans.push({
-                  id: `${cfg.slug}-annual`,
-                  name: `${cfg.name} (Annual)`,
-                  slug: `${cfg.slug}-annual`,
-                  priceFormatted: `$${aPrice.toFixed(2)}/yr`,
-                  interval: 'YEAR',
-                  isFree: false,
-                });
-              }
-            }
+      const serverSettings = await fetchServerAdminSettings();
+      if (serverSettings && Array.isArray(serverSettings.subscriptionPlans) && serverSettings.subscriptionPlans.length > 0) {
+        serverSettings.subscriptionPlans.forEach((cfg: any) => {
+          const isZeroCost = cfg.price === 0 || cfg.isFree;
+          const price = Number(cfg.price || 0);
+          const interval = cfg.interval ? (cfg.interval.toLowerCase().includes('year') ? 'YEAR' : 'MONTH') : 'MONTH';
+
+          parsedPlans.push({
+            id: cfg.id || cfg.slug,
+            name: `${cfg.name} (Free)`,
+            slug: cfg.slug || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+            priceFormatted: isZeroCost ? 'Free' : `$${price.toFixed(2)}${interval === 'YEAR' ? '/yr' : '/mo'}`,
+            interval,
+            isFree: isZeroCost,
           });
-        }
+        });
       }
-    } catch (e) {}
+    } catch (_) {}
 
     if (parsedPlans.length === 0) {
       try {
-        const rawPlans = null;
-        if (rawPlans) {
-          const directPlans = JSON.parse(rawPlans);
-          if (Array.isArray(directPlans) && directPlans.length > 0) {
-            parsedPlans = directPlans.map((p: any) => ({
+        const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const plansList = Array.isArray(data) ? data : (data?.plans || data?.packages);
+          if (Array.isArray(plansList) && plansList.length > 0) {
+            parsedPlans = plansList.map((p: any) => ({
               id: p.id || p.slug,
               name: p.name,
               slug: p.slug,
               priceFormatted: p.priceCents === 0 ? 'Free' : `$${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`,
               interval: p.interval,
-              isFree: p.priceCents === 0,
+              isFree: p.priceCents === 0 || p.price === 0,
             }));
           }
         }
-      } catch (e) {}
-    }
-
-    if (parsedPlans.length === 0) {
-      try {
-        const res = await fetch('/api/admin/plans');
-        const data = await res.json();
-        if (data.success && Array.isArray(data.plans) && data.plans.length > 0) {
-          parsedPlans = data.plans.map((p: any) => ({
-            id: p.id || p.slug,
-            name: p.name,
-            slug: p.slug,
-            priceFormatted: p.priceCents === 0 ? 'Free' : `$${(p.priceCents / 100).toFixed(2)} / ${(p.interval || 'MONTH').toLowerCase()}`,
-            interval: p.interval,
-            isFree: p.priceCents === 0,
-          }));
-        }
-      } catch (e) {}
+      } catch (_) {}
     }
 
     if (parsedPlans.length > 0) {
@@ -22762,70 +22760,72 @@ export default function AdminUserManagementPage() {
     }
   }, []);
 
-  // Safe Non-Looping User Fetcher
+  // Hydrate Users Exclusively from Server Storage with Self-Healing Guarantee
   const loadUsers = useCallback(async () => {
-    if (isFetchingUsersRef.current) return;
-    isFetchingUsersRef.current = true;
+    setIsLoading(true);
+    purgeLegacyBrowserAdminStorage();
 
     try {
-      let localList: AppUser[] = [];
-      const raw = localStorage.getItem('zecratary_users');
-      if (raw) {
-        try { localList = JSON.parse(raw); } catch (_) {}
-      }
-
-      let deletedSet = new Set<string>();
-      try {
-        const rawDel = localStorage.getItem('zecratary_deleted_users');
-        if (rawDel) {
-          const parsed: string[] = JSON.parse(rawDel);
-          deletedSet = new Set(parsed.map((s) => s.toLowerCase().trim()));
-        }
-      } catch (_) {}
-
-      localList = localList.filter((u) => {
-        if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
-        if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
-        return true;
-      });
-
-      const res = await fetch('/api/admin/users', { cache: 'no-store' });
+      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
-          const serverUsers: AppUser[] = data.users.filter((u: any) => {
-            if (u.id && deletedSet.has(u.id.toLowerCase())) return false;
-            if (u.email && deletedSet.has(u.email.toLowerCase())) return false;
-            return true;
-          });
+          let list: AppUser[] = [...data.users];
 
-          const mergedMap = new Map<string, AppUser>();
-          serverUsers.forEach((u) => {
-            if (u && u.email) mergedMap.set(u.email.toLowerCase(), u);
-          });
-          localList.forEach((u) => {
-            if (u && u.email) {
-              const existing = mergedMap.get(u.email.toLowerCase()) || {};
-              mergedMap.set(u.email.toLowerCase(), { ...existing, ...u });
-            }
-          });
+          // Self-Healing 1: Ensure primary root admin exists
+          const hasRootAdmin = list.some(
+            (u) => u.id === 'usr_admin_1' || u.email?.toLowerCase() === 'admin@zecratary.com'
+          );
 
-          const merged = Array.from(mergedMap.values());
-          setUsers(merged);
-
-          const newSerialized = JSON.stringify(merged);
-          if (raw !== newSerialized) {
-            localStorage.setItem('zecratary_users', newSerialized);
+          if (!hasRootAdmin) {
+            const rootAdmin: AppUser = {
+              id: 'usr_admin_1',
+              name: 'System Administrator',
+              email: 'admin@zecratary.com',
+              role: 'admin',
+              subscriptionPlan: 'nutrition-pro-annual',
+              createdAt: '2026-01-01T00:00:00.000Z'
+            };
+            list.unshift(rootAdmin);
+            fetch('/api/admin/users', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(rootAdmin)
+            }).catch(() => {});
           }
+
+          // Self-Healing 2: If active user is admin, ensure they are in the list
+          const activeSession = getCurrentUser();
+          if (activeSession && (activeSession.role || '').toLowerCase() === 'admin') {
+            const inList = list.some(
+              (u) => (u.id && u.id === activeSession.id) || (u.email && u.email.toLowerCase() === activeSession.email.toLowerCase())
+            );
+            if (!inList) {
+              const activeAdminObj: AppUser = {
+                id: activeSession.id || 'usr_' + Date.now().toString(36),
+                name: activeSession.name || 'Administrator',
+                email: activeSession.email,
+                role: 'admin',
+                subscriptionPlan: activeSession.subscriptionPlan || 'nutrition-pro-annual',
+                createdAt: activeSession.createdAt || new Date().toISOString()
+              };
+              list.push(activeAdminObj);
+              fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(activeAdminObj)
+              }).catch(() => {});
+            }
+          }
+
+          setUsers(list);
           return;
         }
       }
-
-      setUsers(localList);
     } catch (err) {
-      console.error('Failed to load users:', err);
+      console.error('Failed to load users from server:', err);
     } finally {
-      isFetchingUsersRef.current = false;
+      setIsLoading(false);
     }
   }, []);
 
@@ -22837,38 +22837,21 @@ export default function AdminUserManagementPage() {
     loadUsers();
     loadPlans();
 
-    const handleSync = (e?: Event) => {
-      if (e && 'key' in e) {
-        const sEvt = e as StorageEvent;
-        if (sEvt.key && sEvt.key !== 'zecratary_users' && sEvt.key !== 'zecratary_subscription_plans' && sEvt.key !== 'zecratary_deleted_users') {
-          return;
-        }
-      }
-
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      syncTimeoutRef.current = setTimeout(() => {
-        loadUsers();
-        loadPlans();
-      }, 400);
+    const handleSync = () => {
+      loadUsers();
+      loadPlans();
     };
 
-    window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_users_updated', handleSync);
     window.addEventListener('zecratary_plans_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_users_updated', handleSync);
       window.removeEventListener('zecratary_plans_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
   }, [loadUsers, loadPlans, tr]);
-
-  const saveUsersList = (updated: AppUser[]) => {
-    setUsers(updated);
-    localStorage.setItem('zecratary_users', JSON.stringify(updated));
-    window.dispatchEvent(new Event('zecratary_users_updated'));
-  };
 
   const showToast = (msg: string) => {
     setFeedbackMsg(msg);
@@ -22948,14 +22931,14 @@ export default function AdminUserManagementPage() {
     }
   };
 
-  // Filter & Sort for Admins
+  // Case-Insensitive Filter & Sort for Admins
   const processedAdmins = useMemo(() => {
-    const admins = users.filter((u) => u.role === 'admin');
+    const admins = users.filter((u) => (u.role || '').toLowerCase() === 'admin');
     const filtered = admins.filter(
       (u) =>
         !search.trim() ||
-        u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-        u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.name || '').toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.email || '').toLowerCase().includes(search.toLowerCase().trim()) ||
         (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
     );
 
@@ -22974,14 +22957,14 @@ export default function AdminUserManagementPage() {
     });
   }, [users, search, adminSortField, adminSortOrder]);
 
-  // Filter & Sort for Standard Users
+  // Case-Insensitive Filter & Sort for Standard Users
   const processedStandardUsers = useMemo(() => {
-    const standardUsers = users.filter((u) => u.role === 'user');
+    const standardUsers = users.filter((u) => (u.role || '').toLowerCase() !== 'admin');
     const filtered = standardUsers.filter(
       (u) =>
         !search.trim() ||
-        u.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-        u.email.toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.name || '').toLowerCase().includes(search.toLowerCase().trim()) ||
+        (u.email || '').toLowerCase().includes(search.toLowerCase().trim()) ||
         (u.subscriptionPlan && u.subscriptionPlan.toLowerCase().includes(search.toLowerCase().trim()))
     );
 
@@ -23080,7 +23063,7 @@ export default function AdminUserManagementPage() {
     const assignedPlan = addSubscriptionPlan || (addRole === 'admin' ? 'nutrition-pro-annual' : 'taster');
 
     const newUser: AppUser = {
-      id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      id: 'usr_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
       name: cleanName,
       email: cleanEmail,
       password: addPassword,
@@ -23090,26 +23073,33 @@ export default function AdminUserManagementPage() {
     };
 
     try {
-      const rawDel = localStorage.getItem('zecratary_deleted_users');
-      if (rawDel) {
-        const delList: string[] = JSON.parse(rawDel);
-        const filteredDel = delList.filter((s) => s.toLowerCase().trim() !== cleanEmail && s !== newUser.id);
-        localStorage.setItem('zecratary_deleted_users', JSON.stringify(filteredDel));
-      }
-    } catch (_) {}
-
-    try {
-      await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newUser),
       });
-    } catch (_) {}
 
-    const updated = [newUser, ...users.filter((u) => !u.email || u.email.toLowerCase() !== cleanEmail)];
-    saveUsersList(updated);
-    setShowAddModal(false);
-    showToast(`${tr('admin.users.userCreatedPrefix', 'User')} "${newUser.name}" ${tr('admin.users.userCreatedSuffix', 'created successfully!')}`);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Server error creating user');
+      }
+
+      const data = await res.json();
+      if (data.users && Array.isArray(data.users)) {
+        setUsers(data.users);
+      } else {
+        setUsers((prev) => [newUser, ...prev.filter((u) => u.email.toLowerCase() !== cleanEmail)]);
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
+
+      setShowAddModal(false);
+      showToast(`${tr('admin.users.userCreatedPrefix', 'User')} "${newUser.name}" ${tr('admin.users.userCreatedSuffix', 'created successfully!')}`);
+    } catch (err: any) {
+      setAddError(err.message || 'Failed to persist new user');
+    }
   };
 
   // Edit User Modal
@@ -23124,7 +23114,7 @@ export default function AdminUserManagementPage() {
     setShowEditModal(true);
   };
 
-  const handleEditUserSubmit = (e: React.FormEvent) => {
+  const handleEditUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUserId) return;
     setEditError('');
@@ -23145,49 +23135,56 @@ export default function AdminUserManagementPage() {
 
     const targetUser = users.find((u) => u.id === editingUserId);
     const isFirstAdmin = isFirstAdminUser(targetUser);
-
     const finalRole: 'admin' | 'user' = isFirstAdmin ? 'admin' : editRole;
 
-    const updated = users.map((u) => {
-      if (u.id === editingUserId) {
-        return {
-          ...u,
-          name: cleanName,
-          email: cleanEmail,
-          password: editPassword ? editPassword : u.password,
-          role: finalRole,
-          subscriptionPlan: editSubscriptionPlan
-        };
-      }
-      return u;
-    });
+    const updatedUser: AppUser = {
+      id: editingUserId,
+      name: cleanName,
+      email: cleanEmail,
+      password: editPassword ? editPassword : targetUser?.password,
+      role: finalRole,
+      subscriptionPlan: editSubscriptionPlan,
+      createdAt: targetUser?.createdAt || new Date().toISOString()
+    };
 
-    saveUsersList(updated);
-
-    const editedTarget = updated.find((u) => u.id === editingUserId);
-    if (editedTarget) {
-      fetch('/api/admin/users', {
+    try {
+      const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editedTarget),
-      }).catch(() => {});
-    }
+        body: JSON.stringify(updatedUser),
+      });
 
-    if (currentUser?.id === editingUserId) {
-      const activeUserUpdated = {
-        ...currentUser,
-        name: cleanName,
-        email: cleanEmail,
-        role: finalRole,
-        subscriptionPlan: editSubscriptionPlan
-      };
-      localStorage.setItem('zecratary_current_user', JSON.stringify(activeUserUpdated));
-      setCurrentUser(activeUserUpdated);
-      window.dispatchEvent(new Event('zecratary_auth_changed'));
-    }
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Server error updating user');
+      }
 
-    setShowEditModal(false);
-    showToast(`${tr('admin.users.userUpdatedPrefix', 'User')} "${cleanName}" ${tr('admin.users.userUpdatedSuffix', 'updated successfully!')}`);
+      const data = await res.json();
+      if (data.users && Array.isArray(data.users)) {
+        setUsers(data.users);
+      } else {
+        setUsers((prev) => prev.map((u) => (u.id === editingUserId ? updatedUser : u)));
+      }
+
+      if (currentUser?.id === editingUserId) {
+        setCurrentUser({
+          ...currentUser,
+          name: cleanName,
+          email: cleanEmail,
+          role: finalRole,
+          subscriptionPlan: editSubscriptionPlan
+        });
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
+
+      setShowEditModal(false);
+      showToast(`${tr('admin.users.userUpdatedPrefix', 'User')} "${cleanName}" ${tr('admin.users.userUpdatedSuffix', 'updated successfully!')}`);
+    } catch (err: any) {
+      setEditError(err.message || 'Failed to update user');
+    }
   };
 
   // Safe Deletion Handler
@@ -23199,7 +23196,7 @@ export default function AdminUserManagementPage() {
       return;
     }
 
-    if (isFirstAdminUser && isFirstAdminUser(targetUser)) {
+    if (isFirstAdminUser(targetUser)) {
       alert(tr('admin.users.cannotDeletePrimary', 'The primary system administrator account cannot be deleted.'));
       return;
     }
@@ -23210,27 +23207,25 @@ export default function AdminUserManagementPage() {
     try {
       const cleanEmail = userEmail.toLowerCase().trim();
 
-      try {
-        const rawDel = localStorage.getItem('zecratary_deleted_users');
-        const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
-        if (cleanEmail && !delList.includes(cleanEmail)) delList.push(cleanEmail);
-        if (id && !delList.includes(id)) delList.push(id);
-        localStorage.setItem('zecratary_deleted_users', JSON.stringify(delList));
-      } catch (_) {}
-
-      const updated = users.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail));
-      setUsers(updated);
-      setSelectedUserIds((prev) => prev.filter((uid) => uid !== id));
-      localStorage.setItem('zecratary_users', JSON.stringify(updated));
-
-      await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, email: cleanEmail }),
-      }).catch(() => {});
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Server error deleting user');
+      }
+
+      setUsers((prev) => prev.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail)));
+      setSelectedUserIds((prev) => prev.filter((uid) => uid !== id));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
 
       showToast(`${tr('admin.users.userDeletedPrefix', 'User')} "${displayName}" ${tr('admin.users.userDeletedSuffix', 'has been deleted.')}`);
-      window.dispatchEvent(new Event('zecratary_users_updated'));
     } catch (err: any) {
       console.error('Failed to delete user:', err);
       showToast(tr('admin.users.deleteFail', 'Failed to delete user: ') + (err?.message || 'Server error'));
@@ -23330,7 +23325,6 @@ export default function AdminUserManagementPage() {
       className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
       style={{ color: cText }}
     >
-      
       {/* ACCESS WARNING FOR NON-ADMINS */}
       {currentUser && currentUser.role !== 'admin' && (
         <div 
@@ -23384,6 +23378,23 @@ export default function AdminUserManagementPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* RELOAD BUTTON */}
+          <button
+            type="button"
+            onClick={loadUsers}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            style={{
+              backgroundColor: cCardBg,
+              borderColor: cInputBorder,
+              color: cText
+            }}
+            title="Reload users from server database"
+          >
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>Reload</span>
+          </button>
+
           {/* EXPORT ACTION BUTTONS */}
           <button
             type="button"
@@ -23613,7 +23624,7 @@ export default function AdminUserManagementPage() {
                   </tr>
                 ) : (
                   paginatedAdmins.map((user) => {
-                    const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
+                    const isCurrent = currentUser?.id === user.id || currentUser?.email?.toLowerCase() === user.email?.toLowerCase();
                     const isPrimary = isFirstAdminUser(user);
                     const isSelected = selectedUserIds.includes(user.id);
                     const planBadge = getPlanBadge(user.subscriptionPlan);
@@ -23645,7 +23656,7 @@ export default function AdminUserManagementPage() {
                               color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                             }}
                           >
-                            {user.name.charAt(0).toUpperCase()}
+                            {(user.name || 'A').charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
@@ -23929,7 +23940,7 @@ export default function AdminUserManagementPage() {
                   </tr>
                 ) : (
                   paginatedStandardUsers.map((user) => {
-                    const isCurrent = currentUser?.id === user.id || currentUser?.email === user.email;
+                    const isCurrent = currentUser?.id === user.id || currentUser?.email?.toLowerCase() === user.email?.toLowerCase();
                     const isSelected = selectedUserIds.includes(user.id);
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
@@ -23960,7 +23971,7 @@ export default function AdminUserManagementPage() {
                               color: 'var(--color-primary, #E05638)'
                             }}
                           >
-                            {user.name.charAt(0).toUpperCase()}
+                            {(user.name || 'U').charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
@@ -24662,6 +24673,11 @@ import {
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 import { applyThemeToDocument } from '@/lib/themeConfig';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 interface SocialConfig {
   googleEnabled: boolean;
@@ -24691,7 +24707,9 @@ const DEFAULT_CONFIG: SocialConfig = {
 
 export default function SocialLoginSettingPage() {
   const router = useRouter();
-  const { t } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+
   const [user, setUser] = useState<User | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [config, setConfig] = useState<SocialConfig>(DEFAULT_CONFIG);
@@ -24704,23 +24722,62 @@ export default function SocialLoginSettingPage() {
 
   const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
+  // Dynamic Theme Synchronization & Day Mode Inversion
   const syncTheme = useCallback(() => {
     try {
-      if (typeof document !== 'undefined') {
-        const isDark = document.documentElement.classList.contains('dark');
-        setIsDayMode(!isDark);
-      }
-      const stored = typeof window !== 'undefined' ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config')) : null;
-      if (stored) {
-        applyThemeToDocument(JSON.parse(stored));
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      const isDay = mode === 'light' || mode === 'day';
+      setIsDayMode(isDay);
+
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
+      const c = stored ? JSON.parse(stored) : {};
+      const root = document.documentElement;
+
+      if (isDay) {
+        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
+        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
+        root.style.setProperty('--color-bg-dark', '#f8fafc');
+        root.style.setProperty('--color-background', '#f8fafc');
+        root.style.setProperty('--color-bg', '#f8fafc');
+        root.style.setProperty('--color-card-dark', '#ffffff');
+        root.style.setProperty('--color-card', '#ffffff');
+        root.style.setProperty('--color-inner-dark', '#f1f5f9');
+        root.style.setProperty('--color-border', '#e2e8f0');
+        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
+        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
+        root.style.setProperty('--color-text', '#0f172a');
+        root.style.setProperty('--color-text-secondary', '#64748b');
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '#f8fafc';
+        }
       } else {
-        applyThemeToDocument(null);
+        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
+        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
+        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
+        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
+        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
+        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
+        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
+        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
+        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
+        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
+        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
+        root.style.setProperty('--color-text', c.textColor || '#ffffff');
+        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '';
+        }
       }
+      applyThemeToDocument(c);
     } catch (_) {}
   }, []);
 
   useEffect(() => {
     syncTheme();
+    purgeLegacyBrowserAdminStorage();
+
     window.addEventListener('zecratary_theme_mode_changed', syncTheme);
     window.addEventListener('zecratary_theme_changed', syncTheme);
     window.addEventListener('zecratary_theme_updated', syncTheme);
@@ -24747,37 +24804,49 @@ export default function SocialLoginSettingPage() {
     setUser(active);
   }, [router]);
 
+  // Hydrate configurations directly from Server Storage (Zero LocalStorage)
   const loadConfig = useCallback(async () => {
+    purgeLegacyBrowserAdminStorage();
     try {
-      // 1. Fetch from centralized server settings store
-      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const settings = data.settings || data;
-        if (settings?.socialLogin) {
-          setConfig(prev => ({
-            ...prev,
-            googleEnabled: settings.socialLogin.googleEnabled ?? prev.googleEnabled,
-            googleClientId: settings.socialLogin.googleClientId ?? prev.googleClientId,
-            googleClientSecret: settings.socialLogin.googleClientSecret ?? prev.googleClientSecret,
-            facebookEnabled: settings.socialLogin.facebookEnabled ?? prev.facebookEnabled,
-            facebookClientId: settings.socialLogin.facebookClientId ?? settings.socialLogin.facebookAppId ?? prev.facebookClientId,
-            facebookClientSecret: settings.socialLogin.facebookClientSecret ?? settings.socialLogin.facebookAppSecret ?? prev.facebookClientSecret,
-            appleEnabled: settings.socialLogin.appleEnabled ?? prev.appleEnabled,
-            appleClientId: settings.socialLogin.appleClientId ?? prev.appleClientId,
-            appleTeamId: settings.socialLogin.appleTeamId ?? prev.appleTeamId,
-            appleKeyId: settings.socialLogin.appleKeyId ?? prev.appleKeyId
-          }));
-          return;
-        }
+      // 1. Centralized Server Settings API
+      const serverData = await fetchServerAdminSettings();
+      if (serverData && serverData.socialLogin) {
+        const sl = serverData.socialLogin;
+        setConfig(prev => ({
+          ...prev,
+          googleEnabled: sl.googleEnabled ?? prev.googleEnabled,
+          googleClientId: sl.googleClientId ?? prev.googleClientId,
+          googleClientSecret: sl.googleClientSecret ?? prev.googleClientSecret,
+          facebookEnabled: sl.facebookEnabled ?? prev.facebookEnabled,
+          facebookClientId: sl.facebookClientId ?? sl.facebookAppId ?? prev.facebookClientId,
+          facebookClientSecret: sl.facebookClientSecret ?? sl.facebookAppSecret ?? prev.facebookClientSecret,
+          appleEnabled: sl.appleEnabled ?? prev.appleEnabled,
+          appleClientId: sl.appleClientId ?? prev.appleClientId,
+          appleTeamId: sl.appleTeamId ?? prev.appleTeamId,
+          appleKeyId: sl.appleKeyId ?? prev.appleKeyId
+        }));
+        return;
       }
 
-      // 2. Fallback to reading from .env endpoint if server store hasn't initialized
-      const envRes = await fetch('/api/admin/social-env', { cache: 'no-store' });
+      // 2. Direct fallback to environment route
+      const envRes = await fetch('/api/admin/social-env?t=' + Date.now(), { cache: 'no-store' });
       if (envRes.ok) {
         const envJson = await envRes.json();
         if (envJson.success && envJson.config) {
-          setConfig(prev => ({ ...prev, ...envJson.config }));
+          const c = envJson.config;
+          setConfig(prev => ({
+            ...prev,
+            googleEnabled: c.googleEnabled ?? prev.googleEnabled,
+            googleClientId: c.googleClientId ?? prev.googleClientId,
+            googleClientSecret: c.googleClientSecret ?? prev.googleClientSecret,
+            facebookEnabled: c.facebookEnabled ?? prev.facebookEnabled,
+            facebookClientId: c.facebookClientId ?? c.facebookAppId ?? prev.facebookClientId,
+            facebookClientSecret: c.facebookClientSecret ?? c.facebookAppSecret ?? prev.facebookClientSecret,
+            appleEnabled: c.appleEnabled ?? prev.appleEnabled,
+            appleClientId: c.appleClientId ?? prev.appleClientId,
+            appleTeamId: c.appleTeamId ?? prev.appleTeamId,
+            appleKeyId: c.appleKeyId ?? prev.appleKeyId
+          }));
         }
       }
     } catch (err) {
@@ -24787,12 +24856,25 @@ export default function SocialLoginSettingPage() {
 
   useEffect(() => {
     loadConfig();
+
+    const handleSync = () => {
+      loadConfig();
+    };
+
+    window.addEventListener('zecratary_social_login_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    return () => {
+      window.removeEventListener('zecratary_social_login_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+    };
   }, [loadConfig]);
 
   const handleCopy = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(id);
-    setTimeout(() => setCopiedKey(null), 2000);
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedKey(id);
+      setTimeout(() => setCopiedKey(null), 2000);
+    }
   };
 
   const handleSaveAndSync = async (e?: React.FormEvent) => {
@@ -24800,39 +24882,35 @@ export default function SocialLoginSettingPage() {
     setLoading(true);
     setStatusMsg(null);
 
+    const payload = {
+      ...config,
+      facebookAppId: config.facebookClientId,
+      facebookAppSecret: config.facebookClientSecret,
+      updatedAt: new Date().toISOString()
+    };
+
     try {
-      // Direct server-backed persistence - ZERO localStorage read/writes
-      const res = await fetch('/api/admin/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          socialLogin: {
-            ...config,
-            facebookAppId: config.facebookClientId,
-            facebookAppSecret: config.facebookClientSecret
-          }
-        })
+      // 1. Direct server-backed persistence - ZERO localStorage read/writes
+      await persistServerAdminSettings({
+        socialLogin: payload
       });
 
-      // Synchronize to .env handler if present
+      // 2. Synchronize to .env handler if present
       try {
         await fetch('/api/admin/social-env', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(config)
+          body: JSON.stringify(payload)
         });
       } catch (_) {}
 
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Failed to persist settings to server storage');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_social_login_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
 
-      window.dispatchEvent(new Event('zecratary_social_login_updated'));
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-
       setStatusMsg({ 
-        text: t('socialSavedSuccess') || 'Configuration saved and synced to server successfully!', 
+        text: t('socialSavedSuccess', 'Configuration saved and synced to server successfully!'), 
         success: true 
       });
       setTimeout(() => setStatusMsg(null), 4000);
@@ -24845,40 +24923,56 @@ export default function SocialLoginSettingPage() {
 
   const handlePullEnv = async () => {
     setSyncingEnv(true);
+    setStatusMsg(null);
     try {
-      const res = await fetch('/api/admin/social-env', { cache: 'no-store' });
+      const res = await fetch('/api/admin/social-env?t=' + Date.now(), { cache: 'no-store' });
       const json = await res.json();
       if (res.ok && json.success && json.config) {
-        setConfig(prev => ({ ...prev, ...json.config }));
-        await fetch('/api/admin/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            socialLogin: {
-              ...json.config,
-              facebookAppId: json.config.facebookClientId,
-              facebookAppSecret: json.config.facebookClientSecret
-            }
-          })
+        const c = json.config;
+        const mergedConfig: SocialConfig = {
+          ...config,
+          googleEnabled: c.googleEnabled ?? config.googleEnabled,
+          googleClientId: c.googleClientId ?? config.googleClientId,
+          googleClientSecret: c.googleClientSecret ?? config.googleClientSecret,
+          facebookEnabled: c.facebookEnabled ?? config.facebookEnabled,
+          facebookClientId: c.facebookClientId ?? c.facebookAppId ?? config.facebookClientId,
+          facebookClientSecret: c.facebookClientSecret ?? c.facebookAppSecret ?? config.facebookClientSecret,
+          appleEnabled: c.appleEnabled ?? config.appleEnabled,
+          appleClientId: c.appleClientId ?? config.appleClientId,
+          appleTeamId: c.appleTeamId ?? config.appleTeamId,
+          appleKeyId: c.appleKeyId ?? config.appleKeyId
+        };
+        setConfig(mergedConfig);
+
+        // Persist directly to server store
+        await persistServerAdminSettings({
+          socialLogin: {
+            ...mergedConfig,
+            facebookAppId: mergedConfig.facebookClientId,
+            facebookAppSecret: mergedConfig.facebookClientSecret
+          }
         });
-        window.dispatchEvent(new Event('zecratary_social_login_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        setStatusMsg({ text: t('socialPullSuccess') || 'Values synced from .env successfully!', success: true });
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_social_login_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+        setStatusMsg({ text: t('socialPullSuccess', 'Values synced from .env successfully!'), success: true });
         setTimeout(() => setStatusMsg(null), 3000);
       } else {
         await loadConfig();
-        setStatusMsg({ text: t('socialPullSuccess') || 'Values refreshed from server store!', success: true });
+        setStatusMsg({ text: t('socialPullSuccess', 'Values refreshed from server store!'), success: true });
         setTimeout(() => setStatusMsg(null), 3000);
       }
     } catch (_) {
-      setStatusMsg({ text: t('socialPullError') || 'Failed to sync configuration.', success: false });
+      setStatusMsg({ text: t('socialPullError', 'Failed to sync configuration.'), success: false });
     } finally {
       setSyncingEnv(false);
     }
   };
 
   const testProvider = (provider: 'google' | 'facebook' | 'apple') => {
-    setDiagnostics(prev => ({ ...prev, [provider]: t('testingHandshake') || 'Testing handshake...' }));
+    setDiagnostics(prev => ({ ...prev, [provider]: t('testingHandshake', 'Testing handshake...') }));
     setTimeout(() => {
       if (provider === 'google') {
         const ok = config.googleClientId.includes('.apps.googleusercontent.com') || config.googleClientId.length > 10;
@@ -24930,16 +25024,16 @@ export default function SocialLoginSettingPage() {
                 borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                 color: isDayMode ? '#0f172a' : '#ffffff'
               }}
-              title={t('backToAdmin') || 'Back to Admin'}
+              title={t('backToAdmin', 'Back to Admin')}
             >
               <ArrowLeft className="h-4 w-4" />
             </Link>
             <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary, #E05638)' }}>
-              {t('socialLoginSettingsTitle') || 'Social Login & Identity Settings'}
+              {t('socialLoginSettingsTitle', 'Social Login & Identity Settings')}
             </h1>
           </div>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('socialLoginSettingsSubtitle') || 'Configure Google, Facebook, and Apple authentication and synchronize credentials to .env.'}
+            {t('socialLoginSettingsSubtitle', 'Configure Google, Facebook, and Apple authentication and synchronize credentials to .env.')}
           </p>
         </div>
 
@@ -24956,7 +25050,7 @@ export default function SocialLoginSettingPage() {
             }}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'} ${syncingEnv ? 'animate-spin' : ''}`} />
-            {t('syncFromEnvBtn') || 'Sync from .env'}
+            {t('syncFromEnvBtn', 'Sync from .env')}
           </button>
           <button
             type="button"
@@ -24966,7 +25060,7 @@ export default function SocialLoginSettingPage() {
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
             {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            {t('saveAndSyncEnvBtn') || 'Save & Sync .env'}
+            {t('saveAndSyncEnvBtn', 'Save & Sync .env')}
           </button>
         </div>
       </div>
@@ -25002,7 +25096,7 @@ export default function SocialLoginSettingPage() {
         >
           <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
             <span className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              {t('googleTitle') || 'Google Identity Services'}
+              {t('googleTitle', 'Google Identity Services')}
             </span>
             <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
               <input 
@@ -25011,13 +25105,13 @@ export default function SocialLoginSettingPage() {
                 onChange={(e) => setConfig({ ...config, googleEnabled: e.target.checked })} 
                 className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
               />
-              <span>{config.googleEnabled ? (t('enabled') || 'Enabled') : (t('disabled') || 'Disabled')}</span>
+              <span>{config.googleEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}</span>
             </label>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('clientId') || 'Client ID'}
+                {t('clientId', 'Client ID')}
               </label>
               <input 
                 type="text" 
@@ -25034,7 +25128,7 @@ export default function SocialLoginSettingPage() {
             </div>
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('clientSecret') || 'Client Secret'}
+                {t('clientSecret', 'Client Secret')}
               </label>
               <div className="relative">
                 <input 
@@ -25089,7 +25183,7 @@ export default function SocialLoginSettingPage() {
               }}
             >
               <Zap className={`h-3.5 w-3.5 ${isDayMode ? 'text-amber-600' : 'text-amber-400'}`} /> 
-              {t('testConnection') || 'Test Connection'}
+              {t('testConnection', 'Test Connection')}
             </button>
             <button 
               type="button" 
@@ -25106,7 +25200,7 @@ export default function SocialLoginSettingPage() {
               ) : (
                 <Copy className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} />
               )} 
-              {copiedKey === 'gcb' ? (t('copied') || 'Copied!') : (t('copyCallbackUrl') || 'Copy Callback URL')}
+              {copiedKey === 'gcb' ? t('copied', 'Copied!') : t('copyCallbackUrl', 'Copy Callback URL')}
             </button>
           </div>
         </div>
@@ -25121,7 +25215,7 @@ export default function SocialLoginSettingPage() {
         >
           <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
             <span className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              {t('facebookTitle') || 'Facebook Login (Meta Graph)'}
+              {t('facebookTitle', 'Facebook Login (Meta Graph)')}
             </span>
             <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
               <input 
@@ -25130,13 +25224,13 @@ export default function SocialLoginSettingPage() {
                 onChange={(e) => setConfig({ ...config, facebookEnabled: e.target.checked })} 
                 className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
               />
-              <span>{config.facebookEnabled ? (t('enabled') || 'Enabled') : (t('disabled') || 'Disabled')}</span>
+              <span>{config.facebookEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}</span>
             </label>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('facebookAppId') || 'Facebook App ID'}
+                {t('facebookAppId', 'Facebook App ID')}
               </label>
               <input 
                 type="text" 
@@ -25153,7 +25247,7 @@ export default function SocialLoginSettingPage() {
             </div>
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('facebookAppSecret') || 'Facebook App Secret'}
+                {t('facebookAppSecret', 'Facebook App Secret')}
               </label>
               <div className="relative">
                 <input 
@@ -25208,7 +25302,7 @@ export default function SocialLoginSettingPage() {
               }}
             >
               <Zap className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} /> 
-              {t('testConnection') || 'Test Connection'}
+              {t('testConnection', 'Test Connection')}
             </button>
             <button 
               type="button" 
@@ -25225,7 +25319,7 @@ export default function SocialLoginSettingPage() {
               ) : (
                 <Copy className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} />
               )} 
-              {copiedKey === 'fcb' ? (t('copied') || 'Copied!') : (t('copyCallbackUrl') || 'Copy Callback URL')}
+              {copiedKey === 'fcb' ? t('copied', 'Copied!') : t('copyCallbackUrl', 'Copy Callback URL')}
             </button>
           </div>
         </div>
@@ -25240,7 +25334,7 @@ export default function SocialLoginSettingPage() {
         >
           <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
             <span className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              {t('appleTitle') || 'Sign in with Apple'}
+              {t('appleTitle', 'Sign in with Apple')}
             </span>
             <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
               <input 
@@ -25249,13 +25343,13 @@ export default function SocialLoginSettingPage() {
                 onChange={(e) => setConfig({ ...config, appleEnabled: e.target.checked })} 
                 className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
               />
-              <span>{config.appleEnabled ? (t('enabled') || 'Enabled') : (t('disabled') || 'Disabled')}</span>
+              <span>{config.appleEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}</span>
             </label>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('appleClientId') || 'Service ID (Client ID)'}
+                {t('appleClientId', 'Service ID (Client ID)')}
               </label>
               <input 
                 type="text" 
@@ -25272,7 +25366,7 @@ export default function SocialLoginSettingPage() {
             </div>
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('appleTeamId') || 'Team ID'}
+                {t('appleTeamId', 'Team ID')}
               </label>
               <input 
                 type="text" 
@@ -25289,7 +25383,7 @@ export default function SocialLoginSettingPage() {
             </div>
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('appleKeyId') || 'Key ID'}
+                {t('appleKeyId', 'Key ID')}
               </label>
               <input 
                 type="text" 
@@ -25332,7 +25426,7 @@ export default function SocialLoginSettingPage() {
               }}
             >
               <Zap className={`h-3.5 w-3.5 ${isDayMode ? 'text-slate-600' : 'text-slate-400'}`} /> 
-              {t('testConnection') || 'Test Connection'}
+              {t('testConnection', 'Test Connection')}
             </button>
             <button 
               type="button" 
@@ -25349,7 +25443,7 @@ export default function SocialLoginSettingPage() {
               ) : (
                 <Copy className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} />
               )} 
-              {copiedKey === 'acb' ? (t('copied') || 'Copied!') : (t('copyReturnUrl') || 'Copy Return URL')}
+              {copiedKey === 'acb' ? t('copied', 'Copied!') : t('copyReturnUrl', 'Copy Return URL')}
             </button>
           </div>
         </div>
@@ -25366,7 +25460,7 @@ export default function SocialLoginSettingPage() {
           style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
         >
           {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          {t('saveAndSyncEnvBtn') || 'Save & Sync .env'}
+          {t('saveAndSyncEnvBtn', 'Save & Sync .env')}
         </button>
       </div>
     </div>
@@ -33574,6 +33668,7 @@ export async function POST(req: NextRequest) {
         ...(body.socialLogin || {})
       },
       subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || [],
+      recipeTypes: body.recipeTypes || current.recipeTypes || [],
       supportedLanguages: body.supportedLanguages || current.supportedLanguages || [],
       ingredientCategories: body.ingredientCategories || current.ingredientCategories || [],
       chefAiSettings: {
@@ -33605,194 +33700,208 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/plans/route.ts`
 ```typescript
-// Generated / Updated by AI Collaborator
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-function getDataFilePath(): string {
-  const root = process.cwd();
-  const candidates = [
-    path.join(root, 'data', 'subscription_configs.json'),
-    path.join(root, 'apps', 'web', 'data', 'subscription_configs.json'),
-    path.join(root, 'src', 'data', 'subscription_configs.json'),
-    path.join(root, 'apps', 'web', 'src', 'data', 'subscription_configs.json'),
+function getDataPaths(filename: string): string[] {
+  return [
+    path.join(process.cwd(), 'apps/web/data', filename),
+    path.join(process.cwd(), 'data', filename)
   ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  const defaultPath = path.join(root, 'data', 'subscription_configs.json');
-  const dir = path.dirname(defaultPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  return defaultPath;
 }
 
-const DEFAULT_PRESET_TASTER = {
-  id: 'preset_taster',
-  name: 'Taster',
-  slug: 'taster',
-  isFree: true,
-  isDefault: true,
-  monthlyPriceDollars: 0,
-  annualPriceDollars: 0,
-  monthlyBadge: '',
-  annualBadge: '',
-  trialBadge: '',
-  descriptionMonthly: 'Free tier with limited features',
-  descriptionAnnual: 'Free tier with limited features',
-  buttonText: 'Manage',
-  aiRecipeLimit: 5,
-  recipeLibraryLimit: 25,
-  socialScrapeLimit: 5,
-  canViewMacros: false,
-  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
-  features: [
-    'Create up to 5 AI-powered recipes per month',
-    'Personal recipe library (25 total recipes)',
-    'Smart ingredient repurposing',
-    'Automated shopping list creation',
-    'Direct online grocery shopping links',
-    'Meal planner',
-    'Ingredient photo recognition'
-  ],
-  tokenLimit: 50000,
-  tokenReimburseFrequency: 'monthly'
-};
-
-function readServerConfigs(): any[] {
-  const filePath = getDataFilePath();
-  try {
-    if (fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      const parsed = JSON.parse(raw);
-      const list = Array.isArray(parsed) ? parsed : (parsed?.configs || parsed?.plans || []);
-      if (Array.isArray(list) && list.length > 0) {
-        const hasTaster = list.some((p: any) => p && (p.slug === 'taster' || p.id === 'preset_taster'));
-        return hasTaster ? list : [DEFAULT_PRESET_TASTER, ...list];
-      }
+function readJsonFile<T>(filename: string, fallback: T): T {
+  const paths = getDataPaths(filename);
+  for (const p of paths) {
+    if (fs.existsSync(p)) {
+      try {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) as T;
+      } catch (_) {}
     }
-  } catch (_) {}
-  return [DEFAULT_PRESET_TASTER];
+  }
+  return fallback;
 }
 
-function writeServerConfigs(configs: any[]): boolean {
-  try {
-    const filePath = getDataFilePath();
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(configs, null, 2), 'utf-8');
-    return true;
-  } catch (err) {
-    console.error('Failed to write subscription configs:', err);
-    return false;
+function writeJsonFile<T>(filename: string, data: T): void {
+  const paths = getDataPaths(filename);
+  for (const p of paths) {
+    try {
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (_) {}
   }
 }
+
+const DEFAULT_PLANS = [
+  {
+    id: 'preset_taster',
+    name: 'Taster',
+    slug: 'taster',
+    isFree: true,
+    isDefault: true,
+    monthlyPriceDollars: 0,
+    annualPriceDollars: 0,
+    monthlyBadge: '',
+    annualBadge: '',
+    trialBadge: '',
+    descriptionMonthly: 'Free tier with limited features',
+    descriptionAnnual: 'Free tier with limited features',
+    buttonText: 'Manage',
+    aiRecipeLimit: 5,
+    recipeLibraryLimit: 25,
+    socialScrapeLimit: 5,
+    canViewMacros: false,
+    allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
+    featuresText: 'Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition',
+    features: [
+      'Create up to 5 AI-powered recipes per month',
+      'Personal recipe library (25 total recipes)',
+      'Smart ingredient repurposing',
+      'Automated shopping list creation',
+      'Direct online grocery shopping links',
+      'Meal planner',
+      'Ingredient photo recognition'
+    ],
+    tokenLimit: 50000,
+    tokenReimburseFrequency: 'monthly'
+  },
+  {
+    id: 'preset_nutrition_pro',
+    name: 'Nutrition Pro',
+    slug: 'nutrition-pro',
+    isFree: false,
+    isDefault: false,
+    monthlyPriceDollars: 8.99,
+    annualPriceDollars: 59.99,
+    monthlyBadge: 'Billed Immediately',
+    annualBadge: 'Save 44%',
+    trialBadge: '7-Day Free Trial',
+    descriptionMonthly: 'Full premium access, billed monthly',
+    descriptionAnnual: 'Best value - all premium features, billed annually',
+    buttonText: 'Choose Plan',
+    aiRecipeLimit: -1,
+    recipeLibraryLimit: -1,
+    socialScrapeLimit: -1,
+    canViewMacros: true,
+    allowedAiModels: 'gemini-3.6-flash,gpt-4o',
+    featuresText: 'Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)',
+    features: [
+      'Unlimited AI-powered recipe generation',
+      'Unlimited recipe library',
+      'Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)'
+    ],
+    tokenLimit: 1000000,
+    tokenReimburseFrequency: 'monthly'
+  }
+];
 
 export async function GET() {
-  const configs = readServerConfigs();
+  let plans = readJsonFile('subscription_plans.json', [] as any[]);
+  if (!Array.isArray(plans) || plans.length === 0) {
+    const adminSettings = readJsonFile('admin_settings.json', {} as any);
+    if (Array.isArray(adminSettings.subscriptionPlans) && adminSettings.subscriptionPlans.length > 0) {
+      plans = adminSettings.subscriptionPlans;
+    } else {
+      plans = DEFAULT_PLANS;
+    }
+  }
+
   return NextResponse.json({
     success: true,
-    configs,
-    plans: configs
+    packages: plans,
+    plans: plans,
+    configs: plans
   }, {
     headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0'
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
     }
   });
 }
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json();
-    const planId = body.id || 'plan_' + Date.now();
-    const slug = (body.slug || body.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || planId).trim();
-    const isTaster = planId === 'preset_taster' || slug === 'taster';
+    const body = await req.json();
+    let currentPlans = readJsonFile('subscription_plans.json', [] as any[]);
+    if (!Array.isArray(currentPlans) || currentPlans.length === 0) {
+      currentPlans = [...DEFAULT_PLANS];
+    }
 
-    const newConfig = {
+    const planId = body.id || 'plan_' + Date.now();
+    const planSlug = body.slug || body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+    const updatedPlan = {
       ...body,
       id: planId,
-      slug,
-      isDefault: isTaster,
+      slug: planSlug,
+      isDefault: planSlug === 'taster' || planId === 'preset_taster',
+      updatedAt: new Date().toISOString()
     };
 
-    let configs = readServerConfigs();
-    const existingIndex = configs.findIndex((c: any) => c.id === planId || c.slug === slug);
-    if (existingIndex >= 0) {
-      configs[existingIndex] = newConfig;
+    const existingIdx = currentPlans.findIndex((p: any) => p.id === planId || p.slug === planSlug);
+    if (existingIdx >= 0) {
+      currentPlans[existingIdx] = updatedPlan;
     } else {
-      configs.push(newConfig);
+      currentPlans.push(updatedPlan);
     }
 
-    configs = configs.map((p: any) => ({
-      ...p,
-      isDefault: p.id === 'preset_taster' || p.slug === 'taster'
-    }));
+    // Persist across dual JSON stores
+    writeJsonFile('subscription_plans.json', currentPlans);
 
-    writeServerConfigs(configs);
-    return NextResponse.json({ success: true, configs, plan: newConfig });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Error saving plan' }, { status: 500 });
-  }
-}
-
-export async function DELETE(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    const slug = searchParams.get('slug');
-    let body: any = {};
-    try {
-      body = await request.json();
-    } catch (_) {}
-
-    const targetId = (id || body.id || '').trim();
-    const targetSlug = (slug || body.slug || '').trim();
-    const identifier = targetId || targetSlug;
-
-    if (!identifier) {
-      return NextResponse.json({ success: false, error: 'Plan identifier is required' }, { status: 400 });
-    }
-
-    if (identifier === 'taster' || identifier === 'preset_taster' || targetSlug === 'taster' || targetId === 'preset_taster') {
-      return NextResponse.json({ success: false, error: 'The default Taster plan cannot be deleted' }, { status: 403 });
-    }
-
-    let configs = readServerConfigs();
-    const beforeCount = configs.length;
-
-    configs = configs.filter((c: any) => {
-      if (!c) return false;
-      const matchId = targetId && (c.id === targetId || c.slug === targetId);
-      const matchSlug = targetSlug && (c.slug === targetSlug || c.id === targetSlug);
-      return !(matchId || matchSlug);
-    });
-
-    configs = configs.map((p: any) => ({
-      ...p,
-      isDefault: p.id === 'preset_taster' || p.slug === 'taster'
-    }));
-
-    writeServerConfigs(configs);
+    const adminSettings = readJsonFile('admin_settings.json', {} as any);
+    adminSettings.subscriptionPlans = currentPlans;
+    writeJsonFile('admin_settings.json', adminSettings);
 
     return NextResponse.json({
       success: true,
-      message: 'Plan deleted successfully',
-      configs,
-      deletedCount: beforeCount - configs.length
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
-      }
+      plan: updatedPlan,
+      packages: currentPlans
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Error deleting plan' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message || 'Failed to save plan' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let slug = searchParams.get('slug');
+
+    if (!id && !slug) {
+      try {
+        const body = await req.json();
+        id = body.id;
+        slug = body.slug;
+      } catch (_) {}
+    }
+
+    if (slug === 'taster' || id === 'preset_taster') {
+      return NextResponse.json({ success: false, error: 'Taster plan cannot be deleted' }, { status: 400 });
+    }
+
+    let currentPlans = readJsonFile('subscription_plans.json', [] as any[]);
+    const updated = currentPlans.filter((p: any) => {
+      const matchId = id && (p.id === id || p.slug === id);
+      const matchSlug = slug && (p.slug === slug || p.id === slug);
+      return !(matchId || matchSlug);
+    });
+
+    writeJsonFile('subscription_plans.json', updated);
+
+    const adminSettings = readJsonFile('admin_settings.json', {} as any);
+    adminSettings.subscriptionPlans = updated;
+    writeJsonFile('admin_settings.json', adminSettings);
+
+    return NextResponse.json({ success: true, packages: updated });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Failed to delete plan' }, { status: 500 });
   }
 }
 
@@ -34335,130 +34444,171 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/users/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-function getUsersFilePath() {
-  const rootDir = process.cwd();
-  const dir = path.join(rootDir, 'data');
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, 'users.json');
+function getDataPaths(filename: string): string[] {
+  const cwd = process.cwd();
+  const paths: string[] = [];
+  
+  if (cwd.endsWith('apps/web') || cwd.endsWith('apps/web/')) {
+    const root = path.resolve(cwd, '../..');
+    paths.push(path.join(cwd, 'data', filename));
+    paths.push(path.join(root, 'data', filename));
+    paths.push(path.join(root, 'apps/web/data', filename));
+  } else {
+    paths.push(path.join(cwd, 'apps/web/data', filename));
+    paths.push(path.join(cwd, 'data', filename));
+  }
+  return Array.from(new Set(paths));
 }
 
-const DEFAULT_USERS = [
-  {
-    id: 'usr_admin_1',
-    name: 'Administrator',
-    email: 'admin@foodieprep.com',
-    role: 'admin',
-    subscriptionPlan: 'nutrition-pro-annual',
-    subscriptionTier: 'nutrition-pro-annual',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'usr_admin_2',
-    name: 'System Admin',
-    email: 'admin@zecratary.com',
-    role: 'admin',
-    subscriptionPlan: 'nutrition-pro-annual',
-    subscriptionTier: 'nutrition-pro-annual',
-    createdAt: new Date().toISOString()
+function readJsonFile<T>(filename: string, fallback: T): T {
+  const paths = getDataPaths(filename);
+  for (const p of paths) {
+    if (fs.existsSync(p)) {
+      try {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed) return parsed as T;
+      } catch (_) {}
+    }
   }
-];
+  return fallback;
+}
 
-function readUsers(): any[] {
-  const filePath = getUsersFilePath();
-  if (fs.existsSync(filePath)) {
+function writeJsonFile<T>(filename: string, data: T): void {
+  const paths = getDataPaths(filename);
+  for (const p of paths) {
     try {
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      if (raw.trim()) return JSON.parse(raw);
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
     } catch (_) {}
   }
-  return [...DEFAULT_USERS];
 }
 
-function writeUsers(users: any[]) {
-  const filePath = getUsersFilePath();
-  fs.writeFileSync(filePath, JSON.stringify(users, null, 2), 'utf-8');
-}
+const PRIMARY_ADMIN = {
+  id: 'usr_admin_1',
+  name: 'System Administrator',
+  email: 'admin@zecratary.com',
+  role: 'admin',
+  subscriptionPlan: 'nutrition-pro-annual',
+  createdAt: '2026-01-01T00:00:00.000Z'
+};
 
 export async function GET() {
-  try {
-    const users = readUsers();
-    return new NextResponse(JSON.stringify({ success: true, users }), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+  let users = readJsonFile('users.json', [] as any[]);
+  if (!Array.isArray(users)) users = [];
+
+  // Self-Healing: Guarantee at least one administrator user exists
+  const hasAdmin = users.some((u: any) => 
+    u.id === 'usr_admin_1' || 
+    String(u.email || '').toLowerCase() === 'admin@zecratary.com' ||
+    String(u.role || '').toLowerCase() === 'admin'
+  );
+
+  if (!hasAdmin) {
+    users.unshift(PRIMARY_ADMIN);
+    writeJsonFile('users.json', users);
+  } else {
+    // Ensure primary admin role is locked to admin
+    users = users.map((u: any) => {
+      if (u.id === 'usr_admin_1' || String(u.email || '').toLowerCase() === 'admin@zecratary.com') {
+        return { ...u, role: 'admin' };
       }
+      return u;
     });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
+
+  return NextResponse.json({
+    success: true,
+    users
+  }, {
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+    }
+  });
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const users = readUsers();
-    const incomingList = Array.isArray(body) ? body : [body];
+    let currentUsers = readJsonFile('users.json', [] as any[]);
+    if (!Array.isArray(currentUsers)) currentUsers = [];
 
-    for (const incoming of incomingList) {
-      if (!incoming || !incoming.email) continue;
-      const cleanEmail = incoming.email.trim().toLowerCase();
-      const existingIdx = users.findIndex((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
+    const cleanEmail = (body.email || '').trim().toLowerCase();
+    const userId = body.id || 'usr_' + Date.now().toString(36);
 
-      const record = {
-        id: incoming.id || `usr_${Date.now().toString(36)}`,
-        name: incoming.name || cleanEmail.split('@')[0],
-        email: cleanEmail,
-        password: incoming.password || 'password123',
-        role: incoming.role || 'user',
-        subscriptionPlan: incoming.subscriptionPlan || incoming.subscriptionTier || 'taster',
-        subscriptionTier: incoming.subscriptionTier || incoming.subscriptionPlan || 'taster',
-        createdAt: incoming.createdAt || new Date().toISOString(),
-        ...incoming
-      };
+    const userPayload = {
+      ...body,
+      id: userId,
+      email: cleanEmail,
+      createdAt: body.createdAt || new Date().toISOString()
+    };
 
-      if (existingIdx !== -1) {
-        users[existingIdx] = { ...users[existingIdx], ...record };
-      } else {
-        users.unshift(record);
-      }
+    const existingIdx = currentUsers.findIndex((u: any) => 
+      (u.id && u.id === userId) || (u.email && u.email.toLowerCase() === cleanEmail)
+    );
+
+    if (existingIdx >= 0) {
+      currentUsers[existingIdx] = { ...currentUsers[existingIdx], ...userPayload };
+    } else {
+      currentUsers.unshift(userPayload);
     }
 
-    writeUsers(users);
-    return NextResponse.json({ success: true, users });
+    // Guarantee primary admin remains intact
+    if (!currentUsers.some((u: any) => u.id === 'usr_admin_1' || u.email?.toLowerCase() === 'admin@zecratary.com')) {
+      currentUsers.unshift(PRIMARY_ADMIN);
+    }
+
+    writeJsonFile('users.json', currentUsers);
+
+    return NextResponse.json({
+      success: true,
+      user: userPayload,
+      users: currentUsers
+    });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message || 'Failed to persist user' }, { status: 500 });
   }
 }
 
-export async function DELETE(req: Request) {
+export async function DELETE(req: NextRequest) {
   try {
-    const { id, email } = await req.json();
-    let users = readUsers();
-    const cleanEmail = (email || '').trim().toLowerCase();
-    const cleanId = (id || '').trim().toLowerCase();
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let email = searchParams.get('email');
 
-    if (cleanId === 'usr_admin_1') {
-      return NextResponse.json({ success: false, error: 'Cannot delete primary admin' }, { status: 403 });
+    if (!id && !email) {
+      try {
+        const body = await req.json();
+        id = body.id;
+        email = body.email;
+      } catch (_) {}
     }
 
-    users = users.filter((u: any) => {
-      if (cleanId && u.id && u.id.toLowerCase() === cleanId) return false;
-      if (cleanEmail && u.email && u.email.toLowerCase() === cleanEmail) return false;
-      return true;
+    if (id === 'usr_admin_1' || email?.toLowerCase() === 'admin@zecratary.com') {
+      return NextResponse.json({ success: false, error: 'Primary administrator cannot be deleted' }, { status: 400 });
+    }
+
+    let currentUsers = readJsonFile('users.json', [] as any[]);
+    const updated = currentUsers.filter((u: any) => {
+      const matchId = id && u.id === id;
+      const matchEmail = email && u.email && u.email.toLowerCase() === email.toLowerCase().trim();
+      return !(matchId || matchEmail);
     });
 
-    writeUsers(users);
-    return NextResponse.json({ success: true, deleted: { id, email } });
+    writeJsonFile('users.json', updated);
+
+    return NextResponse.json({ success: true, users: updated });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message || 'Failed to delete user' }, { status: 500 });
   }
 }
 
@@ -41650,65 +41800,43 @@ export async function saveThemeColors(colors: any): Promise<boolean> {
 
 ## File: `apps/web/src/lib/recipe-types.ts`
 ```typescript
-'use client';
-import { useState, useEffect } from 'react';
+// Server-backed Recipe Types Store
+// Zero localStorage writes for recipe type management
 
-export const DEFAULT_RECIPE_TYPES = [
-  "Main Dish",
-  "Breakfast",
-  "Lunch",
-  "Dinner",
-  "Appetizer",
-  "Side Dish",
-  "Salad",
-  "Dessert",
-  "Snacks",
-  "Beverages"
+import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
+
+export const DEFAULT_RECIPE_TYPES: string[] = [
+  'Breakfast',
+  'Lunch',
+  'Dinner',
+  'Snack',
+  'Dessert',
+  'Beverage',
+  'Appetizer',
+  'Salad',
+  'Soup',
+  'Side Dish',
+  'Baking'
 ];
 
-const STORAGE_KEY = 'zecratary_recipe_types';
-const EVENT_KEY = 'zecratary_recipe_types_changed';
+let memoryRecipeTypes: string[] = [...DEFAULT_RECIPE_TYPES];
 
-export const getStoredRecipeTypes = (): string[] => {
-  if (typeof window === 'undefined') return DEFAULT_RECIPE_TYPES;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    console.error('Failed to read recipe types from storage:', e);
+export function getStoredRecipeTypes(): string[] {
+  return [...memoryRecipeTypes];
+}
+
+export function setMemoryRecipeTypes(types: string[]): void {
+  if (Array.isArray(types) && types.length > 0) {
+    memoryRecipeTypes = [...types];
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_RECIPE_TYPES));
-  return DEFAULT_RECIPE_TYPES;
-};
+}
 
-export const saveRecipeTypes = (types: string[]) => {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(types));
-  window.dispatchEvent(new Event(EVENT_KEY));
-};
-
-export function useRecipeTypes() {
-  const [recipeTypes, setRecipeTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
-
-  useEffect(() => {
-    setRecipeTypes(getStoredRecipeTypes());
-
-    const handleSync = () => {
-      setRecipeTypes(getStoredRecipeTypes());
-    };
-
-    window.addEventListener(EVENT_KEY, handleSync);
-    window.addEventListener('storage', handleSync);
-    return () => {
-      window.removeEventListener(EVENT_KEY, handleSync);
-      window.removeEventListener('storage', handleSync);
-    };
-  }, []);
-
-  return recipeTypes;
+export async function saveRecipeTypes(types: string[]): Promise<boolean> {
+  memoryRecipeTypes = [...types];
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_changed', { detail: types }));
+  }
+  return await persistServerAdminSettings({ recipeTypes: types });
 }
 
 ```
@@ -42234,6 +42362,15 @@ export function purgeLegacyBrowserAdminStorage(): void {
   if (typeof window === 'undefined') return;
   const legacyKeys = [
     'zecratary_admin_settings',
+    'socialLogin',
+    'zecratary_social_login',
+    'social_login_config',
+    'zecratary_recipetypes',
+    'recipe_types',
+    'zecratary_recipe_types',
+    'zecratary_default_plan',
+    'zecratary_default_plan_slug',
+    'zecratary_deleted_plan_slugs',
     'payment_transactions',
     'payment_settings',
     'zecratary_currency',
