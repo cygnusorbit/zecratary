@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.1.9",
+  "version": "7.2.1",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.1.9",
+  "version": "7.2.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -33739,112 +33739,189 @@ export async function GET(
 ## File: `apps/web/src/app/api/admin/settings/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function getStorePaths(): string[] {
-  const cwd = process.cwd();
-  return [
-    path.join(cwd, 'apps/web/data/admin_settings.json'),
-    path.join(cwd, 'data/admin_settings.json')
-  ];
-}
-
-function readServerSettings(): Record<string, any> {
-  const filePaths = getStorePaths();
-  for (const fp of filePaths) {
-    if (fs.existsSync(fp)) {
-      try {
-        const raw = fs.readFileSync(fp, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') return parsed;
-      } catch (err) {
-        console.error('[API admin/settings] Read error:', fp, err);
-      }
-    }
-  }
-  return {};
-}
-
-function writeServerSettings(data: Record<string, any>): boolean {
-  const filePaths = getStorePaths();
-  let wrote = false;
-  const payload = {
-    ...data,
-    updatedAt: new Date().toISOString()
-  };
-  for (const fp of filePaths) {
-    try {
-      const dir = path.dirname(fp);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(fp, JSON.stringify(payload, null, 2), 'utf-8');
-      wrote = true;
-    } catch (err) {
-      console.error('[API admin/settings] Write error:', fp, err);
-    }
-  }
-  return wrote;
-}
-
 export async function GET() {
   try {
-    const settings = readServerSettings();
+    const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    let settings: any = {};
+
+    if (rows.length > 0) {
+      const r = rows[0];
+      settings = {
+        id: r.id,
+        siteName: r.site_name || 'Zecratary',
+        titlebarEmoji: r.titlebar_emoji || '🍳',
+        titlebarImage: r.titlebar_image || '',
+        faviconEmoji: r.favicon_emoji || '🍳',
+        faviconImage: r.favicon_image || '',
+        currency: r.currency || 'USD',
+        aiProvider: r.ai_provider || 'gemini',
+        aiModel: r.ai_model || 'gemini-3.5-flash-lite',
+        themeColors: r.theme_colors || {},
+        paymentSettings: r.payment_settings || {},
+        socialLogin: r.social_login || {},
+        chefAiSettings: r.chef_ai_settings || {},
+        recipeTypes: r.recipe_types || [],
+        ingredientCategories: r.ingredient_categories || [],
+        supportedLanguages: r.supported_languages || [],
+        updatedAt: r.updated_at
+      };
+    } else {
+      await query(`
+        INSERT INTO admin_settings (id, site_name, updated_at)
+        VALUES ('primary_settings', 'Zecratary', NOW())
+        ON CONFLICT (id) DO NOTHING;
+      `);
+      settings = {
+        siteName: 'Zecratary',
+        titlebarEmoji: '🍳',
+        titlebarImage: '',
+        faviconEmoji: '🍳',
+        faviconImage: '',
+        currency: 'USD',
+        aiProvider: 'gemini',
+        aiModel: 'gemini-3.5-flash-lite',
+        themeColors: {},
+        paymentSettings: {},
+        socialLogin: {},
+        chefAiSettings: {},
+        recipeTypes: [],
+        ingredientCategories: [],
+        supportedLanguages: []
+      };
+    }
+
+    const plans = await query(`
+      SELECT 
+        id, name, slug, is_free AS "isFree", is_default AS "isDefault",
+        monthly_price_dollars AS "monthlyPriceDollars", annual_price_dollars AS "annualPriceDollars",
+        monthly_badge AS "monthlyBadge", annual_badge AS "annualBadge", trial_badge AS "trialBadge",
+        description_monthly AS "descriptionMonthly", description_annual AS "descriptionAnnual",
+        button_text AS "buttonText", ai_recipe_limit AS "aiRecipeLimit",
+        recipe_library_limit AS "recipeLibraryLimit", social_scrape_limit AS "socialScrapeLimit",
+        can_view_macros AS "canViewMacros", allowed_ai_models AS "allowedAiModels",
+        features, token_limit AS "tokenLimit", token_reimburse_frequency AS "tokenReimburseFrequency"
+      FROM subscription_plans
+      ORDER BY monthly_price_dollars ASC
+    `);
+
+    settings.subscriptionPlans = plans;
+
     return NextResponse.json(
       { success: true, settings },
-      {
-        headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
-        }
-      }
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Failed to read settings' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const current = readServerSettings();
-    const merged = {
-      ...current,
-      ...body,
-      themeColors: {
-        ...(current.themeColors || {}),
-        ...(body.themeColors || {})
-      },
-      socialLogin: {
-        ...(current.socialLogin || {}),
-        ...(body.socialLogin || {})
-      },
-      subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || [],
-      recipeTypes: body.recipeTypes || current.recipeTypes || [],
-      supportedLanguages: body.supportedLanguages || current.supportedLanguages || [],
-      ingredientCategories: body.ingredientCategories || current.ingredientCategories || [],
-      chefAiSettings: {
-        ...(current.chefAiSettings || {}),
-        ...(body.chefAiSettings || {})
-      },
-      chefQuestionnaire: body.chefQuestionnaire || current.chefQuestionnaire || []
-    };
 
-    const success = writeServerSettings(merged);
-    if (!success) {
-      return NextResponse.json({ error: 'Failed to write settings to storage' }, { status: 500 });
-    }
+    if (Array.isArray(body.subscriptionPlans)) {
+      for (const p of body.subscriptionPlans) {
+        if (!p) continue;
+        const slug = (p.slug || p.id || p.name || 'plan').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
+        const targetId = p.id || slug;
 
-    return NextResponse.json(
-      { success: true, settings: merged },
-      {
-        headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+        const exists = await query('SELECT id FROM subscription_plans WHERE slug = $1', [slug]);
+        if (exists.length > 0) {
+          await query(`
+            UPDATE subscription_plans SET
+              name = $1, is_free = $2, is_default = $3, monthly_price_dollars = $4, annual_price_dollars = $5,
+              monthly_badge = $6, annual_badge = $7, trial_badge = $8, description_monthly = $9, description_annual = $10,
+              button_text = $11, ai_recipe_limit = $12, recipe_library_limit = $13, social_scrape_limit = $14,
+              can_view_macros = $15, allowed_ai_models = $16, features = $17::jsonb, token_limit = $18,
+              token_reimburse_frequency = $19, updated_at = NOW()
+            WHERE slug = $20
+          `, [
+            p.name, Boolean(p.isFree), Boolean(p.isDefault), p.monthlyPriceDollars || p.price || 0,
+            p.annualPriceDollars || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
+            p.descriptionMonthly || p.description || '', p.descriptionAnnual || '', p.buttonText || 'Choose Plan',
+            p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5, p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
+            p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5, Boolean(p.canViewMacros),
+            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.5-flash-lite'),
+            JSON.stringify(p.features || []), p.tokenLimit || 50000, p.tokenReimburseFrequency || 'monthly', slug
+          ]);
+        } else {
+          await query(`
+            INSERT INTO subscription_plans (
+              id, name, slug, is_free, is_default, monthly_price_dollars, annual_price_dollars,
+              monthly_badge, annual_badge, trial_badge, description_monthly, description_annual,
+              button_text, ai_recipe_limit, recipe_library_limit, social_scrape_limit,
+              can_view_macros, allowed_ai_models, features, token_limit, token_reimburse_frequency, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, NOW())
+          `, [
+            targetId, p.name, slug, Boolean(p.isFree), Boolean(p.isDefault), p.monthlyPriceDollars || p.price || 0,
+            p.annualPriceDollars || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
+            p.descriptionMonthly || p.description || '', p.descriptionAnnual || '', p.buttonText || 'Choose Plan',
+            p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5, p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
+            p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5, Boolean(p.canViewMacros),
+            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.5-flash-lite'),
+            JSON.stringify(p.features || []), p.tokenLimit || 50000, p.tokenReimburseFrequency || 'monthly'
+          ]);
         }
       }
-    );
+    }
+
+    const currentRows = await query('SELECT * FROM admin_settings WHERE id = $1', ['primary_settings']);
+    const current = currentRows[0] || {};
+
+    const siteName = body.siteName !== undefined ? body.siteName : (current.site_name || 'Zecratary');
+    const titlebarEmoji = body.titlebarEmoji !== undefined ? body.titlebarEmoji : (current.titlebar_emoji || '🍳');
+    const titlebarImage = body.titlebarImage !== undefined ? body.titlebarImage : (current.titlebar_image || '');
+    const faviconEmoji = body.faviconEmoji !== undefined ? body.faviconEmoji : (current.favicon_emoji || '🍳');
+    const faviconImage = body.faviconImage !== undefined ? body.faviconImage : (current.favicon_image || '');
+    const currency = body.currency !== undefined ? body.currency : (current.currency || 'USD');
+    const aiProvider = body.aiProvider !== undefined ? body.aiProvider : (current.ai_provider || 'gemini');
+    const aiModel = body.aiModel !== undefined ? body.aiModel : (current.ai_model || 'gemini-3.5-flash-lite');
+
+    const themeColors = body.themeColors !== undefined ? body.themeColors : (current.theme_colors || {});
+    const paymentSettings = body.paymentSettings !== undefined ? body.paymentSettings : (current.payment_settings || {});
+    const socialLogin = body.socialLogin !== undefined ? body.socialLogin : (current.social_login || {});
+    const chefAiSettings = body.chefAiSettings !== undefined ? body.chefAiSettings : (current.chef_ai_settings || {});
+    const recipeTypes = body.recipeTypes !== undefined ? body.recipeTypes : (current.recipe_types || []);
+    const ingredientCategories = body.ingredientCategories !== undefined ? body.ingredientCategories : (current.ingredient_categories || []);
+    const supportedLanguages = body.supportedLanguages !== undefined ? body.supportedLanguages : (current.supported_languages || []);
+
+    await query(`
+      INSERT INTO admin_settings (
+        id, site_name, titlebar_emoji, titlebar_image, favicon_emoji, favicon_image,
+        currency, ai_provider, ai_model, theme_colors, payment_settings, social_login,
+        chef_ai_settings, recipe_types, ingredient_categories, supported_languages, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        site_name = EXCLUDED.site_name,
+        titlebar_emoji = EXCLUDED.titlebar_emoji,
+        titlebar_image = EXCLUDED.titlebar_image,
+        favicon_emoji = EXCLUDED.favicon_emoji,
+        favicon_image = EXCLUDED.favicon_image,
+        currency = EXCLUDED.currency,
+        ai_provider = EXCLUDED.ai_provider,
+        ai_model = EXCLUDED.ai_model,
+        theme_colors = EXCLUDED.theme_colors,
+        payment_settings = EXCLUDED.payment_settings,
+        social_login = EXCLUDED.social_login,
+        chef_ai_settings = EXCLUDED.chef_ai_settings,
+        recipe_types = EXCLUDED.recipe_types,
+        ingredient_categories = EXCLUDED.ingredient_categories,
+        supported_languages = EXCLUDED.supported_languages,
+        updated_at = NOW();
+    `, [
+      'primary_settings', siteName, titlebarEmoji, titlebarImage, faviconEmoji, faviconImage,
+      currency, aiProvider, aiModel, JSON.stringify(themeColors), JSON.stringify(paymentSettings),
+      JSON.stringify(socialLogin), JSON.stringify(chefAiSettings), JSON.stringify(recipeTypes),
+      JSON.stringify(ingredientCategories), JSON.stringify(supportedLanguages)
+    ]);
+
+    return NextResponse.json({ success: true, message: 'Settings saved directly to PostgreSQL.' });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Failed to persist settings' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -33853,207 +33930,141 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/plans/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function getDataPaths(filename: string): string[] {
-  return [
-    path.join(process.cwd(), 'apps/web/data', filename),
-    path.join(process.cwd(), 'data', filename)
-  ];
-}
-
-function readJsonFile<T>(filename: string, fallback: T): T {
-  const paths = getDataPaths(filename);
-  for (const p of paths) {
-    if (fs.existsSync(p)) {
-      try {
-        const raw = fs.readFileSync(p, 'utf-8');
-        return JSON.parse(raw) as T;
-      } catch (_) {}
-    }
-  }
-  return fallback;
-}
-
-function writeJsonFile<T>(filename: string, data: T): void {
-  const paths = getDataPaths(filename);
-  for (const p of paths) {
-    try {
-      const dir = path.dirname(p);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (_) {}
-  }
-}
-
-const DEFAULT_PLANS = [
-  {
-    id: 'preset_taster',
-    name: 'Taster',
-    slug: 'taster',
-    isFree: true,
-    isDefault: true,
-    monthlyPriceDollars: 0,
-    annualPriceDollars: 0,
-    monthlyBadge: '',
-    annualBadge: '',
-    trialBadge: '',
-    descriptionMonthly: 'Free tier with limited features',
-    descriptionAnnual: 'Free tier with limited features',
-    buttonText: 'Manage',
-    aiRecipeLimit: 5,
-    recipeLibraryLimit: 25,
-    socialScrapeLimit: 5,
-    canViewMacros: false,
-    allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
-    featuresText: 'Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition',
-    features: [
-      'Create up to 5 AI-powered recipes per month',
-      'Personal recipe library (25 total recipes)',
-      'Smart ingredient repurposing',
-      'Automated shopping list creation',
-      'Direct online grocery shopping links',
-      'Meal planner',
-      'Ingredient photo recognition'
-    ],
-    tokenLimit: 50000,
-    tokenReimburseFrequency: 'monthly'
-  },
-  {
-    id: 'preset_nutrition_pro',
-    name: 'Nutrition Pro',
-    slug: 'nutrition-pro',
-    isFree: false,
-    isDefault: false,
-    monthlyPriceDollars: 8.99,
-    annualPriceDollars: 59.99,
-    monthlyBadge: 'Billed Immediately',
-    annualBadge: 'Save 44%',
-    trialBadge: '7-Day Free Trial',
-    descriptionMonthly: 'Full premium access, billed monthly',
-    descriptionAnnual: 'Best value - all premium features, billed annually',
-    buttonText: 'Choose Plan',
-    aiRecipeLimit: -1,
-    recipeLibraryLimit: -1,
-    socialScrapeLimit: -1,
-    canViewMacros: true,
-    allowedAiModels: 'gemini-3.6-flash,gpt-4o',
-    featuresText: 'Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)',
-    features: [
-      'Unlimited AI-powered recipe generation',
-      'Unlimited recipe library',
-      'Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)'
-    ],
-    tokenLimit: 1000000,
-    tokenReimburseFrequency: 'monthly'
-  }
-];
-
 export async function GET() {
-  let plans = readJsonFile('subscription_plans.json', [] as any[]);
-  if (!Array.isArray(plans) || plans.length === 0) {
-    const adminSettings = readJsonFile('admin_settings.json', {} as any);
-    if (Array.isArray(adminSettings.subscriptionPlans) && adminSettings.subscriptionPlans.length > 0) {
-      plans = adminSettings.subscriptionPlans;
-    } else {
-      plans = DEFAULT_PLANS;
-    }
-  }
+  try {
+    const rows = await query(`
+      SELECT 
+        id,
+        name,
+        slug,
+        is_free AS "isFree",
+        is_default AS "isDefault",
+        monthly_price_dollars AS "monthlyPriceDollars",
+        annual_price_dollars AS "annualPriceDollars",
+        monthly_badge AS "monthlyBadge",
+        annual_badge AS "annualBadge",
+        trial_badge AS "trialBadge",
+        description_monthly AS "descriptionMonthly",
+        description_annual AS "descriptionAnnual",
+        button_text AS "buttonText",
+        ai_recipe_limit AS "aiRecipeLimit",
+        recipe_library_limit AS "recipeLibraryLimit",
+        social_scrape_limit AS "socialScrapeLimit",
+        can_view_macros AS "canViewMacros",
+        allowed_ai_models AS "allowedAiModels",
+        features,
+        token_limit AS "tokenLimit",
+        token_reimburse_frequency AS "tokenReimburseFrequency",
+        updated_at AS "updatedAt"
+      FROM subscription_plans
+      ORDER BY monthly_price_dollars ASC
+    `);
 
-  return NextResponse.json({
-    success: true,
-    packages: plans,
-    plans: plans,
-    configs: plans
-  }, {
-    headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-    }
-  });
+    return NextResponse.json({ success: true, plans: rows }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    let currentPlans = readJsonFile('subscription_plans.json', [] as any[]);
-    if (!Array.isArray(currentPlans) || currentPlans.length === 0) {
-      currentPlans = [...DEFAULT_PLANS];
+    const plans = Array.isArray(body) ? body : (body.plans || [body]);
+
+    for (const p of plans) {
+      if (!p) continue;
+      const slug = (p.slug || p.id || p.name || 'plan').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
+      const targetId = p.id || slug;
+
+      const existing = await query('SELECT id FROM subscription_plans WHERE slug = $1', [slug]);
+
+      if (existing.length > 0) {
+        await query(`
+          UPDATE subscription_plans SET
+            name = $1,
+            is_free = $2,
+            is_default = $3,
+            monthly_price_dollars = $4,
+            annual_price_dollars = $5,
+            monthly_badge = $6,
+            annual_badge = $7,
+            trial_badge = $8,
+            description_monthly = $9,
+            description_annual = $10,
+            button_text = $11,
+            ai_recipe_limit = $12,
+            recipe_library_limit = $13,
+            social_scrape_limit = $14,
+            can_view_macros = $15,
+            allowed_ai_models = $16,
+            features = $17::jsonb,
+            token_limit = $18,
+            token_reimburse_frequency = $19,
+            updated_at = NOW()
+          WHERE slug = $20
+        `, [
+          p.name,
+          Boolean(p.isFree),
+          Boolean(p.isDefault),
+          p.monthlyPriceDollars || 0,
+          p.annualPriceDollars || 0,
+          p.monthlyBadge || '',
+          p.annualBadge || '',
+          p.trialBadge || '',
+          p.descriptionMonthly || '',
+          p.descriptionAnnual || '',
+          p.buttonText || 'Choose Plan',
+          p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5,
+          p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
+          p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5,
+          Boolean(p.canViewMacros),
+          Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.5-flash-lite'),
+          JSON.stringify(p.features || []),
+          p.tokenLimit || 50000,
+          p.tokenReimburseFrequency || 'monthly',
+          slug
+        ]);
+      } else {
+        await query(`
+          INSERT INTO subscription_plans (
+            id, name, slug, is_free, is_default, monthly_price_dollars, annual_price_dollars,
+            monthly_badge, annual_badge, trial_badge, description_monthly, description_annual,
+            button_text, ai_recipe_limit, recipe_library_limit, social_scrape_limit,
+            can_view_macros, allowed_ai_models, features, token_limit, token_reimburse_frequency, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, NOW())
+        `, [
+          targetId,
+          p.name,
+          slug,
+          Boolean(p.isFree),
+          Boolean(p.isDefault),
+          p.monthlyPriceDollars || 0,
+          p.annualPriceDollars || 0,
+          p.monthlyBadge || '',
+          p.annualBadge || '',
+          p.trialBadge || '',
+          p.descriptionMonthly || '',
+          p.descriptionAnnual || '',
+          p.buttonText || 'Choose Plan',
+          p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5,
+          p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
+          p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5,
+          Boolean(p.canViewMacros),
+          Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.5-flash-lite'),
+          JSON.stringify(p.features || []),
+          p.tokenLimit || 50000,
+          p.tokenReimburseFrequency || 'monthly'
+        ]);
+      }
     }
 
-    const planId = body.id || 'plan_' + Date.now();
-    const planSlug = body.slug || body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-
-    const updatedPlan = {
-      ...body,
-      id: planId,
-      slug: planSlug,
-      isDefault: planSlug === 'taster' || planId === 'preset_taster',
-      updatedAt: new Date().toISOString()
-    };
-
-    const existingIdx = currentPlans.findIndex((p: any) => p.id === planId || p.slug === planSlug);
-    if (existingIdx >= 0) {
-      currentPlans[existingIdx] = updatedPlan;
-    } else {
-      currentPlans.push(updatedPlan);
-    }
-
-    // Persist across dual JSON stores
-    writeJsonFile('subscription_plans.json', currentPlans);
-
-    const adminSettings = readJsonFile('admin_settings.json', {} as any);
-    adminSettings.subscriptionPlans = currentPlans;
-    writeJsonFile('admin_settings.json', adminSettings);
-
-    return NextResponse.json({
-      success: true,
-      plan: updatedPlan,
-      packages: currentPlans
-    });
+    return NextResponse.json({ success: true, message: 'Plans synchronized successfully in PostgreSQL.' });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Failed to save plan' }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
-    let slug = searchParams.get('slug');
-
-    if (!id && !slug) {
-      try {
-        const body = await req.json();
-        id = body.id;
-        slug = body.slug;
-      } catch (_) {}
-    }
-
-    if (slug === 'taster' || id === 'preset_taster') {
-      return NextResponse.json({ success: false, error: 'Taster plan cannot be deleted' }, { status: 400 });
-    }
-
-    let currentPlans = readJsonFile('subscription_plans.json', [] as any[]);
-    const updated = currentPlans.filter((p: any) => {
-      const matchId = id && (p.id === id || p.slug === id);
-      const matchSlug = slug && (p.slug === slug || p.id === slug);
-      return !(matchId || matchSlug);
-    });
-
-    writeJsonFile('subscription_plans.json', updated);
-
-    const adminSettings = readJsonFile('admin_settings.json', {} as any);
-    adminSettings.subscriptionPlans = updated;
-    writeJsonFile('admin_settings.json', adminSettings);
-
-    return NextResponse.json({ success: true, packages: updated });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Failed to delete plan' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -34062,262 +34073,100 @@ export async function DELETE(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/payment/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function getDataPaths(filename: string): string[] {
-  const cwd = process.cwd();
-  const paths: string[] = [];
-  if (cwd.endsWith('apps/web') || cwd.endsWith('apps/web/')) {
-    const root = path.resolve(cwd, '../..');
-    paths.push(path.join(cwd, 'data', filename));
-    paths.push(path.join(root, 'data', filename));
-    paths.push(path.join(root, 'apps/web/data', filename));
-  } else {
-    paths.push(path.join(cwd, 'apps/web/data', filename));
-    paths.push(path.join(cwd, 'data', filename));
-  }
-  return Array.from(new Set(paths));
-}
-
-function readJsonFile<T>(filename: string, fallback: T): T {
-  const paths = getDataPaths(filename);
-  for (const p of paths) {
-    if (fs.existsSync(p)) {
-      try {
-        const raw = fs.readFileSync(p, 'utf-8');
-        return JSON.parse(raw) as T;
-      } catch (_) {}
-    }
-  }
-  return fallback;
-}
-
-function writeJsonFile<T>(filename: string, data: T): void {
-  const paths = getDataPaths(filename);
-  for (const p of paths) {
-    try {
-      const dir = path.dirname(p);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (_) {}
-  }
-}
-
-let cachedPool: any = null;
-async function getDbClient() {
-  const connUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!connUrl) return null;
-  if (!cachedPool) {
-    try {
-      const { Pool } = await import('pg');
-      cachedPool = new Pool({
-        connectionString: connUrl,
-        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
-        connectionTimeoutMillis: 3000,
-        max: 5
-      });
-    } catch (_) {
-      return null;
-    }
-  }
-  return cachedPool;
-}
-
-async function ensurePlanExists(pool: any, slug: string, name: string, amount: number) {
-  if (!pool) return slug;
-  const cleanSlug = (slug || 'taster').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
-  const cleanName = name || cleanSlug;
-  try {
-    const check = await pool.query('SELECT id FROM subscription_plans WHERE slug = $1', [cleanSlug]);
-    if (check.rows.length === 0) {
-      await pool.query(`
-        INSERT INTO subscription_plans (id, name, slug, monthly_price_dollars, annual_price_dollars, is_free)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT DO NOTHING;
-      `, ['plan_' + cleanSlug + '_' + Date.now().toString(36), cleanName, cleanSlug, amount || 0, 0, false]);
-    }
-  } catch (err) {
-    console.warn('[DB Plan Auto-Seed Warning]:', err);
-  }
-  return cleanSlug;
-}
-
-const DEFAULT_SETTINGS = {
-  activeGateway: 'stripe',
-  currency: 'USD',
-  testMode: true,
-  stripeConnected: false,
-  stripe: { enabled: true, publishableKey: '', secretKey: '', webhookSecret: '' },
-  paypal: { enabled: false, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' }
-};
-
 export async function GET() {
-  const pool = await getDbClient();
-  if (pool) {
-    try {
-      const settingsRes = await pool.query("SELECT payment_settings, currency FROM admin_settings WHERE id = 'primary_settings'");
-      let settings = DEFAULT_SETTINGS;
-      if (settingsRes.rows.length > 0) {
-        settings = settingsRes.rows[0].payment_settings || DEFAULT_SETTINGS;
-        if (settingsRes.rows[0].currency) settings.currency = settingsRes.rows[0].currency;
-      }
-      const txRes = await pool.query(`
-        SELECT 
-          id, 
-          customer_name as "customerName", 
-          customer_email as "customerEmail", 
-          plan_name as "planName", 
-          plan_slug as "planSlug", 
-          amount, 
-          currency, 
-          gateway, 
-          status, 
-          failure_reason as "failureReason", 
-          test_mode as "testMode", 
-          expiry_date as "expiryDate", 
-          created_at as "createdAt" 
-        FROM payment_transactions 
-        ORDER BY created_at DESC
-      `);
-      return NextResponse.json({ success: true, settings, transactions: txRes.rows }, { headers: { 'Cache-Control': 'no-store' } });
-    } catch (_) {}
+  try {
+    const rows = await query(`
+      SELECT 
+        id,
+        customer_name AS "customerName",
+        customer_email AS "customerEmail",
+        plan_name AS "planName",
+        plan_slug AS "planSlug",
+        amount,
+        currency,
+        gateway,
+        status,
+        failure_reason AS "failureReason",
+        test_mode AS "testMode",
+        expiry_date AS "expiryDate",
+        created_at AS "createdAt"
+      FROM payment_transactions
+      ORDER BY created_at DESC
+    `);
+
+    return NextResponse.json({ success: true, transactions: rows }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
-
-  const adminSettings = readJsonFile('admin_settings.json', {} as any);
-  const settings = adminSettings.paymentSettings || DEFAULT_SETTINGS;
-  if (adminSettings.currency) settings.currency = adminSettings.currency;
-  const transactions = readJsonFile('payment_transactions.json', []);
-
-  return NextResponse.json({ success: true, settings, transactions }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const pool = await getDbClient();
+    const customerEmail = (body.customerEmail || body.email || '').toLowerCase().trim();
 
-    if (body.action === 'connect_stripe') {
-      if (pool) {
-        try {
-          await pool.query(`
-            INSERT INTO admin_settings (id, payment_settings, updated_at)
-            VALUES ('primary_settings', $1, NOW())
-            ON CONFLICT (id) DO UPDATE SET payment_settings = EXCLUDED.payment_settings, updated_at = NOW();
-          `, [JSON.stringify(body)]);
-        } catch (_) {}
-      }
-      return NextResponse.json({ success: true, message: 'Stripe Gateway enabled and verified.' });
+    if (!customerEmail) {
+      return NextResponse.json({ success: false, error: 'Customer email is required' }, { status: 400 });
     }
 
-    if (body.action === 'add_transaction' && body.transaction) {
-      const newTx = body.transaction;
-      const cleanEmail = (newTx.customerEmail || '').toLowerCase().trim();
-      const planSlug = await ensurePlanExists(pool, newTx.planSlug || newTx.planName, newTx.planName, newTx.amount);
-      const planName = newTx.planName || planSlug;
+    const customerName = body.customerName || body.name || 'Customer';
+    const planName = body.planName || 'Plan';
+    let planSlug = (body.planSlug || body.slug || planName).toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
+    const amount = parseFloat(body.amount) || 0;
+    const currency = body.currency || 'USD';
+    const gateway = body.gateway || 'stripe';
+    const status = body.status || 'succeeded';
+    const failureReason = body.failureReason || null;
+    const testMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
+    const expiryDate = body.expiryDate ? new Date(body.expiryDate) : null;
+    const txId = body.id || ('tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
 
-      if (pool) {
-        try {
-          await pool.query(`
-            INSERT INTO payment_transactions (
-              id, customer_name, customer_email, plan_name, plan_slug, amount, currency,
-              gateway, status, failure_reason, test_mode, expiry_date, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status;
-          `, [
-            newTx.id,
-            newTx.customerName || 'Customer',
-            cleanEmail,
-            planName,
-            planSlug,
-            newTx.amount || 0,
-            newTx.currency || 'USD',
-            newTx.gateway || 'stripe',
-            newTx.status || 'succeeded',
-            newTx.failureReason || null,
-            Boolean(newTx.testMode),
-            newTx.expiryDate || null,
-            newTx.createdAt || new Date().toISOString()
-          ]);
-        } catch (dbErr: any) {
-          console.error('[Payment API DB Error]:', dbErr);
+    if (planSlug) {
+      const planExists = await query('SELECT 1 FROM subscription_plans WHERE slug = $1', [planSlug]);
+      if (planExists.length === 0) {
+        let planId = 'plan_' + planSlug;
+        const idTaken = await query('SELECT 1 FROM subscription_plans WHERE id = $1', [planId]);
+        if (idTaken.length > 0) {
+          planId = `plan_${planSlug}_${Math.random().toString(36).substring(2, 6)}`;
         }
+        await query(`
+          INSERT INTO subscription_plans (id, name, slug, monthly_price_dollars, is_free, updated_at)
+          VALUES ($1, $2, $3, $4, FALSE, NOW())
+        `, [planId, planName, planSlug, amount]);
       }
-
-      const transactions = readJsonFile('payment_transactions.json', [] as any[]);
-      transactions.unshift({ ...newTx, planSlug });
-      writeJsonFile('payment_transactions.json', transactions);
-      return NextResponse.json({ success: true, transaction: { ...newTx, planSlug } });
     }
 
-    if (body.action === 'update_transaction' && body.transaction) {
-      const updatedTx = body.transaction;
-      const planSlug = await ensurePlanExists(pool, updatedTx.planSlug || updatedTx.planName, updatedTx.planName, updatedTx.amount);
-      const planName = updatedTx.planName || planSlug;
+    await query(`
+      INSERT INTO payment_transactions (
+        id, customer_name, customer_email, plan_name, plan_slug, amount, currency,
+        gateway, status, failure_reason, test_mode, expiry_date, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        failure_reason = EXCLUDED.failure_reason,
+        expiry_date = EXCLUDED.expiry_date
+    `, [
+      txId, customerName, customerEmail, planName, planSlug || null,
+      amount, currency, gateway, status, failureReason, testMode, expiryDate
+    ]);
 
-      if (pool) {
-        try {
-          await pool.query(`
-            UPDATE payment_transactions SET
-              customer_name = $2,
-              customer_email = $3,
-              plan_name = $4,
-              plan_slug = $5,
-              amount = $6,
-              currency = $7,
-              gateway = $8,
-              status = $9,
-              failure_reason = $10,
-              expiry_date = $11
-            WHERE id = $1;
-          `, [
-            updatedTx.id,
-            updatedTx.customerName || 'Customer',
-            (updatedTx.customerEmail || '').toLowerCase().trim(),
-            planName,
-            planSlug,
-            updatedTx.amount || 0,
-            updatedTx.currency || 'USD',
-            updatedTx.gateway || 'stripe',
-            updatedTx.status || 'succeeded',
-            updatedTx.failureReason || null,
-            updatedTx.expiryDate || null
-          ]);
-        } catch (dbErr: any) {
-          console.error('[Payment API DB Error]:', dbErr);
-        }
-      }
-
-      const transactions = readJsonFile('payment_transactions.json', [] as any[]);
-      const updatedTxs = transactions.map((t: any) => (t.id === updatedTx.id ? { ...updatedTx, planSlug } : t));
-      writeJsonFile('payment_transactions.json', updatedTxs);
-      return NextResponse.json({ success: true, transaction: { ...updatedTx, planSlug } });
+    if (status === 'succeeded' && planSlug) {
+      await query(`
+        UPDATE users SET
+          subscription_plan = $1,
+          plan_expiry_date = $2,
+          updated_at = NOW()
+        WHERE email = $3
+      `, [planSlug, expiryDate, customerEmail]);
     }
 
-    // Default: Update Gateway Settings
-    if (pool) {
-      try {
-        await pool.query(`
-          INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
-          VALUES ('primary_settings', $1, $2, NOW())
-          ON CONFLICT (id) DO UPDATE SET payment_settings = EXCLUDED.payment_settings, currency = EXCLUDED.currency, updated_at = NOW();
-        `, [JSON.stringify(body), body.currency || 'USD']);
-      } catch (_) {}
-    }
-
-    const adminSettings = readJsonFile('admin_settings.json', {} as any);
-    const mergedSettings = { ...(adminSettings.paymentSettings || DEFAULT_SETTINGS), ...body };
-    adminSettings.paymentSettings = mergedSettings;
-    if (body.currency) adminSettings.currency = body.currency;
-    writeJsonFile('admin_settings.json', adminSettings);
-
-    return NextResponse.json({ success: true, settings: mergedSettings });
+    return NextResponse.json({ success: true, message: 'Payment transaction saved to PostgreSQL.' });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Failed to process request' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -34330,20 +34179,10 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
     }
 
-    const pool = await getDbClient();
-    if (pool) {
-      try {
-        await pool.query("DELETE FROM payment_transactions WHERE id = $1", [id]);
-      } catch (_) {}
-    }
-
-    const transactions = readJsonFile('payment_transactions.json', [] as any[]);
-    const updated = transactions.filter((t: any) => t.id !== id);
-    writeJsonFile('payment_transactions.json', updated);
-
-    return NextResponse.json({ success: true, message: 'Transaction deleted' });
+    await query('DELETE FROM payment_transactions WHERE id = $1', [id]);
+    return NextResponse.json({ success: true, message: 'Transaction deleted from PostgreSQL.' });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Failed to delete transaction' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -34691,272 +34530,29 @@ export async function DELETE(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/users/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function getDataPaths(filename: string): string[] {
-  const cwd = process.cwd();
-  const paths: string[] = [];
-  
-  if (cwd.endsWith('apps/web') || cwd.endsWith('apps/web/')) {
-    const root = path.resolve(cwd, '../..');
-    paths.push(path.join(cwd, 'data', filename));
-    paths.push(path.join(root, 'data', filename));
-    paths.push(path.join(root, 'apps/web/data', filename));
-  } else {
-    paths.push(path.join(cwd, 'apps/web/data', filename));
-    paths.push(path.join(cwd, 'data', filename));
-  }
-  return Array.from(new Set(paths));
-}
-
-function readJsonFile<T>(filename: string, fallback: T): T {
-  const paths = getDataPaths(filename);
-  for (const p of paths) {
-    if (fs.existsSync(p)) {
-      try {
-        const raw = fs.readFileSync(p, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (parsed) return parsed as T;
-      } catch (_) {}
-    }
-  }
-  return fallback;
-}
-
-function writeJsonFile<T>(filename: string, data: T): void {
-  const paths = getDataPaths(filename);
-  for (const p of paths) {
-    try {
-      const dir = path.dirname(p);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (_) {}
-  }
-}
-
-const PRIMARY_ADMIN = {
-  id: 'usr_admin_1',
-  name: 'System Administrator',
-  email: 'admin@zecratary.com',
-  role: 'admin',
-  subscriptionPlan: 'nutrition-pro-annual',
-  createdAt: '2026-01-01T00:00:00.000Z'
-};
-
-export async function GET() {
-  let users = readJsonFile('users.json', [] as any[]);
-  if (!Array.isArray(users)) users = [];
-
-  // Self-Healing: Guarantee at least one administrator user exists
-  const hasAdmin = users.some((u: any) => 
-    u.id === 'usr_admin_1' || 
-    String(u.email || '').toLowerCase() === 'admin@zecratary.com' ||
-    String(u.role || '').toLowerCase() === 'admin'
-  );
-
-  if (!hasAdmin) {
-    users.unshift(PRIMARY_ADMIN);
-    writeJsonFile('users.json', users);
-  } else {
-    // Ensure primary admin role is locked to admin
-    users = users.map((u: any) => {
-      if (u.id === 'usr_admin_1' || String(u.email || '').toLowerCase() === 'admin@zecratary.com') {
-        return { ...u, role: 'admin' };
-      }
-      return u;
-    });
-  }
-
-  return NextResponse.json({
-    success: true,
-    users
-  }, {
-    headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-    }
-  });
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    let currentUsers = readJsonFile('users.json', [] as any[]);
-    if (!Array.isArray(currentUsers)) currentUsers = [];
-
-    const cleanEmail = (body.email || '').trim().toLowerCase();
-    const userId = body.id || 'usr_' + Date.now().toString(36);
-
-    const userPayload = {
-      ...body,
-      id: userId,
-      email: cleanEmail,
-      createdAt: body.createdAt || new Date().toISOString()
-    };
-
-    const existingIdx = currentUsers.findIndex((u: any) => 
-      (u.id && u.id === userId) || (u.email && u.email.toLowerCase() === cleanEmail)
-    );
-
-    if (existingIdx >= 0) {
-      currentUsers[existingIdx] = { ...currentUsers[existingIdx], ...userPayload };
-    } else {
-      currentUsers.unshift(userPayload);
-    }
-
-    // Guarantee primary admin remains intact
-    if (!currentUsers.some((u: any) => u.id === 'usr_admin_1' || u.email?.toLowerCase() === 'admin@zecratary.com')) {
-      currentUsers.unshift(PRIMARY_ADMIN);
-    }
-
-    writeJsonFile('users.json', currentUsers);
-
-    return NextResponse.json({
-      success: true,
-      user: userPayload,
-      users: currentUsers
-    });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Failed to persist user' }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
-    let email = searchParams.get('email');
-
-    if (!id && !email) {
-      try {
-        const body = await req.json();
-        id = body.id;
-        email = body.email;
-      } catch (_) {}
-    }
-
-    if (id === 'usr_admin_1' || email?.toLowerCase() === 'admin@zecratary.com') {
-      return NextResponse.json({ success: false, error: 'Primary administrator cannot be deleted' }, { status: 400 });
-    }
-
-    let currentUsers = readJsonFile('users.json', [] as any[]);
-    const updated = currentUsers.filter((u: any) => {
-      const matchId = id && u.id === id;
-      const matchEmail = email && u.email && u.email.toLowerCase() === email.toLowerCase().trim();
-      return !(matchId || matchEmail);
-    });
-
-    writeJsonFile('users.json', updated);
-
-    return NextResponse.json({ success: true, users: updated });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Failed to delete user' }, { status: 500 });
-  }
-}
-
-```
-
-## File: `apps/web/src/app/api/admin/keys/route.ts`
-```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
-
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-function getTargetEnvFiles(): string[] {
-  const cwd = process.cwd();
-  const searchDirs = [
-    cwd,
-    path.join(cwd, 'apps', 'web'),
-    path.resolve(cwd, '..'),
-    path.resolve(cwd, '..', '..')
-  ];
-
-  const envFilenames = ['.env', '.env.local', '.env.development'];
-  const found: string[] = [];
-
-  for (const dir of searchDirs) {
-    for (const name of envFilenames) {
-      const full = path.resolve(dir, name);
-      if (fs.existsSync(full) && !found.includes(full)) {
-        found.push(full);
-      }
-    }
-  }
-
-  // If no env file exists anywhere, default to .env in project root
-  if (found.length === 0) {
-    found.push(path.resolve(cwd, '.env'));
-  }
-  return found;
-}
-
-function parseEnv(content: string): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const clean = trimmed.startsWith('export ') ? trimmed.slice(7).trim() : trimmed;
-    const eqIdx = clean.indexOf('=');
-    if (eqIdx > 0) {
-      const k = clean.slice(0, eqIdx).trim();
-      let v = clean.slice(eqIdx + 1).trim();
-      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-        v = v.slice(1, -1);
-      }
-      env[k] = v;
-    }
-  }
-  return env;
-}
-
 export async function GET() {
   try {
-    const files = getTargetEnvFiles();
-    const diskEnv: Record<string, string> = {};
+    const rows = await query(`
+      SELECT 
+        id,
+        name,
+        email,
+        role,
+        subscription_plan AS "subscriptionPlan",
+        plan_expiry_date AS "planExpiryDate",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM users
+      ORDER BY 
+        CASE WHEN role = 'admin' THEN 0 ELSE 1 END,
+        created_at ASC
+    `);
 
-    for (const file of files) {
-      if (fs.existsSync(file)) {
-        try {
-          const content = fs.readFileSync(file, 'utf-8');
-          Object.assign(diskEnv, parseEnv(content));
-        } catch (_) {}
-      }
-    }
-
-    // Add process.env overrides
-    for (const [k, v] of Object.entries(process.env)) {
-      if (v && typeof v === 'string') {
-        const u = k.toUpperCase();
-        if (u.includes('GEMINI') || u.includes('OPENAI') || u.includes('GOOGLE')) {
-          if (!diskEnv[k]) diskEnv[k] = v;
-        }
-      }
-    }
-
-    const keys: any[] = [];
-    for (const [k, v] of Object.entries(diskEnv)) {
-      if (!v) continue;
-      const u = k.toUpperCase();
-      let prov = 'API Key';
-      if (u.includes('GEMINI') || u.includes('GOOGLE')) prov = 'Google Gemini';
-      else if (u.includes('OPENAI')) prov = 'OpenAI GPT';
-
-      keys.push({ envKey: k, keyValue: v, provider: prov });
-    }
-
-    return NextResponse.json({
-      success: true,
-      keys,
-      envMap: diskEnv,
-      filesScanned: files
-    });
+    return NextResponse.json({ success: true, users: rows }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -34965,64 +34561,113 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { provider, keyValue, envKey } = body;
+    const email = (body.email || '').toLowerCase().trim();
 
-    if (!keyValue || typeof keyValue !== 'string' || keyValue.trim().length === 0) {
-      return NextResponse.json({ success: false, error: 'API key value cannot be empty.' }, { status: 400 });
+    if (!email) {
+      return NextResponse.json({ success: false, error: 'Email is required' }, { status: 400 });
     }
 
-    const cleanValue = keyValue.trim();
-    const isGemini = (provider || '').toLowerCase().includes('gemini') || (envKey || '').includes('GEMINI');
+    const name = body.name || 'User';
+    const role = body.role || 'user';
+    const subscriptionPlan = body.subscriptionPlan || body.subscription_plan || 'taster';
+    const planExpiryDate = body.planExpiryDate || body.plan_expiry_date ? new Date(body.planExpiryDate || body.plan_expiry_date) : null;
 
-    // Keys to update
-    const primaryKey = isGemini ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
-    const secondaryKeys = isGemini 
-      ? ['GOOGLE_API_KEY', 'NEXT_PUBLIC_GEMINI_API_KEY', 'NEXT_PUBLIC_GOOGLE_API_KEY']
-      : ['NEXT_PUBLIC_OPENAI_API_KEY'];
+    const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
 
-    const targetFiles = getTargetEnvFiles();
-    const updatedFiles: string[] = [];
+    if (existing.length > 0) {
+      await query(`
+        UPDATE users SET
+          name = $1,
+          role = $2,
+          subscription_plan = $3,
+          plan_expiry_date = $4,
+          updated_at = NOW()
+        WHERE email = $5
+      `, [name, role, subscriptionPlan, planExpiryDate, email]);
 
-    for (const envFile of targetFiles) {
-      let content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf-8') : '';
-      let fileModified = false;
+      return NextResponse.json({ success: true, message: 'User updated in PostgreSQL.' });
+    } else {
+      const id = body.id || ('usr_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+      await query(`
+        INSERT INTO users (id, name, email, role, subscription_plan, plan_expiry_date, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+      `, [id, name, email, role, subscriptionPlan, planExpiryDate]);
 
-      // Update primary key
-      const regex = new RegExp(`^(?:export\\s+)?${primaryKey}=.*$`, 'm');
-      if (regex.test(content)) {
-        content = content.replace(regex, `${primaryKey}="${cleanValue}"`);
-        fileModified = true;
-      } else {
-        content = content.trim() + `\n${primaryKey}="${cleanValue}"\n`;
-        fileModified = true;
-      }
+      return NextResponse.json({ success: true, message: 'User created in PostgreSQL.' });
+    }
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
 
-      // Also update any matching secondary keys already present in the file
-      for (const secKey of secondaryKeys) {
-        const secRegex = new RegExp(`^(?:export\\s+)?${secKey}=.*$`, 'm');
-        if (secRegex.test(content)) {
-          content = content.replace(secRegex, `${secKey}="${cleanValue}"`);
-          fileModified = true;
-        }
-      }
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+    const email = searchParams.get('email');
 
-      if (fileModified) {
-        fs.writeFileSync(envFile, content.trim() + '\n', 'utf-8');
-        updatedFiles.push(envFile);
-      }
+    if (!id && !email) {
+      return NextResponse.json({ success: false, error: 'User ID or Email is required' }, { status: 400 });
     }
 
-    // Update in-memory runtime process.env
-    process.env[primaryKey] = cleanValue;
-    if (isGemini) {
-      process.env['GOOGLE_API_KEY'] = cleanValue;
+    const target = await query('SELECT id, role, email FROM users WHERE id = $1 OR email = $2 LIMIT 1', [id || '', email || '']);
+    if (target.length > 0 && target[0].role === 'admin' && (target[0].id === 'usr_admin_1' || target[0].email === 'admin@zecratary.com')) {
+      return NextResponse.json({ success: false, error: 'Cannot delete the primary system administrator.' }, { status: 403 });
     }
 
+    if (id) {
+      await query('DELETE FROM users WHERE id = $1', [id]);
+    } else if (email) {
+      await query('DELETE FROM users WHERE email = $1', [email]);
+    }
+
+    return NextResponse.json({ success: true, message: 'User deleted from PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/keys/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  try {
+    const rows = await query('SELECT ai_provider, ai_model, chef_ai_settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    const r = rows[0] || {};
     return NextResponse.json({
       success: true,
-      message: `Saved ${primaryKey} to: ${updatedFiles.map(f => path.basename(f)).join(', ')}`,
-      updatedFiles
-    });
+      aiProvider: r.ai_provider || 'gemini',
+      aiModel: r.ai_model || 'gemini-3.5-flash-lite',
+      chefAiSettings: r.chef_ai_settings || {}
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const aiProvider = body.aiProvider || 'gemini';
+    const aiModel = body.aiModel || 'gemini-3.5-flash-lite';
+    const chefAiSettings = body.chefAiSettings || {};
+
+    await query(`
+      UPDATE admin_settings SET
+        ai_provider = $1,
+        ai_model = $2,
+        chef_ai_settings = $3::jsonb,
+        updated_at = NOW()
+      WHERE id = 'primary_settings'
+    `, [aiProvider, aiModel, JSON.stringify(chefAiSettings)]);
+
+    return NextResponse.json({ success: true, message: 'AI configuration updated in PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -35236,146 +34881,34 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/social-config/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-function getEnvPath() {
-  const rootDir = process.cwd();
-  const localEnv = path.join(rootDir, '.env.local');
-  if (fs.existsSync(localEnv)) return localEnv;
-  return path.join(rootDir, '.env');
-}
-
-function parseEnv(): Record<string, string> {
-  const envFile = getEnvPath();
-  if (!fs.existsSync(envFile)) return {};
-  const content = fs.readFileSync(envFile, 'utf8');
-  const envMap: Record<string, string> = {};
-  content.split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#')) {
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx !== -1) {
-        const key = trimmed.slice(0, eqIdx).trim();
-        const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
-        envMap[key] = val;
-      }
-    }
-  });
-  return envMap;
-}
 
 export async function GET() {
   try {
-    const envMap = parseEnv();
-
-    const googleClientId = envMap['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] || '';
-    const googleClientSecret = envMap['GOOGLE_CLIENT_SECRET'] || '';
-    const facebookClientId = envMap['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] || '';
-    const facebookClientSecret = envMap['FACEBOOK_CLIENT_SECRET'] || '';
-    const appleClientId = envMap['NEXT_PUBLIC_APPLE_CLIENT_ID'] || '';
-    const appleClientSecret = envMap['APPLE_CLIENT_SECRET'] || '';
-
-    const payload = {
-      success: true,
-      // Flat properties for admin panel compatibility
-      googleEnabled: Boolean(googleClientId || true),
-      googleClientId,
-      googleClientSecret,
-      facebookEnabled: Boolean(facebookClientId || true),
-      facebookClientId,
-      facebookClientSecret,
-      appleEnabled: Boolean(appleClientId || true),
-      appleClientId,
-      appleClientSecret,
-      // Nested structure for client authentication components
-      config: {
-        google: {
-          clientId: googleClientId,
-          clientSecret: googleClientSecret,
-          enabled: Boolean(googleClientId || true)
-        },
-        facebook: {
-          clientId: facebookClientId,
-          clientSecret: facebookClientSecret,
-          enabled: Boolean(facebookClientId || true)
-        },
-        apple: {
-          clientId: appleClientId,
-          clientSecret: appleClientSecret,
-          enabled: Boolean(appleClientId || true)
-        }
-      }
-    };
-
-    return new NextResponse(JSON.stringify(payload), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-      }
-    });
+    const rows = await query('SELECT social_login FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    const socialLogin = rows[0]?.social_login || {};
+    return NextResponse.json({ success: true, socialLogin }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const envFile = getEnvPath();
-    let content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : '';
+    const socialLogin = body.socialLogin || body;
 
-    const updates: Record<string, string> = {};
+    await query(`
+      UPDATE admin_settings SET
+        social_login = $1::jsonb,
+        updated_at = NOW()
+      WHERE id = 'primary_settings'
+    `, [JSON.stringify(socialLogin)]);
 
-    if (body.googleClientId !== undefined) updates['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] = body.googleClientId;
-    if (body.googleClientSecret !== undefined) updates['GOOGLE_CLIENT_SECRET'] = body.googleClientSecret;
-    if (body.facebookClientId !== undefined) updates['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] = body.facebookClientId;
-    if (body.facebookClientSecret !== undefined) updates['FACEBOOK_CLIENT_SECRET'] = body.facebookClientSecret;
-    if (body.appleClientId !== undefined) updates['NEXT_PUBLIC_APPLE_CLIENT_ID'] = body.appleClientId;
-    if (body.appleClientSecret !== undefined) updates['APPLE_CLIENT_SECRET'] = body.appleClientSecret;
-
-    if (body.google) {
-      if (body.google.clientId !== undefined) updates['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] = body.google.clientId;
-      if (body.google.clientSecret !== undefined) updates['GOOGLE_CLIENT_SECRET'] = body.google.clientSecret;
-    }
-    if (body.facebook) {
-      if (body.facebook.clientId !== undefined) updates['NEXT_PUBLIC_FACEBOOK_CLIENT_ID'] = body.facebook.clientId;
-      if (body.facebook.clientSecret !== undefined) updates['FACEBOOK_CLIENT_SECRET'] = body.facebook.clientSecret;
-    }
-    if (body.apple) {
-      if (body.apple.clientId !== undefined) updates['NEXT_PUBLIC_APPLE_CLIENT_ID'] = body.apple.clientId;
-      if (body.apple.clientSecret !== undefined) updates['APPLE_CLIENT_SECRET'] = body.apple.clientSecret;
-    }
-
-    const lines = content.split('\n');
-    const updatedKeys = new Set<string>();
-    const newLines = lines.map(line => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return line;
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx !== -1) {
-        const key = trimmed.slice(0, eqIdx).trim();
-        if (key in updates) {
-          updatedKeys.add(key);
-          return `${key}="${updates[key]}"`;
-        }
-      }
-      return line;
-    });
-
-    for (const [key, val] of Object.entries(updates)) {
-      if (!updatedKeys.has(key)) {
-        newLines.push(`${key}="${val}"`);
-      }
-    }
-
-    fs.writeFileSync(envFile, newLines.join('\n'), 'utf8');
-    return NextResponse.json({ success: true, message: 'Configuration synchronized to environment file' });
+    return NextResponse.json({ success: true, message: 'Social login settings updated in PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -35386,100 +34919,35 @@ export async function POST(req: Request) {
 ## File: `apps/web/src/app/api/user/theme/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function getTargetFiles(): string[] {
-  const cwd = process.cwd();
-  return [
-    path.join(cwd, 'apps/web/data/user_theme.json'),
-    path.join(cwd, 'data/user_theme.json')
-  ];
-}
-
-function readThemeData(): any[] {
-  const files = getTargetFiles();
-  for (const file of files) {
-    if (fs.existsSync(file)) {
-      try {
-        const raw = fs.readFileSync(file, 'utf-8');
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [parsed];
-      } catch (err) {
-        console.error('[API user-theme] Read error:', file, err);
-      }
-    }
-  }
-  return [];
-}
-
-function writeThemeData(themes: any[]): boolean {
-  const files = getTargetFiles();
-  let wroteAny = false;
-  for (const file of files) {
-    try {
-      const dir = path.dirname(file);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(file, JSON.stringify(themes, null, 2), 'utf-8');
-      wroteAny = true;
-    } catch (err) {
-      console.error('[API user-theme] Write error:', file, err);
-    }
-  }
-  return wroteAny;
-}
-
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
-    const { searchParams } = new URL(req.url);
-    const userId = (searchParams.get('userId') || 'usr_admin_1').trim();
-
-    const themes = readThemeData();
-    const userTheme = themes.find((t: any) => t.userId === userId) || {
-      userId,
-      themeMode: 'dark',
-      primaryColor: '#E05638',
-      accentColor: '#10b981'
-    };
-
-    return NextResponse.json(userTheme, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
-      }
-    });
+    const rows = await query('SELECT theme_colors FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    const themeColors = rows.length > 0 ? rows[0].theme_colors : {};
+    return NextResponse.json({ success: true, themeColors }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const userId = (body.userId || 'usr_admin_1').trim();
+    const colors = body.colors || body.themeColors || body;
 
-    const themes = readThemeData();
-    const others = themes.filter((t: any) => t.userId !== userId);
-    
-    const updatedTheme = {
-      ...body,
-      userId
-    };
+    await query(`
+      UPDATE admin_settings SET
+        theme_colors = $1::jsonb,
+        updated_at = NOW()
+      WHERE id = 'primary_settings'
+    `, [JSON.stringify(colors)]);
 
-    const merged = [updatedTheme, ...others];
-    writeThemeData(merged);
-
-    return NextResponse.json({
-      success: true,
-      theme: updatedTheme
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
-      }
-    });
+    return NextResponse.json({ success: true, message: 'Theme colors updated in PostgreSQL.' });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -35488,53 +34956,39 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/system-settings/route.ts`
 ```typescript
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-function getSettingsPath() {
-  const rootDir = process.cwd();
-  const dir = path.join(rootDir, 'data');
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, 'system_settings.json');
-}
 
 export async function GET() {
   try {
-    const sPath = getSettingsPath();
-    let settings: any = {};
-    if (fs.existsSync(sPath)) {
-      const raw = fs.readFileSync(sPath, 'utf-8');
-      if (raw.trim()) settings = JSON.parse(raw);
+    const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    if (rows.length === 0) {
+      return NextResponse.json({
+        success: true,
+        siteName: 'Zecratary',
+        titlebarEmoji: '🍳',
+        titlebarImage: '',
+        faviconEmoji: '🍳',
+        faviconImage: '',
+        currency: 'USD',
+        themeColors: {},
+        supportedLanguages: []
+      }, { headers: { 'Cache-Control': 'no-store' } });
     }
-    return new NextResponse(JSON.stringify({ success: true, settings }), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-      }
-    });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const sPath = getSettingsPath();
-    let current: any = {};
-    if (fs.existsSync(sPath)) {
-      try {
-        const raw = fs.readFileSync(sPath, 'utf-8');
-        if (raw.trim()) current = JSON.parse(raw);
-      } catch (_) {}
-    }
-    const updated = { ...current, ...body, updatedAt: new Date().toISOString() };
-    fs.writeFileSync(sPath, JSON.stringify(updated, null, 2), 'utf-8');
-    return NextResponse.json({ success: true, settings: updated });
+    const r = rows[0];
+    return NextResponse.json({
+      success: true,
+      siteName: r.site_name || 'Zecratary',
+      titlebarEmoji: r.titlebar_emoji || '🍳',
+      titlebarImage: r.titlebar_image || '',
+      faviconEmoji: r.favicon_emoji || '🍳',
+      faviconImage: r.favicon_image || '',
+      currency: r.currency || 'USD',
+      themeColors: r.theme_colors || {},
+      supportedLanguages: r.supported_languages || []
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -35545,88 +34999,33 @@ export async function POST(req: Request) {
 ## File: `apps/web/src/app/api/dashboard/route.ts`
 ```typescript
 import { NextResponse } from 'next/server';
-import { prisma } from '@zecratary/database';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const recipeCountRes = await query('SELECT COUNT(*) AS count FROM saved_recipes');
+    const userCountRes = await query('SELECT COUNT(*) AS count FROM users');
+    const revenueRes = await query("SELECT COALESCE(SUM(amount), 0) AS total FROM payment_transactions WHERE status = 'succeeded'");
+    const activeSubRes = await query("SELECT COUNT(*) AS count FROM payment_transactions WHERE status = 'succeeded' AND (expiry_date IS NULL OR expiry_date > NOW())");
 
-    // 1. Query live database counts and upcoming schedules from Prisma
-    const [
-      savedRecipesCount,
-      pantryStockCount,
-      groceryItemsCount,
-      recipesWithTags,
-      upcomingMealPlan
-    ] = await Promise.all([
-      prisma.recipe.count(),
-      prisma.pantryItem.count(),
-      prisma.groceryListItem.count({ where: { checked: false } }).catch(() => 0),
-      prisma.recipe.findMany({ select: { tags: true } }),
-      prisma.mealPlanItem.findFirst({
-        where: {
-          dayOfWeek: dayOfWeek,
-        },
-        include: {
-          recipe: true,
-        },
-      }).catch(async () => {
-        return await prisma.recipe.findFirst({
-          orderBy: { createdAt: 'desc' },
-        });
-      }),
-    ]);
-
-    const uniqueTags = new Set(recipesWithTags.flatMap((r) => r.tags || []));
-    const recipeBooksCount = uniqueTags.size > 0 ? uniqueTags.size : 0;
-
-    let upcomingMeal = null;
-    if (upcomingMealPlan) {
-      if ('recipe' in upcomingMealPlan && upcomingMealPlan.recipe) {
-        const r = upcomingMealPlan.recipe;
-        upcomingMeal = {
-          title: r.title,
-          mealType: upcomingMealPlan.mealType || 'DINNER',
-          prepCookTime: `${(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 25)} mins`,
-          tag: r.tags?.[0] || 'Scheduled',
-        };
-      } else if ('title' in upcomingMealPlan) {
-        const r = upcomingMealPlan as any;
-        upcomingMeal = {
-          title: r.title,
-          mealType: 'DINNER',
-          prepCookTime: `${(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 25)} mins`,
-          tag: r.tags?.[0] || 'Saved Dish',
-        };
-      }
-    }
+    const recentRecipes = await query('SELECT id, title, recipe_type AS "recipeType", created_at AS "createdAt" FROM saved_recipes ORDER BY created_at DESC LIMIT 5');
+    const recentTransactions = await query('SELECT id, customer_name AS "customerName", plan_name AS "planName", amount, currency, status, created_at AS "createdAt" FROM payment_transactions ORDER BY created_at DESC LIMIT 5');
 
     return NextResponse.json({
       success: true,
       stats: {
-        savedRecipes: savedRecipesCount,
-        recipeBooks: recipeBooksCount,
-        pantryStock: pantryStockCount,
-        groceryItems: groceryItemsCount,
+        totalRecipes: parseInt(recipeCountRes[0]?.count || '0', 10),
+        totalUsers: parseInt(userCountRes[0]?.count || '0', 10),
+        totalRevenue: parseFloat(revenueRes[0]?.total || '0'),
+        activeSubscriptions: parseInt(activeSubRes[0]?.count || '0', 10),
       },
-      upcomingMeal,
-    });
-  } catch (error: any) {
-    console.error('Database fetch error in /api/dashboard:', error);
-    return NextResponse.json({
-      success: false,
-      error: error.message,
-      stats: {
-        savedRecipes: 0,
-        recipeBooks: 0,
-        pantryStock: 0,
-        groceryItems: 0,
-      },
-      upcomingMeal: null,
-    });
+      recentRecipes,
+      recentTransactions
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -37072,120 +36471,95 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/saved-recipes/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
-
-function getTargetFiles(): string[] {
-  const cwd = process.cwd();
-  return [
-    path.join(cwd, 'apps/web/data/saved_recipes.json'),
-    path.join(cwd, 'data/saved_recipes.json')
-  ];
-}
-
-function readAllRecipes(): any[] {
-  const files = getTargetFiles();
-  for (const file of files) {
-    if (fs.existsSync(file)) {
-      try {
-        const raw = fs.readFileSync(file, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        if (parsed && Array.isArray(parsed.recipes) && parsed.recipes.length > 0) return parsed.recipes;
-      } catch (err) {
-        console.error('[API saved-recipes] Read error:', file, err);
-      }
-    }
-  }
-  return [];
-}
-
-function writeAllRecipes(recipes: any[]): boolean {
-  const files = getTargetFiles();
-  let wroteAny = false;
-  for (const file of files) {
-    try {
-      const dir = path.dirname(file);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(file, JSON.stringify(recipes, null, 2), 'utf-8');
-      wroteAny = true;
-    } catch (err) {
-      console.error('[API saved-recipes] Write error:', file, err);
-    }
-  }
-  return wroteAny;
-}
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const userId = (searchParams.get('userId') || 'usr_admin_1').trim();
+    const userId = searchParams.get('userId');
 
-    const allRecipes = readAllRecipes();
+    let rows;
+    if (userId) {
+      rows = await query(
+        'SELECT * FROM saved_recipes WHERE user_id = $1 OR is_public = TRUE ORDER BY created_at DESC',
+        [userId]
+      );
+    } else {
+      rows = await query('SELECT * FROM saved_recipes ORDER BY created_at DESC');
+    }
 
-    // Deduplicate and filter recipes
-    const userRecipes = allRecipes.filter((r: any) => {
-      if (!userId || userId === 'usr_admin_1') return true;
-      if (r.userId && r.userId === userId) return true;
-      if (r.creatorId && r.creatorId === userId) return true;
-      if (r.createdBy && (r.createdBy === userId || (userId.includes('admin') && String(r.createdBy).includes('admin')))) return true;
-      return false;
-    });
-
-    return NextResponse.json(userRecipes, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-      }
-    });
+    return NextResponse.json({ success: true, recipes: rows }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const userId = (body.userId || 'usr_admin_1').trim();
-    const incoming = Array.isArray(body.recipes) ? body.recipes : (Array.isArray(body) ? body : []);
+    const id = body.id || 'rcp_' + Date.now().toString(36);
 
-    const existingAll = readAllRecipes();
+    await query(`
+      INSERT INTO saved_recipes (
+        id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+        servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        recipe_type = EXCLUDED.recipe_type,
+        cuisine = EXCLUDED.cuisine,
+        prep_time = EXCLUDED.prep_time,
+        cook_time = EXCLUDED.cook_time,
+        servings = EXCLUDED.servings,
+        difficulty = EXCLUDED.difficulty,
+        ingredients = EXCLUDED.ingredients,
+        directions = EXCLUDED.directions,
+        nutrition = EXCLUDED.nutrition,
+        tags = EXCLUDED.tags,
+        image_url = EXCLUDED.image_url,
+        is_public = EXCLUDED.is_public,
+        updated_at = NOW();
+    `, [
+      id,
+      body.userId || null,
+      body.title || 'Untitled Recipe',
+      body.description || '',
+      body.recipeType || body.category || 'General',
+      body.cuisine || '',
+      body.prepTime || '',
+      body.cookTime || '',
+      body.servings || '',
+      body.difficulty || '',
+      JSON.stringify(body.ingredients || []),
+      JSON.stringify(body.directions || body.instructions || []),
+      JSON.stringify(body.nutrition || body.macros || {}),
+      JSON.stringify(body.tags || []),
+      body.imageUrl || body.image || '',
+      Boolean(body.isPublic)
+    ]);
 
-    // Build key-indexed lookup to safely merge without data wipeout
-    const mergedMap = new Map<string, any>();
-
-    // 1. Ingest existing recipes
-    for (const item of existingAll) {
-      if (!item) continue;
-      const key = String(item.id || item.title || item.name || '').trim().toLowerCase();
-      if (key) mergedMap.set(key, item);
-    }
-
-    // 2. Overlay incoming recipes
-    for (const item of incoming) {
-      if (!item) continue;
-      const key = String(item.id || item.title || item.name || '').trim().toLowerCase();
-      if (key) {
-        const existing = mergedMap.get(key) || {};
-        mergedMap.set(key, { ...existing, ...item, userId: userId });
-      }
-    }
-
-    const finalMerged = Array.from(mergedMap.values());
-    writeAllRecipes(finalMerged);
-
-    return NextResponse.json({
-      success: true,
-      count: finalMerged.length,
-      recipes: finalMerged
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-      }
-    });
+    return NextResponse.json({ success: true, id, message: 'Recipe saved successfully in PostgreSQL.' });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
+    }
+
+    await query('DELETE FROM saved_recipes WHERE id = $1', [id]);
+    return NextResponse.json({ success: true, message: 'Recipe deleted from PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -42999,45 +42373,61 @@ if (typeof window !== 'undefined') {
 
 ## File: `apps/web/src/lib/db.ts`
 ```typescript
-// Hybrid PostgreSQL Client with Server-JSON Fallback
-// Provides resilient database querying and zero browser storage dependencies
+// Strict PostgreSQL Database Client
+// 100% Database Persistence - No JSON Fallback
 
-import fs from 'fs';
-import path from 'path';
+import { Pool } from 'pg';
 
-let pgPool: any = null;
+let pgPool: Pool | null = null;
 
-export function isPostgresConfigured(): boolean {
-  return Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL);
+export function getConnectionString(): string {
+  const connUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!connUrl) {
+    throw new Error('[DB FATAL] DATABASE_URL environment variable is missing. A valid PostgreSQL connection is required.');
+  }
+  return connUrl;
 }
 
-export async function getDbPool() {
+export async function getDbPool(): Promise<Pool> {
   if (pgPool) return pgPool;
-  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!connectionString) return null;
+  const connectionString = getConnectionString();
 
-  try {
-    const { Pool } = await import('pg');
-    pgPool = new Pool({
-      connectionString,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
-      max: 10,
-      idleTimeoutMillis: 30000
-    });
-    return pgPool;
-  } catch (err) {
-    console.warn('[DB] PostgreSQL pg module not installed or connection failed. Using JSON store fallback.');
-    return null;
-  }
+  pgPool = new Pool({
+    connectionString,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
+
+  return pgPool;
 }
 
 export async function query(sql: string, params: any[] = []): Promise<any[]> {
   const pool = await getDbPool();
-  if (pool) {
-    const res = await pool.query(sql, params);
+  const client = await pool.connect();
+  try {
+    const res = await client.query(sql, params);
     return res.rows;
+  } finally {
+    client.release();
   }
-  return [];
+}
+
+export async function transaction<T>(callback: (client: any) => Promise<T>): Promise<T> {
+  const pool = await getDbPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 ```
