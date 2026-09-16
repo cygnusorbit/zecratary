@@ -1,35 +1,52 @@
 'use client';
+
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   Tags, Plus, Edit3, Trash2, Check, X, RotateCcw, 
   CheckCircle, ArrowLeft, MoreVertical, GripVertical, 
-  ArrowUpDown, ArrowUp, ArrowDown, Save
+  ArrowUpDown, ArrowUp, ArrowDown, Save, RefreshCw
 } from 'lucide-react';
-import { getStoredCategories, saveCategories, DEFAULT_CATEGORIES } from '@/lib/categories';
+import { 
+  getStoredCategories, 
+  saveCategories, 
+  setMemoryCategories, 
+  DEFAULT_CATEGORIES 
+} from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 export default function IngredientCategoryPage() {
-  const { t, version } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+  const version = langContext?.version;
+
   const [categories, setCategories] = useState<string[]>([]);
   const [newCatName, setNewCatName] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [feedback, setFeedback] = useState('');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   
   // Reposition / Reorder States
   const [isReordering, setIsReordering] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Dynamic Theme Synchronization & Day Mode Inversion
+  // Dynamic Theme Synchronization
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined' 
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -68,7 +85,7 @@ export default function IngredientCategoryPage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -89,27 +106,64 @@ export default function IngredientCategoryPage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadCategories = () => {
-    setCategories(getStoredCategories());
-  };
+  // Hydrate Categories Exclusively from Server Storage
+  const loadCategoriesFromServer = useCallback(async () => {
+    setIsLoading(true);
+    purgeLegacyBrowserAdminStorage();
+    try {
+      const serverData = await fetchServerAdminSettings();
+      if (serverData && Array.isArray(serverData.ingredientCategories) && serverData.ingredientCategories.length > 0) {
+        setCategories(serverData.ingredientCategories);
+        setMemoryCategories(serverData.ingredientCategories);
+      } else {
+        const fallback = getStoredCategories();
+        const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_CATEGORIES;
+        setCategories(activeList);
+        setMemoryCategories(activeList);
+      }
+    } catch (err) {
+      console.error('[IngredientCategoryPage] Error loading server categories:', err);
+      const fallback = getStoredCategories();
+      setCategories(fallback.length > 0 ? fallback : DEFAULT_CATEGORIES);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     document.title = `${t('ingredientCatTitle', 'Ingredient Categories')} - ${t('adminConsole', 'Admin Console')}`;
-    loadCategories();
+    loadCategoriesFromServer();
 
-    const handleSync = () => setCategories(getStoredCategories());
+    const handleSync = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setCategories(e.detail);
+      } else {
+        loadCategoriesFromServer();
+      }
+    };
+
     window.addEventListener('zecratary_categories_changed', handleSync);
-    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_categories_changed', handleSync);
-      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [t, version]);
+  }, [t, version, loadCategoriesFromServer]);
 
   const notify = (msg: string) => {
     setFeedback(msg);
     setTimeout(() => setFeedback(''), 3000);
+  };
+
+  // Centralized Server-Backed Commit (Zero LocalStorage)
+  const commitCategories = async (updated: string[]) => {
+    setCategories(updated);
+    setMemoryCategories(updated);
+    await saveCategories(updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
   };
 
   // Drag & Drop Handlers
@@ -131,7 +185,7 @@ export default function IngredientCategoryPage() {
 
   const handleDrop = () => {
     setDraggedIndex(null);
-    saveCategories(categories);
+    commitCategories(categories);
   };
 
   const moveCategory = (index: number, direction: 'up' | 'down') => {
@@ -142,13 +196,12 @@ export default function IngredientCategoryPage() {
     const temp = list[index];
     list[index] = list[targetIndex];
     list[targetIndex] = temp;
-    setCategories(list);
-    saveCategories(list);
+    commitCategories(list);
   };
 
   const toggleRepositionMode = () => {
     if (isReordering) {
-      saveCategories(categories);
+      commitCategories(categories);
       notify(t('orderSaved', 'Category order saved successfully!'));
       setIsReordering(false);
     } else {
@@ -168,8 +221,7 @@ export default function IngredientCategoryPage() {
     }
 
     const updated = [...categories, clean];
-    setCategories(updated);
-    saveCategories(updated);
+    commitCategories(updated);
     setNewCatName('');
     notify(`${t('categoryAdded', 'Added category')} "${clean}"`);
   };
@@ -188,8 +240,7 @@ export default function IngredientCategoryPage() {
 
     const updated = [...categories];
     updated[index] = clean;
-    setCategories(updated);
-    saveCategories(updated);
+    commitCategories(updated);
     setEditingIndex(null);
     setEditingValue('');
     notify(`${t('categoryUpdated', 'Updated category')} "${clean}"`);
@@ -199,15 +250,13 @@ export default function IngredientCategoryPage() {
     const confirmMsg = t('confirmDeleteCat', 'Are you sure you want to delete category');
     if (!confirm(`${confirmMsg} "${name}"?`)) return;
     const updated = categories.filter((_, i) => i !== index);
-    setCategories(updated);
-    saveCategories(updated);
+    commitCategories(updated);
     notify(`${t('categoryRemoved', 'Removed category')} "${name}"`);
   };
 
   const handleResetDefaults = () => {
     if (!confirm(t('confirmResetCats', 'Are you sure you want to reset categories to default?'))) return;
-    setCategories(DEFAULT_CATEGORIES);
-    saveCategories(DEFAULT_CATEGORIES);
+    commitCategories(DEFAULT_CATEGORIES);
     setIsReordering(false);
     notify(t('resetCatsSuccess', 'Categories reset to default successfully!'));
   };
@@ -232,6 +281,21 @@ export default function IngredientCategoryPage() {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={loadCategoriesFromServer}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            style={{
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#334155' : '#cbd5e1'
+            }}
+            title="Reload from server storage"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>{t('refreshBtn', 'Reload')}</span>
+          </button>
+
           <button
             onClick={handleResetDefaults}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"

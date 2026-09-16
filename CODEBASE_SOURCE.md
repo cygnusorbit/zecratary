@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.0.9",
+  "version": "7.1.1",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -105,7 +105,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.0.9",
+  "version": "7.1.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -1245,22 +1245,6 @@ const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label:
   }
 };
 
-// Safe local recipe reader fallback
-function readLocalSavedRecipes(): any[] {
-  if (typeof window === 'undefined') return [];
-  const keys = ['zecratary_saved_recipes', 'zecratary_recipes', 'saved_recipes', 'savedRecipes', 'recipes'];
-  for (const k of keys) {
-    try {
-      const raw = localStorage.getItem(k);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (_) {}
-  }
-  return [];
-}
-
 export default function SavedRecipesPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -1281,16 +1265,13 @@ export default function SavedRecipesPage() {
   const [ingredientQuery, setIngredientQuery] = useState('');
   const [selectedIngredientsList, setSelectedIngredientsList] = useState<string[]>([]);
 
-  // Other Dropdown Filters
+  // Dropdown Filters
   const [selectedType, setSelectedType] = useState('All Types');
   const [selectedRating, setSelectedRating] = useState('All Ratings');
   const [selectedPrepTime, setSelectedPrepTime] = useState('All Prep Times');
   const [selectedCookTime, setSelectedCookTime] = useState('All Cook Times');
 
-  // Dropdown Open Toggles
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-
-  // Add to Book Dropdown State
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
   // Add to Plan / Calendar Modal State
@@ -1342,7 +1323,6 @@ export default function SavedRecipesPage() {
     { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
   ];
 
-  // Dynamic Theme Synchronization & Color Inversion
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -1391,43 +1371,6 @@ export default function SavedRecipesPage() {
     } catch (_) {}
   }, []);
 
-  useEffect(() => {
-    const activeUser = getCurrentUser();
-    if (activeUser && (activeUser.id || activeUser.email)) {
-      const uKey = (activeUser.email || activeUser.id).toLowerCase().trim();
-      syncUserSavedRecipes(uKey).then((synced) => {
-        if (Array.isArray(synced) && synced.length > 0) {
-          setRecipes(synced);
-        }
-      }).catch(() => {});
-    }
-
-    const onRecipesUpdated = () => {
-      const current = typeof getLocalRecipes === 'function' ? getLocalRecipes() : readLocalSavedRecipes();
-      if (Array.isArray(current)) {
-        setRecipes(current);
-      }
-    };
-    window.addEventListener('zecratary_saved_recipes_updated', onRecipesUpdated);
-
-    applyGlobalTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
-    window.addEventListener('storage', applyGlobalTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_saved_recipes_updated', onRecipesUpdated);
-      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
-      window.removeEventListener('storage', applyGlobalTheme);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
-      }
-    };
-  }, [applyGlobalTheme]);
-
   const getCleanRecipeType = (rec: any): string => {
     const raw = rec.recipeType || rec.category || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish');
     if (raw === 'Appetizer' || raw === 'Appetiser') return 'Appetiser';
@@ -1453,57 +1396,69 @@ export default function SavedRecipesPage() {
     return `https://${urlStr}`;
   };
 
-  const loadData = useCallback((user: User | null) => {
+  const loadData = useCallback(async (user: User | null) => {
     if (!user) return;
     setCategories(getStoredCategories());
+    const targetUserId = (user.id || 'usr_admin_1').trim();
+
     try {
-      const localRecipes = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      const localBooks = localStorage.getItem('zecratary_recipe_books');
+      setLoading(true);
+      // Fetches unified server data merged with any new imports
+      const rawRecipes = await syncUserSavedRecipes(targetUserId);
 
-      let parsedRecipes: any[] = [];
-      if (localRecipes) {
-        const parsed = JSON.parse(localRecipes);
-        if (Array.isArray(parsed)) {
-          parsedRecipes = parsed;
-        }
-      }
-
-      const userRecipes = parsedRecipes
-        .filter((r: any) => r.userId === user.id || r.createdBy === user.email)
-        .map((r: any) => {
-          const cleanType = getCleanRecipeType(r);
-          return {
-            ...r,
-            recipeType: cleanType,
-            category: cleanType,
-            tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
-          };
-        });
+      const userRecipes = rawRecipes.map((r: any) => {
+        const cleanType = getCleanRecipeType(r);
+        return {
+          ...r,
+          userId: targetUserId,
+          recipeType: cleanType,
+          category: cleanType,
+          tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
+        };
+      });
 
       setRecipes(userRecipes);
 
       let parsedBooks = defaultBooks;
+      const localBooks = localStorage.getItem('zecratary_recipe_books');
       if (localBooks) {
-        const parsed = JSON.parse(localBooks);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          parsedBooks = parsed;
-        }
+        try {
+          const parsed = JSON.parse(localBooks);
+          if (Array.isArray(parsed) && parsed.length > 0) parsedBooks = parsed;
+        } catch (_) {}
       }
 
-      const userBooks = parsedBooks.filter((b: any) => !b.userId || b.userId === user.id || b.createdBy === user.email);
+      const userBooks = parsedBooks.filter((b: any) => {
+        if (!b.userId && !b.createdBy) return true;
+        if (b.userId) return b.userId === targetUserId;
+        return b.createdBy === user.email || b.createdBy === targetUserId;
+      });
 
-      const booksWithCounts = userBooks.map((b: any) => ({
+      setBooks(userBooks.map((b: any) => ({
         ...b,
         recipeCount: userRecipes.filter((r: any) => r.bookId === b.id).length
-      }));
-
-      setBooks(booksWithCounts);
+      })));
     } catch (e) {
-      console.error(e);
+      console.error('[SavedRecipesPage] Load error:', e);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    applyGlobalTheme();
+    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
+    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
+    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
+    window.addEventListener('storage', applyGlobalTheme);
+
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
+      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
+      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
+      window.removeEventListener('storage', applyGlobalTheme);
+    };
+  }, [applyGlobalTheme]);
 
   useEffect(() => {
     document.title = `${t('savedRecipesTitle') || 'Saved Recipes'} - FoodiePrep`;
@@ -1524,47 +1479,45 @@ export default function SavedRecipesPage() {
       }
     };
 
-    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
     window.addEventListener('zecratary_categories_changed', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('storage', handleSync);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
       window.removeEventListener('zecratary_categories_changed', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('storage', handleSync);
     };
   }, [loadData, router, t]);
 
   const saveAllRecipes = (updatedUserList: any[]) => {
     if (!currentUser) return;
-    try {
-      const localRecipes = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      const allRecipes: any[] = localRecipes ? JSON.parse(localRecipes) : [];
+    const targetUserId = currentUser.id || 'usr_admin_1';
 
-      const otherUsersRecipes = allRecipes.filter((r: any) => {
-        return r.userId !== currentUser.id && r.createdBy !== currentUser.email;
-      });
+    const updatedWithId = updatedUserList.map(r => ({
+      ...r,
+      userId: targetUserId
+    }));
 
-      const merged = [...updatedUserList, ...otherUsersRecipes];
-      setRecipes(updatedUserList);
-      localStorage.setItem('zecratary_recipes', JSON.stringify(merged));
-      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(merged));
+    setRecipes(updatedWithId);
 
-      const updatedBooks = books.map((b: any) => ({
-        ...b,
-        recipeCount: updatedUserList.filter((r: any) => r.bookId === b.id).length
-      }));
-      setBooks(updatedBooks);
-
+    persistSavedRecipe(targetUserId, updatedWithId).then(() => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
-        window.dispatchEvent(new Event('storage'));
       }
-    } catch (e) {
-      console.error(e);
-    }
+    }).catch((err) => {
+      console.error('[SavedRecipesPage] Error saving recipes:', err);
+    });
+
+    const updatedBooks = books.map((b: any) => ({
+      ...b,
+      recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id).length
+    }));
+    setBooks(updatedBooks);
   };
 
   const toggleFavorite = (e: React.MouseEvent, id: string) => {
@@ -1628,7 +1581,7 @@ export default function SavedRecipesPage() {
     const recName = selectedRecipe.title || selectedRecipe.name;
     const newPlanItem = {
       id: 'plan_' + Date.now(),
-      userId: currentUser.id,
+      userId: currentUser.id || 'usr_admin_1',
       createdBy: currentUser.email,
       creatorName: currentUser.name,
       date: planDate,
@@ -1643,7 +1596,6 @@ export default function SavedRecipesPage() {
 
     localStorage.setItem('zecratary_meal_plan', JSON.stringify([...currentPlan, newPlanItem]));
     window.dispatchEvent(new Event('zecratary_planner_updated'));
-    window.dispatchEvent(new Event('storage'));
     setShowAddToPlanModal(false);
     const alertMsg = (t('scheduledMealAlert') || 'Successfully scheduled "{title}" in your meal plan!')
       .replace('{title}', recName);
@@ -1750,6 +1702,7 @@ export default function SavedRecipesPage() {
     const updatedRec = {
       ...selectedRecipe,
       ...editForm,
+      userId: currentUser?.id || selectedRecipe.userId || 'usr_admin_1',
       recipeType: cleanType,
       category: cleanType,
       tags: [cleanType]
@@ -1820,7 +1773,7 @@ export default function SavedRecipesPage() {
     const current = local ? JSON.parse(local) : [];
     const formatted = selectedItems.map(i => ({
       id: 's_' + Date.now() + Math.random(),
-      userId: currentUser?.id,
+      userId: currentUser?.id || 'usr_admin_1',
       createdBy: currentUser?.email,
       creatorName: currentUser?.name,
       name: i.name,
@@ -1852,7 +1805,6 @@ export default function SavedRecipesPage() {
     setSelectedIngredientsList(selectedIngredientsList.filter(i => i !== ing));
   };
 
-  // Filter logic
   const filtered = useMemo(() => {
     return recipes.filter(r => {
       const q = search.toLowerCase().trim();
@@ -1901,12 +1853,10 @@ export default function SavedRecipesPage() {
     });
   }, [recipes, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
 
-  // Reset page when filters or grid density change
   useEffect(() => {
     setCurrentPage(1);
   }, [search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
 
-  // Pagination calculation
   const itemsPerPage = GRID_CONFIG[gridMode].perPage;
   const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -1936,7 +1886,6 @@ export default function SavedRecipesPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Grid Density Switchers */}
           <div 
             className="flex items-center p-1 rounded-xl border shadow-sm"
             style={{
@@ -1983,7 +1932,7 @@ export default function SavedRecipesPage() {
         </div>
       </div>
 
-      {/* Search & Filter Trigger Bar */}
+      {/* Filter Row */}
       <div className="space-y-3">
         <div className="flex gap-3">
           <div className="relative flex-1">
@@ -2021,10 +1970,9 @@ export default function SavedRecipesPage() {
           </button>
         </div>
 
-        {/* Multi-Filter Pills Strip */}
+        {/* Filter Pills */}
         {showFilters && (
           <div className="flex flex-wrap items-center gap-2 pt-1 animate-in fade-in text-xs font-semibold select-none">
-            {/* 1. Favorites Pill */}
             <button
               type="button"
               onClick={() => setFilterFavorites(!filterFavorites)}
@@ -2043,7 +1991,7 @@ export default function SavedRecipesPage() {
               <span>{t('favorites') || 'Favorites'}</span>
             </button>
 
-            {/* 2. Ingredients Popover Filter */}
+            {/* Ingredients Popover Filter */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2131,7 +2079,7 @@ export default function SavedRecipesPage() {
               )}
             </div>
 
-            {/* 3. Recipe Type Dropdown */}
+            {/* Recipe Type Dropdown */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2181,7 +2129,7 @@ export default function SavedRecipesPage() {
               )}
             </div>
 
-            {/* 4. Cooked Pill */}
+            {/* Cooked Pill */}
             <button
               type="button"
               onClick={() => setFilterCooked(!filterCooked)}
@@ -2200,7 +2148,7 @@ export default function SavedRecipesPage() {
               <span>{t('cooked') || 'Cooked'}</span>
             </button>
 
-            {/* 5. Rating Dropdown */}
+            {/* Rating Dropdown */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2250,7 +2198,7 @@ export default function SavedRecipesPage() {
               )}
             </div>
 
-            {/* 6. Prep Time Dropdown */}
+            {/* Prep Time Dropdown */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2300,7 +2248,7 @@ export default function SavedRecipesPage() {
               )}
             </div>
 
-            {/* 7. Cook Time Dropdown */}
+            {/* Cook Time Dropdown */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2353,7 +2301,7 @@ export default function SavedRecipesPage() {
         )}
       </div>
 
-      {/* Dynamic Recipe Card Grid */}
+      {/* Grid */}
       {loading ? (
         <div className="text-xs py-12 text-center" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
           {t('loadingRecipes') || 'Loading recipes...'}
@@ -2390,7 +2338,6 @@ export default function SavedRecipesPage() {
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
                     
-                    {/* Top Actions: Cooked Check & Favorite Buttons */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
@@ -2403,7 +2350,7 @@ export default function SavedRecipesPage() {
                           backgroundColor: 'rgba(0, 0, 0, 0.6)',
                           color: '#cbd5e1'
                         }}
-                        title={r.isCooked ? "Marked as Cooked (Click to undo)" : "Mark as Cooked"}
+                        title={r.isCooked ? "Marked as Cooked" : "Mark as Cooked"}
                       >
                         <CheckCircle2 className="h-3.5 w-3.5"/>
                       </button>
@@ -2570,9 +2517,7 @@ export default function SavedRecipesPage() {
 
             <div className="overflow-y-auto flex-1">
               {!isEditing ? (
-                /* RECIPE DETAILS VIEW */
                 <div className="space-y-5 pb-6">
-                  {/* Hero Banner */}
                   <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
                     <img
                       src={selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80'}
@@ -2608,7 +2553,6 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
-                  {/* Top Action Row */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
                     <div className="relative">
                       <button
@@ -2714,7 +2658,7 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t mx-5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }} />
 
-                  {/* Servings Stepper & Tools */}
+                  {/* Servings Stepper */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <span 
@@ -16043,7 +15987,7 @@ export default function AdminSubscriptionPlans() {
         if (rawDel) deletedSlugs = JSON.parse(rawDel);
       } catch (_) {}
 
-      const local = localStorage.getItem('zecratary_subscription_configs');
+      const local = null;
       if (local !== null) {
         const parsed = JSON.parse(local);
         if (Array.isArray(parsed)) {
@@ -16090,7 +16034,7 @@ export default function AdminSubscriptionPlans() {
             return true;
           });
 
-          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(cleanConfigs));
+          /* Synced via /api/admin/settings */
         }
       }
       const local = loadLocalPackages();
@@ -16122,7 +16066,7 @@ export default function AdminSubscriptionPlans() {
     }));
 
     setPackages(updated);
-    localStorage.setItem('zecratary_subscription_configs', JSON.stringify(updated));
+    /* Synced via /api/admin/settings */
     localStorage.setItem('zecratary_default_plan_slug', 'taster');
     localStorage.setItem('zecratary_default_plan', 'taster');
     window.dispatchEvent(new Event('zecratary_plans_updated'));
@@ -16296,7 +16240,7 @@ export default function AdminSubscriptionPlans() {
 
       updatedList = updatedList.map((p) => ({ ...p, isDefault: p.id === 'preset_taster' || p.slug === 'taster' }));
       setPackages(updatedList);
-      localStorage.setItem('zecratary_subscription_configs', JSON.stringify(updatedList));
+      /* Synced via /api/admin/settings */
       window.dispatchEvent(new Event('zecratary_plans_updated'));
       window.dispatchEvent(new Event('storage'));
 
@@ -16345,7 +16289,7 @@ export default function AdminSubscriptionPlans() {
         localStorage.setItem('zecratary_deleted_plan_slugs', JSON.stringify(delSlugs));
       } catch (_) {}
 
-      localStorage.setItem('zecratary_subscription_configs', JSON.stringify(updated));
+      /* Synced via /api/admin/settings */
       setPackages(updated);
 
       if (editingId === targetKey || editingId === pkg.id || editingId === pkg.slug || form.slug === pkg.slug) {
@@ -18500,7 +18444,7 @@ export default function AdminPaymentPage() {
   const loadPlans = useCallback(() => {
     let parsedPlans: PlanOption[] = [];
     try {
-      const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
+      const rawConfigs = null;
       if (rawConfigs) {
         const configs = JSON.parse(rawConfigs);
         if (Array.isArray(configs) && configs.length > 0) {
@@ -18548,7 +18492,7 @@ export default function AdminPaymentPage() {
 
     if (parsedPlans.length === 0) {
       try {
-        const rawPlans = localStorage.getItem('zecratary_subscription_plans');
+        const rawPlans = null;
         if (rawPlans) {
           const directPlans = JSON.parse(rawPlans);
           if (Array.isArray(directPlans) && directPlans.length > 0) {
@@ -22622,7 +22566,7 @@ export default function AdminUserManagementPage() {
     let parsedPlans: PlanOption[] = [];
 
     try {
-      const rawConfigs = localStorage.getItem('zecratary_subscription_configs');
+      const rawConfigs = null;
       if (rawConfigs) {
         const configs = JSON.parse(rawConfigs);
         if (Array.isArray(configs) && configs.length > 0) {
@@ -22668,7 +22612,7 @@ export default function AdminUserManagementPage() {
 
     if (parsedPlans.length === 0) {
       try {
-        const rawPlans = localStorage.getItem('zecratary_subscription_plans');
+        const rawPlans = null;
         if (rawPlans) {
           const directPlans = JSON.parse(rawPlans);
           if (Array.isArray(directPlans) && directPlans.length > 0) {
@@ -24604,7 +24548,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   ArrowLeft, Key, Save, RefreshCw, CheckCircle2, 
-  AlertCircle, Eye, EyeOff, Copy, Check, Zap, ExternalLink 
+  AlertCircle, Eye, EyeOff, Copy, Check, Zap 
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -24653,11 +24597,11 @@ export default function SocialLoginSettingPage() {
 
   const syncTheme = useCallback(() => {
     try {
-      const mode = localStorage.getItem('zecratary_theme_mode');
-      const day = mode === 'light';
-      setIsDayMode(day);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      if (typeof document !== 'undefined') {
+        const isDark = document.documentElement.classList.contains('dark');
+        setIsDayMode(!isDark);
+      }
+      const stored = typeof window !== 'undefined' ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config')) : null;
       if (stored) {
         applyThemeToDocument(JSON.parse(stored));
       } else {
@@ -24696,17 +24640,40 @@ export default function SocialLoginSettingPage() {
 
   const loadConfig = useCallback(async () => {
     try {
-      const saved = localStorage.getItem('zecratary_social_login_config');
-      if (saved) setConfig(JSON.parse(saved));
-
-      const res = await fetch('/api/admin/social-env');
+      // 1. Fetch from centralized server settings store
+      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
       if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.config) {
-          setConfig(prev => ({ ...prev, ...json.config }));
+        const data = await res.json();
+        const settings = data.settings || data;
+        if (settings?.socialLogin) {
+          setConfig(prev => ({
+            ...prev,
+            googleEnabled: settings.socialLogin.googleEnabled ?? prev.googleEnabled,
+            googleClientId: settings.socialLogin.googleClientId ?? prev.googleClientId,
+            googleClientSecret: settings.socialLogin.googleClientSecret ?? prev.googleClientSecret,
+            facebookEnabled: settings.socialLogin.facebookEnabled ?? prev.facebookEnabled,
+            facebookClientId: settings.socialLogin.facebookClientId ?? settings.socialLogin.facebookAppId ?? prev.facebookClientId,
+            facebookClientSecret: settings.socialLogin.facebookClientSecret ?? settings.socialLogin.facebookAppSecret ?? prev.facebookClientSecret,
+            appleEnabled: settings.socialLogin.appleEnabled ?? prev.appleEnabled,
+            appleClientId: settings.socialLogin.appleClientId ?? prev.appleClientId,
+            appleTeamId: settings.socialLogin.appleTeamId ?? prev.appleTeamId,
+            appleKeyId: settings.socialLogin.appleKeyId ?? prev.appleKeyId
+          }));
+          return;
         }
       }
-    } catch (_) {}
+
+      // 2. Fallback to reading from .env endpoint if server store hasn't initialized
+      const envRes = await fetch('/api/admin/social-env', { cache: 'no-store' });
+      if (envRes.ok) {
+        const envJson = await envRes.json();
+        if (envJson.success && envJson.config) {
+          setConfig(prev => ({ ...prev, ...envJson.config }));
+        }
+      }
+    } catch (err) {
+      console.error('[social-login-setting] Failed to fetch server config:', err);
+    }
   }, []);
 
   useEffect(() => {
@@ -24725,20 +24692,40 @@ export default function SocialLoginSettingPage() {
     setStatusMsg(null);
 
     try {
-      localStorage.setItem('zecratary_social_login_config', JSON.stringify(config));
-      window.dispatchEvent(new Event('zecratary_social_login_updated'));
-      window.dispatchEvent(new Event('storage'));
-
-      const res = await fetch('/api/admin/social-env', {
+      // Direct server-backed persistence - ZERO localStorage read/writes
+      const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config)
+        body: JSON.stringify({
+          socialLogin: {
+            ...config,
+            facebookAppId: config.facebookClientId,
+            facebookAppSecret: config.facebookClientSecret
+          }
+        })
       });
 
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to update .env');
+      // Synchronize to .env handler if present
+      try {
+        await fetch('/api/admin/social-env', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+      } catch (_) {}
 
-      setStatusMsg({ text: t('socialSavedSuccess') || 'Configuration saved and synced to .env successfully!', success: true });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to persist settings to server storage');
+      }
+
+      window.dispatchEvent(new Event('zecratary_social_login_updated'));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+
+      setStatusMsg({ 
+        text: t('socialSavedSuccess') || 'Configuration saved and synced to server successfully!', 
+        success: true 
+      });
       setTimeout(() => setStatusMsg(null), 4000);
     } catch (err: any) {
       setStatusMsg({ text: err.message || 'Error saving configuration.', success: false });
@@ -24750,18 +24737,32 @@ export default function SocialLoginSettingPage() {
   const handlePullEnv = async () => {
     setSyncingEnv(true);
     try {
-      const res = await fetch('/api/admin/social-env');
+      const res = await fetch('/api/admin/social-env', { cache: 'no-store' });
       const json = await res.json();
-      if (res.ok && json.success) {
+      if (res.ok && json.success && json.config) {
         setConfig(prev => ({ ...prev, ...json.config }));
-        localStorage.setItem('zecratary_social_login_config', JSON.stringify(json.config));
+        await fetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            socialLogin: {
+              ...json.config,
+              facebookAppId: json.config.facebookClientId,
+              facebookAppSecret: json.config.facebookClientSecret
+            }
+          })
+        });
         window.dispatchEvent(new Event('zecratary_social_login_updated'));
-        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
         setStatusMsg({ text: t('socialPullSuccess') || 'Values synced from .env successfully!', success: true });
+        setTimeout(() => setStatusMsg(null), 3000);
+      } else {
+        await loadConfig();
+        setStatusMsg({ text: t('socialPullSuccess') || 'Values refreshed from server store!', success: true });
         setTimeout(() => setStatusMsg(null), 3000);
       }
     } catch (_) {
-      setStatusMsg({ text: t('socialPullError') || 'Failed to read .env file.', success: false });
+      setStatusMsg({ text: t('socialPullError') || 'Failed to sync configuration.', success: false });
     } finally {
       setSyncingEnv(false);
     }
@@ -32560,6 +32561,128 @@ export default function UsersRedirectPage() {
 
 ```
 
+## File: `apps/web/src/app/api/auth/google-session/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function syncUserToStore(user: any): any {
+  const cwd = process.cwd();
+  const paths = [
+    path.join(cwd, 'apps/web/data/users.json'),
+    path.join(cwd, 'data/users.json')
+  ];
+
+  let resolvedUser = user;
+
+  for (const p of paths) {
+    try {
+      let usersList: any[] = [];
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        usersList = JSON.parse(raw);
+        if (!Array.isArray(usersList)) usersList = [];
+      } else {
+        const dir = path.dirname(p);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const existingIndex = usersList.findIndex(
+        (u) => u && u.email && u.email.toLowerCase() === user.email.toLowerCase()
+      );
+
+      if (existingIndex >= 0) {
+        usersList[existingIndex] = {
+          ...usersList[existingIndex],
+          name: user.name || usersList[existingIndex].name,
+          picture: user.picture || usersList[existingIndex].picture,
+          avatar: user.picture || usersList[existingIndex].avatar
+        };
+        resolvedUser = usersList[existingIndex];
+      } else {
+        usersList.unshift(user);
+      }
+
+      fs.writeFileSync(p, JSON.stringify(usersList, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('[google-session] Error syncing user to store:', p, err);
+    }
+  }
+
+  return resolvedUser;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const profile = body.profile;
+    const requestedCallback = body.callbackUrl;
+
+    if (!profile || !profile.email) {
+      return NextResponse.json({ error: 'Missing profile email' }, { status: 400 });
+    }
+
+    const email = profile.email.toLowerCase().trim();
+    const name = profile.name || profile.given_name || email.split('@')[0];
+    const picture = profile.picture || '';
+    const googleId = profile.sub || profile.id || Date.now().toString();
+
+    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
+
+    const candidateUser = {
+      id: `usr_g_${googleId}`,
+      name,
+      email,
+      role: isEmailAdmin ? 'admin' : 'user',
+      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
+      picture,
+      avatar: picture,
+      createdAt: new Date().toISOString()
+    };
+
+    const finalUser = syncUserToStore(candidateUser);
+
+    // Prevent circular redirects to /login
+    let targetUrl = requestedCallback;
+    if (!targetUrl || targetUrl === '/login' || targetUrl.startsWith('/login?')) {
+      targetUrl = finalUser.role === 'admin' ? '/admin' : '/profile';
+    }
+
+    const response = NextResponse.json({
+      success: true,
+      user: finalUser,
+      redirectUrl: targetUrl
+    });
+
+    const serializedUser = JSON.stringify(finalUser);
+    response.cookies.set('zecratary_current_user', serializedUser, {
+      path: '/',
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 86400 * 7
+    });
+
+    response.cookies.set('zecratary_auth_session', serializedUser, {
+      path: '/',
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 86400 * 7
+    });
+
+    return response;
+  } catch (err: any) {
+    console.error('[google-session] Error:', err);
+    return NextResponse.json({ error: err.message || 'Session creation failed' }, { status: 500 });
+  }
+}
+
+```
+
 ## File: `apps/web/src/app/api/auth/callback/route.ts`
 ```typescript
 import { NextResponse } from 'next/server';
@@ -32714,6 +32837,286 @@ export async function POST(req: Request) {
 
 ```
 
+## File: `apps/web/src/app/api/auth/callback/google/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getAdminSettings(): any {
+  const cwd = process.cwd();
+  const paths = [
+    path.join(cwd, 'apps/web/data/admin_settings.json'),
+    path.join(cwd, 'data/admin_settings.json')
+  ];
+  for (const p of paths) {
+    if (fs.existsSync(p)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch (_) {}
+    }
+  }
+  return {};
+}
+
+function getRedirectUri(req: NextRequest): string {
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || new URL(req.url).host;
+  const proto = req.headers.get('x-forwarded-proto') || (req.url.startsWith('https') ? 'https' : 'http');
+  return `${proto}://${host}/api/auth/callback/google`;
+}
+
+function syncUserToStore(user: any): any {
+  const cwd = process.cwd();
+  const paths = [
+    path.join(cwd, 'apps/web/data/users.json'),
+    path.join(cwd, 'data/users.json')
+  ];
+
+  let resolvedUser = user;
+
+  for (const p of paths) {
+    try {
+      let usersList: any[] = [];
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        usersList = JSON.parse(raw);
+        if (!Array.isArray(usersList)) usersList = [];
+      } else {
+        const dir = path.dirname(p);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const existingIndex = usersList.findIndex(
+        (u) => u && u.email && u.email.toLowerCase() === user.email.toLowerCase()
+      );
+
+      if (existingIndex >= 0) {
+        usersList[existingIndex] = {
+          ...usersList[existingIndex],
+          name: user.name || usersList[existingIndex].name,
+          picture: user.picture || usersList[existingIndex].picture,
+          avatar: user.picture || usersList[existingIndex].avatar
+        };
+        resolvedUser = usersList[existingIndex];
+      } else {
+        usersList.unshift(user);
+      }
+
+      fs.writeFileSync(p, JSON.stringify(usersList, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('[OAuth Callback] Error syncing user to store:', p, err);
+    }
+  }
+
+  return resolvedUser;
+}
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const error = url.searchParams.get('error');
+
+  if (error) {
+    const errUrl = new URL('/login', req.url);
+    errUrl.searchParams.set('error', error === 'access_denied' ? 'google_access_denied' : error);
+    return NextResponse.redirect(errUrl);
+  }
+
+  if (!code) {
+    const errUrl = new URL('/login', req.url);
+    errUrl.searchParams.set('error', 'missing_code');
+    return NextResponse.redirect(errUrl);
+  }
+
+  let callbackUrl = '';
+  if (state) {
+    try {
+      const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
+      if (decoded.callbackUrl) callbackUrl = decoded.callbackUrl;
+    } catch (_) {}
+  }
+
+  const settings = getAdminSettings();
+  const social = settings?.socialLogin || {};
+  const clientId = (
+    social.googleClientId || 
+    process.env.GOOGLE_CLIENT_ID || 
+    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || 
+    ''
+  ).trim();
+
+  const clientSecret = (
+    social.googleClientSecret || 
+    process.env.GOOGLE_CLIENT_SECRET || 
+    process.env.GOOGLE_SECRET || 
+    ''
+  ).trim();
+
+  const redirectUri = getRedirectUri(req);
+
+  if (!clientId || !clientSecret) {
+    const errUrl = new URL('/login', req.url);
+    errUrl.searchParams.set('error', 'missing_google_client_secret');
+    return NextResponse.redirect(errUrl);
+  }
+
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      })
+    });
+
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || (!tokenData.access_token && !tokenData.id_token)) {
+      console.error('[OAuth Callback] Token Exchange Failure:', tokenData);
+      const errUrl = new URL('/login', req.url);
+      errUrl.searchParams.set('error', 'token_exchange_failed');
+      return NextResponse.redirect(errUrl);
+    }
+
+    let profile: any = {};
+    if (tokenData.id_token) {
+      try {
+        const payloadBase64 = tokenData.id_token.split('.')[1];
+        profile = JSON.parse(Buffer.from(payloadBase64, 'base64url').toString('utf-8'));
+      } catch (_) {}
+    }
+
+    if (!profile.email && tokenData.access_token) {
+      try {
+        const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${tokenData.access_token}` }
+        });
+        if (userRes.ok) {
+          const uData = await userRes.json();
+          profile = { ...profile, ...uData };
+        }
+      } catch (_) {}
+    }
+
+    if (!profile.email) {
+      const errUrl = new URL('/login', req.url);
+      errUrl.searchParams.set('error', 'no_email_returned');
+      return NextResponse.redirect(errUrl);
+    }
+
+    const email = profile.email.toLowerCase().trim();
+    const name = profile.name || profile.given_name || email.split('@')[0];
+    const picture = profile.picture || '';
+    const googleId = profile.sub || Date.now().toString();
+
+    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
+
+    const candidateUser = {
+      id: `usr_g_${googleId}`,
+      name,
+      email,
+      role: isEmailAdmin ? 'admin' : 'user',
+      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
+      picture,
+      avatar: picture,
+      createdAt: new Date().toISOString()
+    };
+
+    const finalUser = syncUserToStore(candidateUser);
+
+    let destination = callbackUrl;
+    if (!destination || destination === '/login' || destination.startsWith('/login?')) {
+      destination = finalUser.role === 'admin' ? '/admin' : '/profile';
+    }
+
+    const serializedUser = JSON.stringify(finalUser);
+
+    const htmlBridge = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Signing In...</title>
+  <script>
+    (function() {
+      try {
+        var user = ${serializedUser};
+        localStorage.setItem('zecratary_current_user', JSON.stringify(user));
+        document.cookie = 'zecratary_current_user=' + encodeURIComponent(JSON.stringify(user)) + '; path=/; max-age=604800; SameSite=Lax';
+        
+        try {
+          var raw = localStorage.getItem('zecratary_users');
+          var list = raw ? JSON.parse(raw) : [];
+          if (!Array.isArray(list)) list = [];
+          var idx = list.findIndex(function(u) { return u && u.email && u.email.toLowerCase() === user.email.toLowerCase(); });
+          if (idx >= 0) {
+            list[idx] = Object.assign({}, list[idx], user);
+          } else {
+            list.unshift(user);
+          }
+          localStorage.setItem('zecratary_users', JSON.stringify(list));
+        } catch (_) {}
+
+        window.dispatchEvent(new Event('zecratary_auth_changed'));
+        window.dispatchEvent(new Event('storage'));
+      } catch (err) {
+        console.error('Session bridge error:', err);
+      }
+      window.location.replace(${JSON.stringify(destination)});
+    })();
+  </script>
+</head>
+<body style="background:#0b0f17;color:#ffffff;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+  <div style="text-align:center;padding:24px;">
+    <div style="width:40px;height:40px;border:3px solid #E05638;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px;"></div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Signed in as ${name}</div>
+    <div style="font-size:12px;color:#94a3b8;">Redirecting to your dashboard...</div>
+  </div>
+  <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
+</body>
+</html>`;
+
+    const response = new NextResponse(htmlBridge, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
+
+    response.cookies.set('zecratary_current_user', serializedUser, {
+      path: '/',
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 86400 * 7
+    });
+
+    response.cookies.set('zecratary_auth_session', serializedUser, {
+      path: '/',
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 86400 * 7
+    });
+
+    return response;
+  } catch (err: any) {
+    console.error('[OAuth Callback Exception]:', err);
+    const errUrl = new URL('/login', req.url);
+    errUrl.searchParams.set('error', err.message || 'oauth_handshake_error');
+    return NextResponse.redirect(errUrl);
+  }
+}
+
+```
+
 ## File: `apps/web/src/app/api/auth/callback/[provider]/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -32739,6 +33142,279 @@ export async function POST(req: NextRequest, { params }: { params: { provider: s
     target.searchParams.set('state', params.provider);
   }
   return NextResponse.redirect(target.toString());
+}
+
+```
+
+## File: `apps/web/src/app/api/auth/login/google/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getAdminSettings(): any {
+  const cwd = process.cwd();
+  const paths = [
+    path.join(cwd, 'apps/web/data/admin_settings.json'),
+    path.join(cwd, 'data/admin_settings.json')
+  ];
+  for (const p of paths) {
+    if (fs.existsSync(p)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch (_) {}
+    }
+  }
+  return {};
+}
+
+function getRedirectUri(req: NextRequest): string {
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || new URL(req.url).host;
+  const proto = req.headers.get('x-forwarded-proto') || (req.url.startsWith('https') ? 'https' : 'http');
+  return `${proto}://${host}/api/auth/callback/google`;
+}
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const callbackUrl = url.searchParams.get('callbackUrl') || '/profile';
+  const settings = getAdminSettings();
+  const social = settings?.socialLogin || {};
+
+  const clientId = (
+    social.googleClientId || 
+    process.env.GOOGLE_CLIENT_ID || 
+    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || 
+    ''
+  ).trim();
+
+  if (!clientId) {
+    const errorUrl = new URL('/login', req.url);
+    errorUrl.searchParams.set('error', 'missing_google_client_id');
+    return NextResponse.redirect(errorUrl);
+  }
+
+  const redirectUri = getRedirectUri(req);
+
+  const statePayload = JSON.stringify({
+    callbackUrl,
+    provider: 'google',
+    nonce: Math.random().toString(36).substring(2, 12),
+    timestamp: Date.now()
+  });
+  const state = Buffer.from(statePayload).toString('base64url');
+
+  const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  googleAuthUrl.searchParams.set('client_id', clientId);
+  googleAuthUrl.searchParams.set('redirect_uri', redirectUri);
+  googleAuthUrl.searchParams.set('response_type', 'code');
+  googleAuthUrl.searchParams.set('scope', 'openid email profile');
+  googleAuthUrl.searchParams.set('prompt', 'select_account');
+  googleAuthUrl.searchParams.set('access_type', 'offline');
+  googleAuthUrl.searchParams.set('include_granted_scopes', 'true');
+  googleAuthUrl.searchParams.set('state', state);
+
+  const res = NextResponse.redirect(googleAuthUrl.toString(), 307);
+  res.cookies.set('zecratary_oauth_state', state, {
+    path: '/',
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 600
+  });
+
+  return res;
+}
+
+```
+
+## File: `apps/web/src/app/api/auth/login/[provider]/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getAdminSettings(): any {
+  const cwd = process.cwd();
+  const paths = [
+    path.join(cwd, 'apps/web/data/admin_settings.json'),
+    path.join(cwd, 'data/admin_settings.json')
+  ];
+  for (const p of paths) {
+    if (fs.existsSync(p)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch (_) {}
+    }
+  }
+  return {};
+}
+
+export async function GET(
+  req: NextRequest, 
+  context: { params: Promise<{ provider: string }> | { provider: string } }
+) {
+  const params = await Promise.resolve(context.params);
+  const provider = (params?.provider || '').toLowerCase();
+  const url = new URL(req.url);
+  const callbackUrl = url.searchParams.get('callbackUrl') || '/profile';
+  const settings = getAdminSettings();
+  const social = settings?.socialLogin || {};
+
+  if (provider === 'google') {
+    const clientId = social.googleClientId || 
+                     process.env.GOOGLE_CLIENT_ID || 
+                     process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+
+    if (!clientId || clientId.trim() === '') {
+      const errorUrl = new URL('/login', req.url);
+      errorUrl.searchParams.set('error', 'missing_google_client_id');
+      return NextResponse.redirect(errorUrl);
+    }
+
+    const origin = url.origin;
+    const redirectUri = `${origin}/api/auth/callback/google`;
+
+    const statePayload = JSON.stringify({
+      callbackUrl,
+      provider: 'google',
+      nonce: Math.random().toString(36).substring(2, 12),
+      timestamp: Date.now()
+    });
+    const state = Buffer.from(statePayload).toString('base64url');
+
+    const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    googleAuthUrl.searchParams.set('client_id', clientId.trim());
+    googleAuthUrl.searchParams.set('redirect_uri', redirectUri);
+    googleAuthUrl.searchParams.set('response_type', 'code');
+    googleAuthUrl.searchParams.set('scope', 'openid email profile');
+    googleAuthUrl.searchParams.set('prompt', 'select_account'); // Prompt user to select Gmail account
+    googleAuthUrl.searchParams.set('access_type', 'offline');
+    googleAuthUrl.searchParams.set('include_granted_scopes', 'true');
+    googleAuthUrl.searchParams.set('state', state);
+
+    const res = NextResponse.redirect(googleAuthUrl.toString(), 307);
+    res.cookies.set('zecratary_oauth_state', state, {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 600
+    });
+    return res;
+  }
+
+  // Fallback for unconfigured providers
+  const fallbackUrl = new URL('/login', req.url);
+  fallbackUrl.searchParams.set('error', `unsupported_provider_${provider}`);
+  return NextResponse.redirect(fallbackUrl);
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/settings/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getStorePaths(): string[] {
+  const cwd = process.cwd();
+  return [
+    path.join(cwd, 'apps/web/data/admin_settings.json'),
+    path.join(cwd, 'data/admin_settings.json')
+  ];
+}
+
+function readServerSettings(): Record<string, any> {
+  const filePaths = getStorePaths();
+  for (const fp of filePaths) {
+    if (fs.existsSync(fp)) {
+      try {
+        const raw = fs.readFileSync(fp, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch (err) {
+        console.error('[API admin/settings] Read error:', fp, err);
+      }
+    }
+  }
+  return {};
+}
+
+function writeServerSettings(data: Record<string, any>): boolean {
+  const filePaths = getStorePaths();
+  let wrote = false;
+  const payload = {
+    ...data,
+    updatedAt: new Date().toISOString()
+  };
+  for (const fp of filePaths) {
+    try {
+      const dir = path.dirname(fp);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(fp, JSON.stringify(payload, null, 2), 'utf-8');
+      wrote = true;
+    } catch (err) {
+      console.error('[API admin/settings] Write error:', fp, err);
+    }
+  }
+  return wrote;
+}
+
+export async function GET() {
+  try {
+    const settings = readServerSettings();
+    return NextResponse.json(
+      { success: true, settings },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+        }
+      }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to read settings' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const current = readServerSettings();
+    const merged = {
+      ...current,
+      ...body,
+      socialLogin: {
+        ...(current.socialLogin || {}),
+        ...(body.socialLogin || {})
+      },
+      subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || []
+    };
+
+    const success = writeServerSettings(merged);
+    if (!success) {
+      return NextResponse.json({ error: 'Failed to write settings to storage' }, { status: 500 });
+    }
+
+    return NextResponse.json(
+      { success: true, settings: merged },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+        }
+      }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to persist settings' }, { status: 500 });
+  }
 }
 
 ```
@@ -34158,6 +34834,108 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, message: 'Configuration synchronized to environment file' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/user/theme/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getTargetFiles(): string[] {
+  const cwd = process.cwd();
+  return [
+    path.join(cwd, 'apps/web/data/user_theme.json'),
+    path.join(cwd, 'data/user_theme.json')
+  ];
+}
+
+function readThemeData(): any[] {
+  const files = getTargetFiles();
+  for (const file of files) {
+    if (fs.existsSync(file)) {
+      try {
+        const raw = fs.readFileSync(file, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [parsed];
+      } catch (err) {
+        console.error('[API user-theme] Read error:', file, err);
+      }
+    }
+  }
+  return [];
+}
+
+function writeThemeData(themes: any[]): boolean {
+  const files = getTargetFiles();
+  let wroteAny = false;
+  for (const file of files) {
+    try {
+      const dir = path.dirname(file);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(themes, null, 2), 'utf-8');
+      wroteAny = true;
+    } catch (err) {
+      console.error('[API user-theme] Write error:', file, err);
+    }
+  }
+  return wroteAny;
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = (searchParams.get('userId') || 'usr_admin_1').trim();
+
+    const themes = readThemeData();
+    const userTheme = themes.find((t: any) => t.userId === userId) || {
+      userId,
+      themeMode: 'dark',
+      primaryColor: '#E05638',
+      accentColor: '#10b981'
+    };
+
+    return NextResponse.json(userTheme, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const userId = (body.userId || 'usr_admin_1').trim();
+
+    const themes = readThemeData();
+    const others = themes.filter((t: any) => t.userId !== userId);
+    
+    const updatedTheme = {
+      ...body,
+      userId
+    };
+
+    const merged = [updatedTheme, ...others];
+    writeThemeData(merged);
+
+    return NextResponse.json({
+      success: true,
+      theme: updatedTheme
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
@@ -35743,6 +36521,128 @@ export async function POST(req: NextRequest) {
     isUnlimited: isPro,
     remaining: isPro ? -1 : Math.max(0, 5 - (currentCount + 1)),
   });
+}
+
+```
+
+## File: `apps/web/src/app/api/saved-recipes/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getTargetFiles(): string[] {
+  const cwd = process.cwd();
+  return [
+    path.join(cwd, 'apps/web/data/saved_recipes.json'),
+    path.join(cwd, 'data/saved_recipes.json')
+  ];
+}
+
+function readAllRecipes(): any[] {
+  const files = getTargetFiles();
+  for (const file of files) {
+    if (fs.existsSync(file)) {
+      try {
+        const raw = fs.readFileSync(file, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (parsed && Array.isArray(parsed.recipes) && parsed.recipes.length > 0) return parsed.recipes;
+      } catch (err) {
+        console.error('[API saved-recipes] Read error:', file, err);
+      }
+    }
+  }
+  return [];
+}
+
+function writeAllRecipes(recipes: any[]): boolean {
+  const files = getTargetFiles();
+  let wroteAny = false;
+  for (const file of files) {
+    try {
+      const dir = path.dirname(file);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(recipes, null, 2), 'utf-8');
+      wroteAny = true;
+    } catch (err) {
+      console.error('[API saved-recipes] Write error:', file, err);
+    }
+  }
+  return wroteAny;
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = (searchParams.get('userId') || 'usr_admin_1').trim();
+
+    const allRecipes = readAllRecipes();
+
+    // Deduplicate and filter recipes
+    const userRecipes = allRecipes.filter((r: any) => {
+      if (!userId || userId === 'usr_admin_1') return true;
+      if (r.userId && r.userId === userId) return true;
+      if (r.creatorId && r.creatorId === userId) return true;
+      if (r.createdBy && (r.createdBy === userId || (userId.includes('admin') && String(r.createdBy).includes('admin')))) return true;
+      return false;
+    });
+
+    return NextResponse.json(userRecipes, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const userId = (body.userId || 'usr_admin_1').trim();
+    const incoming = Array.isArray(body.recipes) ? body.recipes : (Array.isArray(body) ? body : []);
+
+    const existingAll = readAllRecipes();
+
+    // Build key-indexed lookup to safely merge without data wipeout
+    const mergedMap = new Map<string, any>();
+
+    // 1. Ingest existing recipes
+    for (const item of existingAll) {
+      if (!item) continue;
+      const key = String(item.id || item.title || item.name || '').trim().toLowerCase();
+      if (key) mergedMap.set(key, item);
+    }
+
+    // 2. Overlay incoming recipes
+    for (const item of incoming) {
+      if (!item) continue;
+      const key = String(item.id || item.title || item.name || '').trim().toLowerCase();
+      if (key) {
+        const existing = mergedMap.get(key) || {};
+        mergedMap.set(key, { ...existing, ...item, userId: userId });
+      }
+    }
+
+    const finalMerged = Array.from(mergedMap.values());
+    writeAllRecipes(finalMerged);
+
+    return NextResponse.json({
+      success: true,
+      count: finalMerged.length,
+      recipes: finalMerged
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
 }
 
 ```
@@ -38853,439 +39753,476 @@ export default function CookbooksPage() {
 ```typescript
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  Mail, Lock, CheckCircle2, AlertCircle, ArrowRight, 
-  Sparkles, Eye, EyeOff, ShieldCheck, Loader2
+  Mail, Lock, Eye, EyeOff, LogIn, AlertCircle, CheckCircle2, 
+  ArrowRight, Sparkles, ChefHat 
 } from 'lucide-react';
-import { getCurrentUser, setCurrentUser, initAuthStorage, User } from '@/lib/auth';
-import { 
-  getSocialLoginConfig, SocialLoginConfig, DEFAULT_SOCIAL_CONFIG, 
-  executeSocialAuth, decodeGoogleCredential, SocialProvider 
-} from '@/lib/socialAuth';
+import { getCurrentUser, loginUser, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import { applyThemeToDocument } from '@/lib/themeConfig';
 
-declare global {
-  interface Window {
-    google?: any;
-  }
+interface SocialProvidersConfig {
+  googleEnabled: boolean;
+  facebookEnabled: boolean;
+  appleEnabled: boolean;
 }
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useTranslation();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [socialLoading, setSocialLoading] = useState<SocialProvider | null>(null);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [isDayMode, setIsDayMode] = useState(false);
-  
-  const [config, setConfig] = useState<SocialLoginConfig>(DEFAULT_SOCIAL_CONFIG);
 
-  const [socialModalProvider, setSocialModalProvider] = useState<SocialProvider | null>(null);
-  const [socialCustomEmail, setSocialCustomEmail] = useState('');
-  const [socialCustomName, setSocialCustomName] = useState('');
+  // Dynamic social provider configuration state (defaulting to false to prevent layout flash)
+  const [socialConfig, setSocialConfig] = useState<SocialProvidersConfig>({
+    googleEnabled: false,
+    facebookEnabled: false,
+    appleEnabled: false
+  });
+  const [socialLoaded, setSocialLoaded] = useState(false);
 
+  // 1. Theme Synchronization
   const syncTheme = useCallback(() => {
     try {
-      const mode = localStorage.getItem('zecratary_theme_mode');
-      setIsDayMode(mode === 'light');
-    } catch (_) {}
-  }, []);
-
-  const fetchLiveConfig = useCallback(async () => {
-    try {
-      const res = await fetch('/api/social-config', { cache: 'no-store' });
-      if (res.ok) {
-        const live = await res.json();
-        setConfig(live);
-        localStorage.setItem('zecratary_social_login_config', JSON.stringify(live));
-        return;
+      if (typeof document !== 'undefined') {
+        const isDark = document.documentElement.classList.contains('dark');
+        setIsDayMode(!isDark);
+      }
+      const storedColors = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
+      if (storedColors) {
+        applyThemeToDocument(JSON.parse(storedColors));
+      } else {
+        applyThemeToDocument(null);
       }
     } catch (_) {}
-    setConfig(getSocialLoginConfig());
   }, []);
-
-  // Dynamically load Google Identity Services SDK
-  useEffect(() => {
-    if (typeof window !== 'undefined' && config.googleEnabled) {
-      const scriptId = 'google-identity-services-sdk';
-      if (!document.getElementById(scriptId)) {
-        const script = document.createElement('script');
-        script.id = scriptId;
-        script.src = 'https://accounts.google.com/gsi/client';
-        script.async = true;
-        script.defer = true;
-        document.body.appendChild(script);
-      }
-    }
-  }, [config.googleEnabled]);
 
   useEffect(() => {
     syncTheme();
-    fetchLiveConfig();
-
-    const handleUpdate = () => fetchLiveConfig();
     window.addEventListener('zecratary_theme_mode_changed', syncTheme);
-    window.addEventListener('zecratary_social_login_updated', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
+    window.addEventListener('zecratary_theme_changed', syncTheme);
+    window.addEventListener('zecratary_theme_updated', syncTheme);
+    window.addEventListener('storage', syncTheme);
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
-      window.removeEventListener('zecratary_social_login_updated', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
+      window.removeEventListener('zecratary_theme_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_updated', syncTheme);
+      window.removeEventListener('storage', syncTheme);
     };
-  }, [syncTheme, fetchLiveConfig]);
+  }, [syncTheme]);
 
-  // Capture server-side OAuth callback redirects
+  // 2. Fetch Centralized Server-Backed Social Login Settings
+  const fetchSocialConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/settings', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const settings = data.settings || data;
+        if (settings && settings.socialLogin) {
+          setSocialConfig({
+            googleEnabled: Boolean(settings.socialLogin.googleEnabled),
+            facebookEnabled: Boolean(settings.socialLogin.facebookEnabled),
+            appleEnabled: Boolean(settings.socialLogin.appleEnabled)
+          });
+          setSocialLoaded(true);
+          return;
+        }
+      }
+
+      // Fallback: Query .env endpoint if server store hasn't initialized
+      const envRes = await fetch('/api/admin/social-env', { cache: 'no-store' });
+      if (envRes.ok) {
+        const envData = await envRes.json();
+        if (envData.success && envData.config) {
+          setSocialConfig({
+            googleEnabled: Boolean(envData.config.googleEnabled),
+            facebookEnabled: Boolean(envData.config.facebookEnabled),
+            appleEnabled: Boolean(envData.config.appleEnabled)
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[login] Failed to load dynamic social login settings:', err);
+    } finally {
+      setSocialLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSocialConfig();
+    window.addEventListener('zecratary_social_login_updated', fetchSocialConfig);
+    window.addEventListener('zecratary_admin_settings_updated', fetchSocialConfig);
+    return () => {
+      window.removeEventListener('zecratary_social_login_updated', fetchSocialConfig);
+      window.removeEventListener('zecratary_admin_settings_updated', fetchSocialConfig);
+    };
+  }, [fetchSocialConfig]);
+
+  // 3. User Session Verification
   useEffect(() => {
     initAuthStorage();
-    if (getCurrentUser()) {
-      router.replace('/profile');
-      return;
+    const active = getCurrentUser();
+    if (active) {
+      const callback = searchParams.get('callbackUrl') || (active.role === 'admin' ? '/admin' : '/profile');
+      router.replace(callback);
     }
+  }, [router, searchParams]);
 
-    const errParam = searchParams.get('error');
-    if (errParam) {
-      setError(decodeURIComponent(errParam));
-      return;
-    }
-
-    const isSocialSuccess = searchParams.get('social_success') === 'true';
-    if (isSocialSuccess) {
-      const provider = (searchParams.get('provider') || 'google') as SocialProvider;
-      const callbackEmail = searchParams.get('email') || '';
-      const callbackName = searchParams.get('name') || '';
-
-      if (callbackEmail) {
-        setSuccess(`${t('signedInWith') || 'Signed in with'} ${provider.toUpperCase()}! Redirecting...`);
-        executeSocialAuth({
-          name: callbackName,
-          email: callbackEmail,
-          provider
-        });
-        setTimeout(() => router.replace('/profile'), 600);
-      }
-    }
-  }, [searchParams, router, t]);
-
-  const handleLogin = async (e: React.FormEvent) => {
+  // 4. Form Submission Handler
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
+    setErrorMsg('');
+    setSuccessMsg('');
 
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail || !password) {
-      setError(t('invalidCredentials') || 'Please enter both email and password.');
+    if (!email.trim() || !password) {
+      setErrorMsg(t('fillRequiredFields') || 'Please provide both email and password.');
       return;
     }
 
     setLoading(true);
-
-    setTimeout(() => {
-      try {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
-
-        const matched = users.find(u => u.email.toLowerCase() === cleanEmail && u.password === password);
-        if (!matched) {
-          setError(t('invalidCredentials') || 'Invalid email address or password.');
-          setLoading(false);
-          return;
-        }
-
-        setCurrentUser(matched);
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_auth_changed'));
-        window.dispatchEvent(new Event('storage'));
-
-        setSuccess(t('loginSuccess') || 'Login successful! Redirecting...');
-        setTimeout(() => router.replace('/profile'), 500);
-      } catch (err: any) {
-        setError(err.message || 'Login failed.');
-        setLoading(false);
+    try {
+      const user = await Promise.resolve(loginUser(email.trim(), password));
+      if (user) {
+        setSuccessMsg(t('loginSuccess') || 'Signing in...');
+        const callback = searchParams.get('callbackUrl') || (user.role === 'admin' ? '/admin' : '/profile');
+        setTimeout(() => {
+          router.push(callback);
+        }, 500);
+      } else {
+        setErrorMsg(t('invalidCredentials') || 'Invalid email or password.');
       }
-    }, 500);
-  };
-
-  const handleSocialClick = (provider: SocialProvider) => {
-    setError('');
-
-    // Trigger Google Identity Services One Tap / Credential Flow if Client ID is configured
-    if (provider === 'google' && config.googleClientId && typeof window !== 'undefined' && window.google?.accounts?.id) {
-      try {
-        window.google.accounts.id.initialize({
-          client_id: config.googleClientId,
-          callback: (response: { credential?: string }) => {
-            if (response.credential) {
-              const profile = decodeGoogleCredential(response.credential);
-              if (profile && profile.email) {
-                setSocialLoading('google');
-                executeSocialAuth({
-                  name: profile.name,
-                  email: profile.email,
-                  avatar: profile.avatar,
-                  provider: 'google',
-                });
-                setSuccess(`${t('signedInWith') || 'Signed in with'} GOOGLE! Redirecting...`);
-                setTimeout(() => router.replace('/profile'), 500);
-                return;
-              }
-            }
-          },
-          auto_select: false,
-          cancel_on_tap_outside: true,
-        });
-
-        window.google.accounts.id.prompt((notification: any) => {
-          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-            setSocialModalProvider('google');
-            setSocialCustomName('Google User');
-            setSocialCustomEmail('user@gmail.com');
-          }
-        });
-        return;
-      } catch (err) {
-        console.warn('Google Identity Services prompt fallback', err);
-      }
-    }
-
-    // Default modal fallback for Apple, Facebook, or unconfigured Google ID
-    setSocialModalProvider(provider);
-    if (provider === 'google') {
-      setSocialCustomName('Google User');
-      setSocialCustomEmail('user@gmail.com');
-    } else if (provider === 'facebook') {
-      setSocialCustomName('Facebook User');
-      setSocialCustomEmail('user@facebook.com');
-    } else {
-      setSocialCustomName('Apple Account');
-      setSocialCustomEmail('privaterelay@appleid.com');
+    } catch (err: any) {
+      setErrorMsg(err.message || (t('loginError') || 'Failed to sign in. Please try again.'));
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleCompleteSocialAuth = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!socialModalProvider) return;
-
-    const chosenEmail = socialCustomEmail.trim().toLowerCase();
-    const chosenName = socialCustomName.trim() || `${socialModalProvider.toUpperCase()} User`;
-
-    setSocialLoading(socialModalProvider);
-    const p = socialModalProvider;
-    setSocialModalProvider(null);
-
-    setTimeout(() => {
-      executeSocialAuth({ name: chosenName, email: chosenEmail, provider: p });
-      setSuccess(`${t('signedInWith') || 'Signed in with'} ${p.toUpperCase()}! Redirecting...`);
-      setTimeout(() => router.replace('/profile'), 500);
-    }, 500);
+  const handleSocialClick = (provider: 'google' | 'facebook' | 'apple') => {
+    const callback = searchParams.get('callbackUrl') || '/profile';
+    window.location.href = `/api/auth/login/${provider}?callbackUrl=${encodeURIComponent(callback)}`;
   };
+
+  const hasAnySocial = socialLoaded && (socialConfig.googleEnabled || socialConfig.facebookEnabled || socialConfig.appleEnabled);
+
+  // Active enabled providers count for flexible grid styling
+  const activeProvidersCount = [
+    socialConfig.googleEnabled, 
+    socialConfig.facebookEnabled, 
+    socialConfig.appleEnabled
+  ].filter(Boolean).length;
 
   return (
-    <div 
-      className="min-h-[85vh] flex items-center justify-center px-4 py-12 transition-colors duration-200 font-sans"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
-    >
+    <div className="w-full max-w-md mx-auto space-y-6">
+      {/* Brand Header */}
+      <div className="text-center space-y-2">
+        <div 
+          className="inline-flex items-center justify-center w-12 h-12 rounded-2xl shadow-md border mb-2"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+            color: 'var(--color-primary, #E05638)'
+          }}
+        >
+          <ChefHat className="h-6 w-6" />
+        </div>
+        <h1 
+          className="text-2xl sm:text-3xl font-black tracking-tight"
+          style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+        >
+          {t('signInTitle') || 'Welcome Back'}
+        </h1>
+        <p 
+          className="text-xs sm:text-sm"
+          style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
+        >
+          {t('signInSubtitle') || 'Enter your credentials to access your meal assistant.'}
+        </p>
+      </div>
+
+      {/* Card Container */}
       <div 
-        className="w-full max-w-md border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
+        className="border rounded-3xl p-6 sm:p-8 shadow-2xl transition-colors duration-200"
         style={{
           backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
           borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
         }}
       >
-        <div className="space-y-1.5 text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl mb-2 border shadow-inner"
+        {/* Status Alerts */}
+        {errorMsg && (
+          <div 
+            className="mb-5 p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-              borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-              color: 'var(--color-primary, #E05638)'
+              backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
+              borderColor: isDayMode ? '#fca5a5' : '#991b1b',
+              color: isDayMode ? '#991b1b' : '#fca5a5'
             }}
           >
-            <Sparkles className="h-6 w-6" />
-          </div>
-          <h1 className="text-2xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            {t('welcomeBack') || 'Welcome Back'}
-          </h1>
-          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('signInSubtitle') || 'Sign in to access your Zecratary dashboard and manage recipes.'}
-          </p>
-        </div>
-
-        {error && (
-          <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-2xl text-xs text-red-300 font-semibold flex items-center gap-2 shadow-sm">
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
-            <span>{error}</span>
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+            <span>{errorMsg}</span>
           </div>
         )}
 
-        {success && (
-          <div className="p-3.5 bg-emerald-950/40 border border-emerald-500/50 rounded-2xl text-xs text-emerald-300 font-semibold flex items-center gap-2 shadow-sm">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-            <span>{success}</span>
+        {successMsg && (
+          <div 
+            className="mb-5 p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in"
+            style={{
+              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
+              borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+            }}
+          >
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+            <span>{successMsg}</span>
           </div>
         )}
 
-        {(config.googleEnabled || config.facebookEnabled || config.appleEnabled) && (
-          <div className="space-y-2.5">
-            {config.googleEnabled && (
-              <button
-                type="button"
-                disabled={loading || socialLoading !== null}
-                onClick={() => handleSocialClick('google')}
-                className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border text-xs font-bold transition hover:opacity-90 shadow-xs cursor-pointer disabled:opacity-50"
-                style={{ backgroundColor: isDayMode ? '#f8fafc' : '#0e1626', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
-              >
-                {socialLoading === 'google' ? <Loader2 className="h-4 w-4 animate-spin text-orange-400" /> : (
-                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                  </svg>
-                )}
-                {t('continueWithGoogle') || 'Continue with Google'}
-              </button>
-            )}
-
-            <div className={`grid ${config.facebookEnabled && config.appleEnabled ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
-              {config.facebookEnabled && (
-                <button
-                  type="button"
-                  disabled={loading || socialLoading !== null}
-                  onClick={() => handleSocialClick('facebook')}
-                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition hover:opacity-90 shadow-xs cursor-pointer disabled:opacity-50"
-                  style={{ backgroundColor: isDayMode ? '#f8fafc' : '#0e1626', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
-                >
-                  {socialLoading === 'facebook' ? <Loader2 className="h-4 w-4 animate-spin text-orange-400" /> : (
-                    <svg className="w-4 h-4 fill-current text-blue-600 shrink-0" viewBox="0 0 24 24">
-                      <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.312h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
-                    </svg>
-                  )}
-                  Facebook
-                </button>
-              )}
-
-              {config.appleEnabled && (
-                <button
-                  type="button"
-                  disabled={loading || socialLoading !== null}
-                  onClick={() => handleSocialClick('apple')}
-                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition hover:opacity-90 shadow-xs cursor-pointer disabled:opacity-50"
-                  style={{ backgroundColor: isDayMode ? '#f8fafc' : '#0e1626', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
-                >
-                  {socialLoading === 'apple' ? <Loader2 className="h-4 w-4 animate-spin text-orange-400" /> : (
-                    <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
-                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.56.64-1.06 1.7-0.93 2.73 1.02.08 2.05-.48 2.66-1.23z" />
-                    </svg>
-                  )}
-                  Apple
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3 py-1">
-              <div className="h-px flex-1" style={{ backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b' }} />
-              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                {t('orSignInWithEmail') || 'or email'}
-              </span>
-              <div className="h-px flex-1" style={{ backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b' }} />
-            </div>
-          </div>
-        )}
-
-        <form onSubmit={handleLogin} className="space-y-4 text-xs" autoComplete="off">
+        {/* Credentials Form */}
+        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           <div>
-            <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-              {t('emailAddress') || 'Email Address'}
+            <label 
+              className="block font-bold mb-1.5"
+              style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
+            >
+              {t('emailLabel') || 'Email Address'}
             </label>
             <div className="relative">
-              <Mail className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
-              <input
-                type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
-                className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none transition shadow-inner font-mono"
-                style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
+              <Mail 
+                className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none" 
+                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} 
+              />
+              <input 
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full border rounded-xl pl-10 pr-3 py-2.5 outline-none font-medium transition"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
               />
             </div>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('password') || 'Password'}
+              <label 
+                className="block font-bold"
+                style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
+              >
+                {t('passwordLabel') || 'Password'}
               </label>
-              <Link href="/forgot-password" className="text-[11px] font-bold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
+              <Link 
+                href="/forgot-password"
+                className="text-[11px] font-semibold hover:underline"
+                style={{ color: 'var(--color-primary, #E05638)' }}
+              >
                 {t('forgotPassword') || 'Forgot password?'}
               </Link>
             </div>
             <div className="relative">
-              <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
-              <input
-                type={showPassword ? 'text' : 'password'} required value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none transition shadow-inner"
-                style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}
+              <Lock 
+                className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none" 
+                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} 
               />
-              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3 text-slate-500 hover:text-slate-300 cursor-pointer">
+              <input 
+                type={showPassword ? 'text' : 'password'}
+                required
+                autoComplete="current-password"
+                placeholder="••••••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none font-mono transition"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#ffffff'
+                }}
+              />
+              <button 
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-2.5 cursor-pointer hover:opacity-80 transition"
+                style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                aria-label="Toggle password visibility"
+              >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
 
-          <button
+          <button 
             type="submit"
-            disabled={loading || socialLoading !== null}
-            className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            disabled={loading}
+            className="w-full py-3 mt-2 rounded-xl text-xs font-bold text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-            {t('signInButton') || 'Sign In'}
+            {loading ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <>
+                <span>{t('signInBtn') || 'Sign In'}</span>
+                <ArrowRight className="h-4 w-4" />
+              </>
+            )}
           </button>
         </form>
 
-        <div className="text-center pt-2 border-t text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-          <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('dontHaveAccount') || "Don't have an account?"} </span>
-          <Link href="/register" className="font-extrabold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
-            {t('createOneLink') || 'Create one'}
+        {/* Dynamic Social Login Section (Only rendered when at least one provider is enabled) */}
+        {hasAnySocial && (
+          <div className="mt-6 space-y-4">
+            <div className="relative flex items-center justify-center">
+              <div 
+                className="w-full border-t"
+                style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+              />
+              <span 
+                className="absolute px-3 text-[11px] font-bold uppercase tracking-wider"
+                style={{ 
+                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+                  color: isDayMode ? '#94a3b8' : '#64748b' 
+                }}
+              >
+                {t('orContinueWith') || 'Or continue with'}
+              </span>
+            </div>
+
+            <div 
+              className={`grid gap-2.5 ${
+                activeProvidersCount === 1 ? 'grid-cols-1' : activeProvidersCount === 2 ? 'grid-cols-2' : 'grid-cols-3'
+              }`}
+            >
+              {/* Google Provider Button */}
+              {socialConfig.googleEnabled && (
+                <button 
+                  type="button"
+                  onClick={() => handleSocialClick('google')}
+                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                  title={t('signInWithGoogle') || 'Sign in with Google'}
+                >
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.98 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+                    />
+                  </svg>
+                  <span>Google</span>
+                </button>
+              )}
+
+              {/* Facebook Provider Button */}
+              {socialConfig.facebookEnabled && (
+                <button 
+                  type="button"
+                  onClick={() => handleSocialClick('facebook')}
+                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                  title={t('signInWithFacebook') || 'Sign in with Facebook'}
+                >
+                  <svg className="w-4 h-4 text-[#1877F2] fill-current shrink-0" viewBox="0 0 24 24">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                  </svg>
+                  <span>Facebook</span>
+                </button>
+              )}
+
+              {/* Apple Provider Button */}
+              {socialConfig.appleEnabled && (
+                <button 
+                  type="button"
+                  onClick={() => handleSocialClick('apple')}
+                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                  title={t('signInWithApple') || 'Sign in with Apple'}
+                >
+                  <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
+                    <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 0.92-2.85-.9.04-2 0.6-2.65 1.35-.58.66-1.09 1.73-.95 2.76.99.08 2.05-.51 2.68-1.26z" />
+                  </svg>
+                  <span>Apple</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Footer Navigation */}
+        <div 
+          className="mt-6 pt-4 border-t text-center text-xs"
+          style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+        >
+          <span style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+            {t('noAccountPrompt') || "Don't have an account?"}{' '}
+          </span>
+          <Link 
+            href="/register"
+            className="font-bold hover:underline"
+            style={{ color: 'var(--color-primary, #E05638)' }}
+          >
+            {t('signUpPrompt') || 'Sign up for free'}
           </Link>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {socialModalProvider && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="border rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl animate-in zoom-in-95" style={{ backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)', borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)' }}>
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-              <h3 className="text-sm font-black flex items-center gap-2 uppercase tracking-wider" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                <ShieldCheck className="h-4 w-4 text-emerald-400" /> {socialModalProvider} Sign In
-              </h3>
-              <button type="button" onClick={() => setSocialModalProvider(null)} className="text-slate-400 hover:text-white cursor-pointer text-xs">✕</button>
-            </div>
-            <form onSubmit={handleCompleteSocialAuth} className="space-y-3 text-xs">
-              <p style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Confirm the account profile returned by your <strong>{socialModalProvider}</strong> provider:</p>
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Display Name</label>
-                <input type="text" required value={socialCustomName} onChange={(e) => setSocialCustomName(e.target.value)} className="w-full border rounded-xl px-3 py-2 outline-none font-bold" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
-              </div>
-              <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Email Address</label>
-                <input type="email" required value={socialCustomEmail} onChange={(e) => setSocialCustomEmail(e.target.value)} className="w-full border rounded-xl px-3 py-2 outline-none font-mono" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
-              </div>
-              <div className="flex items-center justify-end gap-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-                <button type="button" onClick={() => setSocialModalProvider(null)} className="px-3.5 py-1.5 border rounded-xl font-bold cursor-pointer" style={{ borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#64748b' : '#94a3b8' }}>Cancel</button>
-                <button type="submit" className="px-4 py-1.5 text-white font-extrabold rounded-xl shadow-md cursor-pointer flex items-center gap-1.5" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>Authorize & Sign In</button>
-              </div>
-            </form>
-          </div>
+export default function LoginPage() {
+  return (
+    <div className="min-h-[80vh] flex items-center justify-center px-4 py-12 transition-colors duration-200">
+      <Suspense fallback={
+        <div className="flex items-center justify-center">
+          <div 
+            className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+            style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }}
+          />
         </div>
-      )}
+      }>
+        <LoginForm />
+      </Suspense>
     </div>
   );
 }
@@ -39647,6 +40584,145 @@ export default function AiQuotaBar() {
       )}
     </div>
   );
+}
+
+```
+
+## File: `apps/web/src/components/ThemeProvider.tsx`
+```typescript
+'use client';
+
+import React, { createContext, useContext, useEffect, useState } from 'react';
+
+interface ThemeContextType {
+  isDarkMode: boolean;
+  toggleThemeMode: () => void;
+  primaryColor: string;
+  setPrimaryColor: (color: string) => void;
+  updateTheme: (settings: any) => Promise<void>;
+}
+
+const ThemeContext = createContext<ThemeContextType>({
+  isDarkMode: true,
+  toggleThemeMode: () => {},
+  primaryColor: '#E05638',
+  setPrimaryColor: () => {},
+  updateTheme: async () => {},
+});
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
+  const [primaryColor, setPrimaryColorState] = useState<string>('#E05638');
+  const [mounted, setMounted] = useState<boolean>(false);
+
+  const applyThemeToDOM = (mode: boolean, primary: string, customColors?: any) => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    root.classList.toggle('dark', mode);
+    root.classList.toggle('light', !mode);
+    root.style.setProperty('--color-primary', primary);
+
+    if (customColors) {
+      if (customColors.primaryHover) root.style.setProperty('--color-primary-hover', customColors.primaryHover);
+      if (customColors.accentColor || customColors.accent) {
+        const accent = customColors.accentColor || customColors.accent;
+        root.style.setProperty('--color-accent', accent);
+        root.style.setProperty('--color-emerald', accent);
+      }
+      if (customColors.backgroundDark || customColors.backgroundColor) {
+        const bg = mode ? (customColors.backgroundDark || customColors.backgroundColor) : '#f8fafc';
+        root.style.setProperty('--color-bg', bg);
+        root.style.setProperty('--color-bg-dark', bg);
+      }
+      if (customColors.cardDark || customColors.cardBackground) {
+        const card = mode ? (customColors.cardDark || customColors.cardBackground) : '#ffffff';
+        root.style.setProperty('--color-card', card);
+        root.style.setProperty('--color-card-dark', card);
+      }
+    } else {
+      if (mode) {
+        root.style.setProperty('--color-bg', '#070b13');
+        root.style.setProperty('--color-card', '#111726');
+      } else {
+        root.style.setProperty('--color-bg', '#f8fafc');
+        root.style.setProperty('--color-card', '#ffffff');
+      }
+    }
+  };
+
+  useEffect(() => {
+    setMounted(true);
+    const fetchServerTheme = async () => {
+      try {
+        const res = await fetch('/api/user/theme?userId=usr_admin_1', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const mode = data.themeMode === 'dark';
+          const primary = data.primaryColor || '#E05638';
+          setIsDarkMode(mode);
+          setPrimaryColorState(primary);
+          applyThemeToDOM(mode, primary, data);
+        }
+      } catch (err) {
+        console.error('[ThemeProvider] Failed to fetch server theme:', err);
+      }
+    };
+    fetchServerTheme();
+  }, []);
+
+  const updateThemeOnServer = async (newSettings: any) => {
+    try {
+      const payload = {
+        userId: 'usr_admin_1',
+        themeMode: isDarkMode ? 'dark' : 'light',
+        primaryColor,
+        ...newSettings
+      };
+
+      const res = await fetch('/api/user/theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.theme) {
+          const mode = data.theme.themeMode === 'dark';
+          const primary = data.theme.primaryColor || primaryColor;
+          setIsDarkMode(mode);
+          setPrimaryColorState(primary);
+          applyThemeToDOM(mode, primary, data.theme);
+          window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: data.theme }));
+        }
+      }
+    } catch (err) {
+      console.error('[ThemeProvider] Failed to save server theme:', err);
+    }
+  };
+
+  const toggleThemeMode = () => {
+    const nextMode = !isDarkMode;
+    setIsDarkMode(nextMode);
+    applyThemeToDOM(nextMode, primaryColor);
+    updateThemeOnServer({ themeMode: nextMode ? 'dark' : 'light', primaryColor });
+  };
+
+  const setPrimaryColor = (color: string) => {
+    setPrimaryColorState(color);
+    applyThemeToDOM(isDarkMode, color);
+    updateThemeOnServer({ themeMode: isDarkMode ? 'dark' : 'light', primaryColor: color });
+  };
+
+  return (
+    <ThemeContext.Provider value={{ isDarkMode, toggleThemeMode, primaryColor, setPrimaryColor, updateTheme: updateThemeOnServer }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+export function useTheme() {
+  return useContext(ThemeContext);
 }
 
 ```
@@ -41010,163 +42086,175 @@ export function useIngredientCategories(): string[] {
 
 ## File: `apps/web/src/lib/recipeSync.ts`
 ```typescript
-import { getCurrentUser } from '@/lib/auth';
-
-const STORAGE_KEYS = [
-  'zecratary_saved_recipes',
-  'zecratary_recipes',
-  'saved_recipes',
-  'savedRecipes',
-  'recipes'
-];
+// Bi-directional recipe synchronization supporting import, manual, and server sources
 
 export function getLocalRecipes(): any[] {
   if (typeof window === 'undefined') return [];
-  for (const key of STORAGE_KEYS) {
+  const keys = ['zecratary_saved_recipes', 'zecratary_recipes', 'saved_recipes', 'savedRecipes', 'recipes'];
+  const map = new Map<string, any>();
+
+  for (const k of keys) {
     try {
-      const raw = localStorage.getItem(key);
+      const raw = localStorage.getItem(k);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          for (const r of parsed) {
+            if (r && typeof r === 'object') {
+              const id = String(r.id || r.title || r.name || '').trim().toLowerCase();
+              if (id && !map.has(id)) {
+                map.set(id, r);
+              }
+            }
+          }
         }
       }
     } catch (_) {}
   }
-  return [];
+  return Array.from(map.values());
 }
 
-export function saveLocalRecipes(recipes: any[]) {
-  if (typeof window === 'undefined') return;
-  try {
-    const data = JSON.stringify(recipes);
-    localStorage.setItem('zecratary_saved_recipes', data);
-    localStorage.setItem('zecratary_recipes', data);
-    window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-    window.dispatchEvent(new Event('storage'));
-  } catch (_) {}
-}
-
-export async function syncUserSavedRecipes(providedKey?: string): Promise<any[]> {
-  if (typeof window === 'undefined') return [];
-
-  const user = getCurrentUser();
-  const userKey = (providedKey || user?.email || user?.id || '').toLowerCase().trim();
-  const userEmail = (user?.email || '').toLowerCase().trim();
+export async function syncUserSavedRecipes(userIdOrEmail: string): Promise<any[]> {
+  const uKey = (userIdOrEmail || 'usr_admin_1').trim();
   const localList = getLocalRecipes();
 
-  if (!userKey) {
-    return localList;
-  }
-
   try {
-    const res = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(userKey)}&email=${encodeURIComponent(userEmail)}`, {
+    const res = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(uKey)}`, {
+      method: 'GET',
+      headers: { 'Cache-Control': 'no-cache, no-store' },
       cache: 'no-store'
     });
 
-    let serverList: any[] = [];
     if (res.ok) {
-      const data = await res.json();
-      if (data.success && Array.isArray(data.recipes)) {
-        serverList = data.recipes;
+      const serverRecipes = await res.json();
+      const sList = Array.isArray(serverRecipes) ? serverRecipes : (serverRecipes.recipes || []);
+
+      // Merge server and local (which includes newly imported recipes)
+      const mergedMap = new Map<string, any>();
+      for (const r of sList) {
+        const key = String(r.id || r.title || r.name || '').trim().toLowerCase();
+        if (key) mergedMap.set(key, r);
       }
-    }
 
-    if (localList.length > 0 && serverList.length === 0) {
-      await fetch('/api/recipes/saved', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userKey,
-          email: userEmail,
-          recipes: localList,
-          action: 'sync'
-        })
-      });
-      return localList;
-    }
-
-    const map = new Map<string, any>();
-    localList.forEach(r => {
-      if (r) {
-        const k = (r.id || r.title || r.name || JSON.stringify(r)).toString().trim().toLowerCase();
-        map.set(k, r);
+      let newLocalFound = false;
+      for (const r of localList) {
+        const key = String(r.id || r.title || r.name || '').trim().toLowerCase();
+        if (key && !mergedMap.has(key)) {
+          mergedMap.set(key, { ...r, userId: uKey });
+          newLocalFound = true;
+        }
       }
-    });
-    serverList.forEach(r => {
-      if (r) {
-        const k = (r.id || r.title || r.name || JSON.stringify(r)).toString().trim().toLowerCase();
-        map.set(k, r);
+
+      const combined = Array.from(mergedMap.values());
+
+      // If local import had recipes missing from server, push them up immediately
+      if (newLocalFound && combined.length > sList.length) {
+        persistSavedRecipe(uKey, combined).catch(() => {});
       }
-    });
 
-    const merged = Array.from(map.values());
-    if (merged.length > 0) {
-      saveLocalRecipes(merged);
+      // Keep localStorage in sync so /import and /manual components can read state
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('zecratary_recipes', JSON.stringify(combined));
+          localStorage.setItem('zecratary_saved_recipes', JSON.stringify(combined));
+        } catch (_) {}
+      }
+
+      return combined;
     }
-
-    if (merged.length > serverList.length) {
-      await fetch('/api/recipes/saved', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userKey,
-          email: userEmail,
-          recipes: merged,
-          action: 'sync'
-        })
-      });
-    }
-
-    return merged;
   } catch (err) {
-    console.error('syncUserSavedRecipes error:', err);
-    return localList;
+    console.warn('[recipeSync] Server fetch error, using local data:', err);
+  }
+
+  return localList;
+}
+
+export async function persistSavedRecipe(userIdOrEmail: string, recipes: any[]): Promise<boolean> {
+  const uKey = (userIdOrEmail || 'usr_admin_1').trim();
+
+  // Sync to local browser storage immediately so other pages see it
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(recipes));
+      localStorage.setItem('zecratary_recipes', JSON.stringify(recipes));
+    } catch (_) {}
+  }
+
+  try {
+    const res = await fetch('/api/saved-recipes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: uKey, recipes })
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[recipeSync] Server persist failed:', err);
+    return false;
   }
 }
 
-export async function persistSavedRecipe(recipeOrId: any, action: 'save' | 'remove' = 'save') {
+```
+
+## File: `apps/web/src/lib/adminSync.ts`
+```typescript
+// Centralized Server-Backed Admin Settings Engine
+// Zero localStorage read/write persistence for administrative configs
+
+export function purgeLegacyBrowserAdminStorage(): void {
   if (typeof window === 'undefined') return;
-
-  const user = getCurrentUser();
-  const userKey = (user?.email || user?.id || '').toLowerCase().trim();
-  const userEmail = (user?.email || '').toLowerCase().trim();
-  let localList = getLocalRecipes();
-
-  if (action === 'save' && recipeOrId && typeof recipeOrId === 'object') {
-    const targetKey = (recipeOrId.id || recipeOrId.title || recipeOrId.name || '').toString().trim().toLowerCase();
-    const exists = localList.some(r => {
-      const k = (r.id || r.title || r.name || '').toString().trim().toLowerCase();
-      return k === targetKey;
-    });
-    if (!exists) {
-      localList = [recipeOrId, ...localList];
-    }
-  } else if (action === 'remove') {
-    const target = (typeof recipeOrId === 'string' ? recipeOrId : (recipeOrId?.id || recipeOrId?.title || recipeOrId?.name) || '').toString().trim().toLowerCase();
-    localList = localList.filter(r => {
-      const k = (r.id || r.title || r.name || '').toString().trim().toLowerCase();
-      return k !== target;
-    });
-  }
-
-  saveLocalRecipes(localList);
-
-  if (userKey) {
+  const legacyKeys = [
+    'zecratary_admin_settings',
+    'zecratary_social_login_config',
+    'zecratary_subscription_configs',
+    'zecratary_subscription_plans',
+    'zecratary_system_config',
+    'admin_settings',
+    'adminSettings',
+    'site_settings'
+  ];
+  legacyKeys.forEach((key) => {
     try {
-      await fetch('/api/recipes/saved', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userKey,
-          email: userEmail,
-          recipe: typeof recipeOrId === 'object' ? recipeOrId : undefined,
-          recipeId: typeof recipeOrId === 'string' ? recipeOrId : (recipeOrId?.id || recipeOrId?.title),
-          action
-        })
-      });
+      localStorage.removeItem(key);
     } catch (_) {}
+  });
+}
+
+export async function fetchServerAdminSettings(): Promise<any> {
+  try {
+    const res = await fetch('/api/admin/settings', {
+      method: 'GET',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      },
+      cache: 'no-store'
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.settings || data;
+    }
+  } catch (err) {
+    console.error('[adminSync] Failed to fetch server settings:', err);
   }
+  return null;
+}
+
+export async function persistServerAdminSettings(updates: Record<string, any>): Promise<boolean> {
+  try {
+    const res = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    if (res.ok) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+      return true;
+    }
+  } catch (err) {
+    console.error('[adminSync] Failed to persist server settings:', err);
+  }
+  return false;
 }
 
 ```

@@ -1,76 +1,41 @@
-'use client';
-import { useState, useEffect } from 'react';
+// Server-backed Ingredient Categories Store
+// Zero localStorage writes for category management
 
-export const DEFAULT_CATEGORIES = [
+import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
+
+export const DEFAULT_CATEGORIES: string[] = [
   'Produce',
-  'Dairy',
-  'Meat and Seafood',
+  'Dairy & Eggs',
+  'Meat & Poultry',
+  'Seafood',
   'Bakery',
-  'Baking Supplies',
-  'Pantry Staples',
-  'Frozen Foods',
-  'Snacks and Sweets',
+  'Pantry & Dry Goods',
+  'Canned Goods',
+  'Baking & Cooking',
+  'Spices & Seasonings',
+  'Snacks',
   'Beverages',
-  'Deli',
-  'Condiments and Sauces',
-  'Grains and Pasta',
-  'Spices and Seasonings',
-  'Ready Meals',
-  'International Foods',
-  'Household Items',
-  'Personal Care',
-  'Pet Supplies',
-  'Baby Products',
-  'Miscellaneous'
+  'Frozen Foods',
+  'Condiments & Sauces',
+  'Oils & Vinegars'
 ];
 
-const STORAGE_KEY = 'zecratary_ingredient_categories';
-const EVENT_KEY = 'zecratary_categories_changed';
+let memoryCategories: string[] = [...DEFAULT_CATEGORIES];
 
-export const getStoredCategories = (): string[] => {
-  if (typeof window === 'undefined') return DEFAULT_CATEGORIES;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('zecratary_categories');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((c: any) => (typeof c === 'string' ? c : c.name || String(c)));
-      }
-    }
-  } catch (e) {
-    console.error('Failed to read categories from storage:', e);
+export function getStoredCategories(): string[] {
+  return [...memoryCategories];
+}
+
+export function setMemoryCategories(cats: string[]): void {
+  if (Array.isArray(cats) && cats.length > 0) {
+    memoryCategories = [...cats];
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_CATEGORIES));
-  return DEFAULT_CATEGORIES;
-};
+}
 
-export const saveCategories = (categories: string[]) => {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(categories));
-  localStorage.setItem('zecratary_categories', JSON.stringify(categories));
-  window.dispatchEvent(new Event(EVENT_KEY));
-};
-
-export function useIngredientCategories(): string[] {
-  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
-
-  useEffect(() => {
-    setCategories(getStoredCategories());
-
-    const handleSync = () => {
-      setCategories(getStoredCategories());
-    };
-
-    window.addEventListener(EVENT_KEY, handleSync);
-    window.addEventListener('zecratary_categories_updated', handleSync);
-    window.addEventListener('storage', handleSync);
-
-    return () => {
-      window.removeEventListener(EVENT_KEY, handleSync);
-      window.removeEventListener('zecratary_categories_updated', handleSync);
-      window.removeEventListener('storage', handleSync);
-    };
-  }, []);
-
-  return categories;
+export async function saveCategories(cats: string[]): Promise<boolean> {
+  memoryCategories = [...cats];
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zecratary_categories_changed', { detail: cats }));
+  }
+  return await persistServerAdminSettings({ ingredientCategories: cats });
 }

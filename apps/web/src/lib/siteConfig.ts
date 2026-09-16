@@ -1,15 +1,20 @@
-export const DEFAULT_SITE_NAME = 'Zecratary';
-export const DEFAULT_SITE_ICON = '🥑';
+// Server-backed Site Identity & Branding
+// Zero browser localStorage writes
+
+import { persistServerAdminSettings, fetchServerAdminSettings } from '@/lib/adminSync';
 
 export interface SiteIdentityConfig {
   siteName: string;
   titlebarEmoji: string;
-  titlebarImage: string;
+  titlebarImage?: string;
   faviconEmoji: string;
-  faviconImage: string;
+  faviconImage?: string;
 }
 
-const DEFAULT_CONFIG: SiteIdentityConfig = {
+export const DEFAULT_SITE_NAME = 'Zecratary';
+export const DEFAULT_SITE_ICON = '🍳';
+
+let memorySiteConfig: SiteIdentityConfig = {
   siteName: DEFAULT_SITE_NAME,
   titlebarEmoji: DEFAULT_SITE_ICON,
   titlebarImage: '',
@@ -18,110 +23,78 @@ const DEFAULT_CONFIG: SiteIdentityConfig = {
 };
 
 export function getSiteConfig(): SiteIdentityConfig {
-  if (typeof window === 'undefined') return DEFAULT_CONFIG;
-  try {
-    const raw = localStorage.getItem('zecratary_site_settings');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return {
-        siteName: parsed.siteName || parsed.name || DEFAULT_SITE_NAME,
-        titlebarEmoji: parsed.titlebarEmoji || parsed.icon || DEFAULT_SITE_ICON,
-        titlebarImage: parsed.titlebarImage || '',
-        faviconEmoji: parsed.faviconEmoji || parsed.titlebarEmoji || parsed.icon || DEFAULT_SITE_ICON,
-        faviconImage: parsed.faviconImage || ''
-      };
-    }
-  } catch (_) {}
-  return DEFAULT_CONFIG;
+  return { ...memorySiteConfig };
 }
 
 export function getSiteName(): string {
-  return getSiteConfig().siteName;
+  return memorySiteConfig.siteName || DEFAULT_SITE_NAME;
 }
 
 export function getSiteIcon(): string {
-  const cfg = getSiteConfig();
-  return cfg.titlebarImage || cfg.titlebarEmoji || DEFAULT_SITE_ICON;
+  return memorySiteConfig.titlebarImage || memorySiteConfig.titlebarEmoji || DEFAULT_SITE_ICON;
 }
 
-export function getFavicon(): string {
-  const cfg = getSiteConfig();
-  return cfg.faviconImage || cfg.faviconEmoji || cfg.titlebarImage || cfg.titlebarEmoji || DEFAULT_SITE_ICON;
+export function setMemorySiteConfig(cfg: Partial<SiteIdentityConfig>): void {
+  memorySiteConfig = { ...memorySiteConfig, ...cfg };
 }
 
-export function updateFavicon(iconOrUrl?: string) {
-  if (typeof window === 'undefined') return;
-  const target = iconOrUrl || getFavicon();
-  let href = target;
-
-  if (
-    !target.startsWith('data:') && 
-    !target.startsWith('http://') && 
-    !target.startsWith('https://') && 
-    !target.startsWith('/')
-  ) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${target}</text></svg>`;
-    href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
-  }
-
-  let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
-  if (!link) {
-    link = document.createElement('link');
-    link.rel = 'icon';
-    document.head.appendChild(link);
-  }
-  link.href = href;
-
-  let shortcut = document.querySelector<HTMLLinkElement>("link[rel~='shortcut icon']");
-  if (shortcut) {
-    shortcut.href = href;
-  }
-}
-
-export function saveSiteConfig(config: Partial<SiteIdentityConfig>) {
-  if (typeof window === 'undefined') return;
-  const current = getSiteConfig();
-  const updated: SiteIdentityConfig = { ...current, ...config };
-  localStorage.setItem('zecratary_site_settings', JSON.stringify(updated));
-  localStorage.setItem('zecratary_site_name', updated.siteName);
-  localStorage.setItem('zecratary_site_icon', updated.titlebarImage || updated.titlebarEmoji);
-  
-  window.dispatchEvent(new Event('zecratary_site_settings_changed'));
-  window.dispatchEvent(new Event('storage'));
-  updateFavicon(updated.faviconImage || updated.faviconEmoji || updated.titlebarEmoji);
-
-  // Sync to backend API for cross-browser synchronization
+export function updateFavicon(faviconUrl?: string): void {
+  if (typeof document === 'undefined') return;
   try {
-    fetch('/api/system-settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteSettings: updated })
-    }).catch(() => {});
+    const iconToUse = faviconUrl || memorySiteConfig.faviconImage || (
+      memorySiteConfig.faviconEmoji
+        ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${memorySiteConfig.faviconEmoji}</text></svg>`)}`
+        : `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${DEFAULT_SITE_ICON}</text></svg>`)}`
+    );
+
+    let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'shortcut icon';
+      document.getElementsByTagName('head')[0].appendChild(link);
+    }
+    link.href = iconToUse;
   } catch (_) {}
 }
 
-export async function syncSiteConfigFromServer(): Promise<SiteIdentityConfig | null> {
-  if (typeof window === 'undefined') return null;
-  try {
-    const res = await fetch('/api/system-settings', { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.settings?.siteSettings) {
-        const s = data.settings.siteSettings;
-        const current = getSiteConfig();
-        const merged: SiteIdentityConfig = {
-          siteName: s.siteName || current.siteName,
-          titlebarEmoji: s.titlebarEmoji || current.titlebarEmoji,
-          titlebarImage: s.titlebarImage !== undefined ? s.titlebarImage : current.titlebarImage,
-          faviconEmoji: s.faviconEmoji || current.faviconEmoji,
-          faviconImage: s.faviconImage !== undefined ? s.faviconImage : current.faviconImage
-        };
-        localStorage.setItem('zecratary_site_settings', JSON.stringify(merged));
+export async function saveSiteConfig(config: SiteIdentityConfig): Promise<boolean> {
+  memorySiteConfig = { ...config };
+  if (typeof window !== 'undefined') {
+    if (config.faviconImage) {
+      updateFavicon(config.faviconImage);
+    } else if (config.faviconEmoji) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${config.faviconEmoji}</text></svg>`;
+      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+    }
+    window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: config }));
+    window.dispatchEvent(new Event('zecratary_site_settings_changed'));
+    window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+  }
+  return await persistServerAdminSettings({
+    siteName: config.siteName,
+    titlebarEmoji: config.titlebarEmoji,
+    titlebarImage: config.titlebarImage || '',
+    faviconEmoji: config.faviconEmoji,
+    faviconImage: config.faviconImage || ''
+  });
+}
+
+// Auto-hydrate from server on startup with zero localStorage writes
+if (typeof window !== 'undefined') {
+  fetchServerAdminSettings().then((settings) => {
+    if (settings) {
+      const updated: Partial<SiteIdentityConfig> = {};
+      if (settings.siteName) updated.siteName = settings.siteName;
+      if (settings.titlebarEmoji) updated.titlebarEmoji = settings.titlebarEmoji;
+      if (settings.titlebarImage !== undefined) updated.titlebarImage = settings.titlebarImage;
+      if (settings.faviconEmoji) updated.faviconEmoji = settings.faviconEmoji;
+      if (settings.faviconImage !== undefined) updated.faviconImage = settings.faviconImage;
+      
+      if (Object.keys(updated).length > 0) {
+        setMemorySiteConfig(updated);
+        updateFavicon();
         window.dispatchEvent(new Event('zecratary_site_settings_changed'));
-        updateFavicon(merged.faviconImage || merged.faviconEmoji || merged.titlebarEmoji);
-        return merged;
       }
     }
-  } catch (_) {}
-  return null;
+  }).catch(() => {});
 }

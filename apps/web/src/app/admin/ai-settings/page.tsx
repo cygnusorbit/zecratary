@@ -1,10 +1,17 @@
 'use client';
+
 import { useState, useEffect, useCallback } from 'react';
 import { 
   Radio, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Key, Sliders, Sparkles, Globe, PackageCheck, 
   ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle
 } from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 interface QuestionnaireSection {
   id: string;
@@ -39,6 +46,14 @@ const DEFAULT_SECTIONS: QuestionnaireSection[] = [
 ];
 
 export default function ChefAISettingsPage() {
+  let t = (key: string, fallback?: string) => fallback || key;
+  try {
+    const langContext = useTranslation();
+    if (langContext && typeof langContext.t === 'function') {
+      t = langContext.t;
+    }
+  } catch (_) {}
+
   const [activeTab, setActiveTab] = useState<'general' | 'questionnaire' | 'voice' | 'advanced'>('general');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
@@ -91,14 +106,16 @@ export default function ChefAISettingsPage() {
 
   const [saved, setSaved] = useState(false);
 
-  // Dynamic Theme Synchronization & Day Mode Inversion
+  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -137,7 +154,7 @@ export default function ChefAISettingsPage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -158,7 +175,7 @@ export default function ChefAISettingsPage() {
     };
   }, [applySavedTheme]);
 
-  // Fetch API Keys from .env and local storage
+  // Fetch API Keys from .env
   const fetchEnvKeys = async () => {
     try {
       const res = await fetch('/api/admin/keys?t=' + Date.now(), { cache: 'no-store' });
@@ -188,32 +205,34 @@ export default function ChefAISettingsPage() {
     return {};
   };
 
-  useEffect(() => {
-    fetchEnvKeys();
-    setTimeout(() => {
-      autoConnectGemini(true);
-    }, 400);
+  // Load Settings Exclusively from Server Storage (Zero LocalStorage)
+  const loadSettingsFromServer = useCallback(async () => {
+    purgeLegacyBrowserAdminStorage();
     try {
-      const stored = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
-      if (stored) {
-        const c = JSON.parse(stored);
+      const serverData = await fetchServerAdminSettings();
+      if (serverData) {
+        const c = serverData.chefAiSettings || serverData.aiSettings || serverData;
         if (c.provider) setProvider(c.provider);
+        else if (serverData.aiProvider) setProvider(serverData.aiProvider);
+
         if (c.apiKey !== undefined) setApiKey(c.apiKey);
         if (c.model) setModel(c.model);
+        else if (serverData.aiModel) setModel(serverData.aiModel);
+
         if (c.temperature !== undefined) setTemperature(c.temperature);
-        if (c.maxTokens) setMaxTokens(c.maxTokens);
-        if (c.systemPrompt) setSystemPrompt(c.systemPrompt);
+        if (c.maxTokens !== undefined) setMaxTokens(c.maxTokens);
+        if (c.systemPrompt !== undefined) setSystemPrompt(c.systemPrompt);
         if (c.enableWebSearch !== undefined) setEnableWebSearch(c.enableWebSearch);
         if (c.enablePantryContext !== undefined) setEnablePantryContext(c.enablePantryContext);
         if (c.strictDietEnforcement !== undefined) setStrictDietEnforcement(c.strictDietEnforcement);
-        if (c.maxPlanDays) setMaxPlanDays(c.maxPlanDays);
-        if (c.resultDisplayMode) setResultDisplayMode(c.resultDisplayMode);
+        if (c.maxPlanDays !== undefined) setMaxPlanDays(c.maxPlanDays);
+        if (c.resultDisplayMode !== undefined) setResultDisplayMode(c.resultDisplayMode);
         
         if (c.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(c.enableVoiceInteraction);
-        if (c.voiceEngine) setVoiceEngine(c.voiceEngine);
+        if (c.voiceEngine !== undefined) setVoiceEngine(c.voiceEngine);
         if (c.voiceSpeed !== undefined) setVoiceSpeed(c.voiceSpeed);
         if (c.voiceAutoPlay !== undefined) setVoiceAutoPlay(c.voiceAutoPlay);
-        if (c.selectedVoiceName) setSelectedVoiceName(c.selectedVoiceName);
+        if (c.selectedVoiceName !== undefined) setSelectedVoiceName(c.selectedVoiceName);
 
         if (Array.isArray(c.knowledgeBaseList)) setKnowledgeBaseList(c.knowledgeBaseList);
         if (Array.isArray(c.customVocabularyList)) setCustomVocabularyList(c.customVocabularyList);
@@ -223,8 +242,18 @@ export default function ChefAISettingsPage() {
           setSections(c.sections.map((s: any) => ({ ...s, enabled: s.enabled !== false })));
         }
       }
-    } catch (e) {}
+    } catch (err) {
+      console.error('[ChefAISettings] Failed to load server settings:', err);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchEnvKeys();
+    loadSettingsFromServer();
+    setTimeout(() => {
+      autoConnectGemini(true);
+    }, 400);
+  }, [loadSettingsFromServer]);
 
   const handleProviderChange = (newProvider: 'gemini' | 'openai') => {
     setProvider(newProvider);
@@ -244,7 +273,7 @@ export default function ChefAISettingsPage() {
   const handleTestApiKey = async () => {
     const keyToTest = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
     if (!keyToTest) {
-      setTestResult({ success: false, message: 'Please enter an API key or sync from .env first.' });
+      setTestResult({ success: false, message: t('enterApiKeyFirst', 'Please enter an API key or sync from .env first.') });
       return;
     }
     setTestingKey(true);
@@ -271,10 +300,10 @@ export default function ChefAISettingsPage() {
       if (data.success) {
         setTestResult({ success: true, message: data.message });
       } else {
-        setTestResult({ success: false, message: data.error || 'Connection failed.' });
+        setTestResult({ success: false, message: data.error || t('connectionFailed', 'Connection failed.') });
       }
     } catch (err: any) {
-      setTestResult({ success: false, message: err.message || 'Could not reach verification endpoint.' });
+      setTestResult({ success: false, message: err.message || t('verificationEndpointError', 'Could not reach verification endpoint.') });
     } finally {
       setTestingKey(false);
     }
@@ -299,7 +328,7 @@ export default function ChefAISettingsPage() {
 
       if (!resolvedKey || resolvedKey.includes('sample') || resolvedKey.length < 10) {
         if (!silent) {
-          setTestResult({ success: false, message: 'No active Google Gemini key found in .env. Please enter a key.' });
+          setTestResult({ success: false, message: t('noGeminiKeyFound', 'No active Google Gemini key found in .env. Please enter a key.') });
         }
         setAutoConnecting(false);
         return;
@@ -325,33 +354,28 @@ export default function ChefAISettingsPage() {
       if (testData.success) {
         setTestResult({ success: true, message: `Connected to Google Gemini (${model || 'gemini-1.5-flash'}) & key synced!` });
 
-        const storedRaw = localStorage.getItem('zecratary_chef_ai_settings');
-        const currentConfig = storedRaw ? JSON.parse(storedRaw) : {};
-        const updatedConfig = {
-          ...currentConfig,
-          provider: 'gemini',
-          apiKey: resolvedKey,
-          model: model || 'gemini-1.5-flash',
-          updatedAt: new Date().toISOString()
-        };
+        // Persist directly to server storage without writing to localStorage
+        await persistServerAdminSettings({
+          aiProvider: 'gemini',
+          aiModel: model || 'gemini-1.5-flash',
+          chefAiSettings: {
+            provider: 'gemini',
+            apiKey: resolvedKey,
+            model: model || 'gemini-1.5-flash',
+            updatedAt: new Date().toISOString()
+          }
+        });
 
-        localStorage.setItem('zecratary_chef_ai_settings', JSON.stringify(updatedConfig));
-        localStorage.setItem('zecratary_engine_config', JSON.stringify(updatedConfig));
-        localStorage.setItem('zecratary_settings', JSON.stringify({
-          provider: 'gemini',
-          geminiApiKey: resolvedKey,
-          geminiModel: model || 'gemini-1.5-flash',
-          lastUpdated: new Date().toISOString()
-        }));
-
-        window.dispatchEvent(new Event('storage'));
-        window.dispatchEvent(new Event('zecratary_settings_updated'));
-        window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+          window.dispatchEvent(new Event('zecratary_settings_updated'));
+          window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+        }
       } else if (!silent) {
-        setTestResult({ success: false, message: testData.error || 'Gemini handshake failed.' });
+        setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
       }
     } catch (err: any) {
-      if (!silent) setTestResult({ success: false, message: err.message || 'Auto-connection error.' });
+      if (!silent) setTestResult({ success: false, message: err.message || t('autoConnectionError', 'Auto-connection error.') });
     } finally {
       setAutoConnecting(false);
     }
@@ -379,16 +403,14 @@ export default function ChefAISettingsPage() {
           message: `Synced ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} key (${cleanKey.substring(0, 8)}...) from .env successfully!`
         });
 
-        // Update active localStorage keys
-        try {
-          const rawStored = localStorage.getItem('zecratary_chef_ai_settings');
-          const current = rawStored ? JSON.parse(rawStored) : {};
-          localStorage.setItem('zecratary_chef_ai_settings', JSON.stringify({
-            ...current,
+        // Persist to server store with zero localStorage writes
+        await persistServerAdminSettings({
+          aiProvider: provider,
+          chefAiSettings: {
             apiKey: cleanKey,
             provider
-          }));
-        } catch (_) {}
+          }
+        });
 
         setTimeout(() => {
           if (provider === 'gemini') {
@@ -429,7 +451,7 @@ export default function ChefAISettingsPage() {
 
   const handleDeleteSection = (secId: string) => {
     if (sections.length <= 1) {
-      alert('You must retain at least one questionnaire topic.');
+      alert(t('retainOneTopicWarning', 'You must retain at least one questionnaire topic.'));
       return;
     }
     const updated = sections.filter(s => s.id !== secId);
@@ -496,20 +518,18 @@ export default function ChefAISettingsPage() {
       sections,
       updatedAt: new Date().toISOString()
     };
-    
-    localStorage.setItem('zecratary_chef_ai_settings', JSON.stringify(config));
-    localStorage.setItem('zecratary_engine_config', JSON.stringify(config));
-    localStorage.setItem('zecratary_settings', JSON.stringify({
-      provider,
-      geminiApiKey: provider === 'gemini' ? cleanApiKey : '',
-      geminiModel: provider === 'gemini' ? model : 'gemini-3.6-flash',
-      openaiApiKey: provider === 'openai' ? cleanApiKey : '',
-      openaiModel: provider === 'openai' ? model : 'gpt-4o',
-      lastUpdated: new Date().toISOString()
-    }));
 
-    let envSavedSuccessfully = false;
-    let envErrorMessage = '';
+    const activeFlattenedQuestions = sections
+      .filter(s => s.enabled !== false)
+      .flatMap(s => s.questions);
+
+    // Save directly to server storage API (Zero LocalStorage writes)
+    await persistServerAdminSettings({
+      aiProvider: provider,
+      aiModel: model,
+      chefAiSettings: config,
+      chefQuestionnaire: activeFlattenedQuestions
+    });
 
     if (cleanApiKey) {
       try {
@@ -527,35 +547,29 @@ export default function ChefAISettingsPage() {
 
         const data = await res.json();
         if (res.ok && data.success) {
-          envSavedSuccessfully = true;
           setTestResult({
             success: true,
             message: `Key saved to local .env and synchronized (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
           });
         } else {
-          envErrorMessage = data.error || 'Server rejected key save';
           setTestResult({
             success: false,
-            message: `Local settings stored, but .env save failed: ${envErrorMessage}`
+            message: `Server stored settings, but .env save returned: ${data.error || 'Server rejected key save'}`
           });
         }
       } catch (err: any) {
-        envErrorMessage = err.message || 'Network error writing to /api/admin/keys';
         setTestResult({
           success: false,
-          message: `Local settings stored, but .env save failed: ${envErrorMessage}`
+          message: `Server stored settings, but .env save failed: ${err.message || 'Network error'}`
         });
       }
     }
 
-    const activeFlattenedQuestions = sections
-      .filter(s => s.enabled !== false)
-      .flatMap(s => s.questions);
-    localStorage.setItem('zecratary_chef_questionnaire', JSON.stringify(activeFlattenedQuestions));
-
-    window.dispatchEvent(new Event('storage'));
-    window.dispatchEvent(new Event('zecratary_engine_config_updated'));
-    window.dispatchEvent(new Event('zecratary_settings_updated'));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+      window.dispatchEvent(new Event('zecratary_settings_updated'));
+    }
     
     setSaved(true);
     setTimeout(() => setSaved(false), 3500);
@@ -587,10 +601,10 @@ export default function ChefAISettingsPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
         <div>
           <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary, #E05638)' }}>
-            <Settings className="h-6 w-6" style={{ color: 'var(--color-primary, #E05638)' }} /> AI Assistant Configuration
+            <Settings className="h-6 w-6" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('aiAssistantConfigTitle', 'AI Assistant Configuration')}
           </h1>
           <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            Update settings and functional AI provider models for the <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> agent
+            {t('aiAssistantConfigSubtitle', 'Update settings and functional AI provider models for the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('agentSuffix', 'agent')}
           </p>
         </div>
 
@@ -604,7 +618,7 @@ export default function ChefAISettingsPage() {
                 color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
               }}
             >
-              <CheckCircle className="h-4 w-4" style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }} /> Settings Applied & Synced
+              <CheckCircle className="h-4 w-4" style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }} /> {t('settingsAppliedSynced', 'Settings Applied & Synced')}
             </span>
           )}
           <button
@@ -618,7 +632,7 @@ export default function ChefAISettingsPage() {
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
           >
-            <Check className="h-4 w-4" /> Save Configuration
+            <Check className="h-4 w-4" /> {t('saveConfigurationBtn', 'Save Configuration')}
           </button>
         </div>
       </div>
@@ -626,10 +640,10 @@ export default function ChefAISettingsPage() {
       {/* HORIZONTAL CONFIGURATION TABS */}
       <div className="flex border-b gap-6 overflow-x-auto transition-colors duration-200" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
         {[
-          { id: 'general', label: 'General AI Configuration', icon: Cpu },
-          { id: 'questionnaire', label: `Multi-Topic Questionnaires (${sections.filter(s => s.enabled !== false).length}/${sections.length} Active)`, icon: Layers },
-          { id: 'voice', label: 'Voice Interaction', icon: Mic },
-          { id: 'advanced', label: 'Agent Parameters', icon: SlidersHorizontal },
+          { id: 'general', label: t('tabGeneralConfig', 'General AI Configuration'), icon: Cpu },
+          { id: 'questionnaire', label: `${t('tabQuestionnaires', 'Multi-Topic Questionnaires')} (${sections.filter(s => s.enabled !== false).length}/${sections.length} Active)`, icon: Layers },
+          { id: 'voice', label: t('tabVoiceInteraction', 'Voice Interaction'), icon: Mic },
+          { id: 'advanced', label: t('tabAgentParameters', 'Agent Parameters'), icon: SlidersHorizontal },
         ].map((tab) => {
           const isActive = activeTab === tab.id;
           const Icon = tab.icon;
@@ -670,10 +684,10 @@ export default function ChefAISettingsPage() {
                     className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
                     style={{ color: 'var(--color-primary, #E05638)' }}
                   >
-                    <Sparkles className="h-4 w-4" /> AI Engine Provider & Model Selection
+                    <Sparkles className="h-4 w-4" /> {t('aiEngineProviderTitle', 'AI Engine Provider & Model Selection')}
                   </h2>
                   <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    Select your active AI provider and model version. This choice controls which model processes prompts in <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/api/ai</span>.
+                    {t('aiEngineProviderDesc', 'Select your active AI provider and model version. This choice controls which model processes prompts in')} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/api/ai</span>.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -690,7 +704,7 @@ export default function ChefAISettingsPage() {
                     title="Auto-connect and sync Gemini API key"
                   >
                     <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse text-amber-500' : 'text-[#E05638]'}`} />
-                    <span>{autoConnecting ? 'Connecting...' : 'Auto-Connect Gemini'}</span>
+                    <span>{autoConnecting ? t('connecting', 'Connecting...') : t('autoConnectGemini', 'Auto-Connect Gemini')}</span>
                   </button>
 
                   <button
@@ -705,7 +719,7 @@ export default function ChefAISettingsPage() {
                     title="Reload API Key from .env"
                   >
                     <RefreshCw className={`h-3 w-3 ${syncingEnvKey ? 'animate-spin' : ''}`} style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} />
-                    <span>Sync from .env</span>
+                    <span>{t('syncFromEnv', 'Sync from .env')}</span>
                   </button>
                 </div>
               </div>
@@ -753,7 +767,7 @@ export default function ChefAISettingsPage() {
               <div className="pt-2 space-y-4 text-xs">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>API Key</label>
+                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('apiKeyLabel', 'API Key')}</label>
                     <span className="text-[10px] font-mono font-bold" style={{ color: isDayMode ? '#7e22ce' : '#c084fc' }}>
                       {provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}
                     </span>
@@ -794,12 +808,12 @@ export default function ChefAISettingsPage() {
                         {testingKey ? (
                           <>
                             <Loader2 className="h-3 w-3 animate-spin" />
-                            <span>Testing...</span>
+                            <span>{t('testing', 'Testing...')}</span>
                           </>
                         ) : (
                           <>
                             <Activity className="h-3 w-3" />
-                            <span>Test Connection</span>
+                            <span>{t('testConnection', 'Test Connection')}</span>
                           </>
                         )}
                       </button>
@@ -820,12 +834,14 @@ export default function ChefAISettingsPage() {
                       <span className="leading-snug">{testResult.message}</span>
                     </div>
                   )}
-                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Saved locally and synced to disk environment on save.</span>
+                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('persistedServerSyncNotice', 'Persisted directly to server storage and synced to disk environment.')}
+                  </span>
                 </div>
 
                 <div>
                   <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    Model Version Identifier
+                    {t('modelVersionIdentifier', 'Model Version Identifier')}
                   </label>
                   <select
                     value={model}
@@ -850,7 +866,9 @@ export default function ChefAISettingsPage() {
                       </>
                     )}
                   </select>
-                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Active model endpoint used during AI prompt generation.</span>
+                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}
+                  </span>
                 </div>
               </div>
             </div>
@@ -873,10 +891,10 @@ export default function ChefAISettingsPage() {
                     className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
                     style={{ color: 'var(--color-primary, #E05638)' }}
                   >
-                    <Layers className="h-4 w-4" /> Multi-Topic Questionnaire & Wizard Manager
+                    <Layers className="h-4 w-4" /> {t('questionnaireManagerTitle', 'Multi-Topic Questionnaire & Wizard Manager')}
                   </h2>
                   <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> intake wizard.
+                    {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
                   </p>
                 </div>
                 <span 
@@ -887,14 +905,14 @@ export default function ChefAISettingsPage() {
                     color: 'var(--color-primary, #E05638)'
                   }}
                 >
-                  {sections.filter(s => s.enabled !== false).length}/{sections.length} Topics Active
+                  {sections.filter(s => s.enabled !== false).length}/{sections.length} {t('topicsActiveBadge', 'Topics Active')}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
                 <div className="lg:col-span-5 space-y-3">
                   <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    Questionnaire Topics
+                    {t('questionnaireTopicsHeader', 'Questionnaire Topics')}
                   </label>
                   
                   <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
@@ -925,7 +943,7 @@ export default function ChefAISettingsPage() {
                                   ? (isDayMode ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30') 
                                   : (isDayMode ? 'bg-slate-200 text-slate-700' : 'bg-slate-800 text-slate-400')
                               }`}>
-                                {isEnabled ? 'Enabled' : 'Disabled'}
+                                {isEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                               </span>
                             </div>
                             <p className="text-[10px] truncate" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{sec.description}</p>
@@ -970,11 +988,11 @@ export default function ChefAISettingsPage() {
                     }}
                   >
                     <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                      <FolderPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> Add New Questionnaire Topic
+                      <FolderPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addNewTopicHeader', 'Add New Questionnaire Topic')}
                     </span>
                     <input
                       type="text"
-                      placeholder="Topic Title (e.g. Fitness & Macros)..."
+                      placeholder={t('topicTitlePlaceholder', 'Topic Title (e.g. Fitness & Macros)...')}
                       value={newTopicTitle}
                       onChange={(e) => setNewTopicTitle(e.target.value)}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
@@ -988,7 +1006,7 @@ export default function ChefAISettingsPage() {
                     />
                     <input
                       type="text"
-                      placeholder="Topic Description..."
+                      placeholder={t('topicDescPlaceholder', 'Topic Description...')}
                       value={newTopicDesc}
                       onChange={(e) => setNewTopicDesc(e.target.value)}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
@@ -1009,7 +1027,7 @@ export default function ChefAISettingsPage() {
                       onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                     >
-                      Create Topic Category
+                      {t('createTopicBtn', 'Create Topic Category')}
                     </button>
                   </div>
                 </div>
@@ -1044,7 +1062,7 @@ export default function ChefAISettingsPage() {
                               ? (isDayMode ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30') 
                               : (isDayMode ? 'bg-slate-200 text-slate-700' : 'bg-slate-800 text-slate-400')
                           }`}>
-                            {activeSection?.enabled !== false ? 'Status: Active' : 'Status: Disabled'}
+                            {activeSection?.enabled !== false ? t('statusActive', 'Status: Active') : t('statusDisabled', 'Status: Disabled')}
                           </span>
                         </div>
                         <input
@@ -1061,14 +1079,14 @@ export default function ChefAISettingsPage() {
                         />
                       </div>
                       <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                        {activeSection?.questions.length || 0} Questions
+                        {activeSection?.questions.length || 0} {t('questionsCount', 'Questions')}
                       </span>
                     </div>
 
                     <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
                       {activeSection?.questions.length === 0 ? (
                         <div className="text-center py-8 text-xs italic" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                          No questions in this topic yet. Add one below.
+                          {t('noQuestionsYet', 'No questions in this topic yet. Add one below.')}
                         </div>
                       ) : (
                         activeSection?.questions.map((qText, qIdx) => (
@@ -1124,7 +1142,7 @@ export default function ChefAISettingsPage() {
                   <div className="flex gap-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                     <input
                       type="text"
-                      placeholder={`Add question to "${activeSection?.topicTitle}"...`}
+                      placeholder={`${t('addQuestionPrefix', 'Add question to')} "${activeSection?.topicTitle}"...`}
                       value={newQuestionText}
                       onChange={(e) => setNewQuestionText(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
@@ -1143,7 +1161,7 @@ export default function ChefAISettingsPage() {
                       className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md"
                       style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
                     >
-                      <Plus className="h-4 w-4" /> Add
+                      <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
                     </button>
                   </div>
                 </div>
@@ -1162,14 +1180,14 @@ export default function ChefAISettingsPage() {
                 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <LayoutTemplate className="h-4 w-4" /> Final Results Appearance in /chef Chat
+                <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
               </h2>
               
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
-                  { id: 'card', title: 'Standard Cards View', desc: 'Full interactive meal cards with images and batch cooking options.' },
-                  { id: 'compact', title: 'Compact Table View', desc: 'Condensed list view optimized for quick overview and rapid swapping.' },
-                  { id: 'detailed', title: 'Detailed Master View', desc: 'Expanded view displaying full ingredient breakdowns inline.' }
+                  { id: 'card', title: t('modeCardTitle', 'Standard Cards View'), desc: t('modeCardDesc', 'Full interactive meal cards with images and batch cooking options.') },
+                  { id: 'compact', title: t('modeCompactTitle', 'Compact Table View'), desc: t('modeCompactDesc', 'Condensed list view optimized for quick overview and rapid swapping.') },
+                  { id: 'detailed', title: t('modeDetailedTitle', 'Detailed Master View'), desc: t('modeDetailedDesc', 'Expanded view displaying full ingredient breakdowns inline.') }
                 ].map((mode) => {
                   const isSel = resultDisplayMode === mode.id;
                   return (
@@ -1199,9 +1217,11 @@ export default function ChefAISettingsPage() {
               <div className="pt-3 border-t space-y-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <div className="flex items-center justify-between">
                   <span className="font-bold flex items-center gap-1.5 text-xs" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Live UI Preview ({resultDisplayMode.toUpperCase()} MODE)
+                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('liveUiPreview', 'Live UI Preview')} ({resultDisplayMode.toUpperCase()} MODE)
                   </span>
-                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Updates instantly when selecting above</span>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('liveUiPreviewNotice', 'Updates instantly when selecting above')}
+                  </span>
                 </div>
 
                 <div 
@@ -1328,10 +1348,10 @@ export default function ChefAISettingsPage() {
                   className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  <Mic className="h-4 w-4" /> Voice Interaction & Speech Configuration
+                  <Mic className="h-4 w-4" /> {t('voiceInteractionHeader', 'Voice Interaction & Speech Configuration')}
                 </h2>
                 <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  Configure text-to-speech engine, voice models, playback speed, and auto-read behavior.
+                  {t('voiceInteractionDesc', 'Configure text-to-speech engine, voice models, playback speed, and auto-read behavior.')}
                 </p>
               </div>
 
@@ -1343,7 +1363,7 @@ export default function ChefAISettingsPage() {
                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
                 }}
               >
-                <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Enable Voice Mode</span>
+                <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('enableVoiceMode', 'Enable Voice Mode')}</span>
                 <div 
                   className="w-9 h-5 rounded-full p-0.5 transition"
                   style={{ backgroundColor: enableVoiceInteraction ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#334155') }}
@@ -1356,7 +1376,7 @@ export default function ChefAISettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  Voice Synthesis Engine
+                  {t('voiceSynthesisEngine', 'Voice Synthesis Engine')}
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   {['version1', 'version2'].map((ver) => {
@@ -1385,7 +1405,7 @@ export default function ChefAISettingsPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  Assistant Voice Persona
+                  {t('assistantVoicePersona', 'Assistant Voice Persona')}
                 </label>
                 <select
                   value={selectedVoiceName}
@@ -1408,7 +1428,7 @@ export default function ChefAISettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
               <div className="space-y-2">
                 <div className="flex justify-between font-bold">
-                  <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Speech Speed: {voiceSpeed}x</span>
+                  <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('speechSpeed', 'Speech Speed')}: {voiceSpeed}x</span>
                   <span style={{ color: isDayMode ? '#059669' : '#34d399' }}>{voiceSpeed === 1.0 ? 'Normal' : voiceSpeed > 1.0 ? 'Fast' : 'Relaxed'}</span>
                 </div>
                 <input
@@ -1421,7 +1441,9 @@ export default function ChefAISettingsPage() {
                   className="w-full cursor-pointer"
                   style={{ accentColor: 'var(--color-primary, #E05638)' }}
                 />
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Adjust the speaking pace of the AI assistant when reading recipe steps aloud.</p>
+                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('speechSpeedDesc', 'Adjust the speaking pace of the AI assistant when reading recipe steps aloud.')}
+                </p>
               </div>
 
               <div className="space-y-2 flex flex-col justify-center">
@@ -1436,8 +1458,8 @@ export default function ChefAISettingsPage() {
                   <div className="flex items-center gap-2.5">
                     <Volume2 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
                     <div>
-                      <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Auto-Read AI Responses</span>
-                      <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Automatically speak answers aloud upon generation.</span>
+                      <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('autoReadAiResponses', 'Auto-Read AI Responses')}</span>
+                      <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('autoReadAiResponsesDesc', 'Automatically speak answers aloud upon generation.')}</span>
                     </div>
                   </div>
                   <div 
@@ -1467,9 +1489,11 @@ export default function ChefAISettingsPage() {
                 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <Globe className="h-4 w-4" /> Autonomous Capabilities & Search Scope Control
+                <Globe className="h-4 w-4" /> {t('autonomousCapabilitiesHeader', 'Autonomous Capabilities & Search Scope Control')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Control what data sources the AI agent searches and incorporates when responding on <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/chef</span>.</p>
+              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('autonomousCapabilitiesDesc', 'Control what data sources the AI agent searches and incorporates when responding on')} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/chef</span>.
+              </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
                 <div 
@@ -1493,8 +1517,10 @@ export default function ChefAISettingsPage() {
                     </div>
                   </div>
                   <div>
-                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Live Web Search</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Allows AI to search external culinary web data, trends, and ingredient substitutes.</span>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('liveWebSearch', 'Live Web Search')}</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      {t('liveWebSearchDesc', 'Allows AI to search external culinary web data, trends, and ingredient substitutes.')}
+                    </span>
                   </div>
                 </div>
 
@@ -1519,8 +1545,10 @@ export default function ChefAISettingsPage() {
                     </div>
                   </div>
                   <div>
-                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Pantry Context Search</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Automatically scans user pantry inventory to build recipes matching in-stock ingredients.</span>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('pantryContextSearch', 'Pantry Context Search')}</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      {t('pantryContextSearchDesc', 'Automatically scans user pantry inventory to build recipes matching in-stock ingredients.')}
+                    </span>
                   </div>
                 </div>
 
@@ -1545,8 +1573,10 @@ export default function ChefAISettingsPage() {
                     </div>
                   </div>
                   <div>
-                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Strict Dietary Filters</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.</span>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('strictDietaryFilters', 'Strict Dietary Filters')}</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      {t('strictDietaryFiltersDesc', 'Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.')}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1564,14 +1594,14 @@ export default function ChefAISettingsPage() {
                 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <SlidersHorizontal className="h-4 w-4" /> Agent Parameters & Knowledge Tuning
+                <SlidersHorizontal className="h-4 w-4" /> {t('agentParametersHeader', 'Agent Parameters & Knowledge Tuning')}
               </h2>
 
               {/* CREATIVITY & MAX PLAN DAYS */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <div className="space-y-2">
                   <div className="flex justify-between font-bold">
-                    <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Temperature (Creativity): {temperature}</span>
+                    <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('temperatureLabel', 'Temperature (Creativity)')}: {temperature}</span>
                     <span style={{ color: isDayMode ? '#059669' : '#34d399' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
                   </div>
                   <input
@@ -1584,11 +1614,15 @@ export default function ChefAISettingsPage() {
                     className="w-full cursor-pointer"
                     style={{ accentColor: 'var(--color-primary, #E05638)' }}
                   />
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.</p>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('temperatureDesc', 'Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.')}
+                  </p>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Max Plan Days Limit (Wizard Cap)</label>
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('maxPlanDaysCap', 'Max Plan Days Limit (Wizard Cap)')}
+                  </label>
                   <input
                     type="number"
                     min="1"
@@ -1604,7 +1638,9 @@ export default function ChefAISettingsPage() {
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Maximum number of days the AI can structure in a single meal plan wizard sequence.</p>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('maxPlanDaysDesc', 'Maximum number of days the AI can structure in a single meal plan wizard sequence.')}
+                  </p>
                 </div>
               </div>
 
@@ -1612,9 +1648,11 @@ export default function ChefAISettingsPage() {
               <div className="space-y-3 pt-1">
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Knowledge Base
+                    <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('knowledgeBaseHeader', 'Knowledge Base')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Fine-tune the assistant to your needs by adding reference source documents or databases.</p>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('knowledgeBaseDesc', 'Fine-tune the assistant to your needs by adding reference source documents or databases.')}
+                  </p>
                 </div>
 
                 <div className="flex gap-2">
@@ -1688,9 +1726,11 @@ export default function ChefAISettingsPage() {
               <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    <BookA className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> Custom Vocabulary
+                    <BookA className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enhance accuracy with specialized culinary or business terminology.</p>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('customVocabularyDesc', 'Enhance accuracy with specialized culinary or business terminology.')}
+                  </p>
                 </div>
 
                 <div className="flex gap-2">
@@ -1704,7 +1744,7 @@ export default function ChefAISettingsPage() {
                   >
                     <input
                       type="text"
-                      placeholder="Start typing to add"
+                      placeholder={t('startTypingToAdd', 'Start typing to add')}
                       value={newVocabInput}
                       onChange={(e) => setNewVocabInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -1730,7 +1770,7 @@ export default function ChefAISettingsPage() {
                         color: isDayMode ? '#334155' : '#cbd5e1'
                       }}
                     >
-                      Enter
+                      {t('enterKey', 'Enter')}
                     </span>
                   </div>
                 </div>
@@ -1763,9 +1803,11 @@ export default function ChefAISettingsPage() {
               <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    <Ban className="h-4 w-4 text-red-500" /> Filter Words
+                    <Ban className="h-4 w-4 text-red-500" /> {t('filterWordsHeader', 'Filter Words')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Restricted words or ingredients remain unspoken or avoided in AI outputs.</p>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('filterWordsDesc', 'Restricted words or ingredients remain unspoken or avoided in AI outputs.')}
+                  </p>
                 </div>
 
                 <div className="flex gap-2">
@@ -1779,7 +1821,7 @@ export default function ChefAISettingsPage() {
                   >
                     <input
                       type="text"
-                      placeholder="Start typing to add"
+                      placeholder={t('startTypingToAdd', 'Start typing to add')}
                       value={newFilterInput}
                       onChange={(e) => setNewFilterInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -1805,7 +1847,7 @@ export default function ChefAISettingsPage() {
                         color: isDayMode ? '#334155' : '#cbd5e1'
                       }}
                     >
-                      Enter
+                      {t('enterKey', 'Enter')}
                     </span>
                   </div>
                 </div>
@@ -1837,7 +1879,7 @@ export default function ChefAISettingsPage() {
               {/* SYSTEM PROMPT / PERSONA */}
               <div className="space-y-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  System Prompt / Autonomous Persona
+                  {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
                 </label>
                 <textarea
                   rows={5}
@@ -1853,7 +1895,7 @@ export default function ChefAISettingsPage() {
                   onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 />
                 <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  Defines how the AI agent behaves, formats responses, and handles user queries on the <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> page.
+                  {t('systemPromptDesc', 'Defines how the AI agent behaves, formats responses, and handles user queries on the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('pageSuffix', 'page.')}
                 </p>
               </div>
             </div>

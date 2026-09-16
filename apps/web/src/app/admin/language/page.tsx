@@ -1,10 +1,11 @@
 'use client';
+
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   Globe, Languages, Plus, Edit3, Trash2, Shield, 
   Check, CheckCircle, X, AlertCircle, Search, 
-  ShieldAlert, Star, Type, Sliders, RotateCcw, Flag
+  ShieldAlert, Star, Type, Sliders, RotateCcw, Flag, RefreshCw
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -17,6 +18,11 @@ import { es } from '@/lib/lang/es';
 import { fr } from '@/lib/lang/fr';
 import { th } from '@/lib/lang/th';
 import { DEFAULT_DICTIONARIES } from '@/lib/lang';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 export interface SupportedLanguage {
   code: string;
@@ -96,7 +102,7 @@ export const getLanguageFlag = (code?: string, explicitFlag?: string): string =>
   return match ? match.flag : '🌐';
 };
 
-const DEFAULT_LANGUAGES: SupportedLanguage[] = [
+export const DEFAULT_LANGUAGES: SupportedLanguage[] = [
   { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸', direction: 'ltr', isDefault: true, status: 'active', lastUpdated: new Date().toISOString() },
   { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', direction: 'ltr', isDefault: false, status: 'active', lastUpdated: new Date().toISOString() },
   { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', direction: 'ltr', isDefault: false, status: 'active', lastUpdated: new Date().toISOString() },
@@ -104,13 +110,17 @@ const DEFAULT_LANGUAGES: SupportedLanguage[] = [
 ];
 
 export default function AdminLanguagePage() {
-  const { t, version } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+  const version = langContext?.version;
+
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [languages, setLanguages] = useState<SupportedLanguage[]>([]);
   const [search, setSearch] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [feedbackType, setFeedbackType] = useState<'success' | 'error'>('success');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -138,14 +148,16 @@ export default function AdminLanguagePage() {
   const [newWordKey, setNewWordKey] = useState('');
   const [newWordVal, setNewWordVal] = useState('');
 
-  // Dynamic Theme Synchronization & Day Mode Inversion
+  // Dynamic Theme Synchronization
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -184,7 +196,7 @@ export default function AdminLanguagePage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -205,47 +217,54 @@ export default function AdminLanguagePage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadLanguages = () => {
+  // Load languages exclusively from Server Storage (Zero LocalStorage)
+  const loadLanguages = useCallback(async () => {
+    setIsLoading(true);
+    purgeLegacyBrowserAdminStorage();
     try {
-      const raw = localStorage.getItem('zecratary_languages');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const withFlags = parsed.map((item: any) => ({
-            ...item,
-            flag: item.flag || getLanguageFlag(item.code)
-          }));
-          setLanguages(withFlags);
-          return;
-        }
+      const serverData = await fetchServerAdminSettings();
+      if (serverData && Array.isArray(serverData.supportedLanguages) && serverData.supportedLanguages.length > 0) {
+        const withFlags = serverData.supportedLanguages.map((item: any) => ({
+          ...item,
+          flag: item.flag || getLanguageFlag(item.code)
+        }));
+        setLanguages(withFlags);
+      } else {
+        setLanguages(DEFAULT_LANGUAGES);
       }
-    } catch (e) {}
-    setLanguages(DEFAULT_LANGUAGES);
-    localStorage.setItem('zecratary_languages', JSON.stringify(DEFAULT_LANGUAGES));
-  };
+    } catch (e) {
+      console.error('[AdminLanguagePage] Failed to fetch server languages:', e);
+      setLanguages(DEFAULT_LANGUAGES);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    document.title = `${t('langPageTitle')} - Admin Console`;
+    document.title = `${t('langPageTitle', 'Language Management')} - ${t('adminConsole', 'Admin Console')}`;
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
     loadLanguages();
 
     const handleSync = () => loadLanguages();
-    window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [t, version]);
+  }, [t, version, loadLanguages]);
 
-  const saveLanguagesList = (updated: SupportedLanguage[]) => {
+  // Persist languages list directly to server (Zero LocalStorage writes)
+  const saveLanguagesList = async (updated: SupportedLanguage[]) => {
     setLanguages(updated);
-    localStorage.setItem('zecratary_languages', JSON.stringify(updated));
-    window.dispatchEvent(new Event('zecratary_languages_updated'));
-    window.dispatchEvent(new Event('storage'));
+    await persistServerAdminSettings({ supportedLanguages: updated });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('zecratary_languages_updated', { detail: updated }));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
   };
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -278,12 +297,12 @@ export default function AdminLanguagePage() {
     const cleanNative = langNativeName.trim() || cleanName;
 
     if (!cleanCode || !cleanName) {
-      setModalError(t('codeAndNameRequired'));
+      setModalError(t('codeAndNameRequired', 'Language code and name are required.'));
       return;
     }
 
     if (languages.some((l) => l.code.toLowerCase() === cleanCode)) {
-      setModalError(`"${cleanCode}" ${t('languageAlreadyExists')}`);
+      setModalError(`"${cleanCode}" ${t('languageAlreadyExists', 'already exists.')}`);
       return;
     }
 
@@ -303,10 +322,10 @@ export default function AdminLanguagePage() {
       lastUpdated: new Date().toISOString()
     };
 
-    // Prepare default dictionary words from baseline en.ts
+    // Baseline en words
     const initialWords: Record<string, string> = {};
     Object.keys(en).forEach((k) => {
-      initialWords[k] = en[k];
+      initialWords[k] = (en as any)[k];
     });
 
     try {
@@ -323,11 +342,13 @@ export default function AdminLanguagePage() {
       console.warn('API file sync notice:', err);
     }
 
-    saveLanguagesList([...updated, newLang]);
-    saveCustomDictionary(cleanCode, initialWords);
+    await saveLanguagesList([...updated, newLang]);
+    try {
+      saveCustomDictionary(cleanCode, initialWords);
+    } catch (_) {}
 
     setShowAddModal(false);
-    showToast(`"${cleanName}" (${cleanCode}.ts) ${t('languageAddedSuccess')}`);
+    showToast(`"${cleanName}" (${cleanCode}.ts) ${t('languageAddedSuccess', 'added successfully!')}`);
   };
 
   // OPEN EDIT MODAL
@@ -349,7 +370,7 @@ export default function AdminLanguagePage() {
     const merged = getMergedDictionary(lang.code);
     const fullDictionary: Record<string, string> = {};
     Object.keys(en).forEach((k) => {
-      fullDictionary[k] = merged[k] || DEFAULT_DICTIONARIES[lang.code]?.[k] || en[k] || '';
+      fullDictionary[k] = merged[k] || (DEFAULT_DICTIONARIES as any)[lang.code]?.[k] || (en as any)[k] || '';
     });
     Object.keys(merged).forEach((k) => {
       if (fullDictionary[k] === undefined) {
@@ -382,8 +403,8 @@ export default function AdminLanguagePage() {
 
   const handleResetWordsToDefault = () => {
     if (!editingCode) return;
-    if (confirm('Reset all words for this language back to system defaults?')) {
-      const base = DEFAULT_DICTIONARIES[editingCode] || en;
+    if (confirm(t('confirmResetWords', 'Reset all words for this language back to system defaults?'))) {
+      const base = (DEFAULT_DICTIONARIES as any)[editingCode] || en;
       setWordsMap({ ...base });
     }
   };
@@ -397,7 +418,7 @@ export default function AdminLanguagePage() {
     const cleanNative = langNativeName.trim() || cleanName;
 
     if (!cleanName) {
-      setModalError(t('nameRequired'));
+      setModalError(t('nameRequired', 'Language display name is required.'));
       return;
     }
 
@@ -417,8 +438,10 @@ export default function AdminLanguagePage() {
       return langIsDefault ? { ...l, isDefault: false } : l;
     });
 
-    saveLanguagesList(updated);
-    saveCustomDictionary(editingCode, wordsMap);
+    await saveLanguagesList(updated);
+    try {
+      saveCustomDictionary(editingCode, wordsMap);
+    } catch (_) {}
 
     try {
       await fetch('/api/admin/languages', {
@@ -439,14 +462,14 @@ export default function AdminLanguagePage() {
   // DELETE LANGUAGE
   const handleDeleteLanguage = async (lang: SupportedLanguage) => {
     if (lang.isDefault) {
-      showToast(t('cannotDeleteDefaultError'), 'error');
+      showToast(t('cannotDeleteDefaultError', 'Default language cannot be deleted.'), 'error');
       return;
     }
     if (lang.code === 'en') {
-      showToast(t('cannotDeleteEnglishError'), 'error');
+      showToast(t('cannotDeleteEnglishError', 'Baseline English language cannot be deleted.'), 'error');
       return;
     }
-    if (!confirm(`${t('confirmDelete')} "${lang.name}" (${lang.code}) and remove ${lang.code}.ts library?`)) return;
+    if (!confirm(`${t('confirmDelete', 'Are you sure you want to delete')} "${lang.name}" (${lang.code}) and remove ${lang.code}.ts library?`)) return;
 
     try {
       await fetch('/api/admin/languages', {
@@ -459,19 +482,19 @@ export default function AdminLanguagePage() {
     }
 
     const updated = languages.filter((l) => l.code !== lang.code);
-    saveLanguagesList(updated);
-    showToast(`"${lang.name}" (${lang.code}.ts) ${t('languageRemoved')}`);
+    await saveLanguagesList(updated);
+    showToast(`"${lang.name}" (${lang.code}.ts) ${t('languageRemoved', 'removed successfully.')}`);
   };
 
   // SET DEFAULT
-  const handleSetDefault = (code: string) => {
+  const handleSetDefault = async (code: string) => {
     const updated = languages.map((l) => ({
       ...l,
       isDefault: l.code === code,
-      status: l.code === code ? 'active' : l.status
+      status: (l.code === code ? 'active' : l.status) as 'active' | 'inactive'
     }));
-    saveLanguagesList(updated);
-    showToast(`${t('setAsDefaultSuccess')} ${code.toUpperCase()}`);
+    await saveLanguagesList(updated);
+    showToast(`${t('setAsDefaultSuccess', 'Default language set to')} ${code.toUpperCase()}`);
   };
 
   const filtered = languages.filter(
@@ -486,7 +509,7 @@ export default function AdminLanguagePage() {
     const query = wordSearch.toLowerCase().trim();
     return Object.keys(wordsMap).filter((k) => {
       if (!query) return true;
-      const enVal = en[k] || '';
+      const enVal = (en as any)[k] || '';
       const curVal = wordsMap[k] || '';
       return (
         k.toLowerCase().includes(query) ||
@@ -525,7 +548,7 @@ export default function AdminLanguagePage() {
           <div className="flex items-center gap-2">
             <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" />
             <span>
-              Signed in as <strong>{currentUser.email}</strong>. {t('adminPrivilegeWarning')}
+              Signed in as <strong>{currentUser.email}</strong>. {t('adminPrivilegeWarning', 'Administrative privileges are required to modify languages.')}
             </span>
           </div>
           <Link 
@@ -533,7 +556,7 @@ export default function AdminLanguagePage() {
             className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 shadow-sm"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            {t('switchToAdmin')}
+            {t('switchToAdmin', 'Switch to Admin')}
           </Link>
         </div>
       )}
@@ -568,24 +591,39 @@ export default function AdminLanguagePage() {
             className="text-3xl font-black tracking-tight flex items-center gap-2.5"
             style={{ color: 'var(--color-primary, #E05638)' }}
           >
-            <Languages className="h-8 w-8" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('langPageTitle')}
+            <Languages className="h-8 w-8" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('langPageTitle', 'Language Management')}
           </h1>
           <p 
             className="text-sm font-semibold"
             style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
           >
-            {t('langPageSubtitle')} ({languages.length} {t('installedSuffix')})
+            {t('langPageSubtitle', 'Configure active system locales and in-app dictionaries')} ({languages.length} {t('installedSuffix', 'installed')})
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={loadLanguages}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+            style={{
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#0f172a' : '#cbd5e1'
+            }}
+            title="Reload from server store"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>{t('refreshBtn', 'Reload')}</span>
+          </button>
+
           <button
             onClick={handleOpenAddModal}
             disabled={currentUser?.role !== 'admin'}
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            <Plus className="h-4 w-4" /> {t('addLanguage')}
+            <Plus className="h-4 w-4" /> {t('addLanguage', 'Add Language')}
           </button>
           <Link
             href="/admin"
@@ -596,7 +634,7 @@ export default function AdminLanguagePage() {
               color: isDayMode ? '#0f172a' : '#cbd5e1'
             }}
           >
-            <Shield className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminConsole')}
+            <Shield className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminConsole', 'Admin Console')}
           </Link>
         </div>
       </div>
@@ -606,7 +644,7 @@ export default function AdminLanguagePage() {
         <Search className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
         <input
           type="text"
-          placeholder={t('searchLanguagePlaceholder')}
+          placeholder={t('searchLanguagePlaceholder', 'Search language by name, code or native script...')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition shadow-xs"
@@ -639,19 +677,19 @@ export default function AdminLanguagePage() {
               }}
             >
               <tr>
-                <th className="px-5 py-4">{t('tableLangAndCode')}</th>
-                <th className="px-5 py-4">{t('tableNativeName')}</th>
-                <th className="px-5 py-4">{t('tableDirection')}</th>
-                <th className="px-5 py-4">{t('tableDefault')}</th>
-                <th className="px-5 py-4">{t('tableStatus')}</th>
-                <th className="px-5 py-4 text-right">{t('tableActions')}</th>
+                <th className="px-5 py-4">{t('tableLangAndCode', 'Language & Identifier')}</th>
+                <th className="px-5 py-4">{t('tableNativeName', 'Native Script & Flag')}</th>
+                <th className="px-5 py-4">{t('tableDirection', 'Direction')}</th>
+                <th className="px-5 py-4">{t('tableDefault', 'Default')}</th>
+                <th className="px-5 py-4">{t('tableStatus', 'Status')}</th>
+                <th className="px-5 py-4 text-right">{t('tableActions', 'Actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y transition-colors duration-200" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="text-center py-12" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {t('noLanguagesFound')} "{search}"
+                    {t('noLanguagesFound', 'No languages found matching')} "{search}"
                   </td>
                 </tr>
               ) : (
@@ -707,7 +745,7 @@ export default function AdminLanguagePage() {
                             color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                           }}
                         >
-                          <Star className="h-3 w-3 fill-current" /> {t('defaultBadge')}
+                          <Star className="h-3 w-3 fill-current" /> {t('defaultBadge', 'Default')}
                         </span>
                       ) : (
                         <button
@@ -720,7 +758,7 @@ export default function AdminLanguagePage() {
                             color: isDayMode ? '#334155' : '#94a3b8'
                           }}
                         >
-                          {t('setDefault')}
+                          {t('setDefault', 'Set Default')}
                         </button>
                       )}
                     </td>
@@ -737,7 +775,7 @@ export default function AdminLanguagePage() {
                           color: isDayMode ? '#64748b' : '#94a3b8'
                         }}
                       >
-                        {item.status === 'active' ? t('active') : t('inactive')}
+                        {item.status === 'active' ? t('active', 'Active') : t('inactive', 'Inactive')}
                       </span>
                     </td>
                     <td className="px-5 py-4 text-right">
@@ -766,7 +804,7 @@ export default function AdminLanguagePage() {
                             borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                             color: isDayMode ? '#64748b' : '#94a3b8'
                           }}
-                          title={item.isDefault ? t('cannotDeleteDefault') : t('deleteLanguageTooltip')}
+                          title={item.isDefault ? t('cannotDeleteDefault', 'Cannot delete default language') : t('deleteLanguageTooltip', 'Delete Language')}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -811,9 +849,11 @@ export default function AdminLanguagePage() {
                 className="text-xl font-black flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <Languages className="h-5 w-5" /> {t('addNewLanguageTitle')}
+                <Languages className="h-5 w-5" /> {t('addNewLanguageTitle', 'Add New Language')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('addNewLanguageSub')}</p>
+              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('addNewLanguageSub', 'Register a new locale code and initialize system translations.')}
+              </p>
             </div>
 
             {modalError && (
@@ -897,11 +937,13 @@ export default function AdminLanguagePage() {
                 </div>
 
                 <div className="flex-1">
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('langCodeLabel')}</label>
+                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('langCodeLabel', 'Language Code (ISO)')}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder={t('langCodePlaceholder')}
+                    placeholder={t('langCodePlaceholder', 'e.g. de, it, ja')}
                     maxLength={5}
                     value={langCode}
                     onChange={(e) => setLangCode(e.target.value)}
@@ -916,11 +958,13 @@ export default function AdminLanguagePage() {
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('displayNameLabel')}</label>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('displayNameLabel', 'Display Name')}
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder={t('displayNamePlaceholder')}
+                  placeholder={t('displayNamePlaceholder', 'e.g. German')}
                   value={langName}
                   onChange={(e) => setLangName(e.target.value)}
                   className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
@@ -933,10 +977,12 @@ export default function AdminLanguagePage() {
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('nativeNameLabel')}</label>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('nativeNameLabel', 'Native Name')}
+                </label>
                 <input
                   type="text"
-                  placeholder={t('nativeNamePlaceholder')}
+                  placeholder={t('nativeNamePlaceholder', 'e.g. Deutsch')}
                   value={langNativeName}
                   onChange={(e) => setLangNativeName(e.target.value)}
                   className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
@@ -950,7 +996,9 @@ export default function AdminLanguagePage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('layoutDirectionLabel')}</label>
+                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('layoutDirectionLabel', 'Layout Direction')}
+                  </label>
                   <select
                     value={langDirection}
                     onChange={(e) => setLangDirection(e.target.value as any)}
@@ -961,13 +1009,15 @@ export default function AdminLanguagePage() {
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
-                    <option value="ltr" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionLtr')}</option>
-                    <option value="rtl" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionRtl')}</option>
+                    <option value="ltr" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionLtr', 'Left-to-Right (LTR)')}</option>
+                    <option value="rtl" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionRtl', 'Right-to-Left (RTL)')}</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('statusLabel')}</label>
+                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('statusLabel', 'Status')}
+                  </label>
                   <select
                     value={langStatus}
                     onChange={(e) => setLangStatus(e.target.value as any)}
@@ -978,8 +1028,8 @@ export default function AdminLanguagePage() {
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
-                    <option value="active" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active')}</option>
-                    <option value="inactive" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('inactive')}</option>
+                    <option value="active" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active', 'Active')}</option>
+                    <option value="inactive" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('inactive', 'Inactive')}</option>
                   </select>
                 </div>
               </div>
@@ -992,7 +1042,7 @@ export default function AdminLanguagePage() {
                     onChange={(e) => setLangIsDefault(e.target.checked)}
                     className="rounded accent-[#E05638]"
                   />
-                  <span>{t('setAsDefaultLabel')}</span>
+                  <span>{t('setAsDefaultLabel', 'Set as default application language')}</span>
                 </label>
               </div>
 
@@ -1007,14 +1057,14 @@ export default function AdminLanguagePage() {
                     color: isDayMode ? '#475569' : '#cbd5e1'
                   }}
                 >
-                  {t('cancel')}
+                  {t('cancel', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
                 >
-                  <Plus className="h-4 w-4" /> {t('addLanguage')}
+                  <Plus className="h-4 w-4" /> {t('addLanguage', 'Add Language')}
                 </button>
               </div>
             </form>
@@ -1053,9 +1103,11 @@ export default function AdminLanguagePage() {
                 className="text-xl font-black flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <Edit3 className="h-5 w-5" /> {t('editLanguageTitle')} ({editingCode?.toUpperCase()})
+                <Edit3 className="h-5 w-5" /> {t('editLanguageTitle', 'Edit Language')} ({editingCode?.toUpperCase()})
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('editLanguageSub')}</p>
+              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('editLanguageSub', 'Customize locale configuration and system dictionary phrases.')}
+              </p>
             </div>
 
             {/* TAB NAVIGATION */}
@@ -1172,7 +1224,9 @@ export default function AdminLanguagePage() {
                   </div>
 
                   <div className="flex-1">
-                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('displayNameLabel')}</label>
+                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      {t('displayNameLabel', 'Display Name')}
+                    </label>
                     <input
                       type="text"
                       required
@@ -1189,7 +1243,9 @@ export default function AdminLanguagePage() {
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('nativeNameLabel')}</label>
+                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('nativeNameLabel', 'Native Name')}
+                  </label>
                   <input
                     type="text"
                     value={langNativeName}
@@ -1205,7 +1261,9 @@ export default function AdminLanguagePage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('layoutDirectionLabel')}</label>
+                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      {t('layoutDirectionLabel', 'Layout Direction')}
+                    </label>
                     <select
                       value={langDirection}
                       onChange={(e) => setLangDirection(e.target.value as any)}
@@ -1216,13 +1274,15 @@ export default function AdminLanguagePage() {
                         color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     >
-                      <option value="ltr" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionLtr')}</option>
-                      <option value="rtl" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionRtl')}</option>
+                      <option value="ltr" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionLtr', 'Left-to-Right (LTR)')}</option>
+                      <option value="rtl" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionRtl', 'Right-to-Left (RTL)')}</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('statusLabel')}</label>
+                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      {t('statusLabel', 'Status')}
+                    </label>
                     <select
                       value={langStatus}
                       onChange={(e) => setLangStatus(e.target.value as any)}
@@ -1233,8 +1293,8 @@ export default function AdminLanguagePage() {
                         color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     >
-                      <option value="active" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active')}</option>
-                      <option value="inactive" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('inactive')}</option>
+                      <option value="active" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active', 'Active')}</option>
+                      <option value="inactive" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('inactive', 'Inactive')}</option>
                     </select>
                   </div>
                 </div>
@@ -1247,7 +1307,7 @@ export default function AdminLanguagePage() {
                       onChange={(e) => setLangIsDefault(e.target.checked)}
                       className="rounded accent-[#E05638]"
                     />
-                    <span>{t('setAsDefaultLabel')}</span>
+                    <span>{t('setAsDefaultLabel', 'Set as default application language')}</span>
                   </label>
                 </div>
               </div>
@@ -1341,7 +1401,7 @@ export default function AdminLanguagePage() {
                     </div>
                   ) : (
                     wordKeysList.map((key) => {
-                      const englishRef = en[key] || key;
+                      const englishRef = (en as any)[key] || key;
                       const currentValue = wordsMap[key] ?? '';
 
                       return (
@@ -1393,7 +1453,7 @@ export default function AdminLanguagePage() {
                   color: isDayMode ? '#475569' : '#cbd5e1'
                 }}
               >
-                {t('cancel')}
+                {t('cancel', 'Cancel')}
               </button>
               <button
                 type="submit"
@@ -1401,7 +1461,7 @@ export default function AdminLanguagePage() {
                 className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
               >
-                <Check className="h-4 w-4" /> {t('saveChanges')}
+                <Check className="h-4 w-4" /> {t('saveChanges', 'Save Changes')}
               </button>
             </div>
           </div>

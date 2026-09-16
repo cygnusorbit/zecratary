@@ -27,13 +27,23 @@ import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { 
   getSiteConfig, 
   saveSiteConfig, 
+  setMemorySiteConfig,
   updateFavicon, 
   SiteIdentityConfig, 
   DEFAULT_SITE_NAME, 
   DEFAULT_SITE_ICON 
 } from '@/lib/siteConfig';
-import { applyThemeToDocument, saveThemeColors } from '@/lib/themeConfig';
+import { 
+  applyThemeToDocument, 
+  saveThemeColors, 
+  setMemoryThemeColors 
+} from '@/lib/themeConfig';
 import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 const PRESET_PALETTES = [
   { 
@@ -105,7 +115,8 @@ const PRESET_PALETTES = [
 ];
 
 export default function AdminSettingsPage() {
-  const { t: translate } = useTranslation() || {};
+  const langContext = useTranslation();
+  const translate = langContext?.t;
   const t = useCallback((key: string, fallback: string) => {
     if (typeof translate === 'function') {
       const val = translate(key);
@@ -118,6 +129,7 @@ export default function AdminSettingsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [saved, setSaved] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Site Identity State
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
@@ -191,36 +203,28 @@ export default function AdminSettingsPage() {
     });
   };
 
-  // Initial load: Auth, Site Config, Theme Colors
-  useEffect(() => {
-    initAuthStorage();
-    const active = getCurrentUser();
-    setUser(active);
-
-    const cfg = getSiteConfig();
-    setSiteName(cfg.siteName);
-    setTitlebarEmoji(cfg.titlebarEmoji);
-    setTitlebarImage(cfg.titlebarImage);
-    setFaviconEmoji(cfg.faviconEmoji);
-    setFaviconImage(cfg.faviconImage);
-
+  // Load Settings Exclusively from Server Storage (Zero LocalStorage)
+  const loadSettingsFromServer = useCallback(async () => {
+    setIsLoading(true);
+    purgeLegacyBrowserAdminStorage();
     try {
-      const mode = localStorage.getItem('zecratary_theme_mode');
-      setIsDayMode(mode === 'light');
-    } catch (_) {}
+      const serverData = await fetchServerAdminSettings();
+      if (serverData) {
+        if (serverData.siteName) setSiteName(serverData.siteName);
+        if (serverData.titlebarEmoji) setTitlebarEmoji(serverData.titlebarEmoji);
+        if (serverData.titlebarImage !== undefined) setTitlebarImage(serverData.titlebarImage);
+        if (serverData.faviconEmoji) setFaviconEmoji(serverData.faviconEmoji);
+        if (serverData.faviconImage !== undefined) setFaviconImage(serverData.faviconImage);
 
-    try {
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      if (stored) {
-        const c = JSON.parse(stored);
-        const p = c.primary || c.primaryColor || '#E05638';
-        const ph = c.primaryHover || '#c94529';
-        const ac = c.accentEmerald || c.accentColor || c.accent || '#10b981';
-        const sbi = c.sidebarIconColor || c.sidebarIcon || ac || '#10b981';
-        const bg = c.backgroundColor || c.backgroundDark || '#070b13';
-        const card = c.cardBackground || '#0b0f17';
-        const border = c.cardBorder || '#1e293b';
-        const textSec = c.textSecondary || '#94a3b8';
+        const tc = serverData.themeColors || {};
+        const p = tc.primary || tc.primaryColor || '#E05638';
+        const ph = tc.primaryHover || '#c94529';
+        const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
+        const sbi = tc.sidebarIconColor || tc.sidebarIcon || ac || '#10b981';
+        const bg = tc.backgroundColor || tc.backgroundDark || '#070b13';
+        const card = tc.cardBackground || '#0b0f17';
+        const border = tc.cardBorder || '#1e293b';
+        const textSec = tc.textSecondary || '#94a3b8';
 
         setPrimaryColor(p);
         setPrimaryHoverColor(ph);
@@ -231,72 +235,38 @@ export default function AdminSettingsPage() {
         setCardBorderColor(border);
         setSecondaryTextColor(textSec);
 
-        applyThemeToDocument({
-          primary: p,
-          primaryColor: p,
-          primaryHover: ph,
-          accentEmerald: ac,
-          accentColor: ac,
-          accent: ac,
-          sidebarIconColor: sbi,
-          sidebarIcon: sbi,
-          backgroundColor: bg,
-          backgroundDark: bg,
-          cardBackground: card,
-          cardBorder: border,
-          textSecondary: textSec,
-        });
+        applyColorsLocally(p, ph, ac, sbi, bg, card, border, textSec);
       }
-    } catch (_) {}
-
-    fetch('/api/system-settings', { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((data) => {
-        const tc = data?.settings?.themeColors || data?.themeColors;
-        if (data?.success && tc) {
-          const p = tc.primary || tc.primaryColor || '#E05638';
-          const ph = tc.primaryHover || '#c94529';
-          const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
-          const sbi = tc.sidebarIconColor || tc.sidebarIcon || ac || '#10b981';
-          const bg = tc.backgroundColor || tc.backgroundDark || '#070b13';
-          const card = tc.cardBackground || '#0b0f17';
-          const border = tc.cardBorder || '#1e293b';
-          const textSec = tc.textSecondary || '#94a3b8';
-
-          if (!localStorage.getItem('zecratary_theme_colors')) {
-            setPrimaryColor(p);
-            setPrimaryHoverColor(ph);
-            setAccentColor(ac);
-            setSidebarIconColor(sbi);
-            setBackgroundColor(bg);
-            setCardBackgroundColor(card);
-            setCardBorderColor(border);
-            setSecondaryTextColor(textSec);
-
-            applyThemeToDocument({
-              primary: p,
-              primaryColor: p,
-              primaryHover: ph,
-              accentEmerald: ac,
-              sidebarIconColor: sbi,
-              sidebarIcon: sbi,
-              backgroundColor: bg,
-              cardBackground: card,
-              cardBorder: border,
-              textSecondary: textSec,
-            });
-          }
-        }
-      })
-      .catch(() => {});
+    } catch (err) {
+      console.error('[AdminSettingsPage] Error loading settings from server:', err);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  // Theme mode change listener
+  useEffect(() => {
+    initAuthStorage();
+    const active = getCurrentUser();
+    setUser(active);
+
+    loadSettingsFromServer();
+
+    const handleServerUpdate = () => {
+      loadSettingsFromServer();
+    };
+
+    window.addEventListener('zecratary_admin_settings_updated', handleServerUpdate);
+    return () => {
+      window.removeEventListener('zecratary_admin_settings_updated', handleServerUpdate);
+    };
+  }, [loadSettingsFromServer]);
+
+  // Dynamic Theme mode change listener
   useEffect(() => {
     const handleModeChange = () => {
       try {
-        const mode = localStorage.getItem('zecratary_theme_mode');
-        const day = mode === 'light';
+        const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+        const day = mode === 'light' || mode === 'day';
         setIsDayMode(day);
         const cur = colorsRef.current;
         applyThemeToDocument({
@@ -316,6 +286,7 @@ export default function AdminSettingsPage() {
       } catch (_) {}
     };
 
+    handleModeChange();
     window.addEventListener('zecratary_theme_mode_changed', handleModeChange);
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', handleModeChange);
@@ -367,7 +338,7 @@ export default function AdminSettingsPage() {
     );
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const updatedBranding: SiteIdentityConfig = {
@@ -377,7 +348,14 @@ export default function AdminSettingsPage() {
       faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
       faviconImage
     };
-    saveSiteConfig(updatedBranding);
+
+    setMemorySiteConfig(updatedBranding);
+    if (faviconImage) {
+      updateFavicon(faviconImage);
+    } else if (faviconEmoji) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${faviconEmoji}</text></svg>`;
+      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+    }
 
     const themeColors = {
       primary: primaryColor,
@@ -395,13 +373,39 @@ export default function AdminSettingsPage() {
       textSecondary: secondaryTextColor,
     };
 
-    saveThemeColors(themeColors);
+    setMemoryThemeColors(themeColors);
+    applyColorsLocally(
+      primaryColor,
+      primaryHoverColor,
+      accentColor,
+      sidebarIconColor,
+      backgroundColor,
+      cardBackgroundColor,
+      cardBorderColor,
+      secondaryTextColor
+    );
+
+    // Save directly to server API with Zero LocalStorage writes
+    await persistServerAdminSettings({
+      siteName: updatedBranding.siteName,
+      titlebarEmoji: updatedBranding.titlebarEmoji,
+      titlebarImage: updatedBranding.titlebarImage || '',
+      faviconEmoji: updatedBranding.faviconEmoji,
+      faviconImage: updatedBranding.faviconImage || '',
+      themeColors
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: updatedBranding }));
+      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
 
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
 
-  const handleResetDefaults = () => {
+  const handleResetDefaults = async () => {
     if (!confirm(t('admin.confirmReset', 'Reset branding and theme settings to defaults?'))) return;
 
     const defaultName = DEFAULT_SITE_NAME;
@@ -430,13 +434,13 @@ export default function AdminSettingsPage() {
     setCardBorderColor(defaultBorder);
     setSecondaryTextColor(defaultTextSec);
 
-    saveSiteConfig({
+    const defaultBranding = {
       siteName: defaultName,
       titlebarEmoji: defaultIcon,
       titlebarImage: '',
       faviconEmoji: defaultIcon,
       faviconImage: ''
-    });
+    };
 
     const defaultColors = {
       primary: defaultPrimary,
@@ -454,7 +458,34 @@ export default function AdminSettingsPage() {
       textSecondary: defaultTextSec
     };
 
-    saveThemeColors(defaultColors);
+    setMemorySiteConfig(defaultBranding);
+    setMemoryThemeColors(defaultColors);
+
+    applyColorsLocally(
+      defaultPrimary,
+      defaultPrimaryHover,
+      defaultAccent,
+      defaultSidebarIcon,
+      defaultBg,
+      defaultCard,
+      defaultBorder,
+      defaultTextSec
+    );
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
+    updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+
+    // Persist directly to server storage
+    await persistServerAdminSettings({
+      ...defaultBranding,
+      themeColors: defaultColors
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
+      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
 
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
@@ -485,15 +516,33 @@ export default function AdminSettingsPage() {
           </p>
         </div>
 
-        {saved && (
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
-            isDayMode 
-              ? 'bg-emerald-100 border-emerald-300 text-emerald-700' 
-              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-          }`}>
-            <CheckCircle2 className="h-4 w-4" /> {t('admin.settingsSaved', 'Settings Saved & Broadcasted')}
-          </div>
-        )}
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={loadSettingsFromServer}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            style={{
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#334155' : '#cbd5e1'
+            }}
+            title="Reload settings from server store"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>Reload</span>
+          </button>
+
+          {saved && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
+              isDayMode 
+                ? 'bg-emerald-100 border-emerald-300 text-emerald-700' 
+                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+            }`}>
+              <CheckCircle2 className="h-4 w-4" /> {t('admin.settingsSaved', 'Settings Saved & Broadcasted')}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* TABS NAVIGATION */}

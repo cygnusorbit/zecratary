@@ -71,11 +71,22 @@ export async function POST(req: NextRequest) {
     const merged = {
       ...current,
       ...body,
+      themeColors: {
+        ...(current.themeColors || {}),
+        ...(body.themeColors || {})
+      },
       socialLogin: {
         ...(current.socialLogin || {}),
         ...(body.socialLogin || {})
       },
-      subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || []
+      subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || [],
+      supportedLanguages: body.supportedLanguages || current.supportedLanguages || [],
+      ingredientCategories: body.ingredientCategories || current.ingredientCategories || [],
+      chefAiSettings: {
+        ...(current.chefAiSettings || {}),
+        ...(body.chefAiSettings || {})
+      },
+      chefQuestionnaire: body.chefQuestionnaire || current.chefQuestionnaire || []
     };
 
     const success = writeServerSettings(merged);
