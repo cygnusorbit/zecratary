@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.1.1",
+  "version": "7.1.2",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -105,7 +105,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.1.1",
+  "version": "7.1.2",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -12529,13 +12529,23 @@ import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { 
   getSiteConfig, 
   saveSiteConfig, 
+  setMemorySiteConfig,
   updateFavicon, 
   SiteIdentityConfig, 
   DEFAULT_SITE_NAME, 
   DEFAULT_SITE_ICON 
 } from '@/lib/siteConfig';
-import { applyThemeToDocument, saveThemeColors } from '@/lib/themeConfig';
+import { 
+  applyThemeToDocument, 
+  saveThemeColors, 
+  setMemoryThemeColors 
+} from '@/lib/themeConfig';
 import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 const PRESET_PALETTES = [
   { 
@@ -12607,7 +12617,8 @@ const PRESET_PALETTES = [
 ];
 
 export default function AdminSettingsPage() {
-  const { t: translate } = useTranslation() || {};
+  const langContext = useTranslation();
+  const translate = langContext?.t;
   const t = useCallback((key: string, fallback: string) => {
     if (typeof translate === 'function') {
       const val = translate(key);
@@ -12620,6 +12631,7 @@ export default function AdminSettingsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [saved, setSaved] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Site Identity State
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
@@ -12693,36 +12705,28 @@ export default function AdminSettingsPage() {
     });
   };
 
-  // Initial load: Auth, Site Config, Theme Colors
-  useEffect(() => {
-    initAuthStorage();
-    const active = getCurrentUser();
-    setUser(active);
-
-    const cfg = getSiteConfig();
-    setSiteName(cfg.siteName);
-    setTitlebarEmoji(cfg.titlebarEmoji);
-    setTitlebarImage(cfg.titlebarImage);
-    setFaviconEmoji(cfg.faviconEmoji);
-    setFaviconImage(cfg.faviconImage);
-
+  // Load Settings Exclusively from Server Storage (Zero LocalStorage)
+  const loadSettingsFromServer = useCallback(async () => {
+    setIsLoading(true);
+    purgeLegacyBrowserAdminStorage();
     try {
-      const mode = localStorage.getItem('zecratary_theme_mode');
-      setIsDayMode(mode === 'light');
-    } catch (_) {}
+      const serverData = await fetchServerAdminSettings();
+      if (serverData) {
+        if (serverData.siteName) setSiteName(serverData.siteName);
+        if (serverData.titlebarEmoji) setTitlebarEmoji(serverData.titlebarEmoji);
+        if (serverData.titlebarImage !== undefined) setTitlebarImage(serverData.titlebarImage);
+        if (serverData.faviconEmoji) setFaviconEmoji(serverData.faviconEmoji);
+        if (serverData.faviconImage !== undefined) setFaviconImage(serverData.faviconImage);
 
-    try {
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      if (stored) {
-        const c = JSON.parse(stored);
-        const p = c.primary || c.primaryColor || '#E05638';
-        const ph = c.primaryHover || '#c94529';
-        const ac = c.accentEmerald || c.accentColor || c.accent || '#10b981';
-        const sbi = c.sidebarIconColor || c.sidebarIcon || ac || '#10b981';
-        const bg = c.backgroundColor || c.backgroundDark || '#070b13';
-        const card = c.cardBackground || '#0b0f17';
-        const border = c.cardBorder || '#1e293b';
-        const textSec = c.textSecondary || '#94a3b8';
+        const tc = serverData.themeColors || {};
+        const p = tc.primary || tc.primaryColor || '#E05638';
+        const ph = tc.primaryHover || '#c94529';
+        const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
+        const sbi = tc.sidebarIconColor || tc.sidebarIcon || ac || '#10b981';
+        const bg = tc.backgroundColor || tc.backgroundDark || '#070b13';
+        const card = tc.cardBackground || '#0b0f17';
+        const border = tc.cardBorder || '#1e293b';
+        const textSec = tc.textSecondary || '#94a3b8';
 
         setPrimaryColor(p);
         setPrimaryHoverColor(ph);
@@ -12733,72 +12737,38 @@ export default function AdminSettingsPage() {
         setCardBorderColor(border);
         setSecondaryTextColor(textSec);
 
-        applyThemeToDocument({
-          primary: p,
-          primaryColor: p,
-          primaryHover: ph,
-          accentEmerald: ac,
-          accentColor: ac,
-          accent: ac,
-          sidebarIconColor: sbi,
-          sidebarIcon: sbi,
-          backgroundColor: bg,
-          backgroundDark: bg,
-          cardBackground: card,
-          cardBorder: border,
-          textSecondary: textSec,
-        });
+        applyColorsLocally(p, ph, ac, sbi, bg, card, border, textSec);
       }
-    } catch (_) {}
-
-    fetch('/api/system-settings', { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((data) => {
-        const tc = data?.settings?.themeColors || data?.themeColors;
-        if (data?.success && tc) {
-          const p = tc.primary || tc.primaryColor || '#E05638';
-          const ph = tc.primaryHover || '#c94529';
-          const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
-          const sbi = tc.sidebarIconColor || tc.sidebarIcon || ac || '#10b981';
-          const bg = tc.backgroundColor || tc.backgroundDark || '#070b13';
-          const card = tc.cardBackground || '#0b0f17';
-          const border = tc.cardBorder || '#1e293b';
-          const textSec = tc.textSecondary || '#94a3b8';
-
-          if (!localStorage.getItem('zecratary_theme_colors')) {
-            setPrimaryColor(p);
-            setPrimaryHoverColor(ph);
-            setAccentColor(ac);
-            setSidebarIconColor(sbi);
-            setBackgroundColor(bg);
-            setCardBackgroundColor(card);
-            setCardBorderColor(border);
-            setSecondaryTextColor(textSec);
-
-            applyThemeToDocument({
-              primary: p,
-              primaryColor: p,
-              primaryHover: ph,
-              accentEmerald: ac,
-              sidebarIconColor: sbi,
-              sidebarIcon: sbi,
-              backgroundColor: bg,
-              cardBackground: card,
-              cardBorder: border,
-              textSecondary: textSec,
-            });
-          }
-        }
-      })
-      .catch(() => {});
+    } catch (err) {
+      console.error('[AdminSettingsPage] Error loading settings from server:', err);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  // Theme mode change listener
+  useEffect(() => {
+    initAuthStorage();
+    const active = getCurrentUser();
+    setUser(active);
+
+    loadSettingsFromServer();
+
+    const handleServerUpdate = () => {
+      loadSettingsFromServer();
+    };
+
+    window.addEventListener('zecratary_admin_settings_updated', handleServerUpdate);
+    return () => {
+      window.removeEventListener('zecratary_admin_settings_updated', handleServerUpdate);
+    };
+  }, [loadSettingsFromServer]);
+
+  // Dynamic Theme mode change listener
   useEffect(() => {
     const handleModeChange = () => {
       try {
-        const mode = localStorage.getItem('zecratary_theme_mode');
-        const day = mode === 'light';
+        const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+        const day = mode === 'light' || mode === 'day';
         setIsDayMode(day);
         const cur = colorsRef.current;
         applyThemeToDocument({
@@ -12818,6 +12788,7 @@ export default function AdminSettingsPage() {
       } catch (_) {}
     };
 
+    handleModeChange();
     window.addEventListener('zecratary_theme_mode_changed', handleModeChange);
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', handleModeChange);
@@ -12869,7 +12840,7 @@ export default function AdminSettingsPage() {
     );
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const updatedBranding: SiteIdentityConfig = {
@@ -12879,7 +12850,14 @@ export default function AdminSettingsPage() {
       faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
       faviconImage
     };
-    saveSiteConfig(updatedBranding);
+
+    setMemorySiteConfig(updatedBranding);
+    if (faviconImage) {
+      updateFavicon(faviconImage);
+    } else if (faviconEmoji) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${faviconEmoji}</text></svg>`;
+      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+    }
 
     const themeColors = {
       primary: primaryColor,
@@ -12897,13 +12875,39 @@ export default function AdminSettingsPage() {
       textSecondary: secondaryTextColor,
     };
 
-    saveThemeColors(themeColors);
+    setMemoryThemeColors(themeColors);
+    applyColorsLocally(
+      primaryColor,
+      primaryHoverColor,
+      accentColor,
+      sidebarIconColor,
+      backgroundColor,
+      cardBackgroundColor,
+      cardBorderColor,
+      secondaryTextColor
+    );
+
+    // Save directly to server API with Zero LocalStorage writes
+    await persistServerAdminSettings({
+      siteName: updatedBranding.siteName,
+      titlebarEmoji: updatedBranding.titlebarEmoji,
+      titlebarImage: updatedBranding.titlebarImage || '',
+      faviconEmoji: updatedBranding.faviconEmoji,
+      faviconImage: updatedBranding.faviconImage || '',
+      themeColors
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: updatedBranding }));
+      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
 
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
 
-  const handleResetDefaults = () => {
+  const handleResetDefaults = async () => {
     if (!confirm(t('admin.confirmReset', 'Reset branding and theme settings to defaults?'))) return;
 
     const defaultName = DEFAULT_SITE_NAME;
@@ -12932,13 +12936,13 @@ export default function AdminSettingsPage() {
     setCardBorderColor(defaultBorder);
     setSecondaryTextColor(defaultTextSec);
 
-    saveSiteConfig({
+    const defaultBranding = {
       siteName: defaultName,
       titlebarEmoji: defaultIcon,
       titlebarImage: '',
       faviconEmoji: defaultIcon,
       faviconImage: ''
-    });
+    };
 
     const defaultColors = {
       primary: defaultPrimary,
@@ -12956,7 +12960,34 @@ export default function AdminSettingsPage() {
       textSecondary: defaultTextSec
     };
 
-    saveThemeColors(defaultColors);
+    setMemorySiteConfig(defaultBranding);
+    setMemoryThemeColors(defaultColors);
+
+    applyColorsLocally(
+      defaultPrimary,
+      defaultPrimaryHover,
+      defaultAccent,
+      defaultSidebarIcon,
+      defaultBg,
+      defaultCard,
+      defaultBorder,
+      defaultTextSec
+    );
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
+    updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+
+    // Persist directly to server storage
+    await persistServerAdminSettings({
+      ...defaultBranding,
+      themeColors: defaultColors
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
+      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
 
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
@@ -12987,15 +13018,33 @@ export default function AdminSettingsPage() {
           </p>
         </div>
 
-        {saved && (
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
-            isDayMode 
-              ? 'bg-emerald-100 border-emerald-300 text-emerald-700' 
-              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-          }`}>
-            <CheckCircle2 className="h-4 w-4" /> {t('admin.settingsSaved', 'Settings Saved & Broadcasted')}
-          </div>
-        )}
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={loadSettingsFromServer}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            style={{
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#334155' : '#cbd5e1'
+            }}
+            title="Reload settings from server store"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>Reload</span>
+          </button>
+
+          {saved && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
+              isDayMode 
+                ? 'bg-emerald-100 border-emerald-300 text-emerald-700' 
+                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+            }`}>
+              <CheckCircle2 className="h-4 w-4" /> {t('admin.settingsSaved', 'Settings Saved & Broadcasted')}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* TABS NAVIGATION */}
@@ -13865,12 +13914,19 @@ export default function AdminSettingsPage() {
 ## File: `apps/web/src/app/admin/ai-settings/page.tsx`
 ```typescript
 'use client';
+
 import { useState, useEffect, useCallback } from 'react';
 import { 
   Radio, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Key, Sliders, Sparkles, Globe, PackageCheck, 
   ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle
 } from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 interface QuestionnaireSection {
   id: string;
@@ -13905,6 +13961,14 @@ const DEFAULT_SECTIONS: QuestionnaireSection[] = [
 ];
 
 export default function ChefAISettingsPage() {
+  let t = (key: string, fallback?: string) => fallback || key;
+  try {
+    const langContext = useTranslation();
+    if (langContext && typeof langContext.t === 'function') {
+      t = langContext.t;
+    }
+  } catch (_) {}
+
   const [activeTab, setActiveTab] = useState<'general' | 'questionnaire' | 'voice' | 'advanced'>('general');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
@@ -13957,14 +14021,16 @@ export default function ChefAISettingsPage() {
 
   const [saved, setSaved] = useState(false);
 
-  // Dynamic Theme Synchronization & Day Mode Inversion
+  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -14003,7 +14069,7 @@ export default function ChefAISettingsPage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -14024,7 +14090,7 @@ export default function ChefAISettingsPage() {
     };
   }, [applySavedTheme]);
 
-  // Fetch API Keys from .env and local storage
+  // Fetch API Keys from .env
   const fetchEnvKeys = async () => {
     try {
       const res = await fetch('/api/admin/keys?t=' + Date.now(), { cache: 'no-store' });
@@ -14054,32 +14120,34 @@ export default function ChefAISettingsPage() {
     return {};
   };
 
-  useEffect(() => {
-    fetchEnvKeys();
-    setTimeout(() => {
-      autoConnectGemini(true);
-    }, 400);
+  // Load Settings Exclusively from Server Storage (Zero LocalStorage)
+  const loadSettingsFromServer = useCallback(async () => {
+    purgeLegacyBrowserAdminStorage();
     try {
-      const stored = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
-      if (stored) {
-        const c = JSON.parse(stored);
+      const serverData = await fetchServerAdminSettings();
+      if (serverData) {
+        const c = serverData.chefAiSettings || serverData.aiSettings || serverData;
         if (c.provider) setProvider(c.provider);
+        else if (serverData.aiProvider) setProvider(serverData.aiProvider);
+
         if (c.apiKey !== undefined) setApiKey(c.apiKey);
         if (c.model) setModel(c.model);
+        else if (serverData.aiModel) setModel(serverData.aiModel);
+
         if (c.temperature !== undefined) setTemperature(c.temperature);
-        if (c.maxTokens) setMaxTokens(c.maxTokens);
-        if (c.systemPrompt) setSystemPrompt(c.systemPrompt);
+        if (c.maxTokens !== undefined) setMaxTokens(c.maxTokens);
+        if (c.systemPrompt !== undefined) setSystemPrompt(c.systemPrompt);
         if (c.enableWebSearch !== undefined) setEnableWebSearch(c.enableWebSearch);
         if (c.enablePantryContext !== undefined) setEnablePantryContext(c.enablePantryContext);
         if (c.strictDietEnforcement !== undefined) setStrictDietEnforcement(c.strictDietEnforcement);
-        if (c.maxPlanDays) setMaxPlanDays(c.maxPlanDays);
-        if (c.resultDisplayMode) setResultDisplayMode(c.resultDisplayMode);
+        if (c.maxPlanDays !== undefined) setMaxPlanDays(c.maxPlanDays);
+        if (c.resultDisplayMode !== undefined) setResultDisplayMode(c.resultDisplayMode);
         
         if (c.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(c.enableVoiceInteraction);
-        if (c.voiceEngine) setVoiceEngine(c.voiceEngine);
+        if (c.voiceEngine !== undefined) setVoiceEngine(c.voiceEngine);
         if (c.voiceSpeed !== undefined) setVoiceSpeed(c.voiceSpeed);
         if (c.voiceAutoPlay !== undefined) setVoiceAutoPlay(c.voiceAutoPlay);
-        if (c.selectedVoiceName) setSelectedVoiceName(c.selectedVoiceName);
+        if (c.selectedVoiceName !== undefined) setSelectedVoiceName(c.selectedVoiceName);
 
         if (Array.isArray(c.knowledgeBaseList)) setKnowledgeBaseList(c.knowledgeBaseList);
         if (Array.isArray(c.customVocabularyList)) setCustomVocabularyList(c.customVocabularyList);
@@ -14089,8 +14157,18 @@ export default function ChefAISettingsPage() {
           setSections(c.sections.map((s: any) => ({ ...s, enabled: s.enabled !== false })));
         }
       }
-    } catch (e) {}
+    } catch (err) {
+      console.error('[ChefAISettings] Failed to load server settings:', err);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchEnvKeys();
+    loadSettingsFromServer();
+    setTimeout(() => {
+      autoConnectGemini(true);
+    }, 400);
+  }, [loadSettingsFromServer]);
 
   const handleProviderChange = (newProvider: 'gemini' | 'openai') => {
     setProvider(newProvider);
@@ -14110,7 +14188,7 @@ export default function ChefAISettingsPage() {
   const handleTestApiKey = async () => {
     const keyToTest = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
     if (!keyToTest) {
-      setTestResult({ success: false, message: 'Please enter an API key or sync from .env first.' });
+      setTestResult({ success: false, message: t('enterApiKeyFirst', 'Please enter an API key or sync from .env first.') });
       return;
     }
     setTestingKey(true);
@@ -14137,10 +14215,10 @@ export default function ChefAISettingsPage() {
       if (data.success) {
         setTestResult({ success: true, message: data.message });
       } else {
-        setTestResult({ success: false, message: data.error || 'Connection failed.' });
+        setTestResult({ success: false, message: data.error || t('connectionFailed', 'Connection failed.') });
       }
     } catch (err: any) {
-      setTestResult({ success: false, message: err.message || 'Could not reach verification endpoint.' });
+      setTestResult({ success: false, message: err.message || t('verificationEndpointError', 'Could not reach verification endpoint.') });
     } finally {
       setTestingKey(false);
     }
@@ -14165,7 +14243,7 @@ export default function ChefAISettingsPage() {
 
       if (!resolvedKey || resolvedKey.includes('sample') || resolvedKey.length < 10) {
         if (!silent) {
-          setTestResult({ success: false, message: 'No active Google Gemini key found in .env. Please enter a key.' });
+          setTestResult({ success: false, message: t('noGeminiKeyFound', 'No active Google Gemini key found in .env. Please enter a key.') });
         }
         setAutoConnecting(false);
         return;
@@ -14191,33 +14269,28 @@ export default function ChefAISettingsPage() {
       if (testData.success) {
         setTestResult({ success: true, message: `Connected to Google Gemini (${model || 'gemini-1.5-flash'}) & key synced!` });
 
-        const storedRaw = localStorage.getItem('zecratary_chef_ai_settings');
-        const currentConfig = storedRaw ? JSON.parse(storedRaw) : {};
-        const updatedConfig = {
-          ...currentConfig,
-          provider: 'gemini',
-          apiKey: resolvedKey,
-          model: model || 'gemini-1.5-flash',
-          updatedAt: new Date().toISOString()
-        };
+        // Persist directly to server storage without writing to localStorage
+        await persistServerAdminSettings({
+          aiProvider: 'gemini',
+          aiModel: model || 'gemini-1.5-flash',
+          chefAiSettings: {
+            provider: 'gemini',
+            apiKey: resolvedKey,
+            model: model || 'gemini-1.5-flash',
+            updatedAt: new Date().toISOString()
+          }
+        });
 
-        localStorage.setItem('zecratary_chef_ai_settings', JSON.stringify(updatedConfig));
-        localStorage.setItem('zecratary_engine_config', JSON.stringify(updatedConfig));
-        localStorage.setItem('zecratary_settings', JSON.stringify({
-          provider: 'gemini',
-          geminiApiKey: resolvedKey,
-          geminiModel: model || 'gemini-1.5-flash',
-          lastUpdated: new Date().toISOString()
-        }));
-
-        window.dispatchEvent(new Event('storage'));
-        window.dispatchEvent(new Event('zecratary_settings_updated'));
-        window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+          window.dispatchEvent(new Event('zecratary_settings_updated'));
+          window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+        }
       } else if (!silent) {
-        setTestResult({ success: false, message: testData.error || 'Gemini handshake failed.' });
+        setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
       }
     } catch (err: any) {
-      if (!silent) setTestResult({ success: false, message: err.message || 'Auto-connection error.' });
+      if (!silent) setTestResult({ success: false, message: err.message || t('autoConnectionError', 'Auto-connection error.') });
     } finally {
       setAutoConnecting(false);
     }
@@ -14245,16 +14318,14 @@ export default function ChefAISettingsPage() {
           message: `Synced ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} key (${cleanKey.substring(0, 8)}...) from .env successfully!`
         });
 
-        // Update active localStorage keys
-        try {
-          const rawStored = localStorage.getItem('zecratary_chef_ai_settings');
-          const current = rawStored ? JSON.parse(rawStored) : {};
-          localStorage.setItem('zecratary_chef_ai_settings', JSON.stringify({
-            ...current,
+        // Persist to server store with zero localStorage writes
+        await persistServerAdminSettings({
+          aiProvider: provider,
+          chefAiSettings: {
             apiKey: cleanKey,
             provider
-          }));
-        } catch (_) {}
+          }
+        });
 
         setTimeout(() => {
           if (provider === 'gemini') {
@@ -14295,7 +14366,7 @@ export default function ChefAISettingsPage() {
 
   const handleDeleteSection = (secId: string) => {
     if (sections.length <= 1) {
-      alert('You must retain at least one questionnaire topic.');
+      alert(t('retainOneTopicWarning', 'You must retain at least one questionnaire topic.'));
       return;
     }
     const updated = sections.filter(s => s.id !== secId);
@@ -14362,20 +14433,18 @@ export default function ChefAISettingsPage() {
       sections,
       updatedAt: new Date().toISOString()
     };
-    
-    localStorage.setItem('zecratary_chef_ai_settings', JSON.stringify(config));
-    localStorage.setItem('zecratary_engine_config', JSON.stringify(config));
-    localStorage.setItem('zecratary_settings', JSON.stringify({
-      provider,
-      geminiApiKey: provider === 'gemini' ? cleanApiKey : '',
-      geminiModel: provider === 'gemini' ? model : 'gemini-3.6-flash',
-      openaiApiKey: provider === 'openai' ? cleanApiKey : '',
-      openaiModel: provider === 'openai' ? model : 'gpt-4o',
-      lastUpdated: new Date().toISOString()
-    }));
 
-    let envSavedSuccessfully = false;
-    let envErrorMessage = '';
+    const activeFlattenedQuestions = sections
+      .filter(s => s.enabled !== false)
+      .flatMap(s => s.questions);
+
+    // Save directly to server storage API (Zero LocalStorage writes)
+    await persistServerAdminSettings({
+      aiProvider: provider,
+      aiModel: model,
+      chefAiSettings: config,
+      chefQuestionnaire: activeFlattenedQuestions
+    });
 
     if (cleanApiKey) {
       try {
@@ -14393,35 +14462,29 @@ export default function ChefAISettingsPage() {
 
         const data = await res.json();
         if (res.ok && data.success) {
-          envSavedSuccessfully = true;
           setTestResult({
             success: true,
             message: `Key saved to local .env and synchronized (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
           });
         } else {
-          envErrorMessage = data.error || 'Server rejected key save';
           setTestResult({
             success: false,
-            message: `Local settings stored, but .env save failed: ${envErrorMessage}`
+            message: `Server stored settings, but .env save returned: ${data.error || 'Server rejected key save'}`
           });
         }
       } catch (err: any) {
-        envErrorMessage = err.message || 'Network error writing to /api/admin/keys';
         setTestResult({
           success: false,
-          message: `Local settings stored, but .env save failed: ${envErrorMessage}`
+          message: `Server stored settings, but .env save failed: ${err.message || 'Network error'}`
         });
       }
     }
 
-    const activeFlattenedQuestions = sections
-      .filter(s => s.enabled !== false)
-      .flatMap(s => s.questions);
-    localStorage.setItem('zecratary_chef_questionnaire', JSON.stringify(activeFlattenedQuestions));
-
-    window.dispatchEvent(new Event('storage'));
-    window.dispatchEvent(new Event('zecratary_engine_config_updated'));
-    window.dispatchEvent(new Event('zecratary_settings_updated'));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+      window.dispatchEvent(new Event('zecratary_settings_updated'));
+    }
     
     setSaved(true);
     setTimeout(() => setSaved(false), 3500);
@@ -14453,10 +14516,10 @@ export default function ChefAISettingsPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
         <div>
           <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary, #E05638)' }}>
-            <Settings className="h-6 w-6" style={{ color: 'var(--color-primary, #E05638)' }} /> AI Assistant Configuration
+            <Settings className="h-6 w-6" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('aiAssistantConfigTitle', 'AI Assistant Configuration')}
           </h1>
           <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            Update settings and functional AI provider models for the <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> agent
+            {t('aiAssistantConfigSubtitle', 'Update settings and functional AI provider models for the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('agentSuffix', 'agent')}
           </p>
         </div>
 
@@ -14470,7 +14533,7 @@ export default function ChefAISettingsPage() {
                 color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
               }}
             >
-              <CheckCircle className="h-4 w-4" style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }} /> Settings Applied & Synced
+              <CheckCircle className="h-4 w-4" style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }} /> {t('settingsAppliedSynced', 'Settings Applied & Synced')}
             </span>
           )}
           <button
@@ -14484,7 +14547,7 @@ export default function ChefAISettingsPage() {
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
           >
-            <Check className="h-4 w-4" /> Save Configuration
+            <Check className="h-4 w-4" /> {t('saveConfigurationBtn', 'Save Configuration')}
           </button>
         </div>
       </div>
@@ -14492,10 +14555,10 @@ export default function ChefAISettingsPage() {
       {/* HORIZONTAL CONFIGURATION TABS */}
       <div className="flex border-b gap-6 overflow-x-auto transition-colors duration-200" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
         {[
-          { id: 'general', label: 'General AI Configuration', icon: Cpu },
-          { id: 'questionnaire', label: `Multi-Topic Questionnaires (${sections.filter(s => s.enabled !== false).length}/${sections.length} Active)`, icon: Layers },
-          { id: 'voice', label: 'Voice Interaction', icon: Mic },
-          { id: 'advanced', label: 'Agent Parameters', icon: SlidersHorizontal },
+          { id: 'general', label: t('tabGeneralConfig', 'General AI Configuration'), icon: Cpu },
+          { id: 'questionnaire', label: `${t('tabQuestionnaires', 'Multi-Topic Questionnaires')} (${sections.filter(s => s.enabled !== false).length}/${sections.length} Active)`, icon: Layers },
+          { id: 'voice', label: t('tabVoiceInteraction', 'Voice Interaction'), icon: Mic },
+          { id: 'advanced', label: t('tabAgentParameters', 'Agent Parameters'), icon: SlidersHorizontal },
         ].map((tab) => {
           const isActive = activeTab === tab.id;
           const Icon = tab.icon;
@@ -14536,10 +14599,10 @@ export default function ChefAISettingsPage() {
                     className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
                     style={{ color: 'var(--color-primary, #E05638)' }}
                   >
-                    <Sparkles className="h-4 w-4" /> AI Engine Provider & Model Selection
+                    <Sparkles className="h-4 w-4" /> {t('aiEngineProviderTitle', 'AI Engine Provider & Model Selection')}
                   </h2>
                   <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    Select your active AI provider and model version. This choice controls which model processes prompts in <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/api/ai</span>.
+                    {t('aiEngineProviderDesc', 'Select your active AI provider and model version. This choice controls which model processes prompts in')} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/api/ai</span>.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -14556,7 +14619,7 @@ export default function ChefAISettingsPage() {
                     title="Auto-connect and sync Gemini API key"
                   >
                     <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse text-amber-500' : 'text-[#E05638]'}`} />
-                    <span>{autoConnecting ? 'Connecting...' : 'Auto-Connect Gemini'}</span>
+                    <span>{autoConnecting ? t('connecting', 'Connecting...') : t('autoConnectGemini', 'Auto-Connect Gemini')}</span>
                   </button>
 
                   <button
@@ -14571,7 +14634,7 @@ export default function ChefAISettingsPage() {
                     title="Reload API Key from .env"
                   >
                     <RefreshCw className={`h-3 w-3 ${syncingEnvKey ? 'animate-spin' : ''}`} style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} />
-                    <span>Sync from .env</span>
+                    <span>{t('syncFromEnv', 'Sync from .env')}</span>
                   </button>
                 </div>
               </div>
@@ -14619,7 +14682,7 @@ export default function ChefAISettingsPage() {
               <div className="pt-2 space-y-4 text-xs">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>API Key</label>
+                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('apiKeyLabel', 'API Key')}</label>
                     <span className="text-[10px] font-mono font-bold" style={{ color: isDayMode ? '#7e22ce' : '#c084fc' }}>
                       {provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}
                     </span>
@@ -14660,12 +14723,12 @@ export default function ChefAISettingsPage() {
                         {testingKey ? (
                           <>
                             <Loader2 className="h-3 w-3 animate-spin" />
-                            <span>Testing...</span>
+                            <span>{t('testing', 'Testing...')}</span>
                           </>
                         ) : (
                           <>
                             <Activity className="h-3 w-3" />
-                            <span>Test Connection</span>
+                            <span>{t('testConnection', 'Test Connection')}</span>
                           </>
                         )}
                       </button>
@@ -14686,12 +14749,14 @@ export default function ChefAISettingsPage() {
                       <span className="leading-snug">{testResult.message}</span>
                     </div>
                   )}
-                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Saved locally and synced to disk environment on save.</span>
+                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('persistedServerSyncNotice', 'Persisted directly to server storage and synced to disk environment.')}
+                  </span>
                 </div>
 
                 <div>
                   <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    Model Version Identifier
+                    {t('modelVersionIdentifier', 'Model Version Identifier')}
                   </label>
                   <select
                     value={model}
@@ -14716,7 +14781,9 @@ export default function ChefAISettingsPage() {
                       </>
                     )}
                   </select>
-                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Active model endpoint used during AI prompt generation.</span>
+                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}
+                  </span>
                 </div>
               </div>
             </div>
@@ -14739,10 +14806,10 @@ export default function ChefAISettingsPage() {
                     className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
                     style={{ color: 'var(--color-primary, #E05638)' }}
                   >
-                    <Layers className="h-4 w-4" /> Multi-Topic Questionnaire & Wizard Manager
+                    <Layers className="h-4 w-4" /> {t('questionnaireManagerTitle', 'Multi-Topic Questionnaire & Wizard Manager')}
                   </h2>
                   <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> intake wizard.
+                    {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
                   </p>
                 </div>
                 <span 
@@ -14753,14 +14820,14 @@ export default function ChefAISettingsPage() {
                     color: 'var(--color-primary, #E05638)'
                   }}
                 >
-                  {sections.filter(s => s.enabled !== false).length}/{sections.length} Topics Active
+                  {sections.filter(s => s.enabled !== false).length}/{sections.length} {t('topicsActiveBadge', 'Topics Active')}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
                 <div className="lg:col-span-5 space-y-3">
                   <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    Questionnaire Topics
+                    {t('questionnaireTopicsHeader', 'Questionnaire Topics')}
                   </label>
                   
                   <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
@@ -14791,7 +14858,7 @@ export default function ChefAISettingsPage() {
                                   ? (isDayMode ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30') 
                                   : (isDayMode ? 'bg-slate-200 text-slate-700' : 'bg-slate-800 text-slate-400')
                               }`}>
-                                {isEnabled ? 'Enabled' : 'Disabled'}
+                                {isEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                               </span>
                             </div>
                             <p className="text-[10px] truncate" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{sec.description}</p>
@@ -14836,11 +14903,11 @@ export default function ChefAISettingsPage() {
                     }}
                   >
                     <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                      <FolderPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> Add New Questionnaire Topic
+                      <FolderPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addNewTopicHeader', 'Add New Questionnaire Topic')}
                     </span>
                     <input
                       type="text"
-                      placeholder="Topic Title (e.g. Fitness & Macros)..."
+                      placeholder={t('topicTitlePlaceholder', 'Topic Title (e.g. Fitness & Macros)...')}
                       value={newTopicTitle}
                       onChange={(e) => setNewTopicTitle(e.target.value)}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
@@ -14854,7 +14921,7 @@ export default function ChefAISettingsPage() {
                     />
                     <input
                       type="text"
-                      placeholder="Topic Description..."
+                      placeholder={t('topicDescPlaceholder', 'Topic Description...')}
                       value={newTopicDesc}
                       onChange={(e) => setNewTopicDesc(e.target.value)}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
@@ -14875,7 +14942,7 @@ export default function ChefAISettingsPage() {
                       onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                     >
-                      Create Topic Category
+                      {t('createTopicBtn', 'Create Topic Category')}
                     </button>
                   </div>
                 </div>
@@ -14910,7 +14977,7 @@ export default function ChefAISettingsPage() {
                               ? (isDayMode ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30') 
                               : (isDayMode ? 'bg-slate-200 text-slate-700' : 'bg-slate-800 text-slate-400')
                           }`}>
-                            {activeSection?.enabled !== false ? 'Status: Active' : 'Status: Disabled'}
+                            {activeSection?.enabled !== false ? t('statusActive', 'Status: Active') : t('statusDisabled', 'Status: Disabled')}
                           </span>
                         </div>
                         <input
@@ -14927,14 +14994,14 @@ export default function ChefAISettingsPage() {
                         />
                       </div>
                       <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                        {activeSection?.questions.length || 0} Questions
+                        {activeSection?.questions.length || 0} {t('questionsCount', 'Questions')}
                       </span>
                     </div>
 
                     <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
                       {activeSection?.questions.length === 0 ? (
                         <div className="text-center py-8 text-xs italic" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                          No questions in this topic yet. Add one below.
+                          {t('noQuestionsYet', 'No questions in this topic yet. Add one below.')}
                         </div>
                       ) : (
                         activeSection?.questions.map((qText, qIdx) => (
@@ -14990,7 +15057,7 @@ export default function ChefAISettingsPage() {
                   <div className="flex gap-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                     <input
                       type="text"
-                      placeholder={`Add question to "${activeSection?.topicTitle}"...`}
+                      placeholder={`${t('addQuestionPrefix', 'Add question to')} "${activeSection?.topicTitle}"...`}
                       value={newQuestionText}
                       onChange={(e) => setNewQuestionText(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
@@ -15009,7 +15076,7 @@ export default function ChefAISettingsPage() {
                       className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md"
                       style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
                     >
-                      <Plus className="h-4 w-4" /> Add
+                      <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
                     </button>
                   </div>
                 </div>
@@ -15028,14 +15095,14 @@ export default function ChefAISettingsPage() {
                 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <LayoutTemplate className="h-4 w-4" /> Final Results Appearance in /chef Chat
+                <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
               </h2>
               
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
-                  { id: 'card', title: 'Standard Cards View', desc: 'Full interactive meal cards with images and batch cooking options.' },
-                  { id: 'compact', title: 'Compact Table View', desc: 'Condensed list view optimized for quick overview and rapid swapping.' },
-                  { id: 'detailed', title: 'Detailed Master View', desc: 'Expanded view displaying full ingredient breakdowns inline.' }
+                  { id: 'card', title: t('modeCardTitle', 'Standard Cards View'), desc: t('modeCardDesc', 'Full interactive meal cards with images and batch cooking options.') },
+                  { id: 'compact', title: t('modeCompactTitle', 'Compact Table View'), desc: t('modeCompactDesc', 'Condensed list view optimized for quick overview and rapid swapping.') },
+                  { id: 'detailed', title: t('modeDetailedTitle', 'Detailed Master View'), desc: t('modeDetailedDesc', 'Expanded view displaying full ingredient breakdowns inline.') }
                 ].map((mode) => {
                   const isSel = resultDisplayMode === mode.id;
                   return (
@@ -15065,9 +15132,11 @@ export default function ChefAISettingsPage() {
               <div className="pt-3 border-t space-y-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <div className="flex items-center justify-between">
                   <span className="font-bold flex items-center gap-1.5 text-xs" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Live UI Preview ({resultDisplayMode.toUpperCase()} MODE)
+                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('liveUiPreview', 'Live UI Preview')} ({resultDisplayMode.toUpperCase()} MODE)
                   </span>
-                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Updates instantly when selecting above</span>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('liveUiPreviewNotice', 'Updates instantly when selecting above')}
+                  </span>
                 </div>
 
                 <div 
@@ -15194,10 +15263,10 @@ export default function ChefAISettingsPage() {
                   className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  <Mic className="h-4 w-4" /> Voice Interaction & Speech Configuration
+                  <Mic className="h-4 w-4" /> {t('voiceInteractionHeader', 'Voice Interaction & Speech Configuration')}
                 </h2>
                 <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  Configure text-to-speech engine, voice models, playback speed, and auto-read behavior.
+                  {t('voiceInteractionDesc', 'Configure text-to-speech engine, voice models, playback speed, and auto-read behavior.')}
                 </p>
               </div>
 
@@ -15209,7 +15278,7 @@ export default function ChefAISettingsPage() {
                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
                 }}
               >
-                <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Enable Voice Mode</span>
+                <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('enableVoiceMode', 'Enable Voice Mode')}</span>
                 <div 
                   className="w-9 h-5 rounded-full p-0.5 transition"
                   style={{ backgroundColor: enableVoiceInteraction ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#334155') }}
@@ -15222,7 +15291,7 @@ export default function ChefAISettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  Voice Synthesis Engine
+                  {t('voiceSynthesisEngine', 'Voice Synthesis Engine')}
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   {['version1', 'version2'].map((ver) => {
@@ -15251,7 +15320,7 @@ export default function ChefAISettingsPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  Assistant Voice Persona
+                  {t('assistantVoicePersona', 'Assistant Voice Persona')}
                 </label>
                 <select
                   value={selectedVoiceName}
@@ -15274,7 +15343,7 @@ export default function ChefAISettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
               <div className="space-y-2">
                 <div className="flex justify-between font-bold">
-                  <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Speech Speed: {voiceSpeed}x</span>
+                  <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('speechSpeed', 'Speech Speed')}: {voiceSpeed}x</span>
                   <span style={{ color: isDayMode ? '#059669' : '#34d399' }}>{voiceSpeed === 1.0 ? 'Normal' : voiceSpeed > 1.0 ? 'Fast' : 'Relaxed'}</span>
                 </div>
                 <input
@@ -15287,7 +15356,9 @@ export default function ChefAISettingsPage() {
                   className="w-full cursor-pointer"
                   style={{ accentColor: 'var(--color-primary, #E05638)' }}
                 />
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Adjust the speaking pace of the AI assistant when reading recipe steps aloud.</p>
+                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  {t('speechSpeedDesc', 'Adjust the speaking pace of the AI assistant when reading recipe steps aloud.')}
+                </p>
               </div>
 
               <div className="space-y-2 flex flex-col justify-center">
@@ -15302,8 +15373,8 @@ export default function ChefAISettingsPage() {
                   <div className="flex items-center gap-2.5">
                     <Volume2 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
                     <div>
-                      <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Auto-Read AI Responses</span>
-                      <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Automatically speak answers aloud upon generation.</span>
+                      <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('autoReadAiResponses', 'Auto-Read AI Responses')}</span>
+                      <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('autoReadAiResponsesDesc', 'Automatically speak answers aloud upon generation.')}</span>
                     </div>
                   </div>
                   <div 
@@ -15333,9 +15404,11 @@ export default function ChefAISettingsPage() {
                 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <Globe className="h-4 w-4" /> Autonomous Capabilities & Search Scope Control
+                <Globe className="h-4 w-4" /> {t('autonomousCapabilitiesHeader', 'Autonomous Capabilities & Search Scope Control')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Control what data sources the AI agent searches and incorporates when responding on <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/chef</span>.</p>
+              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('autonomousCapabilitiesDesc', 'Control what data sources the AI agent searches and incorporates when responding on')} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/chef</span>.
+              </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
                 <div 
@@ -15359,8 +15432,10 @@ export default function ChefAISettingsPage() {
                     </div>
                   </div>
                   <div>
-                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Live Web Search</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Allows AI to search external culinary web data, trends, and ingredient substitutes.</span>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('liveWebSearch', 'Live Web Search')}</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      {t('liveWebSearchDesc', 'Allows AI to search external culinary web data, trends, and ingredient substitutes.')}
+                    </span>
                   </div>
                 </div>
 
@@ -15385,8 +15460,10 @@ export default function ChefAISettingsPage() {
                     </div>
                   </div>
                   <div>
-                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Pantry Context Search</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Automatically scans user pantry inventory to build recipes matching in-stock ingredients.</span>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('pantryContextSearch', 'Pantry Context Search')}</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      {t('pantryContextSearchDesc', 'Automatically scans user pantry inventory to build recipes matching in-stock ingredients.')}
+                    </span>
                   </div>
                 </div>
 
@@ -15411,8 +15488,10 @@ export default function ChefAISettingsPage() {
                     </div>
                   </div>
                   <div>
-                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Strict Dietary Filters</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.</span>
+                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('strictDietaryFilters', 'Strict Dietary Filters')}</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      {t('strictDietaryFiltersDesc', 'Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.')}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -15430,14 +15509,14 @@ export default function ChefAISettingsPage() {
                 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <SlidersHorizontal className="h-4 w-4" /> Agent Parameters & Knowledge Tuning
+                <SlidersHorizontal className="h-4 w-4" /> {t('agentParametersHeader', 'Agent Parameters & Knowledge Tuning')}
               </h2>
 
               {/* CREATIVITY & MAX PLAN DAYS */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <div className="space-y-2">
                   <div className="flex justify-between font-bold">
-                    <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Temperature (Creativity): {temperature}</span>
+                    <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('temperatureLabel', 'Temperature (Creativity)')}: {temperature}</span>
                     <span style={{ color: isDayMode ? '#059669' : '#34d399' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
                   </div>
                   <input
@@ -15450,11 +15529,15 @@ export default function ChefAISettingsPage() {
                     className="w-full cursor-pointer"
                     style={{ accentColor: 'var(--color-primary, #E05638)' }}
                   />
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.</p>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('temperatureDesc', 'Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.')}
+                  </p>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Max Plan Days Limit (Wizard Cap)</label>
+                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('maxPlanDaysCap', 'Max Plan Days Limit (Wizard Cap)')}
+                  </label>
                   <input
                     type="number"
                     min="1"
@@ -15470,7 +15553,9 @@ export default function ChefAISettingsPage() {
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Maximum number of days the AI can structure in a single meal plan wizard sequence.</p>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('maxPlanDaysDesc', 'Maximum number of days the AI can structure in a single meal plan wizard sequence.')}
+                  </p>
                 </div>
               </div>
 
@@ -15478,9 +15563,11 @@ export default function ChefAISettingsPage() {
               <div className="space-y-3 pt-1">
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> Knowledge Base
+                    <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('knowledgeBaseHeader', 'Knowledge Base')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Fine-tune the assistant to your needs by adding reference source documents or databases.</p>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('knowledgeBaseDesc', 'Fine-tune the assistant to your needs by adding reference source documents or databases.')}
+                  </p>
                 </div>
 
                 <div className="flex gap-2">
@@ -15554,9 +15641,11 @@ export default function ChefAISettingsPage() {
               <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    <BookA className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> Custom Vocabulary
+                    <BookA className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Enhance accuracy with specialized culinary or business terminology.</p>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('customVocabularyDesc', 'Enhance accuracy with specialized culinary or business terminology.')}
+                  </p>
                 </div>
 
                 <div className="flex gap-2">
@@ -15570,7 +15659,7 @@ export default function ChefAISettingsPage() {
                   >
                     <input
                       type="text"
-                      placeholder="Start typing to add"
+                      placeholder={t('startTypingToAdd', 'Start typing to add')}
                       value={newVocabInput}
                       onChange={(e) => setNewVocabInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -15596,7 +15685,7 @@ export default function ChefAISettingsPage() {
                         color: isDayMode ? '#334155' : '#cbd5e1'
                       }}
                     >
-                      Enter
+                      {t('enterKey', 'Enter')}
                     </span>
                   </div>
                 </div>
@@ -15629,9 +15718,11 @@ export default function ChefAISettingsPage() {
               <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    <Ban className="h-4 w-4 text-red-500" /> Filter Words
+                    <Ban className="h-4 w-4 text-red-500" /> {t('filterWordsHeader', 'Filter Words')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Restricted words or ingredients remain unspoken or avoided in AI outputs.</p>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {t('filterWordsDesc', 'Restricted words or ingredients remain unspoken or avoided in AI outputs.')}
+                  </p>
                 </div>
 
                 <div className="flex gap-2">
@@ -15645,7 +15736,7 @@ export default function ChefAISettingsPage() {
                   >
                     <input
                       type="text"
-                      placeholder="Start typing to add"
+                      placeholder={t('startTypingToAdd', 'Start typing to add')}
                       value={newFilterInput}
                       onChange={(e) => setNewFilterInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -15671,7 +15762,7 @@ export default function ChefAISettingsPage() {
                         color: isDayMode ? '#334155' : '#cbd5e1'
                       }}
                     >
-                      Enter
+                      {t('enterKey', 'Enter')}
                     </span>
                   </div>
                 </div>
@@ -15703,7 +15794,7 @@ export default function ChefAISettingsPage() {
               {/* SYSTEM PROMPT / PERSONA */}
               <div className="space-y-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  System Prompt / Autonomous Persona
+                  {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
                 </label>
                 <textarea
                   rows={5}
@@ -15719,7 +15810,7 @@ export default function ChefAISettingsPage() {
                   onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 />
                 <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  Defines how the AI agent behaves, formats responses, and handles user queries on the <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> page.
+                  {t('systemPromptDesc', 'Defines how the AI agent behaves, formats responses, and handles user queries on the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('pageSuffix', 'page.')}
                 </p>
               </div>
             </div>
@@ -21006,12 +21097,13 @@ export default function AdminPaymentPage() {
 ## File: `apps/web/src/app/admin/language/page.tsx`
 ```typescript
 'use client';
+
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   Globe, Languages, Plus, Edit3, Trash2, Shield, 
   Check, CheckCircle, X, AlertCircle, Search, 
-  ShieldAlert, Star, Type, Sliders, RotateCcw, Flag
+  ShieldAlert, Star, Type, Sliders, RotateCcw, Flag, RefreshCw
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -21024,6 +21116,11 @@ import { es } from '@/lib/lang/es';
 import { fr } from '@/lib/lang/fr';
 import { th } from '@/lib/lang/th';
 import { DEFAULT_DICTIONARIES } from '@/lib/lang';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 export interface SupportedLanguage {
   code: string;
@@ -21103,7 +21200,7 @@ export const getLanguageFlag = (code?: string, explicitFlag?: string): string =>
   return match ? match.flag : '🌐';
 };
 
-const DEFAULT_LANGUAGES: SupportedLanguage[] = [
+export const DEFAULT_LANGUAGES: SupportedLanguage[] = [
   { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸', direction: 'ltr', isDefault: true, status: 'active', lastUpdated: new Date().toISOString() },
   { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', direction: 'ltr', isDefault: false, status: 'active', lastUpdated: new Date().toISOString() },
   { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', direction: 'ltr', isDefault: false, status: 'active', lastUpdated: new Date().toISOString() },
@@ -21111,13 +21208,17 @@ const DEFAULT_LANGUAGES: SupportedLanguage[] = [
 ];
 
 export default function AdminLanguagePage() {
-  const { t, version } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+  const version = langContext?.version;
+
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [languages, setLanguages] = useState<SupportedLanguage[]>([]);
   const [search, setSearch] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [feedbackType, setFeedbackType] = useState<'success' | 'error'>('success');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -21145,14 +21246,16 @@ export default function AdminLanguagePage() {
   const [newWordKey, setNewWordKey] = useState('');
   const [newWordVal, setNewWordVal] = useState('');
 
-  // Dynamic Theme Synchronization & Day Mode Inversion
+  // Dynamic Theme Synchronization
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -21191,7 +21294,7 @@ export default function AdminLanguagePage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -21212,47 +21315,54 @@ export default function AdminLanguagePage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadLanguages = () => {
+  // Load languages exclusively from Server Storage (Zero LocalStorage)
+  const loadLanguages = useCallback(async () => {
+    setIsLoading(true);
+    purgeLegacyBrowserAdminStorage();
     try {
-      const raw = localStorage.getItem('zecratary_languages');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const withFlags = parsed.map((item: any) => ({
-            ...item,
-            flag: item.flag || getLanguageFlag(item.code)
-          }));
-          setLanguages(withFlags);
-          return;
-        }
+      const serverData = await fetchServerAdminSettings();
+      if (serverData && Array.isArray(serverData.supportedLanguages) && serverData.supportedLanguages.length > 0) {
+        const withFlags = serverData.supportedLanguages.map((item: any) => ({
+          ...item,
+          flag: item.flag || getLanguageFlag(item.code)
+        }));
+        setLanguages(withFlags);
+      } else {
+        setLanguages(DEFAULT_LANGUAGES);
       }
-    } catch (e) {}
-    setLanguages(DEFAULT_LANGUAGES);
-    localStorage.setItem('zecratary_languages', JSON.stringify(DEFAULT_LANGUAGES));
-  };
+    } catch (e) {
+      console.error('[AdminLanguagePage] Failed to fetch server languages:', e);
+      setLanguages(DEFAULT_LANGUAGES);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    document.title = `${t('langPageTitle')} - Admin Console`;
+    document.title = `${t('langPageTitle', 'Language Management')} - ${t('adminConsole', 'Admin Console')}`;
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
     loadLanguages();
 
     const handleSync = () => loadLanguages();
-    window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [t, version]);
+  }, [t, version, loadLanguages]);
 
-  const saveLanguagesList = (updated: SupportedLanguage[]) => {
+  // Persist languages list directly to server (Zero LocalStorage writes)
+  const saveLanguagesList = async (updated: SupportedLanguage[]) => {
     setLanguages(updated);
-    localStorage.setItem('zecratary_languages', JSON.stringify(updated));
-    window.dispatchEvent(new Event('zecratary_languages_updated'));
-    window.dispatchEvent(new Event('storage'));
+    await persistServerAdminSettings({ supportedLanguages: updated });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('zecratary_languages_updated', { detail: updated }));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
   };
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -21285,12 +21395,12 @@ export default function AdminLanguagePage() {
     const cleanNative = langNativeName.trim() || cleanName;
 
     if (!cleanCode || !cleanName) {
-      setModalError(t('codeAndNameRequired'));
+      setModalError(t('codeAndNameRequired', 'Language code and name are required.'));
       return;
     }
 
     if (languages.some((l) => l.code.toLowerCase() === cleanCode)) {
-      setModalError(`"${cleanCode}" ${t('languageAlreadyExists')}`);
+      setModalError(`"${cleanCode}" ${t('languageAlreadyExists', 'already exists.')}`);
       return;
     }
 
@@ -21310,10 +21420,10 @@ export default function AdminLanguagePage() {
       lastUpdated: new Date().toISOString()
     };
 
-    // Prepare default dictionary words from baseline en.ts
+    // Baseline en words
     const initialWords: Record<string, string> = {};
     Object.keys(en).forEach((k) => {
-      initialWords[k] = en[k];
+      initialWords[k] = (en as any)[k];
     });
 
     try {
@@ -21330,11 +21440,13 @@ export default function AdminLanguagePage() {
       console.warn('API file sync notice:', err);
     }
 
-    saveLanguagesList([...updated, newLang]);
-    saveCustomDictionary(cleanCode, initialWords);
+    await saveLanguagesList([...updated, newLang]);
+    try {
+      saveCustomDictionary(cleanCode, initialWords);
+    } catch (_) {}
 
     setShowAddModal(false);
-    showToast(`"${cleanName}" (${cleanCode}.ts) ${t('languageAddedSuccess')}`);
+    showToast(`"${cleanName}" (${cleanCode}.ts) ${t('languageAddedSuccess', 'added successfully!')}`);
   };
 
   // OPEN EDIT MODAL
@@ -21356,7 +21468,7 @@ export default function AdminLanguagePage() {
     const merged = getMergedDictionary(lang.code);
     const fullDictionary: Record<string, string> = {};
     Object.keys(en).forEach((k) => {
-      fullDictionary[k] = merged[k] || DEFAULT_DICTIONARIES[lang.code]?.[k] || en[k] || '';
+      fullDictionary[k] = merged[k] || (DEFAULT_DICTIONARIES as any)[lang.code]?.[k] || (en as any)[k] || '';
     });
     Object.keys(merged).forEach((k) => {
       if (fullDictionary[k] === undefined) {
@@ -21389,8 +21501,8 @@ export default function AdminLanguagePage() {
 
   const handleResetWordsToDefault = () => {
     if (!editingCode) return;
-    if (confirm('Reset all words for this language back to system defaults?')) {
-      const base = DEFAULT_DICTIONARIES[editingCode] || en;
+    if (confirm(t('confirmResetWords', 'Reset all words for this language back to system defaults?'))) {
+      const base = (DEFAULT_DICTIONARIES as any)[editingCode] || en;
       setWordsMap({ ...base });
     }
   };
@@ -21404,7 +21516,7 @@ export default function AdminLanguagePage() {
     const cleanNative = langNativeName.trim() || cleanName;
 
     if (!cleanName) {
-      setModalError(t('nameRequired'));
+      setModalError(t('nameRequired', 'Language display name is required.'));
       return;
     }
 
@@ -21424,8 +21536,10 @@ export default function AdminLanguagePage() {
       return langIsDefault ? { ...l, isDefault: false } : l;
     });
 
-    saveLanguagesList(updated);
-    saveCustomDictionary(editingCode, wordsMap);
+    await saveLanguagesList(updated);
+    try {
+      saveCustomDictionary(editingCode, wordsMap);
+    } catch (_) {}
 
     try {
       await fetch('/api/admin/languages', {
@@ -21446,14 +21560,14 @@ export default function AdminLanguagePage() {
   // DELETE LANGUAGE
   const handleDeleteLanguage = async (lang: SupportedLanguage) => {
     if (lang.isDefault) {
-      showToast(t('cannotDeleteDefaultError'), 'error');
+      showToast(t('cannotDeleteDefaultError', 'Default language cannot be deleted.'), 'error');
       return;
     }
     if (lang.code === 'en') {
-      showToast(t('cannotDeleteEnglishError'), 'error');
+      showToast(t('cannotDeleteEnglishError', 'Baseline English language cannot be deleted.'), 'error');
       return;
     }
-    if (!confirm(`${t('confirmDelete')} "${lang.name}" (${lang.code}) and remove ${lang.code}.ts library?`)) return;
+    if (!confirm(`${t('confirmDelete', 'Are you sure you want to delete')} "${lang.name}" (${lang.code}) and remove ${lang.code}.ts library?`)) return;
 
     try {
       await fetch('/api/admin/languages', {
@@ -21466,19 +21580,19 @@ export default function AdminLanguagePage() {
     }
 
     const updated = languages.filter((l) => l.code !== lang.code);
-    saveLanguagesList(updated);
-    showToast(`"${lang.name}" (${lang.code}.ts) ${t('languageRemoved')}`);
+    await saveLanguagesList(updated);
+    showToast(`"${lang.name}" (${lang.code}.ts) ${t('languageRemoved', 'removed successfully.')}`);
   };
 
   // SET DEFAULT
-  const handleSetDefault = (code: string) => {
+  const handleSetDefault = async (code: string) => {
     const updated = languages.map((l) => ({
       ...l,
       isDefault: l.code === code,
-      status: l.code === code ? 'active' : l.status
+      status: (l.code === code ? 'active' : l.status) as 'active' | 'inactive'
     }));
-    saveLanguagesList(updated);
-    showToast(`${t('setAsDefaultSuccess')} ${code.toUpperCase()}`);
+    await saveLanguagesList(updated);
+    showToast(`${t('setAsDefaultSuccess', 'Default language set to')} ${code.toUpperCase()}`);
   };
 
   const filtered = languages.filter(
@@ -21493,7 +21607,7 @@ export default function AdminLanguagePage() {
     const query = wordSearch.toLowerCase().trim();
     return Object.keys(wordsMap).filter((k) => {
       if (!query) return true;
-      const enVal = en[k] || '';
+      const enVal = (en as any)[k] || '';
       const curVal = wordsMap[k] || '';
       return (
         k.toLowerCase().includes(query) ||
@@ -21532,7 +21646,7 @@ export default function AdminLanguagePage() {
           <div className="flex items-center gap-2">
             <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" />
             <span>
-              Signed in as <strong>{currentUser.email}</strong>. {t('adminPrivilegeWarning')}
+              Signed in as <strong>{currentUser.email}</strong>. {t('adminPrivilegeWarning', 'Administrative privileges are required to modify languages.')}
             </span>
           </div>
           <Link 
@@ -21540,7 +21654,7 @@ export default function AdminLanguagePage() {
             className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 shadow-sm"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            {t('switchToAdmin')}
+            {t('switchToAdmin', 'Switch to Admin')}
           </Link>
         </div>
       )}
@@ -21575,24 +21689,39 @@ export default function AdminLanguagePage() {
             className="text-3xl font-black tracking-tight flex items-center gap-2.5"
             style={{ color: 'var(--color-primary, #E05638)' }}
           >
-            <Languages className="h-8 w-8" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('langPageTitle')}
+            <Languages className="h-8 w-8" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('langPageTitle', 'Language Management')}
           </h1>
           <p 
             className="text-sm font-semibold"
             style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
           >
-            {t('langPageSubtitle')} ({languages.length} {t('installedSuffix')})
+            {t('langPageSubtitle', 'Configure active system locales and in-app dictionaries')} ({languages.length} {t('installedSuffix', 'installed')})
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={loadLanguages}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+            style={{
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#0f172a' : '#cbd5e1'
+            }}
+            title="Reload from server store"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>{t('refreshBtn', 'Reload')}</span>
+          </button>
+
           <button
             onClick={handleOpenAddModal}
             disabled={currentUser?.role !== 'admin'}
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            <Plus className="h-4 w-4" /> {t('addLanguage')}
+            <Plus className="h-4 w-4" /> {t('addLanguage', 'Add Language')}
           </button>
           <Link
             href="/admin"
@@ -21603,7 +21732,7 @@ export default function AdminLanguagePage() {
               color: isDayMode ? '#0f172a' : '#cbd5e1'
             }}
           >
-            <Shield className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminConsole')}
+            <Shield className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminConsole', 'Admin Console')}
           </Link>
         </div>
       </div>
@@ -21613,7 +21742,7 @@ export default function AdminLanguagePage() {
         <Search className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
         <input
           type="text"
-          placeholder={t('searchLanguagePlaceholder')}
+          placeholder={t('searchLanguagePlaceholder', 'Search language by name, code or native script...')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition shadow-xs"
@@ -21646,19 +21775,19 @@ export default function AdminLanguagePage() {
               }}
             >
               <tr>
-                <th className="px-5 py-4">{t('tableLangAndCode')}</th>
-                <th className="px-5 py-4">{t('tableNativeName')}</th>
-                <th className="px-5 py-4">{t('tableDirection')}</th>
-                <th className="px-5 py-4">{t('tableDefault')}</th>
-                <th className="px-5 py-4">{t('tableStatus')}</th>
-                <th className="px-5 py-4 text-right">{t('tableActions')}</th>
+                <th className="px-5 py-4">{t('tableLangAndCode', 'Language & Identifier')}</th>
+                <th className="px-5 py-4">{t('tableNativeName', 'Native Script & Flag')}</th>
+                <th className="px-5 py-4">{t('tableDirection', 'Direction')}</th>
+                <th className="px-5 py-4">{t('tableDefault', 'Default')}</th>
+                <th className="px-5 py-4">{t('tableStatus', 'Status')}</th>
+                <th className="px-5 py-4 text-right">{t('tableActions', 'Actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y transition-colors duration-200" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="text-center py-12" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {t('noLanguagesFound')} "{search}"
+                    {t('noLanguagesFound', 'No languages found matching')} "{search}"
                   </td>
                 </tr>
               ) : (
@@ -21714,7 +21843,7 @@ export default function AdminLanguagePage() {
                             color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                           }}
                         >
-                          <Star className="h-3 w-3 fill-current" /> {t('defaultBadge')}
+                          <Star className="h-3 w-3 fill-current" /> {t('defaultBadge', 'Default')}
                         </span>
                       ) : (
                         <button
@@ -21727,7 +21856,7 @@ export default function AdminLanguagePage() {
                             color: isDayMode ? '#334155' : '#94a3b8'
                           }}
                         >
-                          {t('setDefault')}
+                          {t('setDefault', 'Set Default')}
                         </button>
                       )}
                     </td>
@@ -21744,7 +21873,7 @@ export default function AdminLanguagePage() {
                           color: isDayMode ? '#64748b' : '#94a3b8'
                         }}
                       >
-                        {item.status === 'active' ? t('active') : t('inactive')}
+                        {item.status === 'active' ? t('active', 'Active') : t('inactive', 'Inactive')}
                       </span>
                     </td>
                     <td className="px-5 py-4 text-right">
@@ -21773,7 +21902,7 @@ export default function AdminLanguagePage() {
                             borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                             color: isDayMode ? '#64748b' : '#94a3b8'
                           }}
-                          title={item.isDefault ? t('cannotDeleteDefault') : t('deleteLanguageTooltip')}
+                          title={item.isDefault ? t('cannotDeleteDefault', 'Cannot delete default language') : t('deleteLanguageTooltip', 'Delete Language')}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -21818,9 +21947,11 @@ export default function AdminLanguagePage() {
                 className="text-xl font-black flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <Languages className="h-5 w-5" /> {t('addNewLanguageTitle')}
+                <Languages className="h-5 w-5" /> {t('addNewLanguageTitle', 'Add New Language')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('addNewLanguageSub')}</p>
+              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('addNewLanguageSub', 'Register a new locale code and initialize system translations.')}
+              </p>
             </div>
 
             {modalError && (
@@ -21904,11 +22035,13 @@ export default function AdminLanguagePage() {
                 </div>
 
                 <div className="flex-1">
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('langCodeLabel')}</label>
+                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('langCodeLabel', 'Language Code (ISO)')}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder={t('langCodePlaceholder')}
+                    placeholder={t('langCodePlaceholder', 'e.g. de, it, ja')}
                     maxLength={5}
                     value={langCode}
                     onChange={(e) => setLangCode(e.target.value)}
@@ -21923,11 +22056,13 @@ export default function AdminLanguagePage() {
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('displayNameLabel')}</label>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('displayNameLabel', 'Display Name')}
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder={t('displayNamePlaceholder')}
+                  placeholder={t('displayNamePlaceholder', 'e.g. German')}
                   value={langName}
                   onChange={(e) => setLangName(e.target.value)}
                   className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
@@ -21940,10 +22075,12 @@ export default function AdminLanguagePage() {
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('nativeNameLabel')}</label>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('nativeNameLabel', 'Native Name')}
+                </label>
                 <input
                   type="text"
-                  placeholder={t('nativeNamePlaceholder')}
+                  placeholder={t('nativeNamePlaceholder', 'e.g. Deutsch')}
                   value={langNativeName}
                   onChange={(e) => setLangNativeName(e.target.value)}
                   className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
@@ -21957,7 +22094,9 @@ export default function AdminLanguagePage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('layoutDirectionLabel')}</label>
+                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('layoutDirectionLabel', 'Layout Direction')}
+                  </label>
                   <select
                     value={langDirection}
                     onChange={(e) => setLangDirection(e.target.value as any)}
@@ -21968,13 +22107,15 @@ export default function AdminLanguagePage() {
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
-                    <option value="ltr" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionLtr')}</option>
-                    <option value="rtl" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionRtl')}</option>
+                    <option value="ltr" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionLtr', 'Left-to-Right (LTR)')}</option>
+                    <option value="rtl" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionRtl', 'Right-to-Left (RTL)')}</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('statusLabel')}</label>
+                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('statusLabel', 'Status')}
+                  </label>
                   <select
                     value={langStatus}
                     onChange={(e) => setLangStatus(e.target.value as any)}
@@ -21985,8 +22126,8 @@ export default function AdminLanguagePage() {
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
-                    <option value="active" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active')}</option>
-                    <option value="inactive" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('inactive')}</option>
+                    <option value="active" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active', 'Active')}</option>
+                    <option value="inactive" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('inactive', 'Inactive')}</option>
                   </select>
                 </div>
               </div>
@@ -21999,7 +22140,7 @@ export default function AdminLanguagePage() {
                     onChange={(e) => setLangIsDefault(e.target.checked)}
                     className="rounded accent-[#E05638]"
                   />
-                  <span>{t('setAsDefaultLabel')}</span>
+                  <span>{t('setAsDefaultLabel', 'Set as default application language')}</span>
                 </label>
               </div>
 
@@ -22014,14 +22155,14 @@ export default function AdminLanguagePage() {
                     color: isDayMode ? '#475569' : '#cbd5e1'
                   }}
                 >
-                  {t('cancel')}
+                  {t('cancel', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
                 >
-                  <Plus className="h-4 w-4" /> {t('addLanguage')}
+                  <Plus className="h-4 w-4" /> {t('addLanguage', 'Add Language')}
                 </button>
               </div>
             </form>
@@ -22060,9 +22201,11 @@ export default function AdminLanguagePage() {
                 className="text-xl font-black flex items-center gap-2"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                <Edit3 className="h-5 w-5" /> {t('editLanguageTitle')} ({editingCode?.toUpperCase()})
+                <Edit3 className="h-5 w-5" /> {t('editLanguageTitle', 'Edit Language')} ({editingCode?.toUpperCase()})
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('editLanguageSub')}</p>
+              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('editLanguageSub', 'Customize locale configuration and system dictionary phrases.')}
+              </p>
             </div>
 
             {/* TAB NAVIGATION */}
@@ -22179,7 +22322,9 @@ export default function AdminLanguagePage() {
                   </div>
 
                   <div className="flex-1">
-                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('displayNameLabel')}</label>
+                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      {t('displayNameLabel', 'Display Name')}
+                    </label>
                     <input
                       type="text"
                       required
@@ -22196,7 +22341,9 @@ export default function AdminLanguagePage() {
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('nativeNameLabel')}</label>
+                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('nativeNameLabel', 'Native Name')}
+                  </label>
                   <input
                     type="text"
                     value={langNativeName}
@@ -22212,7 +22359,9 @@ export default function AdminLanguagePage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('layoutDirectionLabel')}</label>
+                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      {t('layoutDirectionLabel', 'Layout Direction')}
+                    </label>
                     <select
                       value={langDirection}
                       onChange={(e) => setLangDirection(e.target.value as any)}
@@ -22223,13 +22372,15 @@ export default function AdminLanguagePage() {
                         color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     >
-                      <option value="ltr" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionLtr')}</option>
-                      <option value="rtl" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionRtl')}</option>
+                      <option value="ltr" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionLtr', 'Left-to-Right (LTR)')}</option>
+                      <option value="rtl" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionRtl', 'Right-to-Left (RTL)')}</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('statusLabel')}</label>
+                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      {t('statusLabel', 'Status')}
+                    </label>
                     <select
                       value={langStatus}
                       onChange={(e) => setLangStatus(e.target.value as any)}
@@ -22240,8 +22391,8 @@ export default function AdminLanguagePage() {
                         color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     >
-                      <option value="active" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active')}</option>
-                      <option value="inactive" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('inactive')}</option>
+                      <option value="active" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active', 'Active')}</option>
+                      <option value="inactive" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('inactive', 'Inactive')}</option>
                     </select>
                   </div>
                 </div>
@@ -22254,7 +22405,7 @@ export default function AdminLanguagePage() {
                       onChange={(e) => setLangIsDefault(e.target.checked)}
                       className="rounded accent-[#E05638]"
                     />
-                    <span>{t('setAsDefaultLabel')}</span>
+                    <span>{t('setAsDefaultLabel', 'Set as default application language')}</span>
                   </label>
                 </div>
               </div>
@@ -22348,7 +22499,7 @@ export default function AdminLanguagePage() {
                     </div>
                   ) : (
                     wordKeysList.map((key) => {
-                      const englishRef = en[key] || key;
+                      const englishRef = (en as any)[key] || key;
                       const currentValue = wordsMap[key] ?? '';
 
                       return (
@@ -22400,7 +22551,7 @@ export default function AdminLanguagePage() {
                   color: isDayMode ? '#475569' : '#cbd5e1'
                 }}
               >
-                {t('cancel')}
+                {t('cancel', 'Cancel')}
               </button>
               <button
                 type="submit"
@@ -22408,7 +22559,7 @@ export default function AdminLanguagePage() {
                 className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
               >
-                <Check className="h-4 w-4" /> {t('saveChanges')}
+                <Check className="h-4 w-4" /> {t('saveChanges', 'Save Changes')}
               </button>
             </div>
           </div>
@@ -25269,37 +25420,54 @@ export default function SocialLoginSettingPage() {
 ## File: `apps/web/src/app/admin/ingredient-categories/page.tsx`
 ```typescript
 'use client';
+
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   Tags, Plus, Edit3, Trash2, Check, X, RotateCcw, 
   CheckCircle, ArrowLeft, MoreVertical, GripVertical, 
-  ArrowUpDown, ArrowUp, ArrowDown, Save
+  ArrowUpDown, ArrowUp, ArrowDown, Save, RefreshCw
 } from 'lucide-react';
-import { getStoredCategories, saveCategories, DEFAULT_CATEGORIES } from '@/lib/categories';
+import { 
+  getStoredCategories, 
+  saveCategories, 
+  setMemoryCategories, 
+  DEFAULT_CATEGORIES 
+} from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 export default function IngredientCategoryPage() {
-  const { t, version } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+  const version = langContext?.version;
+
   const [categories, setCategories] = useState<string[]>([]);
   const [newCatName, setNewCatName] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [feedback, setFeedback] = useState('');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   
   // Reposition / Reorder States
   const [isReordering, setIsReordering] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Dynamic Theme Synchronization & Day Mode Inversion
+  // Dynamic Theme Synchronization
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined' 
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -25338,7 +25506,7 @@ export default function IngredientCategoryPage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -25359,27 +25527,64 @@ export default function IngredientCategoryPage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadCategories = () => {
-    setCategories(getStoredCategories());
-  };
+  // Hydrate Categories Exclusively from Server Storage
+  const loadCategoriesFromServer = useCallback(async () => {
+    setIsLoading(true);
+    purgeLegacyBrowserAdminStorage();
+    try {
+      const serverData = await fetchServerAdminSettings();
+      if (serverData && Array.isArray(serverData.ingredientCategories) && serverData.ingredientCategories.length > 0) {
+        setCategories(serverData.ingredientCategories);
+        setMemoryCategories(serverData.ingredientCategories);
+      } else {
+        const fallback = getStoredCategories();
+        const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_CATEGORIES;
+        setCategories(activeList);
+        setMemoryCategories(activeList);
+      }
+    } catch (err) {
+      console.error('[IngredientCategoryPage] Error loading server categories:', err);
+      const fallback = getStoredCategories();
+      setCategories(fallback.length > 0 ? fallback : DEFAULT_CATEGORIES);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     document.title = `${t('ingredientCatTitle', 'Ingredient Categories')} - ${t('adminConsole', 'Admin Console')}`;
-    loadCategories();
+    loadCategoriesFromServer();
 
-    const handleSync = () => setCategories(getStoredCategories());
+    const handleSync = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setCategories(e.detail);
+      } else {
+        loadCategoriesFromServer();
+      }
+    };
+
     window.addEventListener('zecratary_categories_changed', handleSync);
-    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_categories_changed', handleSync);
-      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [t, version]);
+  }, [t, version, loadCategoriesFromServer]);
 
   const notify = (msg: string) => {
     setFeedback(msg);
     setTimeout(() => setFeedback(''), 3000);
+  };
+
+  // Centralized Server-Backed Commit (Zero LocalStorage)
+  const commitCategories = async (updated: string[]) => {
+    setCategories(updated);
+    setMemoryCategories(updated);
+    await saveCategories(updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
   };
 
   // Drag & Drop Handlers
@@ -25401,7 +25606,7 @@ export default function IngredientCategoryPage() {
 
   const handleDrop = () => {
     setDraggedIndex(null);
-    saveCategories(categories);
+    commitCategories(categories);
   };
 
   const moveCategory = (index: number, direction: 'up' | 'down') => {
@@ -25412,13 +25617,12 @@ export default function IngredientCategoryPage() {
     const temp = list[index];
     list[index] = list[targetIndex];
     list[targetIndex] = temp;
-    setCategories(list);
-    saveCategories(list);
+    commitCategories(list);
   };
 
   const toggleRepositionMode = () => {
     if (isReordering) {
-      saveCategories(categories);
+      commitCategories(categories);
       notify(t('orderSaved', 'Category order saved successfully!'));
       setIsReordering(false);
     } else {
@@ -25438,8 +25642,7 @@ export default function IngredientCategoryPage() {
     }
 
     const updated = [...categories, clean];
-    setCategories(updated);
-    saveCategories(updated);
+    commitCategories(updated);
     setNewCatName('');
     notify(`${t('categoryAdded', 'Added category')} "${clean}"`);
   };
@@ -25458,8 +25661,7 @@ export default function IngredientCategoryPage() {
 
     const updated = [...categories];
     updated[index] = clean;
-    setCategories(updated);
-    saveCategories(updated);
+    commitCategories(updated);
     setEditingIndex(null);
     setEditingValue('');
     notify(`${t('categoryUpdated', 'Updated category')} "${clean}"`);
@@ -25469,15 +25671,13 @@ export default function IngredientCategoryPage() {
     const confirmMsg = t('confirmDeleteCat', 'Are you sure you want to delete category');
     if (!confirm(`${confirmMsg} "${name}"?`)) return;
     const updated = categories.filter((_, i) => i !== index);
-    setCategories(updated);
-    saveCategories(updated);
+    commitCategories(updated);
     notify(`${t('categoryRemoved', 'Removed category')} "${name}"`);
   };
 
   const handleResetDefaults = () => {
     if (!confirm(t('confirmResetCats', 'Are you sure you want to reset categories to default?'))) return;
-    setCategories(DEFAULT_CATEGORIES);
-    saveCategories(DEFAULT_CATEGORIES);
+    commitCategories(DEFAULT_CATEGORIES);
     setIsReordering(false);
     notify(t('resetCatsSuccess', 'Categories reset to default successfully!'));
   };
@@ -25502,6 +25702,21 @@ export default function IngredientCategoryPage() {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={loadCategoriesFromServer}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            style={{
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#334155' : '#cbd5e1'
+            }}
+            title="Reload from server storage"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>{t('refreshBtn', 'Reload')}</span>
+          </button>
+
           <button
             onClick={handleResetDefaults}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
@@ -33392,11 +33607,22 @@ export async function POST(req: NextRequest) {
     const merged = {
       ...current,
       ...body,
+      themeColors: {
+        ...(current.themeColors || {}),
+        ...(body.themeColors || {})
+      },
       socialLogin: {
         ...(current.socialLogin || {}),
         ...(body.socialLogin || {})
       },
-      subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || []
+      subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || [],
+      supportedLanguages: body.supportedLanguages || current.supportedLanguages || [],
+      ingredientCategories: body.ingredientCategories || current.ingredientCategories || [],
+      chefAiSettings: {
+        ...(current.chefAiSettings || {}),
+        ...(body.chefAiSettings || {})
+      },
+      chefQuestionnaire: body.chefQuestionnaire || current.chefQuestionnaire || []
     };
 
     const success = writeServerSettings(merged);
@@ -41444,141 +41670,58 @@ export default function ThemeSync() {
 
 ## File: `apps/web/src/lib/themeConfig.ts`
 ```typescript
-export interface ThemeColors {
-  primary?: string;
-  primaryColor?: string;
-  primaryHover?: string;
-  accentEmerald?: string;
-  accentColor?: string;
-  accent?: string;
-  sidebarIcon?: string;
-  sidebarIconColor?: string;
-  backgroundColor?: string;
-  backgroundDark?: string;
-  cardBackground?: string;
-  cardBorder?: string;
-  textSecondary?: string;
-}
+// Server-backed Theme Palette Engine
+// Zero browser localStorage writes
 
-export function applyThemeToDocument(colors: ThemeColors | null | undefined): void {
+import { persistServerAdminSettings } from '@/lib/adminSync';
+
+export function applyThemeToDocument(colors?: any): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const isDayMode = localStorage.getItem('zecratary_theme_mode') === 'light';
+  if (!colors) return;
+  try {
+    const p = colors.primary || colors.primaryColor || '#E05638';
+    const ph = colors.primaryHover || '#c94529';
+    const ac = colors.accentEmerald || colors.accentColor || colors.accent || '#10b981';
+    const sbi = colors.sidebarIconColor || colors.sidebarIcon || ac;
+    const bg = colors.backgroundColor || colors.backgroundDark || '#070b13';
+    const card = colors.cardBackground || '#0b0f17';
+    const border = colors.cardBorder || '#1e293b';
+    const textSec = colors.textSecondary || '#94a3b8';
 
-  const primary = colors?.primary || colors?.primaryColor;
-  const primaryHover = colors?.primaryHover;
-  const accent = colors?.accentEmerald || colors?.accentColor || colors?.accent;
-  const sidebarIcon = colors?.sidebarIconColor || colors?.sidebarIcon || accent || '#10b981';
-  const bg = colors?.backgroundColor || colors?.backgroundDark;
-  const card = colors?.cardBackground;
-  const border = colors?.cardBorder;
-  const textSec = colors?.textSecondary;
-
-  if (primary) {
-    root.style.setProperty('--color-primary', primary);
-    root.style.setProperty('--primary', primary);
-  }
-  if (primaryHover) {
-    root.style.setProperty('--color-primary-hover', primaryHover);
-    root.style.setProperty('--primary-hover', primaryHover);
-  }
-  if (accent) {
-    root.style.setProperty('--color-emerald', accent);
-    root.style.setProperty('--color-accent', accent);
-    root.style.setProperty('--accent', accent);
-  }
-  if (sidebarIcon) {
-    root.style.setProperty('--color-sidebar-icon', sidebarIcon);
-    root.style.setProperty('--sidebar-icon', sidebarIcon);
-  }
-
-  if (isDayMode) {
-    root.classList.remove('dark');
-    root.classList.add('light');
-    root.style.setProperty('--color-bg', '#f8fafc');
-    root.style.setProperty('--color-bg-dark', '#f8fafc');
-    root.style.setProperty('--color-card', '#ffffff');
-    root.style.setProperty('--color-card-dark', '#ffffff');
-    root.style.setProperty('--color-border', '#e2e8f0');
-    root.style.setProperty('--color-border-dark', '#e2e8f0');
-    root.style.setProperty('--color-text', '#0f172a');
-    root.style.setProperty('--color-text-secondary', '#64748b');
-    root.style.setProperty('--color-inner-dark', '#f1f5f9');
-    if (document.body) {
-      document.body.style.backgroundColor = '#f8fafc';
-      document.body.style.color = '#0f172a';
-    }
-  } else {
-    root.classList.remove('light');
-    root.classList.add('dark');
-    if (bg) {
-      root.style.setProperty('--color-bg', bg);
-      root.style.setProperty('--color-bg-dark', bg);
-      root.style.setProperty('--color-inner-dark', bg);
-      if (document.body) {
-        document.body.style.backgroundColor = bg;
-      }
-    }
-    if (card) {
-      root.style.setProperty('--color-card', card);
-      root.style.setProperty('--color-card-dark', card);
-    }
-    if (border) {
-      root.style.setProperty('--color-border', border);
-      root.style.setProperty('--color-border-dark', border);
-    }
-    if (textSec) {
-      root.style.setProperty('--color-text-secondary', textSec);
-    }
-    if (document.body) {
-      document.body.style.color = '#ffffff';
-    }
-  }
+    root.style.setProperty('--color-primary', p);
+    root.style.setProperty('--color-primary-hover', ph);
+    root.style.setProperty('--color-accent', ac);
+    root.style.setProperty('--color-emerald', ac);
+    root.style.setProperty('--color-sidebar-icon', sbi);
+    root.style.setProperty('--color-bg', bg);
+    root.style.setProperty('--color-bg-dark', bg);
+    root.style.setProperty('--color-background', bg);
+    root.style.setProperty('--color-card', card);
+    root.style.setProperty('--color-card-dark', card);
+    root.style.setProperty('--color-border', border);
+    root.style.setProperty('--color-text-secondary', textSec);
+  } catch (_) {}
 }
 
-export function saveThemeColors(colors: ThemeColors): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
-    localStorage.setItem('zecratary_theme_config', JSON.stringify(colors));
-  } catch (_) {}
+let memoryThemeColors: any = null;
 
+export function getStoredThemeColors(): any {
+  return memoryThemeColors ? { ...memoryThemeColors } : null;
+}
+
+export function setMemoryThemeColors(colors: any): void {
+  memoryThemeColors = colors ? { ...colors } : null;
+}
+
+export async function saveThemeColors(colors: any): Promise<boolean> {
+  memoryThemeColors = { ...colors };
   applyThemeToDocument(colors);
-  window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: colors }));
-  window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
-  window.dispatchEvent(new Event('storage'));
-
-  try {
-    fetch('/api/system-settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ themeColors: colors, settings: { themeColors: colors } })
-    }).catch(() => {});
-  } catch (_) {}
-}
-
-export async function fetchAndApplyServerTheme(): Promise<void> {
-  if (typeof window === 'undefined') return;
-
-  try {
-    const cached = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-    if (cached) {
-      applyThemeToDocument(JSON.parse(cached));
-    }
-  } catch (_) {}
-
-  try {
-    const res = await fetch('/api/system-settings', { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      const colors = data?.settings?.themeColors || data?.themeColors;
-      if (data.success && colors) {
-        localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
-        applyThemeToDocument(colors);
-        window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: colors }));
-      }
-    }
-  } catch (_) {}
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
+    window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+  }
+  return await persistServerAdminSettings({ themeColors: colors });
 }
 
 ```
@@ -42005,81 +42148,46 @@ export function ThemeInitializer() {
 
 ## File: `apps/web/src/lib/categories.ts`
 ```typescript
-'use client';
-import { useState, useEffect } from 'react';
+// Server-backed Ingredient Categories Store
+// Zero localStorage writes for category management
 
-export const DEFAULT_CATEGORIES = [
+import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
+
+export const DEFAULT_CATEGORIES: string[] = [
   'Produce',
-  'Dairy',
-  'Meat and Seafood',
+  'Dairy & Eggs',
+  'Meat & Poultry',
+  'Seafood',
   'Bakery',
-  'Baking Supplies',
-  'Pantry Staples',
-  'Frozen Foods',
-  'Snacks and Sweets',
+  'Pantry & Dry Goods',
+  'Canned Goods',
+  'Baking & Cooking',
+  'Spices & Seasonings',
+  'Snacks',
   'Beverages',
-  'Deli',
-  'Condiments and Sauces',
-  'Grains and Pasta',
-  'Spices and Seasonings',
-  'Ready Meals',
-  'International Foods',
-  'Household Items',
-  'Personal Care',
-  'Pet Supplies',
-  'Baby Products',
-  'Miscellaneous'
+  'Frozen Foods',
+  'Condiments & Sauces',
+  'Oils & Vinegars'
 ];
 
-const STORAGE_KEY = 'zecratary_ingredient_categories';
-const EVENT_KEY = 'zecratary_categories_changed';
+let memoryCategories: string[] = [...DEFAULT_CATEGORIES];
 
-export const getStoredCategories = (): string[] => {
-  if (typeof window === 'undefined') return DEFAULT_CATEGORIES;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('zecratary_categories');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((c: any) => (typeof c === 'string' ? c : c.name || String(c)));
-      }
-    }
-  } catch (e) {
-    console.error('Failed to read categories from storage:', e);
+export function getStoredCategories(): string[] {
+  return [...memoryCategories];
+}
+
+export function setMemoryCategories(cats: string[]): void {
+  if (Array.isArray(cats) && cats.length > 0) {
+    memoryCategories = [...cats];
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_CATEGORIES));
-  return DEFAULT_CATEGORIES;
-};
+}
 
-export const saveCategories = (categories: string[]) => {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(categories));
-  localStorage.setItem('zecratary_categories', JSON.stringify(categories));
-  window.dispatchEvent(new Event(EVENT_KEY));
-};
-
-export function useIngredientCategories(): string[] {
-  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
-
-  useEffect(() => {
-    setCategories(getStoredCategories());
-
-    const handleSync = () => {
-      setCategories(getStoredCategories());
-    };
-
-    window.addEventListener(EVENT_KEY, handleSync);
-    window.addEventListener('zecratary_categories_updated', handleSync);
-    window.addEventListener('storage', handleSync);
-
-    return () => {
-      window.removeEventListener(EVENT_KEY, handleSync);
-      window.removeEventListener('zecratary_categories_updated', handleSync);
-      window.removeEventListener('storage', handleSync);
-    };
-  }, []);
-
-  return categories;
+export async function saveCategories(cats: string[]): Promise<boolean> {
+  memoryCategories = [...cats];
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zecratary_categories_changed', { detail: cats }));
+  }
+  return await persistServerAdminSettings({ ingredientCategories: cats });
 }
 
 ```
@@ -42204,6 +42312,22 @@ export function purgeLegacyBrowserAdminStorage(): void {
   if (typeof window === 'undefined') return;
   const legacyKeys = [
     'zecratary_admin_settings',
+    'theme_colors',
+    'site_config',
+    'zecratary_theme_config',
+    'zecratary_theme_colors',
+    'zecratary_site_config',
+    'zecratary_active_language',
+    'languages',
+    'zecratary_languages',
+    'zecratary_categories',
+    'ingredient_categories',
+    'zecratary_ingredient_categories',
+    'zecratary_ai_config',
+    'zecratary_chef_questionnaire',
+    'zecratary_settings',
+    'zecratary_engine_config',
+    'zecratary_chef_ai_settings',
     'zecratary_social_login_config',
     'zecratary_subscription_configs',
     'zecratary_subscription_plans',
@@ -42261,18 +42385,23 @@ export async function persistServerAdminSettings(updates: Record<string, any>): 
 
 ## File: `apps/web/src/lib/siteConfig.ts`
 ```typescript
-export const DEFAULT_SITE_NAME = 'Zecratary';
-export const DEFAULT_SITE_ICON = '🥑';
+// Server-backed Site Identity & Branding
+// Zero browser localStorage writes
+
+import { persistServerAdminSettings, fetchServerAdminSettings } from '@/lib/adminSync';
 
 export interface SiteIdentityConfig {
   siteName: string;
   titlebarEmoji: string;
-  titlebarImage: string;
+  titlebarImage?: string;
   faviconEmoji: string;
-  faviconImage: string;
+  faviconImage?: string;
 }
 
-const DEFAULT_CONFIG: SiteIdentityConfig = {
+export const DEFAULT_SITE_NAME = 'Zecratary';
+export const DEFAULT_SITE_ICON = '🍳';
+
+let memorySiteConfig: SiteIdentityConfig = {
   siteName: DEFAULT_SITE_NAME,
   titlebarEmoji: DEFAULT_SITE_ICON,
   titlebarImage: '',
@@ -42281,112 +42410,80 @@ const DEFAULT_CONFIG: SiteIdentityConfig = {
 };
 
 export function getSiteConfig(): SiteIdentityConfig {
-  if (typeof window === 'undefined') return DEFAULT_CONFIG;
-  try {
-    const raw = localStorage.getItem('zecratary_site_settings');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return {
-        siteName: parsed.siteName || parsed.name || DEFAULT_SITE_NAME,
-        titlebarEmoji: parsed.titlebarEmoji || parsed.icon || DEFAULT_SITE_ICON,
-        titlebarImage: parsed.titlebarImage || '',
-        faviconEmoji: parsed.faviconEmoji || parsed.titlebarEmoji || parsed.icon || DEFAULT_SITE_ICON,
-        faviconImage: parsed.faviconImage || ''
-      };
-    }
-  } catch (_) {}
-  return DEFAULT_CONFIG;
+  return { ...memorySiteConfig };
 }
 
 export function getSiteName(): string {
-  return getSiteConfig().siteName;
+  return memorySiteConfig.siteName || DEFAULT_SITE_NAME;
 }
 
 export function getSiteIcon(): string {
-  const cfg = getSiteConfig();
-  return cfg.titlebarImage || cfg.titlebarEmoji || DEFAULT_SITE_ICON;
+  return memorySiteConfig.titlebarImage || memorySiteConfig.titlebarEmoji || DEFAULT_SITE_ICON;
 }
 
-export function getFavicon(): string {
-  const cfg = getSiteConfig();
-  return cfg.faviconImage || cfg.faviconEmoji || cfg.titlebarImage || cfg.titlebarEmoji || DEFAULT_SITE_ICON;
+export function setMemorySiteConfig(cfg: Partial<SiteIdentityConfig>): void {
+  memorySiteConfig = { ...memorySiteConfig, ...cfg };
 }
 
-export function updateFavicon(iconOrUrl?: string) {
-  if (typeof window === 'undefined') return;
-  const target = iconOrUrl || getFavicon();
-  let href = target;
-
-  if (
-    !target.startsWith('data:') && 
-    !target.startsWith('http://') && 
-    !target.startsWith('https://') && 
-    !target.startsWith('/')
-  ) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${target}</text></svg>`;
-    href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
-  }
-
-  let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
-  if (!link) {
-    link = document.createElement('link');
-    link.rel = 'icon';
-    document.head.appendChild(link);
-  }
-  link.href = href;
-
-  let shortcut = document.querySelector<HTMLLinkElement>("link[rel~='shortcut icon']");
-  if (shortcut) {
-    shortcut.href = href;
-  }
-}
-
-export function saveSiteConfig(config: Partial<SiteIdentityConfig>) {
-  if (typeof window === 'undefined') return;
-  const current = getSiteConfig();
-  const updated: SiteIdentityConfig = { ...current, ...config };
-  localStorage.setItem('zecratary_site_settings', JSON.stringify(updated));
-  localStorage.setItem('zecratary_site_name', updated.siteName);
-  localStorage.setItem('zecratary_site_icon', updated.titlebarImage || updated.titlebarEmoji);
-  
-  window.dispatchEvent(new Event('zecratary_site_settings_changed'));
-  window.dispatchEvent(new Event('storage'));
-  updateFavicon(updated.faviconImage || updated.faviconEmoji || updated.titlebarEmoji);
-
-  // Sync to backend API for cross-browser synchronization
+export function updateFavicon(faviconUrl?: string): void {
+  if (typeof document === 'undefined') return;
   try {
-    fetch('/api/system-settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteSettings: updated })
-    }).catch(() => {});
+    const iconToUse = faviconUrl || memorySiteConfig.faviconImage || (
+      memorySiteConfig.faviconEmoji
+        ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${memorySiteConfig.faviconEmoji}</text></svg>`)}`
+        : `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${DEFAULT_SITE_ICON}</text></svg>`)}`
+    );
+
+    let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'shortcut icon';
+      document.getElementsByTagName('head')[0].appendChild(link);
+    }
+    link.href = iconToUse;
   } catch (_) {}
 }
 
-export async function syncSiteConfigFromServer(): Promise<SiteIdentityConfig | null> {
-  if (typeof window === 'undefined') return null;
-  try {
-    const res = await fetch('/api/system-settings', { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.settings?.siteSettings) {
-        const s = data.settings.siteSettings;
-        const current = getSiteConfig();
-        const merged: SiteIdentityConfig = {
-          siteName: s.siteName || current.siteName,
-          titlebarEmoji: s.titlebarEmoji || current.titlebarEmoji,
-          titlebarImage: s.titlebarImage !== undefined ? s.titlebarImage : current.titlebarImage,
-          faviconEmoji: s.faviconEmoji || current.faviconEmoji,
-          faviconImage: s.faviconImage !== undefined ? s.faviconImage : current.faviconImage
-        };
-        localStorage.setItem('zecratary_site_settings', JSON.stringify(merged));
+export async function saveSiteConfig(config: SiteIdentityConfig): Promise<boolean> {
+  memorySiteConfig = { ...config };
+  if (typeof window !== 'undefined') {
+    if (config.faviconImage) {
+      updateFavicon(config.faviconImage);
+    } else if (config.faviconEmoji) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${config.faviconEmoji}</text></svg>`;
+      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+    }
+    window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: config }));
+    window.dispatchEvent(new Event('zecratary_site_settings_changed'));
+    window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+  }
+  return await persistServerAdminSettings({
+    siteName: config.siteName,
+    titlebarEmoji: config.titlebarEmoji,
+    titlebarImage: config.titlebarImage || '',
+    faviconEmoji: config.faviconEmoji,
+    faviconImage: config.faviconImage || ''
+  });
+}
+
+// Auto-hydrate from server on startup with zero localStorage writes
+if (typeof window !== 'undefined') {
+  fetchServerAdminSettings().then((settings) => {
+    if (settings) {
+      const updated: Partial<SiteIdentityConfig> = {};
+      if (settings.siteName) updated.siteName = settings.siteName;
+      if (settings.titlebarEmoji) updated.titlebarEmoji = settings.titlebarEmoji;
+      if (settings.titlebarImage !== undefined) updated.titlebarImage = settings.titlebarImage;
+      if (settings.faviconEmoji) updated.faviconEmoji = settings.faviconEmoji;
+      if (settings.faviconImage !== undefined) updated.faviconImage = settings.faviconImage;
+      
+      if (Object.keys(updated).length > 0) {
+        setMemorySiteConfig(updated);
+        updateFavicon();
         window.dispatchEvent(new Event('zecratary_site_settings_changed'));
-        updateFavicon(merged.faviconImage || merged.faviconEmoji || merged.titlebarEmoji);
-        return merged;
       }
     }
-  } catch (_) {}
-  return null;
+  }).catch(() => {});
 }
 
 ```
