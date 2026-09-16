@@ -6,8 +6,18 @@
     "role": "admin",
     "subscriptionPlan": "nutrition-pro-monthly",
     "createdAt": "2026-01-01T00:00:00.000Z",
-    "planExpiryDate": "2026-10-16T23:59:59.000Z",
-    "expiryDate": "2026-10-16T23:59:59.000Z"
+    "planExpiryDate": "2026-10-16T12:05:47.690Z",
+    "expiryDate": "2026-10-16T12:05:47.690Z",
+    "subscriptionTier": "nutrition-pro-monthly",
+    "password": "admin",
+    "linkedProviders": [],
+    "planName": "Nutrition Pro (Monthly)",
+    "planInterval": "MONTH",
+    "subscriptionStatus": "active",
+    "lastPaymentDate": "2026-09-16T12:05:47.750Z",
+    "updatedAt": "2026-09-16T12:05:47.750Z",
+    "planSlug": "nutrition-pro-monthly",
+    "planId": "plan_1789546898584-monthly"
   },
   {
     "id": "usr_google_mu19hxvu",

@@ -1,32 +1,17 @@
 [
   {
-    "id": "tx_mu3zunj14k0",
-    "customerName": "Administrator",
-    "customerEmail": "admin@foodieprep.com",
-    "planName": "Nutrition Pro Max (Monthly)",
-    "planSlug": "nutrition-pro-max-monthly",
-    "amount": 18.99,
+    "id": "tx_mu420xmk90x",
+    "customerName": "System Administrator",
+    "customerEmail": "admin@zecratary.com",
+    "planName": "Nutrition Pro (Monthly)",
+    "planSlug": "nutrition-pro-monthly",
+    "amount": 8.99,
     "currency": "USD",
     "gateway": "stripe",
     "status": "succeeded",
     "testMode": true,
-    "createdAt": "2026-09-16T11:04:55.453Z",
-    "expiryDate": "2026-10-16T11:04:55.427Z"
-  },
-  {
-    "id": "tx_mu3zu94my0n",
-    "customerName": "Administrator",
-    "customerEmail": "admin@foodieprep.com",
-    "planName": "Nutrition Pro (Annual)",
-    "planSlug": "nutrition-pro-annual",
-    "amount": "59.99",
-    "currency": "USD",
-    "gateway": "stripe",
-    "status": "refunded",
-    "failureReason": null,
-    "testMode": true,
-    "expiryDate": "2026-09-16T11:04:55.439Z",
-    "createdAt": "2026-09-16T11:04:36.790Z"
+    "createdAt": "2026-09-16T12:05:47.708Z",
+    "expiryDate": "2026-10-16T12:05:47.690Z"
   },
   {
     "id": "tx_mu3ztvxstw8",

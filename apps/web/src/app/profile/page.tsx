@@ -170,11 +170,15 @@ export default function ProfilePage() {
 
   const [processingSocial, setProcessingSocial] = useState<SocialProvider | null>(null);
 
-  // Dynamic Plans state with default free tier preserved
   const [plans, setPlans] = useState<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
   const plansRef = useRef<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
   plansRef.current = plans;
+
+  // Concurrency & Debounce guards
   const isFetchingPlansRef = useRef(false);
+  const isReloadingUserRef = useRef(false);
+  const isFetchingThemeRef = useRef(false);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [selectedInterval, setSelectedInterval] = useState<'ALL' | 'MONTH' | 'YEAR'>('ALL');
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
@@ -189,10 +193,12 @@ export default function ProfilePage() {
     monthlyLimit: 50000,
     reimburseFrequency: 'monthly'
   });
-  const [activeModelName, setActiveModelName] = useState('gemini-1.5-flash');
+  const [activeModelName] = useState('gemini-1.5-flash');
 
   // Load server-backed system settings without writing to localStorage
   const applySavedTheme = useCallback(async () => {
+    if (isFetchingThemeRef.current) return;
+    isFetchingThemeRef.current = true;
     try {
       const res = await fetch('/api/system-settings', { cache: 'no-store' });
       if (res.ok) {
@@ -226,6 +232,9 @@ export default function ProfilePage() {
         }
       }
     } catch (_) {}
+    finally {
+      isFetchingThemeRef.current = false;
+    }
   }, []);
 
   useEffect(() => {
@@ -233,13 +242,11 @@ export default function ProfilePage() {
     window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('zecratary_payment_updated', applySavedTheme);
 
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('zecratary_payment_updated', applySavedTheme);
     };
   }, [applySavedTheme]);
 
@@ -258,18 +265,17 @@ export default function ProfilePage() {
       return true;
     }
 
+    const userInterval = (rawUser.planInterval || (cleanUserPlan.includes('annual') || cleanUserPlan.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
+    const planInterval = (plan.interval || (planSlug.includes('annual') || planSlug.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
+
     if (rawUser.planId && (rawUser.planId === plan.id || rawUser.planId === plan.slug)) {
-      const userInterval = (rawUser.planInterval || (cleanUserPlan.includes('annual') || cleanUserPlan.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
-      const planInterval = (plan.interval || (planSlug.includes('annual') || planSlug.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
+      if (plan.isFree) return true;
       return userInterval === planInterval;
     }
 
     if (cleanUserPlan === planSlug || cleanUserPlan === planId) {
       return true;
     }
-
-    const userInterval = (rawUser.planInterval || (cleanUserPlan.includes('annual') || cleanUserPlan.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
-    const planInterval = (plan.interval || (planSlug.includes('annual') || planSlug.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
 
     const cleanUserBase = cleanUserPlan.replace(/-(monthly|annual|free)$/i, '');
     const cleanPlanBase = planSlug.replace(/-(monthly|annual|free)$/i, '');
@@ -302,21 +308,26 @@ export default function ProfilePage() {
       }
     }
 
-    setTokenUsage(prev => ({
-      ...prev,
-      monthlyLimit: assignedLimit,
-      reimburseFrequency: assignedFrequency
-    }));
+    setTokenUsage(prev => {
+      if (prev.monthlyLimit === assignedLimit && prev.reimburseFrequency === assignedFrequency) {
+        return prev;
+      }
+      return {
+        ...prev,
+        monthlyLimit: assignedLimit,
+        reimburseFrequency: assignedFrequency
+      };
+    });
   }, []);
 
-  // Synchronize available subscription plans dynamically from /api/admin/plans without localStorage
+  // Synchronize available subscription plans dynamically from /api/admin/plans
   const syncPlansFromAdmin = useCallback(async () => {
     if (isFetchingPlansRef.current) return;
     isFetchingPlansRef.current = true;
 
     let serverConfigs: any[] = [];
     try {
-      const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         const list = Array.isArray(data) ? data : (data.configs || data.plans || data.packages || data.subscriptionPlans);
@@ -344,7 +355,6 @@ export default function ProfilePage() {
     const plansMap = new Map<string, SubscriptionPlanItem>();
     const configs: any[] = [...serverConfigs];
 
-    // Guarantee presence of system default free tier
     const hasFree = configs.some((cfg: any) => 
       cfg && (
         cfg.isFree === true || 
@@ -368,7 +378,7 @@ export default function ProfilePage() {
         trialBadge: '',
         descriptionMonthly: SYSTEM_DEFAULT_FREE_PLAN.description,
         descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
-        buttonText: t('switchToFreeBtn') || 'Switch to Free',
+        buttonText: 'Switch to Free',
         features: SYSTEM_DEFAULT_FREE_PLAN.features,
         tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
         tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
@@ -418,7 +428,7 @@ export default function ProfilePage() {
           isFree: true,
           badge: cfg.badge || cfg.monthlyBadge || '',
           saveBadge: '',
-          buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
+          buttonText: cfg.buttonText || 'Switch to Free',
           buttonTheme: 'orange',
           features: planFeatures,
           aiRecipeLimit: cfg.aiRecipeLimit,
@@ -450,7 +460,7 @@ export default function ProfilePage() {
             isFree: false,
             badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
             saveBadge: '',
-            buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+            buttonText: cfg.buttonText || 'Choose Plan',
             buttonTheme: 'green',
             features: planFeatures,
             aiRecipeLimit: cfg.aiRecipeLimit,
@@ -481,7 +491,7 @@ export default function ProfilePage() {
             saveBadge: cfg.annualBadge || '',
             subPrice: `${currencySymbol}${mEquivalent}/month`,
             strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars || cfg.price).toFixed(2)}/month` : undefined,
-            buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+            buttonText: cfg.buttonText || 'Choose Plan',
             buttonTheme: 'green',
             features: planFeatures,
             aiRecipeLimit: cfg.aiRecipeLimit,
@@ -498,141 +508,163 @@ export default function ProfilePage() {
 
     const dynamicPlans = Array.from(plansMap.values());
     plansRef.current = dynamicPlans;
-    setPlans(dynamicPlans);
-  }, [currencySymbol, t]);
+    
+    setPlans(prev => {
+      if (JSON.stringify(prev) === JSON.stringify(dynamicPlans)) {
+        return prev;
+      }
+      return dynamicPlans;
+    });
+  }, [currencySymbol]);
 
-  // Revalidate active user against /api/admin/payment transactions:
-  // Enforce Rule 3: users without valid active payment records automatically fallback to 'taster' (free plan)
+  // Idempotent read-only user data fetcher (never mutates /api/admin/users on mount)
   const reloadActiveUser = useCallback(async () => {
-    initAuthStorage();
-    let active = getCurrentUser() as ExtendedUser | null;
+    if (isReloadingUserRef.current) return;
+    isReloadingUserRef.current = true;
 
-    if (!active && typeof document !== 'undefined') {
-      const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
-      if (match && match[1]) {
-        try {
-          const cookieData = JSON.parse(decodeURIComponent(match[1]));
-          if (cookieData && (cookieData.email || cookieData.id)) {
-            active = {
-              id: cookieData.id || 'usr_standard_default',
-              name: cookieData.name || 'Standard User',
-              email: cookieData.email || 'user@foodieprep.com',
-              role: cookieData.role || 'user',
-              subscriptionPlan: 'taster'
+    try {
+      initAuthStorage();
+      let active = getCurrentUser() as ExtendedUser | null;
+
+      if (!active && typeof document !== 'undefined') {
+        const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
+        if (match && match[1]) {
+          try {
+            const cookieData = JSON.parse(decodeURIComponent(match[1]));
+            if (cookieData && (cookieData.email || cookieData.id)) {
+              active = {
+                id: cookieData.id || 'usr_standard_default',
+                name: cookieData.name || 'Standard User',
+                email: cookieData.email || 'user@foodieprep.com',
+                role: cookieData.role || 'user',
+                subscriptionPlan: 'taster'
+              };
+              setCurrentUser(active);
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!active) {
+        router.replace('/login');
+        return;
+      }
+
+      let matchedUser: ExtendedUser = { ...active };
+
+      try {
+        const usersRes = await fetch('/api/admin/users', { cache: 'no-store' });
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          const usersList: any[] = Array.isArray(usersData.users) ? usersData.users : Array.isArray(usersData) ? usersData : [];
+          const fresh = usersList.find((u: any) => u.id === active?.id || u.email?.toLowerCase() === active?.email?.toLowerCase());
+          if (fresh) {
+            matchedUser = {
+              ...active,
+              ...fresh,
+              subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || fresh.planSlug || fresh.planId || 'taster')
             };
-            setCurrentUser(active);
           }
-        } catch (_) {}
-      }
-    }
-
-    if (!active) {
-      router.replace('/login');
-      return;
-    }
-
-    let matchedUser: ExtendedUser = { ...active };
-
-    // Hydrate fresh user record from server API
-    try {
-      const usersRes = await fetch('/api/admin/users', { cache: 'no-store' });
-      if (usersRes.ok) {
-        const usersData = await usersRes.json();
-        const usersList: any[] = Array.isArray(usersData.users) ? usersData.users : Array.isArray(usersData) ? usersData : [];
-        const fresh = usersList.find((u: any) => u.id === active?.id || u.email?.toLowerCase() === active?.email?.toLowerCase());
-        if (fresh) {
-          matchedUser = {
-            ...active,
-            ...fresh,
-            subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || fresh.planSlug || fresh.planId || 'taster')
-          };
         }
+      } catch (_) {}
+
+      if (!matchedUser.linkedProviders) {
+        const initialLinked: SocialProvider[] = [];
+        if (matchedUser.id.startsWith('usr_google_')) initialLinked.push('google');
+        if (matchedUser.id.startsWith('usr_facebook_')) initialLinked.push('facebook');
+        if (matchedUser.id.startsWith('usr_apple_')) initialLinked.push('apple');
+        matchedUser.linkedProviders = initialLinked;
       }
-    } catch (_) {}
 
-    if (!matchedUser.linkedProviders) {
-      const initialLinked: SocialProvider[] = [];
-      if (matchedUser.id.startsWith('usr_google_')) initialLinked.push('google');
-      if (matchedUser.id.startsWith('usr_facebook_')) initialLinked.push('facebook');
-      if (matchedUser.id.startsWith('usr_apple_')) initialLinked.push('apple');
-      matchedUser.linkedProviders = initialLinked;
-    }
+      try {
+        const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
+        if (txRes.ok) {
+          const txData = await txRes.json();
+          const txList: PaymentTransaction[] = Array.isArray(txData.transactions) 
+            ? txData.transactions.map(normalizeTransaction) 
+            : [];
 
-    // Synchronize with /api/admin/payment transactions and enforce Rule 3 (fallback to free)
-    try {
-      const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
-      if (txRes.ok) {
-        const txData = await txRes.json();
-        const txList: PaymentTransaction[] = Array.isArray(txData.transactions) 
-          ? txData.transactions.map(normalizeTransaction) 
-          : [];
+          const now = new Date();
+          const userEmail = matchedUser.email.toLowerCase().trim();
+          const userTxs = txList.filter(t => t.customerEmail === userEmail);
+          userTxs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
-        const now = new Date();
-        const userEmail = matchedUser.email.toLowerCase().trim();
-        const userTxs = txList.filter(t => t.customerEmail === userEmail);
-        userTxs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          const latestActiveTx = userTxs.find(t => 
+            isSucceeded(t.status) && (!t.expiryDate || new Date(t.expiryDate).getTime() > now.getTime())
+          );
 
-        const latestActiveTx = userTxs.find(t => 
-          isSucceeded(t.status) && (!t.expiryDate || new Date(t.expiryDate).getTime() > now.getTime())
-        );
+          const currentPlan = sanitizeSinglePlan(matchedUser.subscriptionPlan || (matchedUser as any).planSlug || '');
+          const isPaid = currentPlan && currentPlan !== 'taster' && currentPlan !== 'free' && !currentPlan.includes('free');
 
-        const currentPlan = sanitizeSinglePlan(matchedUser.subscriptionPlan || (matchedUser as any).planSlug || '');
-        const isPaid = currentPlan && currentPlan !== 'taster' && currentPlan !== 'free' && !currentPlan.includes('free');
-
-        if (latestActiveTx) {
-          matchedUser.subscriptionPlan = sanitizeSinglePlan(latestActiveTx.planSlug || matchedUser.subscriptionPlan);
-          (matchedUser as any).expiryDate = latestActiveTx.expiryDate;
-          (matchedUser as any).planExpiryDate = latestActiveTx.expiryDate;
-        } else if (isPaid) {
-          // Rule 3: Revert user to free plan if no valid active payment transaction exists
-          matchedUser.subscriptionPlan = 'taster';
-          (matchedUser as any).planSlug = 'taster';
-          (matchedUser as any).expiryDate = '';
-          (matchedUser as any).planExpiryDate = '';
-
-          fetch('/api/admin/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ...matchedUser,
-              subscriptionPlan: 'taster',
-              planExpiryDate: '',
-              expiryDate: ''
-            })
-          }).catch(() => {});
+          if (latestActiveTx) {
+            matchedUser.subscriptionPlan = sanitizeSinglePlan(latestActiveTx.planSlug || matchedUser.subscriptionPlan);
+            (matchedUser as any).expiryDate = latestActiveTx.expiryDate;
+            (matchedUser as any).planExpiryDate = latestActiveTx.expiryDate;
+          } else if (isPaid) {
+            // Read-only memory fallback without background POST mutation
+            matchedUser.subscriptionPlan = 'taster';
+            (matchedUser as any).planSlug = 'taster';
+            (matchedUser as any).expiryDate = '';
+            (matchedUser as any).planExpiryDate = '';
+          }
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
 
-    setCurrentUser(matchedUser);
-    setUserState(matchedUser);
-    setName(matchedUser.name || '');
-    setEmail(matchedUser.email || '');
+      setCurrentUser(matchedUser);
 
-    const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).subscriptionTier || (matchedUser as any).planSlug || '');
-    syncActivePlanTokens(userPlan, plansRef.current);
+      setUserState(prev => {
+        if (prev && JSON.stringify(prev) === JSON.stringify(matchedUser)) {
+          return prev;
+        }
+        return matchedUser;
+      });
+
+      setName(prev => (prev === (matchedUser.name || '') ? prev : (matchedUser.name || '')));
+      setEmail(prev => (prev === (matchedUser.email || '') ? prev : (matchedUser.email || '')));
+
+      const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).subscriptionTier || (matchedUser as any).planSlug || '');
+      syncActivePlanTokens(userPlan, plansRef.current);
+    } finally {
+      isReloadingUserRef.current = false;
+    }
   }, [router, syncActivePlanTokens]);
+
+  const syncPlansRef = useRef(syncPlansFromAdmin);
+  syncPlansRef.current = syncPlansFromAdmin;
+
+  const reloadUserRef = useRef(reloadActiveUser);
+  reloadUserRef.current = reloadActiveUser;
 
   useEffect(() => {
     document.title = `${t('accountProfileTitle') || 'Account Profile'} - Zecratary`;
-    syncPlansFromAdmin();
-    reloadActiveUser();
+  }, [t]);
 
-    const handleSyncEvent = () => {
-      syncPlansFromAdmin();
-      reloadActiveUser();
+  // Mount-only lifecycle with decoupled 300ms debounced listeners (excluding circular self-triggers)
+  useEffect(() => {
+    syncPlansRef.current();
+    reloadUserRef.current();
+
+    const handleDebouncedSync = () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        syncPlansRef.current();
+        reloadUserRef.current();
+      }, 300);
     };
 
-    window.addEventListener('zecratary_plans_updated', handleSyncEvent);
-    window.addEventListener('zecratary_users_updated', handleSyncEvent);
-    window.addEventListener('zecratary_payment_updated', handleSyncEvent);
+    window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
 
     return () => {
-      window.removeEventListener('zecratary_plans_updated', handleSyncEvent);
-      window.removeEventListener('zecratary_users_updated', handleSyncEvent);
-      window.removeEventListener('zecratary_payment_updated', handleSyncEvent);
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
     };
-  }, [reloadActiveUser, syncPlansFromAdmin, t]);
+  }, []);
 
   const handleToggleSocialLink = async (provider: SocialProvider) => {
     if (!user) return;
@@ -671,10 +703,6 @@ export default function ProfilePage() {
 
     setCurrentUser(updatedUser);
     setUserState(updatedUser);
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_users_updated'));
-    }
 
     setProcessingSocial(null);
     setTimeout(() => setSuccessMsg(''), 4000);
@@ -800,10 +828,6 @@ export default function ProfilePage() {
     setPassword('');
     setConfirmPassword('');
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_users_updated'));
-    }
-
     setSuccessMsg(t('profileSavedSuccess') || 'Your profile changes have been saved successfully!');
     setTimeout(() => setSuccessMsg(''), 4000);
   };
@@ -830,12 +854,7 @@ export default function ProfilePage() {
     }
   };
 
-  // CHANGE PLAN LOGIC: Fully synchronized with /admin/payment
-  // 1. Only allow 1 user per plan (prevent duplicate additions if currently active)
-  // 2. Allow upgrades to annual or downgrades to monthly / free
-  // 3. Fallback to default free plan ('taster') if no valid payment exists
-  // 4. Cancel (refund) previous active transactions via /api/admin/payment and create new transaction
-  // 5. Zero localStorage usage: All changes synced to server stores
+  // Change plan: strictly 1 plan per user, refunds prior payments, and persists to server stores without localStorage
   const handleSelectPlan = async (plan: SubscriptionPlanItem) => {
     if (!user) return;
     setPaymentLoading(plan.id);
@@ -847,7 +866,6 @@ export default function ProfilePage() {
       const targetSlug = sanitizeSinglePlan(plan.slug);
       const userEmail = user.email.toLowerCase().trim();
 
-      // Rule 1 & Rule 5: Reject duplicate addition if user already has this exact active plan
       if (checkIsCurrentPlan(plan)) {
         setError(t('alreadySubscribedToPlan') || `You are already subscribed to ${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'}).`);
         setPaymentLoading(null);
@@ -856,7 +874,6 @@ export default function ProfilePage() {
 
       const newExpiryDate = isFree ? '' : calculateRenewalExpiry(new Date(), plan.interval);
 
-      // Rule 4: If upgrading/downgrading, cancel (refund) prior active transactions via /api/admin/payment
       try {
         const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
         if (txRes.ok) {
@@ -883,7 +900,6 @@ export default function ProfilePage() {
         }
       } catch (_) {}
 
-      // Rule 4: Record new transaction in /api/admin/payment if not free
       if (!isFree) {
         const newTx: PaymentTransaction = {
           id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
@@ -907,7 +923,6 @@ export default function ProfilePage() {
         }).catch(() => {});
       }
 
-      // Sync updated plan state to /api/admin/users
       const finalPlanSlug = isFree ? 'taster' : targetSlug;
       const updatedUserPayload: ExtendedUser = {
         ...user,
@@ -932,13 +947,10 @@ export default function ProfilePage() {
 
       setCurrentUser(updatedUserPayload);
       setUserState(updatedUserPayload);
-      syncActivePlanTokens(finalPlanSlug, plans);
+      syncActivePlanTokens(finalPlanSlug, plansRef.current);
 
-      // Dispatch cross-view sync events
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
 
       const currentBase = sanitizeSinglePlan((user as any).subscriptionPlan || '').replace(/-(monthly|annual|free)$/i, '');
@@ -1080,9 +1092,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* USER DETAILS & TOKEN USAGE GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
         {/* MAIN PROFILE CARD */}
         <div 
           className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
@@ -1292,7 +1302,7 @@ export default function ProfilePage() {
           </form>
         </div>
 
-        {/* AI TOKEN USAGE & CONSUMPTION CARD */}
+        {/* AI TOKEN USAGE CARD */}
         <div 
           className="lg:col-span-5 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
           style={{
@@ -1398,7 +1408,6 @@ export default function ProfilePage() {
             </p>
           </div>
         </div>
-
       </div>
 
       {/* CONNECTED SOCIAL ACCOUNTS */}
@@ -1563,7 +1572,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* UPGRADE OR CHANGE MEMBERSHIP PLAN */}
+      {/* MEMBERSHIP PLANS */}
       <div 
         className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
         style={{
@@ -1640,7 +1649,7 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* ACTIVE MEMBERSHIP PLAN CARD BANNER */}
+        {/* ACTIVE PLAN BANNER */}
         <div 
           className="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm transition"
           style={{
