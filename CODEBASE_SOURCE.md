@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.1.5",
+  "version": "7.1.7",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -22,7 +22,11 @@
     "turbo": "^2.4.2",
     "typescript": "^5.7.3"
   },
-  "packageManager": "npm@10.8.2"
+  "packageManager": "npm@10.8.2",
+  "dependencies": {
+    "next": "^16.3.5",
+    "pg": "^8.23.0"
+  }
 }
 
 ```
@@ -105,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.1.5",
+  "version": "7.1.7",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -18250,7 +18254,7 @@ export default function RecipeTypeAdminPage() {
 ```typescript
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
   CreditCard, Shield, CheckCircle2, AlertCircle, Save, 
@@ -18320,12 +18324,6 @@ interface AppUser {
   role: 'admin' | 'user';
   subscriptionPlan?: string;
 }
-
-const DEFAULT_AVAILABLE_PLANS: PlanOption[] = [
-  { id: 'taster', name: 'Taster (Free)', slug: 'taster', priceFormatted: 'Free', priceDollars: 0, isFree: true },
-  { id: 'nutrition-pro-monthly', name: 'Nutrition Pro (Monthly)', slug: 'nutrition-pro-monthly', priceFormatted: '$8.99/mo', priceDollars: 8.99, interval: 'MONTH' },
-  { id: 'nutrition-pro-annual', name: 'Nutrition Pro (Annual)', slug: 'nutrition-pro-annual', priceFormatted: '$59.99/yr', priceDollars: 59.99, interval: 'YEAR' },
-];
 
 const SUPPORTED_CURRENCIES = [
   { code: 'USD', label: 'USD - United States Dollar ($)', symbol: '$' },
@@ -18400,6 +18398,24 @@ const calculateDefaultExpiry = (startDateStr: string, interval?: string): string
   return '';
 };
 
+const normalizeTransaction = (raw: any, defaultCurrency: string): PaymentTransaction => {
+  return {
+    id: String(raw.id || 'tx_' + Math.random().toString(36).substring(2, 8)),
+    customerName: String(raw.customerName || raw.customer_name || 'Customer'),
+    customerEmail: String(raw.customerEmail || raw.customer_email || '').toLowerCase().trim(),
+    planName: String(raw.planName || raw.plan_name || 'Plan'),
+    planSlug: sanitizeSinglePlan(raw.planSlug || raw.plan_slug || ''),
+    amount: parseAmount(raw.amount),
+    currency: String(raw.currency || defaultCurrency || 'USD'),
+    gateway: (raw.gateway || 'stripe') as any,
+    status: (raw.status || 'succeeded') as any,
+    failureReason: raw.failureReason || raw.failure_reason || undefined,
+    testMode: Boolean(raw.testMode !== undefined ? raw.testMode : raw.test_mode),
+    createdAt: raw.createdAt || raw.created_at || new Date().toISOString(),
+    expiryDate: raw.expiryDate || raw.expiry_date || undefined,
+  };
+};
+
 export default function AdminPaymentPage() {
   const langContext = useTranslation();
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
@@ -18407,7 +18423,7 @@ export default function AdminPaymentPage() {
 
   const [activeTab, setActiveTab] = useState<'history' | 'settings'>('history');
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
-  const [availablePlans, setAvailablePlans] = useState<PlanOption[]>(DEFAULT_AVAILABLE_PLANS);
+  const [availablePlans, setAvailablePlans] = useState<PlanOption[]>([]);
   const [registeredUsers, setRegisteredUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [connectingStripe, setConnectingStripe] = useState(false);
@@ -18447,6 +18463,19 @@ export default function AdminPaymentPage() {
       environment: 'sandbox',
     },
   });
+
+  // Mutable refs to prevent circular callback regeneration
+  const transactionsRef = useRef<PaymentTransaction[]>([]);
+  const configRef = useRef<GatewayConfig>(config);
+  const isFetchingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    transactionsRef.current = transactions;
+  }, [transactions]);
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
 
   // Add Payment Modal States
   const [showAddModal, setShowAddModal] = useState(false);
@@ -18552,10 +18581,10 @@ export default function AdminPaymentPage() {
   }, [applySavedTheme]);
 
   const getCurrencySymbol = useCallback((currencyCode?: string) => {
-    const code = currencyCode || config.currency || 'USD';
+    const code = currencyCode || configRef.current?.currency || 'USD';
     const found = SUPPORTED_CURRENCIES.find((c) => c.code.toUpperCase() === code.toUpperCase());
     return found ? found.symbol : '$';
-  }, [config.currency]);
+  }, []);
 
   const activeCurrencySymbol = useMemo(() => {
     return getCurrencySymbol(config.currency);
@@ -18576,26 +18605,57 @@ export default function AdminPaymentPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
-  // Load Plans from Server Settings API (Zero LocalStorage)
-  const loadPlans = useCallback(async () => {
+  // Load Plans from Server Settings API
+  const loadPlans = useCallback(async (currencyOverride?: string) => {
     let parsedPlans: PlanOption[] = [];
+    const symbol = getCurrencySymbol(currencyOverride || configRef.current.currency);
     try {
       const serverData = await fetchServerAdminSettings();
       if (serverData && Array.isArray(serverData.subscriptionPlans) && serverData.subscriptionPlans.length > 0) {
         serverData.subscriptionPlans.forEach((cfg: any) => {
-          const isZeroCost = cfg.price === 0 || cfg.isFree;
-          const price = Number(cfg.price || 0);
-          const interval = cfg.interval ? (cfg.interval.toLowerCase().includes('year') ? 'YEAR' : 'MONTH') : 'MONTH';
+          const isZeroCost = cfg.price === 0 || cfg.isFree || (cfg.monthlyPriceDollars === 0 && cfg.annualPriceDollars === 0);
+          const baseSlug = cfg.slug || cfg.id || 'plan';
+          const baseName = cfg.name || 'Plan';
 
-          parsedPlans.push({
-            id: cfg.id || cfg.slug,
-            name: cfg.name + (isZeroCost ? ' (Free)' : ` (${interval === 'YEAR' ? 'Annual' : 'Monthly'})`),
-            slug: cfg.slug || cfg.id,
-            priceFormatted: isZeroCost ? 'Free' : `${activeCurrencySymbol}${price.toFixed(2)}${interval === 'YEAR' ? '/yr' : '/mo'}`,
-            priceDollars: price,
-            interval,
-            isFree: isZeroCost,
-          });
+          if (isZeroCost) {
+            parsedPlans.push({
+              id: cfg.id || baseSlug,
+              name: baseName + ' (Free)',
+              slug: baseSlug,
+              priceFormatted: 'Free',
+              priceDollars: 0,
+              interval: 'MONTH',
+              isFree: true,
+            });
+          } else {
+            const monthlyPrice = Number(cfg.monthlyPriceDollars ?? cfg.price ?? 0);
+            if (monthlyPrice > 0 || (!cfg.annualPriceDollars && monthlyPrice === 0)) {
+              const mSlug = baseSlug.endsWith('-monthly') ? baseSlug : `${baseSlug.replace(/-annual$/, '')}-monthly`;
+              parsedPlans.push({
+                id: `${cfg.id || baseSlug}-monthly`,
+                name: `${baseName} (Monthly)`,
+                slug: mSlug,
+                priceFormatted: `${symbol}${monthlyPrice.toFixed(2)}/mo`,
+                priceDollars: monthlyPrice,
+                interval: 'MONTH',
+                isFree: false,
+              });
+            }
+
+            const annualPrice = Number(cfg.annualPriceDollars ?? 0);
+            if (annualPrice > 0) {
+              const aSlug = baseSlug.endsWith('-annual') ? baseSlug : `${baseSlug.replace(/-monthly$/, '')}-annual`;
+              parsedPlans.push({
+                id: `${cfg.id || baseSlug}-annual`,
+                name: `${baseName} (Annual)`,
+                slug: aSlug,
+                priceFormatted: `${symbol}${annualPrice.toFixed(2)}/yr`,
+                priceDollars: annualPrice,
+                interval: 'YEAR',
+                isFree: false,
+              });
+            }
+          }
         });
       }
     } catch (_) {}
@@ -18605,16 +18665,53 @@ export default function AdminPaymentPage() {
         const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
-          if (data.success && Array.isArray(data.plans) && data.plans.length > 0) {
-            parsedPlans = data.plans.map((p: any) => ({
-              id: p.id || p.slug,
-              name: p.name + (p.interval ? ` (${p.interval === 'YEAR' ? 'Annual' : 'Monthly'})` : ''),
-              slug: p.slug,
-              priceFormatted: p.priceCents === 0 ? 'Free' : `${activeCurrencySymbol}${(p.priceCents / 100).toFixed(2)}`,
-              priceDollars: p.priceCents ? p.priceCents / 100 : (p.price || 0),
-              interval: p.interval,
-              isFree: p.priceCents === 0 || p.price === 0,
-            }));
+          const list = Array.isArray(data) ? data : (data.plans || data.packages || data.configs);
+          if (Array.isArray(list) && list.length > 0) {
+            list.forEach((p: any) => {
+              const isZeroCost = p.priceCents === 0 || p.monthlyPriceDollars === 0 || p.isFree || (p.price === 0 && !p.annualPriceDollars);
+              const baseSlug = p.slug || p.id || 'plan';
+              const baseName = p.name || 'Plan';
+
+              if (isZeroCost) {
+                parsedPlans.push({
+                  id: p.id || baseSlug,
+                  name: baseName + ' (Free)',
+                  slug: baseSlug,
+                  priceFormatted: 'Free',
+                  priceDollars: 0,
+                  interval: 'MONTH',
+                  isFree: true,
+                });
+              } else {
+                const monthlyPrice = p.priceCents ? p.priceCents / 100 : Number(p.monthlyPriceDollars || p.price || 0);
+                if (monthlyPrice > 0) {
+                  const mSlug = baseSlug.endsWith('-monthly') ? baseSlug : `${baseSlug.replace(/-annual$/, '')}-monthly`;
+                  parsedPlans.push({
+                    id: `${p.id || baseSlug}-monthly`,
+                    name: `${baseName} (Monthly)`,
+                    slug: mSlug,
+                    priceFormatted: `${symbol}${monthlyPrice.toFixed(2)}/mo`,
+                    priceDollars: monthlyPrice,
+                    interval: 'MONTH',
+                    isFree: false,
+                  });
+                }
+
+                const annualPrice = Number(p.annualPriceDollars || 0);
+                if (annualPrice > 0) {
+                  const aSlug = baseSlug.endsWith('-annual') ? baseSlug : `${baseSlug.replace(/-monthly$/, '')}-annual`;
+                  parsedPlans.push({
+                    id: `${p.id || baseSlug}-annual`,
+                    name: `${baseName} (Annual)`,
+                    slug: aSlug,
+                    priceFormatted: `${symbol}${annualPrice.toFixed(2)}/yr`,
+                    priceDollars: annualPrice,
+                    interval: 'YEAR',
+                    isFree: false,
+                  });
+                }
+              }
+            });
           }
         }
       } catch (_) {}
@@ -18623,12 +18720,43 @@ export default function AdminPaymentPage() {
     if (parsedPlans.length > 0) {
       setAvailablePlans(parsedPlans);
     } else {
-      setAvailablePlans(DEFAULT_AVAILABLE_PLANS);
+      setAvailablePlans([
+        { id: 'taster', name: 'Taster (Free)', slug: 'taster', priceFormatted: 'Free', priceDollars: 0, isFree: true },
+        { id: 'nutrition-pro-monthly', name: 'Nutrition Pro (Monthly)', slug: 'nutrition-pro-monthly', priceFormatted: `${symbol}8.99/mo`, priceDollars: 8.99, interval: 'MONTH' },
+        { id: 'nutrition-pro-annual', name: 'Nutrition Pro (Annual)', slug: 'nutrition-pro-annual', priceFormatted: `${symbol}59.99/yr`, priceDollars: 59.99, interval: 'YEAR' },
+      ]);
     }
-  }, [activeCurrencySymbol]);
+  }, [getCurrencySymbol]);
 
-  // Load Registered Users from Server API (Zero LocalStorage)
-  const loadUsers = useCallback(async () => {
+  // Validate user subscription against payment transactions: users without valid succeeded transactions fallback to 'taster'
+  const validateAndSyncUserPlans = useCallback((usersList: AppUser[], txList: PaymentTransaction[]): AppUser[] => {
+    const now = new Date();
+    return usersList.map((u) => {
+      const currentPlan = sanitizeSinglePlan(u.subscriptionPlan);
+      if (currentPlan === 'taster' || currentPlan === 'free') {
+        return { ...u, subscriptionPlan: 'taster' };
+      }
+
+      const uEmail = (u.email || '').toLowerCase().trim();
+      const userTx = txList.find((tx) => {
+        const txEmail = (tx.customerEmail || '').toLowerCase().trim();
+        const matchesEmail = txEmail === uEmail && txEmail !== '';
+        const succeeded = isSucceeded(tx.status);
+        const matchesPlan = (tx.planSlug && sanitizeSinglePlan(tx.planSlug) === currentPlan) || 
+                            (tx.planName && tx.planName.toLowerCase().includes(currentPlan.replace(/-/g, ' ')));
+        const notExpired = !tx.expiryDate || new Date(tx.expiryDate) > now;
+        return matchesEmail && succeeded && matchesPlan && notExpired;
+      });
+
+      if (!userTx) {
+        return { ...u, subscriptionPlan: 'taster' };
+      }
+
+      return u;
+    });
+  }, []);
+
+  const loadUsers = useCallback(async (currentTxs?: PaymentTransaction[]) => {
     try {
       const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
@@ -18638,19 +18766,26 @@ export default function AdminPaymentPage() {
             ...u,
             subscriptionPlan: sanitizeSinglePlan(u.subscriptionPlan)
           }));
-          setRegisteredUsers(normalized);
-          if (normalized.length > 0 && !selectedUserId) {
-            setSelectedUserId(normalized[0].id);
-          }
+          const targetTxList = currentTxs || transactionsRef.current;
+          const validated = validateAndSyncUserPlans(normalized, targetTxList);
+          setRegisteredUsers(validated);
+          setSelectedUserId((prev) => {
+            if (!prev && validated.length > 0) {
+              return validated[0].id;
+            }
+            return prev;
+          });
         }
       }
     } catch (e) {
       console.error('Failed to load users from server:', e);
     }
-  }, [selectedUserId]);
+  }, [validateAndSyncUserPlans]);
 
-  // Hydrate Payments & Gateways Exclusively from Server Storage (Zero LocalStorage)
-  const fetchData = async () => {
+  // Hydrate Payments & Gateways Exclusively from Server (Zero LocalStorage, Stable Callback)
+  const fetchData = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
@@ -18658,31 +18793,37 @@ export default function AdminPaymentPage() {
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
+          let normalizedList: PaymentTransaction[] = [];
+          const curr = configRef.current.currency || 'USD';
           if (Array.isArray(data.transactions)) {
-            setTransactions(data.transactions);
+            normalizedList = data.transactions.map((tItem: any) => normalizeTransaction(tItem, curr));
+            transactionsRef.current = normalizedList;
+            setTransactions(normalizedList);
           }
           if (data.settings) {
-            setConfig(data.settings);
+            configRef.current = { ...configRef.current, ...data.settings };
+            setConfig((prev) => ({ ...prev, ...data.settings }));
           }
+          await loadUsers(normalizedList);
         }
       }
     } catch (e) {
       console.error('Failed to load server payment data:', e);
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
-  };
+  }, [loadUsers]);
 
+  // Stable lifecycle initialization without loop
   useEffect(() => {
     document.title = `${t('paymentManagerTitle', 'Payment Manager')} - Admin`;
     fetchData();
-    loadUsers();
     loadPlans();
 
     const handleSync = () => {
-      loadUsers();
-      loadPlans();
       fetchData();
+      loadPlans();
     };
 
     window.addEventListener('zecratary_plans_updated', handleSync);
@@ -18696,7 +18837,7 @@ export default function AdminPaymentPage() {
       window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [t, version, loadUsers, loadPlans]);
+  }, [t, version, fetchData, loadPlans]);
 
   const currentSelectedUser = useMemo(() => {
     return registeredUsers.find((u) => u.id === selectedUserId) || null;
@@ -18708,41 +18849,37 @@ export default function AdminPaymentPage() {
     const currentPlan = sanitizeSinglePlan(currentSelectedUser.subscriptionPlan);
     const chosenPlan = sanitizeSinglePlan(selectedPlanSlug);
 
+    const getBase = (slug: string) => slug.replace(/-monthly$/, '').replace(/-annual$/, '');
+    const currentBase = getBase(currentPlan);
+    const chosenBase = getBase(chosenPlan);
+
     if (currentPlan === chosenPlan && chosenPlan !== 'taster') {
       return {
         isDuplicate: true,
         isTransition: false,
-        message: `User "${currentSelectedUser.name}" already has active plan "${chosenPlan}". Choose another plan or cancel the existing plan.`
+        message: `User "${currentSelectedUser.name}" already has active plan "${chosenPlan}". Adding duplicate same plan is not allowed.`
       };
     }
 
-    if (currentPlan.includes('monthly') && chosenPlan.includes('annual')) {
+    if (currentBase === chosenBase && currentPlan !== 'taster' && chosenPlan !== 'taster') {
+      const fromInterval = currentPlan.includes('annual') ? 'Annual' : 'Monthly';
+      const toInterval = chosenPlan.includes('annual') ? 'Annual' : 'Monthly';
       return {
         isDuplicate: false,
         isTransition: true,
-        from: 'Monthly',
-        to: 'Annual',
-        message: `Upgrading "${currentSelectedUser.name}" from Monthly to Annual. The user's active Monthly plan will be automatically cancelled to enforce strictly 1 plan per email.`
+        from: fromInterval,
+        to: toInterval,
+        message: `Switching "${currentSelectedUser.name}" on plan "${currentBase}" from ${fromInterval} to ${toInterval}. The previous transaction will be cancelled & new payment recorded.`
       };
     }
 
-    if (currentPlan.includes('annual') && chosenPlan.includes('monthly')) {
-      return {
-        isDuplicate: false,
-        isTransition: true,
-        from: 'Annual',
-        to: 'Monthly',
-        message: `Changing "${currentSelectedUser.name}" from Annual to Monthly. The user's active Annual plan will be automatically cancelled to enforce strictly 1 plan per email.`
-      };
-    }
-
-    if (currentPlan !== 'taster' && chosenPlan !== 'taster' && currentPlan !== chosenPlan) {
+    if (currentPlan !== 'taster' && chosenPlan !== 'taster' && currentBase !== chosenBase) {
       return {
         isDuplicate: false,
         isTransition: true,
         from: currentPlan,
         to: chosenPlan,
-        message: `Changing plan to "${chosenPlan}". The user's previous "${currentPlan}" plan will be cancelled upon recording.`
+        message: `Upgrading/downgrading "${currentSelectedUser.name}" from "${currentPlan}" to "${chosenPlan}". Previous payment transaction will be refunded.`
       };
     }
 
@@ -18755,8 +18892,9 @@ export default function AdminPaymentPage() {
       currency: newCurrency,
     };
     setConfig(updatedConfig);
+    configRef.current = updatedConfig;
+    loadPlans(newCurrency);
 
-    // Save directly to server API & Server Store (Zero LocalStorage)
     await persistServerAdminSettings({ currency: newCurrency, paymentSettings: updatedConfig });
     try {
       await fetch('/api/admin/payment', {
@@ -18837,12 +18975,12 @@ export default function AdminPaymentPage() {
   const handleOpenEditModal = (tx: PaymentTransaction) => {
     setModalError('');
     setEditingTx(tx);
-    setEditCustomerName(tx.customerName);
-    setEditCustomerEmail(tx.customerEmail);
+    setEditCustomerName(tx.customerName || '');
+    setEditCustomerEmail(tx.customerEmail || '');
     setEditPlanSlug(sanitizeSinglePlan(tx.planSlug || ''));
-    setEditPlanName(tx.planName);
+    setEditPlanName(tx.planName || '');
     setEditAmount(parseAmount(tx.amount));
-    setEditGateway(tx.gateway);
+    setEditGateway(tx.gateway || 'stripe');
     setEditStatus(isSucceeded(tx.status) ? 'succeeded' : isFailed(tx.status) ? 'failed' : isRefunded(tx.status) ? 'refunded' : 'pending');
     setEditFailureReason(tx.failureReason || '');
     setEditDate(tx.createdAt ? new Date(tx.createdAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
@@ -18871,15 +19009,13 @@ export default function AdminPaymentPage() {
 
     const updatedTx: PaymentTransaction = { ...tx, status: 'refunded', expiryDate: new Date().toISOString() };
 
-    // Update Transaction on Server
     await fetch('/api/admin/payment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'update_transaction', transaction: updatedTx }),
     });
 
-    // Update User Account on Server via /api/admin/users
-    const targetUser = registeredUsers.find((u) => u.email.toLowerCase() === tx.customerEmail.toLowerCase());
+    const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === (tx.customerEmail || '').toLowerCase().trim());
     if (targetUser) {
       await fetch('/api/admin/users', {
         method: 'POST',
@@ -18948,7 +19084,7 @@ export default function AdminPaymentPage() {
       });
 
       if (editSyncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) {
-        const targetUser = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
+        const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
         if (targetUser) {
           await fetch('/api/admin/users', {
             method: 'POST',
@@ -18983,9 +19119,7 @@ export default function AdminPaymentPage() {
     }
 
     try {
-      await fetch(`/api/admin/payment?id=${id}`, {
-        method: 'DELETE',
-      });
+      await fetch(`/api/admin/payment?id=${id}`, { method: 'DELETE' });
 
       setTransactions((prev) => prev.filter((tItem) => tItem.id !== id));
       setSelectedTxIds((prev) => prev.filter((item) => item !== id));
@@ -19055,8 +19189,8 @@ export default function AdminPaymentPage() {
       return;
     }
 
-    const customerName = targetUser.name;
-    const customerEmail = targetUser.email.trim().toLowerCase();
+    const customerName = targetUser.name || 'Customer';
+    const customerEmail = (targetUser.email || '').trim().toLowerCase();
     const singlePlanSlug = sanitizeSinglePlan(selectedPlanSlug);
     const matchedPlan = availablePlans.find((p) => p.slug === singlePlanSlug);
     const planName = matchedPlan ? matchedPlan.name : singlePlanSlug;
@@ -19070,6 +19204,24 @@ export default function AdminPaymentPage() {
     const formattedExpiryDate = paymentExpiryDate 
       ? new Date(`${paymentExpiryDate}T23:59:59Z`).toISOString() 
       : undefined;
+
+    if (isSucceeded(normalizedStatus)) {
+      const existingUserTxs = transactionsRef.current.filter(
+        (tItem) => (tItem.customerEmail || '').toLowerCase().trim() === customerEmail && isSucceeded(tItem.status)
+      );
+      for (const oldTx of existingUserTxs) {
+        const cancelledTx: PaymentTransaction = { 
+          ...oldTx, 
+          status: 'refunded', 
+          expiryDate: new Date().toISOString() 
+        };
+        await fetch('/api/admin/payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update_transaction', transaction: cancelledTx }),
+        }).catch(() => {});
+      }
+    }
 
     const newTx: PaymentTransaction = {
       id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
@@ -19094,18 +19246,18 @@ export default function AdminPaymentPage() {
         body: JSON.stringify({ action: 'add_transaction', transaction: newTx }),
       });
 
-      if (syncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) {
-        await fetch('/api/admin/users', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            ...targetUser, 
-            subscriptionPlan: singlePlanSlug,
-            planExpiryDate: formattedExpiryDate,
-            expiryDate: formattedExpiryDate
-          }),
-        }).catch(() => {});
-      }
+      const finalPlanToSync = (syncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) ? singlePlanSlug : 'taster';
+
+      await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          ...targetUser, 
+          subscriptionPlan: finalPlanToSync,
+          planExpiryDate: formattedExpiryDate,
+          expiryDate: formattedExpiryDate
+        }),
+      }).catch(() => {});
 
       await fetchData();
 
@@ -19120,7 +19272,7 @@ export default function AdminPaymentPage() {
       setFeedback({
         type: 'success',
         msg: isSwitched 
-          ? `Plan changed to ${planName} for ${customerName}! Previous plan was automatically cancelled.`
+          ? `Successfully upgraded/downgraded plan to ${planName} for ${customerName}. Previous payment cancelled & new transaction recorded!`
           : `Payment of ${activeCurrencySymbol}${cleanAmount.toFixed(2)} recorded for ${customerName} (${planName})!`,
       });
     } catch (err: any) {
@@ -19129,11 +19281,13 @@ export default function AdminPaymentPage() {
   };
 
   const filteredTransactions = useMemo(() => {
+    const q = (searchQuery || '').toLowerCase().trim();
     return transactions.filter((tx) => {
-      const matchesSearch = 
-        tx.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tx.customerEmail.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tx.planName.toLowerCase().includes(searchQuery.toLowerCase());
+      const cName = (tx.customerName || '').toLowerCase();
+      const cEmail = (tx.customerEmail || '').toLowerCase();
+      const pName = (tx.planName || '').toLowerCase();
+
+      const matchesSearch = !q || cName.includes(q) || cEmail.includes(q) || pName.includes(q);
       
       const matchesStatus = 
         statusFilter === 'all' ||
@@ -19224,6 +19378,7 @@ export default function AdminPaymentPage() {
             stripe: { ...config.stripe, enabled: true } 
           };
           setConfig(updated);
+          configRef.current = updated;
           await persistServerAdminSettings({ paymentSettings: updated });
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new Event('zecratary_payment_updated'));
@@ -19241,6 +19396,7 @@ export default function AdminPaymentPage() {
         stripe: { ...config.stripe, enabled: true } 
       };
       setConfig(updated);
+      configRef.current = updated;
       await persistServerAdminSettings({ paymentSettings: updated });
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
@@ -19264,7 +19420,6 @@ export default function AdminPaymentPage() {
     };
 
     try {
-      // 1. Direct Server Persistence via /api/admin/payment
       const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -19272,7 +19427,6 @@ export default function AdminPaymentPage() {
       });
       const data = await res.json();
 
-      // 2. Dual Server Store Persistence (Zero LocalStorage)
       await persistServerAdminSettings({
         paymentSettings: updatedConfig,
         currency: updatedConfig.currency
@@ -19280,6 +19434,7 @@ export default function AdminPaymentPage() {
 
       if (data.success) {
         setConfig(updatedConfig);
+        configRef.current = updatedConfig;
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_payment_updated'));
           window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
@@ -19295,6 +19450,7 @@ export default function AdminPaymentPage() {
         currency: updatedConfig.currency
       });
       setConfig(updatedConfig);
+      configRef.current = updatedConfig;
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
@@ -19625,11 +19781,11 @@ export default function AdminPaymentPage() {
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                 >
-                  <option value="all" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allStatuses', 'All Statuses')}</option>
-                  <option value="succeeded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusSucceeded', 'Succeeded')}</option>
-                  <option value="failed" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusFailed', 'Failed')}</option>
-                  <option value="refunded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusRefunded', 'Refunded')}</option>
-                  <option value="pending" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusPending', 'Pending')}</option>
+                  <option value="all">{t('allStatuses', 'All Statuses')}</option>
+                  <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
+                  <option value="failed">{t('statusFailed', 'Failed')}</option>
+                  <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
+                  <option value="pending">{t('statusPending', 'Pending')}</option>
                 </select>
               </div>
 
@@ -19643,10 +19799,10 @@ export default function AdminPaymentPage() {
                   color: isDayMode ? '#0f172a' : '#ffffff'
                 }}
               >
-                <option value="all" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allGateways', 'All Gateways')}</option>
-                <option value="stripe" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayStripe', 'Stripe')}</option>
-                <option value="paypal" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayPaypal', 'PayPal')}</option>
-                <option value="manual" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayManual', 'Manual')}</option>
+                <option value="all">{t('allGateways', 'All Gateways')}</option>
+                <option value="stripe">{t('gatewayStripe', 'Stripe')}</option>
+                <option value="paypal">{t('gatewayPaypal', 'PayPal')}</option>
+                <option value="manual">{t('gatewayManual', 'Manual')}</option>
               </select>
 
               <select
@@ -19658,12 +19814,11 @@ export default function AdminPaymentPage() {
                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                   color: isDayMode ? '#334155' : '#cbd5e1'
                 }}
-                title="Items per page"
               >
-                <option value={5} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage5', '5 per page')}</option>
-                <option value={10} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage10', '10 per page')}</option>
-                <option value={20} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage20', '20 per page')}</option>
-                <option value={50} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('perPage50', '50 per page')}</option>
+                <option value={5}>{t('perPage5', '5 per page')}</option>
+                <option value={10}>{t('perPage10', '10 per page')}</option>
+                <option value={20}>{t('perPage20', '20 per page')}</option>
+                <option value={50}>{t('perPage50', '50 per page')}</option>
               </select>
             </div>
           </div>
@@ -19779,11 +19934,11 @@ export default function AdminPaymentPage() {
                             />
                           </td>
                           <td className="px-5 py-3.5">
-                            <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.customerName}</div>
-                            <div className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.customerEmail}</div>
+                            <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.customerName || 'Customer'}</div>
+                            <div className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.customerEmail || ''}</div>
                           </td>
                           <td className="px-5 py-3.5 font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                            {tx.planName}
+                            {tx.planName || tx.planSlug || 'Plan'}
                           </td>
                           <td className="px-5 py-3.5 font-bold whitespace-nowrap" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
                             {txSymbol}{parseAmount(tx.amount).toFixed(2)}{' '}
@@ -19842,7 +19997,7 @@ export default function AdminPaymentPage() {
                           </td>
                           
                           <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                            {new Date(tx.createdAt).toLocaleDateString()}
+                            {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '-'}
                           </td>
                           
                           <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
@@ -20074,7 +20229,7 @@ export default function AdminPaymentPage() {
                   onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 >
                   {SUPPORTED_CURRENCIES.map((curr) => (
-                    <option key={curr.code} value={curr.code} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={curr.code} value={curr.code}>
                       {curr.label}
                     </option>
                   ))}
@@ -20486,9 +20641,7 @@ export default function AdminPaymentPage() {
         </form>
       )}
 
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* 1. ADD PAYMENT MODAL                                          */}
-      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 1. ADD PAYMENT MODAL */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
@@ -20537,7 +20690,7 @@ export default function AdminPaymentPage() {
               >
                 <AlertTriangle className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <div className="font-bold">{t('planChangeAutoCancelNotice', 'Plan Change Notice:')}</div>
+                  <div className="font-bold">{t('planChangeNotice', 'Plan Upgrade / Downgrade Notice:')}</div>
                   <div className="text-[11px] leading-relaxed">
                     {planTransitionInfo.message}
                   </div>
@@ -20589,7 +20742,7 @@ export default function AdminPaymentPage() {
                     }}
                   >
                     {registeredUsers.map((user) => (
-                      <option key={user.id} value={user.id} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      <option key={user.id} value={user.id}>
                         {user.name} — {user.email} ({user.role}) [Active: {user.subscriptionPlan || 'taster'}]
                       </option>
                     ))}
@@ -20622,13 +20775,13 @@ export default function AdminPaymentPage() {
                   }}
                 >
                   {paidSubscriptionPlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={plan.id || plan.slug} value={plan.slug}>
                       {plan.name} — {plan.priceFormatted}
                     </option>
                   ))}
                 </select>
                 <p className="text-[10px] mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('planChangeRuleNote', 'Selecting a new plan will automatically cancel any existing active paid subscription for this user.')}
+                  {t('planChangeRuleNote', 'Selecting an upgraded or downgraded plan will automatically cancel and refund any previous active paid subscription.')}
                 </p>
               </div>
 
@@ -20709,7 +20862,7 @@ export default function AdminPaymentPage() {
                     }}
                   >
                     {allowedGateways.map((g) => (
-                      <option key={g.id} value={g.id} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      <option key={g.id} value={g.id}>
                         {g.label}
                       </option>
                     ))}
@@ -20730,10 +20883,10 @@ export default function AdminPaymentPage() {
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
-                    <option value="succeeded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusSucceeded', 'Succeeded')}</option>
-                    <option value="failed" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusFailed', 'Failed')}</option>
-                    <option value="pending" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusPending', 'Pending')}</option>
-                    <option value="refunded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusRefunded', 'Refunded')}</option>
+                    <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
+                    <option value="failed">{t('statusFailed', 'Failed')}</option>
+                    <option value="pending">{t('statusPending', 'Pending')}</option>
+                    <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
                   </select>
                 </div>
 
@@ -20791,7 +20944,6 @@ export default function AdminPaymentPage() {
                   style={{
                     backgroundColor: planTransitionInfo?.isDuplicate ? '#991b1b' : 'var(--color-primary, #E05638)'
                   }}
-                  title={planTransitionInfo?.isDuplicate ? planTransitionInfo.message : 'Record Payment & Switch Plan'}
                 >
                   {planTransitionInfo?.isDuplicate ? (
                     <>
@@ -20813,9 +20965,7 @@ export default function AdminPaymentPage() {
         </div>
       )}
 
-      {/* ───────────────────────────────────────────────────────────── */}
-      {/* 2. MODIFY (EDIT) PAYMENT MODAL                                */}
-      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 2. MODIFY (EDIT) PAYMENT MODAL */}
       {editingTx && (
         <div 
           onClick={() => setEditingTx(null)}
@@ -20906,9 +21056,9 @@ export default function AdminPaymentPage() {
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                 >
-                  <option value="" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Custom: {editPlanName}</option>
+                  <option value="">Custom: {editPlanName}</option>
                   {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={plan.id || plan.slug} value={plan.slug}>
                       {plan.name} — {plan.priceFormatted}
                     </option>
                   ))}
@@ -20990,9 +21140,9 @@ export default function AdminPaymentPage() {
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
-                    <option value="stripe" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayStripe', 'Stripe')}</option>
-                    <option value="paypal" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayPaypal', 'PayPal')}</option>
-                    <option value="manual" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('gatewayManual', 'Manual')}</option>
+                    <option value="stripe">{t('gatewayStripe', 'Stripe')}</option>
+                    <option value="paypal">{t('gatewayPaypal', 'PayPal')}</option>
+                    <option value="manual">{t('gatewayManual', 'Manual')}</option>
                   </select>
                 </div>
               </div>
@@ -21010,10 +21160,10 @@ export default function AdminPaymentPage() {
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
-                    <option value="succeeded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusSucceeded', 'Succeeded')}</option>
-                    <option value="failed" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusFailed', 'Failed')}</option>
-                    <option value="pending" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusPending', 'Pending')}</option>
-                    <option value="refunded" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('statusRefunded', 'Refunded')}</option>
+                    <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
+                    <option value="failed">{t('statusFailed', 'Failed')}</option>
+                    <option value="pending">{t('statusPending', 'Pending')}</option>
+                    <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
                   </select>
                 </div>
 
@@ -33916,10 +34066,18 @@ import path from 'path';
 export const dynamic = 'force-dynamic';
 
 function getDataPaths(filename: string): string[] {
-  return [
-    path.join(process.cwd(), 'apps/web/data', filename),
-    path.join(process.cwd(), 'data', filename)
-  ];
+  const cwd = process.cwd();
+  const paths: string[] = [];
+  if (cwd.endsWith('apps/web') || cwd.endsWith('apps/web/')) {
+    const root = path.resolve(cwd, '../..');
+    paths.push(path.join(cwd, 'data', filename));
+    paths.push(path.join(root, 'data', filename));
+    paths.push(path.join(root, 'apps/web/data', filename));
+  } else {
+    paths.push(path.join(cwd, 'apps/web/data', filename));
+    paths.push(path.join(cwd, 'data', filename));
+  }
+  return Array.from(new Set(paths));
 }
 
 function readJsonFile<T>(filename: string, fallback: T): T {
@@ -33948,132 +34106,211 @@ function writeJsonFile<T>(filename: string, data: T): void {
   }
 }
 
+let cachedPool: any = null;
+async function getDbClient() {
+  const connUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!connUrl) return null;
+  if (!cachedPool) {
+    try {
+      const { Pool } = await import('pg');
+      cachedPool = new Pool({
+        connectionString: connUrl,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+        connectionTimeoutMillis: 3000,
+        max: 5
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+  return cachedPool;
+}
+
+async function ensurePlanExists(pool: any, slug: string, name: string, amount: number) {
+  if (!pool) return slug;
+  const cleanSlug = (slug || 'taster').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+  const cleanName = name || cleanSlug;
+  try {
+    const check = await pool.query('SELECT id FROM subscription_plans WHERE slug = $1', [cleanSlug]);
+    if (check.rows.length === 0) {
+      await pool.query(`
+        INSERT INTO subscription_plans (id, name, slug, monthly_price_dollars, annual_price_dollars, is_free)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT DO NOTHING;
+      `, ['plan_' + cleanSlug + '_' + Date.now().toString(36), cleanName, cleanSlug, amount || 0, 0, false]);
+    }
+  } catch (err) {
+    console.warn('[DB Plan Auto-Seed Warning]:', err);
+  }
+  return cleanSlug;
+}
+
 const DEFAULT_SETTINGS = {
   activeGateway: 'stripe',
   currency: 'USD',
   testMode: true,
   stripeConnected: false,
-  stripe: {
-    enabled: true,
-    publishableKey: '',
-    secretKey: '',
-    webhookSecret: ''
-  },
-  paypal: {
-    enabled: false,
-    clientId: '',
-    clientSecret: '',
-    webhookId: '',
-    environment: 'sandbox'
-  }
+  stripe: { enabled: true, publishableKey: '', secretKey: '', webhookSecret: '' },
+  paypal: { enabled: false, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' }
 };
 
 export async function GET() {
+  const pool = await getDbClient();
+  if (pool) {
+    try {
+      const settingsRes = await pool.query("SELECT payment_settings, currency FROM admin_settings WHERE id = 'primary_settings'");
+      let settings = DEFAULT_SETTINGS;
+      if (settingsRes.rows.length > 0) {
+        settings = settingsRes.rows[0].payment_settings || DEFAULT_SETTINGS;
+        if (settingsRes.rows[0].currency) settings.currency = settingsRes.rows[0].currency;
+      }
+      const txRes = await pool.query(`
+        SELECT 
+          id, 
+          customer_name as "customerName", 
+          customer_email as "customerEmail", 
+          plan_name as "planName", 
+          plan_slug as "planSlug", 
+          amount, 
+          currency, 
+          gateway, 
+          status, 
+          failure_reason as "failureReason", 
+          test_mode as "testMode", 
+          expiry_date as "expiryDate", 
+          created_at as "createdAt" 
+        FROM payment_transactions 
+        ORDER BY created_at DESC
+      `);
+      return NextResponse.json({ success: true, settings, transactions: txRes.rows }, { headers: { 'Cache-Control': 'no-store' } });
+    } catch (_) {}
+  }
+
   const adminSettings = readJsonFile('admin_settings.json', {} as any);
   const settings = adminSettings.paymentSettings || DEFAULT_SETTINGS;
-  if (adminSettings.currency) {
-    settings.currency = adminSettings.currency;
-  }
+  if (adminSettings.currency) settings.currency = adminSettings.currency;
   const transactions = readJsonFile('payment_transactions.json', []);
 
-  return NextResponse.json({
-    success: true,
-    settings,
-    transactions
-  }, {
-    headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-    }
-  });
+  return NextResponse.json({ success: true, settings, transactions }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const pool = await getDbClient();
 
-    // 1. Stripe Connect Action
     if (body.action === 'connect_stripe') {
-      const adminSettings = readJsonFile('admin_settings.json', {} as any);
-      const currentSettings = adminSettings.paymentSettings || DEFAULT_SETTINGS;
-      const updated = {
-        ...currentSettings,
-        stripeConnected: true,
-        stripe: {
-          ...currentSettings.stripe,
-          enabled: true,
-          secretKey: body.secretKey || currentSettings.stripe.secretKey,
-          publishableKey: body.publishableKey || currentSettings.stripe.publishableKey
-        }
-      };
-      adminSettings.paymentSettings = updated;
-      writeJsonFile('admin_settings.json', adminSettings);
+      if (pool) {
+        try {
+          await pool.query(`
+            INSERT INTO admin_settings (id, payment_settings, updated_at)
+            VALUES ('primary_settings', $1, NOW())
+            ON CONFLICT (id) DO UPDATE SET payment_settings = EXCLUDED.payment_settings, updated_at = NOW();
+          `, [JSON.stringify(body)]);
+        } catch (_) {}
+      }
       return NextResponse.json({ success: true, message: 'Stripe Gateway enabled and verified.' });
     }
 
-    // 2. Add Transaction Action
     if (body.action === 'add_transaction' && body.transaction) {
-      const transactions = readJsonFile('payment_transactions.json', [] as any[]);
       const newTx = body.transaction;
       const cleanEmail = (newTx.customerEmail || '').toLowerCase().trim();
+      const planSlug = await ensurePlanExists(pool, newTx.planSlug || newTx.planName, newTx.planName, newTx.amount);
+      const planName = newTx.planName || planSlug;
 
-      const updatedTxs = transactions.map((tItem: any) => {
-        const isSucceeded = ['succeeded', 'succeded', 'success', 'paid', 'completed'].includes(String(newTx.status).toLowerCase());
-        if (
-          isSucceeded &&
-          tItem.customerEmail.toLowerCase() === cleanEmail &&
-          ['succeeded', 'pending'].includes(String(tItem.status).toLowerCase())
-        ) {
-          return {
-            ...tItem,
-            status: 'refunded',
-            expiryDate: new Date().toISOString()
-          };
+      if (pool) {
+        try {
+          await pool.query(`
+            INSERT INTO payment_transactions (
+              id, customer_name, customer_email, plan_name, plan_slug, amount, currency,
+              gateway, status, failure_reason, test_mode, expiry_date, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status;
+          `, [
+            newTx.id,
+            newTx.customerName || 'Customer',
+            cleanEmail,
+            planName,
+            planSlug,
+            newTx.amount || 0,
+            newTx.currency || 'USD',
+            newTx.gateway || 'stripe',
+            newTx.status || 'succeeded',
+            newTx.failureReason || null,
+            Boolean(newTx.testMode),
+            newTx.expiryDate || null,
+            newTx.createdAt || new Date().toISOString()
+          ]);
+        } catch (dbErr: any) {
+          console.error('[Payment API DB Error]:', dbErr);
         }
-        return tItem;
-      });
+      }
 
-      updatedTxs.unshift(newTx);
-      writeJsonFile('payment_transactions.json', updatedTxs);
-      return NextResponse.json({ success: true, transaction: newTx });
-    }
-
-    // 3. Update Transaction Action
-    if (body.action === 'update_transaction' && body.transaction) {
       const transactions = readJsonFile('payment_transactions.json', [] as any[]);
+      transactions.unshift({ ...newTx, planSlug });
+      writeJsonFile('payment_transactions.json', transactions);
+      return NextResponse.json({ success: true, transaction: { ...newTx, planSlug } });
+    }
+
+    if (body.action === 'update_transaction' && body.transaction) {
       const updatedTx = body.transaction;
-      const cleanEmail = (updatedTx.customerEmail || '').toLowerCase().trim();
-      const isSucceeded = ['succeeded', 'succeded', 'success', 'paid', 'completed'].includes(String(updatedTx.status).toLowerCase());
+      const planSlug = await ensurePlanExists(pool, updatedTx.planSlug || updatedTx.planName, updatedTx.planName, updatedTx.amount);
+      const planName = updatedTx.planName || planSlug;
 
-      const updatedTxs = transactions.map((tItem: any) => {
-        if (tItem.id === updatedTx.id) return updatedTx;
-        if (
-          isSucceeded &&
-          tItem.customerEmail.toLowerCase() === cleanEmail &&
-          ['succeeded', 'pending'].includes(String(tItem.status).toLowerCase())
-        ) {
-          return {
-            ...tItem,
-            status: 'refunded',
-            expiryDate: new Date().toISOString()
-          };
+      if (pool) {
+        try {
+          await pool.query(`
+            UPDATE payment_transactions SET
+              customer_name = $2,
+              customer_email = $3,
+              plan_name = $4,
+              plan_slug = $5,
+              amount = $6,
+              currency = $7,
+              gateway = $8,
+              status = $9,
+              failure_reason = $10,
+              expiry_date = $11
+            WHERE id = $1;
+          `, [
+            updatedTx.id,
+            updatedTx.customerName || 'Customer',
+            (updatedTx.customerEmail || '').toLowerCase().trim(),
+            planName,
+            planSlug,
+            updatedTx.amount || 0,
+            updatedTx.currency || 'USD',
+            updatedTx.gateway || 'stripe',
+            updatedTx.status || 'succeeded',
+            updatedTx.failureReason || null,
+            updatedTx.expiryDate || null
+          ]);
+        } catch (dbErr: any) {
+          console.error('[Payment API DB Error]:', dbErr);
         }
-        return tItem;
-      });
+      }
 
+      const transactions = readJsonFile('payment_transactions.json', [] as any[]);
+      const updatedTxs = transactions.map((t: any) => (t.id === updatedTx.id ? { ...updatedTx, planSlug } : t));
       writeJsonFile('payment_transactions.json', updatedTxs);
-      return NextResponse.json({ success: true, transaction: updatedTx });
+      return NextResponse.json({ success: true, transaction: { ...updatedTx, planSlug } });
     }
 
-    // 4. Update Gateway Settings
-    const adminSettings = readJsonFile('admin_settings.json', {} as any);
-    const mergedSettings = {
-      ...(adminSettings.paymentSettings || DEFAULT_SETTINGS),
-      ...body
-    };
-    adminSettings.paymentSettings = mergedSettings;
-    if (body.currency) {
-      adminSettings.currency = body.currency;
+    // Default: Update Gateway Settings
+    if (pool) {
+      try {
+        await pool.query(`
+          INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
+          VALUES ('primary_settings', $1, $2, NOW())
+          ON CONFLICT (id) DO UPDATE SET payment_settings = EXCLUDED.payment_settings, currency = EXCLUDED.currency, updated_at = NOW();
+        `, [JSON.stringify(body), body.currency || 'USD']);
+      } catch (_) {}
     }
+
+    const adminSettings = readJsonFile('admin_settings.json', {} as any);
+    const mergedSettings = { ...(adminSettings.paymentSettings || DEFAULT_SETTINGS), ...body };
+    adminSettings.paymentSettings = mergedSettings;
+    if (body.currency) adminSettings.currency = body.currency;
     writeJsonFile('admin_settings.json', adminSettings);
 
     return NextResponse.json({ success: true, settings: mergedSettings });
@@ -34089,6 +34326,13 @@ export async function DELETE(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
+    }
+
+    const pool = await getDbClient();
+    if (pool) {
+      try {
+        await pool.query("DELETE FROM payment_transactions WHERE id = $1", [id]);
+      } catch (_) {}
     }
 
     const transactions = readJsonFile('payment_transactions.json', [] as any[]);
@@ -42548,6 +42792,51 @@ if (typeof window !== 'undefined') {
       }
     }
   }).catch(() => {});
+}
+
+```
+
+## File: `apps/web/src/lib/db.ts`
+```typescript
+// Hybrid PostgreSQL Client with Server-JSON Fallback
+// Provides resilient database querying and zero browser storage dependencies
+
+import fs from 'fs';
+import path from 'path';
+
+let pgPool: any = null;
+
+export function isPostgresConfigured(): boolean {
+  return Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL);
+}
+
+export async function getDbPool() {
+  if (pgPool) return pgPool;
+  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!connectionString) return null;
+
+  try {
+    const { Pool } = await import('pg');
+    pgPool = new Pool({
+      connectionString,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+      max: 10,
+      idleTimeoutMillis: 30000
+    });
+    return pgPool;
+  } catch (err) {
+    console.warn('[DB] PostgreSQL pg module not installed or connection failed. Using JSON store fallback.');
+    return null;
+  }
+}
+
+export async function query(sql: string, params: any[] = []): Promise<any[]> {
+  const pool = await getDbPool();
+  if (pool) {
+    const res = await pool.query(sql, params);
+    return res.rows;
+  }
+  return [];
 }
 
 ```
