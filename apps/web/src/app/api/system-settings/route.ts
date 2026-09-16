@@ -1,51 +1,37 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-function getSettingsPath() {
-  const rootDir = process.cwd();
-  const dir = path.join(rootDir, 'data');
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, 'system_settings.json');
-}
 
 export async function GET() {
   try {
-    const sPath = getSettingsPath();
-    let settings: any = {};
-    if (fs.existsSync(sPath)) {
-      const raw = fs.readFileSync(sPath, 'utf-8');
-      if (raw.trim()) settings = JSON.parse(raw);
+    const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    if (rows.length === 0) {
+      return NextResponse.json({
+        success: true,
+        siteName: 'Zecratary',
+        titlebarEmoji: '🍳',
+        titlebarImage: '',
+        faviconEmoji: '🍳',
+        faviconImage: '',
+        currency: 'USD',
+        themeColors: {},
+        supportedLanguages: []
+      }, { headers: { 'Cache-Control': 'no-store' } });
     }
-    return new NextResponse(JSON.stringify({ success: true, settings }), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-      }
-    });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const sPath = getSettingsPath();
-    let current: any = {};
-    if (fs.existsSync(sPath)) {
-      try {
-        const raw = fs.readFileSync(sPath, 'utf-8');
-        if (raw.trim()) current = JSON.parse(raw);
-      } catch (_) {}
-    }
-    const updated = { ...current, ...body, updatedAt: new Date().toISOString() };
-    fs.writeFileSync(sPath, JSON.stringify(updated, null, 2), 'utf-8');
-    return NextResponse.json({ success: true, settings: updated });
+    const r = rows[0];
+    return NextResponse.json({
+      success: true,
+      siteName: r.site_name || 'Zecratary',
+      titlebarEmoji: r.titlebar_emoji || '🍳',
+      titlebarImage: r.titlebar_image || '',
+      faviconEmoji: r.favicon_emoji || '🍳',
+      faviconImage: r.favicon_image || '',
+      currency: r.currency || 'USD',
+      themeColors: r.theme_colors || {},
+      supportedLanguages: r.supported_languages || []
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

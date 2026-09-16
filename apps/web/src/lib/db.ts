@@ -1,40 +1,56 @@
-// Hybrid PostgreSQL Client with Server-JSON Fallback
-// Provides resilient database querying and zero browser storage dependencies
+// Strict PostgreSQL Database Client
+// 100% Database Persistence - No JSON Fallback
 
-import fs from 'fs';
-import path from 'path';
+import { Pool } from 'pg';
 
-let pgPool: any = null;
+let pgPool: Pool | null = null;
 
-export function isPostgresConfigured(): boolean {
-  return Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL);
+export function getConnectionString(): string {
+  const connUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!connUrl) {
+    throw new Error('[DB FATAL] DATABASE_URL environment variable is missing. A valid PostgreSQL connection is required.');
+  }
+  return connUrl;
 }
 
-export async function getDbPool() {
+export async function getDbPool(): Promise<Pool> {
   if (pgPool) return pgPool;
-  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!connectionString) return null;
+  const connectionString = getConnectionString();
 
-  try {
-    const { Pool } = await import('pg');
-    pgPool = new Pool({
-      connectionString,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
-      max: 10,
-      idleTimeoutMillis: 30000
-    });
-    return pgPool;
-  } catch (err) {
-    console.warn('[DB] PostgreSQL pg module not installed or connection failed. Using JSON store fallback.');
-    return null;
-  }
+  pgPool = new Pool({
+    connectionString,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
+
+  return pgPool;
 }
 
 export async function query(sql: string, params: any[] = []): Promise<any[]> {
   const pool = await getDbPool();
-  if (pool) {
-    const res = await pool.query(sql, params);
+  const client = await pool.connect();
+  try {
+    const res = await client.query(sql, params);
     return res.rows;
+  } finally {
+    client.release();
   }
-  return [];
+}
+
+export async function transaction<T>(callback: (client: any) => Promise<T>): Promise<T> {
+  const pool = await getDbPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }

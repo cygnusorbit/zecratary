@@ -1,85 +1,30 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@zecratary/database';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const recipeCountRes = await query('SELECT COUNT(*) AS count FROM saved_recipes');
+    const userCountRes = await query('SELECT COUNT(*) AS count FROM users');
+    const revenueRes = await query("SELECT COALESCE(SUM(amount), 0) AS total FROM payment_transactions WHERE status = 'succeeded'");
+    const activeSubRes = await query("SELECT COUNT(*) AS count FROM payment_transactions WHERE status = 'succeeded' AND (expiry_date IS NULL OR expiry_date > NOW())");
 
-    // 1. Query live database counts and upcoming schedules from Prisma
-    const [
-      savedRecipesCount,
-      pantryStockCount,
-      groceryItemsCount,
-      recipesWithTags,
-      upcomingMealPlan
-    ] = await Promise.all([
-      prisma.recipe.count(),
-      prisma.pantryItem.count(),
-      prisma.groceryListItem.count({ where: { checked: false } }).catch(() => 0),
-      prisma.recipe.findMany({ select: { tags: true } }),
-      prisma.mealPlanItem.findFirst({
-        where: {
-          dayOfWeek: dayOfWeek,
-        },
-        include: {
-          recipe: true,
-        },
-      }).catch(async () => {
-        return await prisma.recipe.findFirst({
-          orderBy: { createdAt: 'desc' },
-        });
-      }),
-    ]);
-
-    const uniqueTags = new Set(recipesWithTags.flatMap((r) => r.tags || []));
-    const recipeBooksCount = uniqueTags.size > 0 ? uniqueTags.size : 0;
-
-    let upcomingMeal = null;
-    if (upcomingMealPlan) {
-      if ('recipe' in upcomingMealPlan && upcomingMealPlan.recipe) {
-        const r = upcomingMealPlan.recipe;
-        upcomingMeal = {
-          title: r.title,
-          mealType: upcomingMealPlan.mealType || 'DINNER',
-          prepCookTime: `${(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 25)} mins`,
-          tag: r.tags?.[0] || 'Scheduled',
-        };
-      } else if ('title' in upcomingMealPlan) {
-        const r = upcomingMealPlan as any;
-        upcomingMeal = {
-          title: r.title,
-          mealType: 'DINNER',
-          prepCookTime: `${(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 25)} mins`,
-          tag: r.tags?.[0] || 'Saved Dish',
-        };
-      }
-    }
+    const recentRecipes = await query('SELECT id, title, recipe_type AS "recipeType", created_at AS "createdAt" FROM saved_recipes ORDER BY created_at DESC LIMIT 5');
+    const recentTransactions = await query('SELECT id, customer_name AS "customerName", plan_name AS "planName", amount, currency, status, created_at AS "createdAt" FROM payment_transactions ORDER BY created_at DESC LIMIT 5');
 
     return NextResponse.json({
       success: true,
       stats: {
-        savedRecipes: savedRecipesCount,
-        recipeBooks: recipeBooksCount,
-        pantryStock: pantryStockCount,
-        groceryItems: groceryItemsCount,
+        totalRecipes: parseInt(recipeCountRes[0]?.count || '0', 10),
+        totalUsers: parseInt(userCountRes[0]?.count || '0', 10),
+        totalRevenue: parseFloat(revenueRes[0]?.total || '0'),
+        activeSubscriptions: parseInt(activeSubRes[0]?.count || '0', 10),
       },
-      upcomingMeal,
-    });
-  } catch (error: any) {
-    console.error('Database fetch error in /api/dashboard:', error);
-    return NextResponse.json({
-      success: false,
-      error: error.message,
-      stats: {
-        savedRecipes: 0,
-        recipeBooks: 0,
-        pantryStock: 0,
-        groceryItems: 0,
-      },
-      upcomingMeal: null,
-    });
+      recentRecipes,
+      recentTransactions
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
