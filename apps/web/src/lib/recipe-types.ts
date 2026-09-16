@@ -1,60 +1,38 @@
-'use client';
-import { useState, useEffect } from 'react';
+// Server-backed Recipe Types Store
+// Zero localStorage writes for recipe type management
 
-export const DEFAULT_RECIPE_TYPES = [
-  "Main Dish",
-  "Breakfast",
-  "Lunch",
-  "Dinner",
-  "Appetizer",
-  "Side Dish",
-  "Salad",
-  "Dessert",
-  "Snacks",
-  "Beverages"
+import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
+
+export const DEFAULT_RECIPE_TYPES: string[] = [
+  'Breakfast',
+  'Lunch',
+  'Dinner',
+  'Snack',
+  'Dessert',
+  'Beverage',
+  'Appetizer',
+  'Salad',
+  'Soup',
+  'Side Dish',
+  'Baking'
 ];
 
-const STORAGE_KEY = 'zecratary_recipe_types';
-const EVENT_KEY = 'zecratary_recipe_types_changed';
+let memoryRecipeTypes: string[] = [...DEFAULT_RECIPE_TYPES];
 
-export const getStoredRecipeTypes = (): string[] => {
-  if (typeof window === 'undefined') return DEFAULT_RECIPE_TYPES;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    console.error('Failed to read recipe types from storage:', e);
+export function getStoredRecipeTypes(): string[] {
+  return [...memoryRecipeTypes];
+}
+
+export function setMemoryRecipeTypes(types: string[]): void {
+  if (Array.isArray(types) && types.length > 0) {
+    memoryRecipeTypes = [...types];
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_RECIPE_TYPES));
-  return DEFAULT_RECIPE_TYPES;
-};
+}
 
-export const saveRecipeTypes = (types: string[]) => {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(types));
-  window.dispatchEvent(new Event(EVENT_KEY));
-};
-
-export function useRecipeTypes() {
-  const [recipeTypes, setRecipeTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
-
-  useEffect(() => {
-    setRecipeTypes(getStoredRecipeTypes());
-
-    const handleSync = () => {
-      setRecipeTypes(getStoredRecipeTypes());
-    };
-
-    window.addEventListener(EVENT_KEY, handleSync);
-    window.addEventListener('storage', handleSync);
-    return () => {
-      window.removeEventListener(EVENT_KEY, handleSync);
-      window.removeEventListener('storage', handleSync);
-    };
-  }, []);
-
-  return recipeTypes;
+export async function saveRecipeTypes(types: string[]): Promise<boolean> {
+  memoryRecipeTypes = [...types];
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_changed', { detail: types }));
+  }
+  return await persistServerAdminSettings({ recipeTypes: types });
 }

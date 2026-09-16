@@ -1,190 +1,204 @@
-// Generated / Updated by AI Collaborator
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-function getDataFilePath(): string {
-  const root = process.cwd();
-  const candidates = [
-    path.join(root, 'data', 'subscription_configs.json'),
-    path.join(root, 'apps', 'web', 'data', 'subscription_configs.json'),
-    path.join(root, 'src', 'data', 'subscription_configs.json'),
-    path.join(root, 'apps', 'web', 'src', 'data', 'subscription_configs.json'),
+function getDataPaths(filename: string): string[] {
+  return [
+    path.join(process.cwd(), 'apps/web/data', filename),
+    path.join(process.cwd(), 'data', filename)
   ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  const defaultPath = path.join(root, 'data', 'subscription_configs.json');
-  const dir = path.dirname(defaultPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  return defaultPath;
 }
 
-const DEFAULT_PRESET_TASTER = {
-  id: 'preset_taster',
-  name: 'Taster',
-  slug: 'taster',
-  isFree: true,
-  isDefault: true,
-  monthlyPriceDollars: 0,
-  annualPriceDollars: 0,
-  monthlyBadge: '',
-  annualBadge: '',
-  trialBadge: '',
-  descriptionMonthly: 'Free tier with limited features',
-  descriptionAnnual: 'Free tier with limited features',
-  buttonText: 'Manage',
-  aiRecipeLimit: 5,
-  recipeLibraryLimit: 25,
-  socialScrapeLimit: 5,
-  canViewMacros: false,
-  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
-  features: [
-    'Create up to 5 AI-powered recipes per month',
-    'Personal recipe library (25 total recipes)',
-    'Smart ingredient repurposing',
-    'Automated shopping list creation',
-    'Direct online grocery shopping links',
-    'Meal planner',
-    'Ingredient photo recognition'
-  ],
-  tokenLimit: 50000,
-  tokenReimburseFrequency: 'monthly'
-};
-
-function readServerConfigs(): any[] {
-  const filePath = getDataFilePath();
-  try {
-    if (fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      const parsed = JSON.parse(raw);
-      const list = Array.isArray(parsed) ? parsed : (parsed?.configs || parsed?.plans || []);
-      if (Array.isArray(list) && list.length > 0) {
-        const hasTaster = list.some((p: any) => p && (p.slug === 'taster' || p.id === 'preset_taster'));
-        return hasTaster ? list : [DEFAULT_PRESET_TASTER, ...list];
-      }
+function readJsonFile<T>(filename: string, fallback: T): T {
+  const paths = getDataPaths(filename);
+  for (const p of paths) {
+    if (fs.existsSync(p)) {
+      try {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) as T;
+      } catch (_) {}
     }
-  } catch (_) {}
-  return [DEFAULT_PRESET_TASTER];
+  }
+  return fallback;
 }
 
-function writeServerConfigs(configs: any[]): boolean {
-  try {
-    const filePath = getDataFilePath();
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(configs, null, 2), 'utf-8');
-    return true;
-  } catch (err) {
-    console.error('Failed to write subscription configs:', err);
-    return false;
+function writeJsonFile<T>(filename: string, data: T): void {
+  const paths = getDataPaths(filename);
+  for (const p of paths) {
+    try {
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (_) {}
   }
 }
+
+const DEFAULT_PLANS = [
+  {
+    id: 'preset_taster',
+    name: 'Taster',
+    slug: 'taster',
+    isFree: true,
+    isDefault: true,
+    monthlyPriceDollars: 0,
+    annualPriceDollars: 0,
+    monthlyBadge: '',
+    annualBadge: '',
+    trialBadge: '',
+    descriptionMonthly: 'Free tier with limited features',
+    descriptionAnnual: 'Free tier with limited features',
+    buttonText: 'Manage',
+    aiRecipeLimit: 5,
+    recipeLibraryLimit: 25,
+    socialScrapeLimit: 5,
+    canViewMacros: false,
+    allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
+    featuresText: 'Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition',
+    features: [
+      'Create up to 5 AI-powered recipes per month',
+      'Personal recipe library (25 total recipes)',
+      'Smart ingredient repurposing',
+      'Automated shopping list creation',
+      'Direct online grocery shopping links',
+      'Meal planner',
+      'Ingredient photo recognition'
+    ],
+    tokenLimit: 50000,
+    tokenReimburseFrequency: 'monthly'
+  },
+  {
+    id: 'preset_nutrition_pro',
+    name: 'Nutrition Pro',
+    slug: 'nutrition-pro',
+    isFree: false,
+    isDefault: false,
+    monthlyPriceDollars: 8.99,
+    annualPriceDollars: 59.99,
+    monthlyBadge: 'Billed Immediately',
+    annualBadge: 'Save 44%',
+    trialBadge: '7-Day Free Trial',
+    descriptionMonthly: 'Full premium access, billed monthly',
+    descriptionAnnual: 'Best value - all premium features, billed annually',
+    buttonText: 'Choose Plan',
+    aiRecipeLimit: -1,
+    recipeLibraryLimit: -1,
+    socialScrapeLimit: -1,
+    canViewMacros: true,
+    allowedAiModels: 'gemini-3.6-flash,gpt-4o',
+    featuresText: 'Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)',
+    features: [
+      'Unlimited AI-powered recipe generation',
+      'Unlimited recipe library',
+      'Comprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)'
+    ],
+    tokenLimit: 1000000,
+    tokenReimburseFrequency: 'monthly'
+  }
+];
 
 export async function GET() {
-  const configs = readServerConfigs();
+  let plans = readJsonFile('subscription_plans.json', [] as any[]);
+  if (!Array.isArray(plans) || plans.length === 0) {
+    const adminSettings = readJsonFile('admin_settings.json', {} as any);
+    if (Array.isArray(adminSettings.subscriptionPlans) && adminSettings.subscriptionPlans.length > 0) {
+      plans = adminSettings.subscriptionPlans;
+    } else {
+      plans = DEFAULT_PLANS;
+    }
+  }
+
   return NextResponse.json({
     success: true,
-    configs,
-    plans: configs
+    packages: plans,
+    plans: plans,
+    configs: plans
   }, {
     headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0'
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
     }
   });
 }
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json();
-    const planId = body.id || 'plan_' + Date.now();
-    const slug = (body.slug || body.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || planId).trim();
-    const isTaster = planId === 'preset_taster' || slug === 'taster';
+    const body = await req.json();
+    let currentPlans = readJsonFile('subscription_plans.json', [] as any[]);
+    if (!Array.isArray(currentPlans) || currentPlans.length === 0) {
+      currentPlans = [...DEFAULT_PLANS];
+    }
 
-    const newConfig = {
+    const planId = body.id || 'plan_' + Date.now();
+    const planSlug = body.slug || body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+    const updatedPlan = {
       ...body,
       id: planId,
-      slug,
-      isDefault: isTaster,
+      slug: planSlug,
+      isDefault: planSlug === 'taster' || planId === 'preset_taster',
+      updatedAt: new Date().toISOString()
     };
 
-    let configs = readServerConfigs();
-    const existingIndex = configs.findIndex((c: any) => c.id === planId || c.slug === slug);
-    if (existingIndex >= 0) {
-      configs[existingIndex] = newConfig;
+    const existingIdx = currentPlans.findIndex((p: any) => p.id === planId || p.slug === planSlug);
+    if (existingIdx >= 0) {
+      currentPlans[existingIdx] = updatedPlan;
     } else {
-      configs.push(newConfig);
+      currentPlans.push(updatedPlan);
     }
 
-    configs = configs.map((p: any) => ({
-      ...p,
-      isDefault: p.id === 'preset_taster' || p.slug === 'taster'
-    }));
+    // Persist across dual JSON stores
+    writeJsonFile('subscription_plans.json', currentPlans);
 
-    writeServerConfigs(configs);
-    return NextResponse.json({ success: true, configs, plan: newConfig });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Error saving plan' }, { status: 500 });
-  }
-}
-
-export async function DELETE(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    const slug = searchParams.get('slug');
-    let body: any = {};
-    try {
-      body = await request.json();
-    } catch (_) {}
-
-    const targetId = (id || body.id || '').trim();
-    const targetSlug = (slug || body.slug || '').trim();
-    const identifier = targetId || targetSlug;
-
-    if (!identifier) {
-      return NextResponse.json({ success: false, error: 'Plan identifier is required' }, { status: 400 });
-    }
-
-    if (identifier === 'taster' || identifier === 'preset_taster' || targetSlug === 'taster' || targetId === 'preset_taster') {
-      return NextResponse.json({ success: false, error: 'The default Taster plan cannot be deleted' }, { status: 403 });
-    }
-
-    let configs = readServerConfigs();
-    const beforeCount = configs.length;
-
-    configs = configs.filter((c: any) => {
-      if (!c) return false;
-      const matchId = targetId && (c.id === targetId || c.slug === targetId);
-      const matchSlug = targetSlug && (c.slug === targetSlug || c.id === targetSlug);
-      return !(matchId || matchSlug);
-    });
-
-    configs = configs.map((p: any) => ({
-      ...p,
-      isDefault: p.id === 'preset_taster' || p.slug === 'taster'
-    }));
-
-    writeServerConfigs(configs);
+    const adminSettings = readJsonFile('admin_settings.json', {} as any);
+    adminSettings.subscriptionPlans = currentPlans;
+    writeJsonFile('admin_settings.json', adminSettings);
 
     return NextResponse.json({
       success: true,
-      message: 'Plan deleted successfully',
-      configs,
-      deletedCount: beforeCount - configs.length
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
-      }
+      plan: updatedPlan,
+      packages: currentPlans
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Error deleting plan' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message || 'Failed to save plan' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let slug = searchParams.get('slug');
+
+    if (!id && !slug) {
+      try {
+        const body = await req.json();
+        id = body.id;
+        slug = body.slug;
+      } catch (_) {}
+    }
+
+    if (slug === 'taster' || id === 'preset_taster') {
+      return NextResponse.json({ success: false, error: 'Taster plan cannot be deleted' }, { status: 400 });
+    }
+
+    let currentPlans = readJsonFile('subscription_plans.json', [] as any[]);
+    const updated = currentPlans.filter((p: any) => {
+      const matchId = id && (p.id === id || p.slug === id);
+      const matchSlug = slug && (p.slug === slug || p.id === slug);
+      return !(matchId || matchSlug);
+    });
+
+    writeJsonFile('subscription_plans.json', updated);
+
+    const adminSettings = readJsonFile('admin_settings.json', {} as any);
+    adminSettings.subscriptionPlans = updated;
+    writeJsonFile('admin_settings.json', adminSettings);
+
+    return NextResponse.json({ success: true, packages: updated });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Failed to delete plan' }, { status: 500 });
   }
 }

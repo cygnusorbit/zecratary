@@ -127,5 +127,18 @@
       "webhookId": "",
       "environment": "sandbox"
     }
-  }
+  },
+  "recipeTypes": [
+    "Breakfast",
+    "Lunch",
+    "Dinner",
+    "Snack",
+    "Dessert",
+    "Beverage",
+    "Appetizer",
+    "Salad",
+    "Soup",
+    "Side Dish",
+    "Baking"
+  ]
 }

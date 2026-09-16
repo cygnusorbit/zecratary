@@ -21,7 +21,9 @@
     "appleTeamId": "",
     "appleKeyId": "",
     "allowSocialRegistration": true,
-    "requireEmailVerification": true
+    "requireEmailVerification": true,
+    "facebookClientId": "",
+    "facebookClientSecret": ""
   },
   "subscriptionPlans": [
     {
@@ -215,5 +217,18 @@
       "webhookId": "",
       "environment": "sandbox"
     }
-  }
+  },
+  "recipeTypes": [
+    "Breakfast",
+    "Lunch",
+    "Dinner",
+    "Snack",
+    "Dessert",
+    "Beverage",
+    "Appetizer",
+    "Salad",
+    "Soup",
+    "Side Dish",
+    "Baking"
+  ]
 }

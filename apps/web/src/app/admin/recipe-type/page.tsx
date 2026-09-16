@@ -1,22 +1,37 @@
 'use client';
+
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   Utensils, Plus, Edit3, Trash2, Check, X, RotateCcw, 
   CheckCircle, ArrowLeft, MoreVertical, GripVertical, 
-  ArrowUpDown, ArrowUp, ArrowDown
+  ArrowUpDown, ArrowUp, ArrowDown, RefreshCw
 } from 'lucide-react';
-import { getStoredRecipeTypes, saveRecipeTypes, DEFAULT_RECIPE_TYPES } from '@/lib/recipe-types';
+import { 
+  getStoredRecipeTypes, 
+  saveRecipeTypes, 
+  setMemoryRecipeTypes, 
+  DEFAULT_RECIPE_TYPES 
+} from '@/lib/recipe-types';
 import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 export default function RecipeTypeAdminPage() {
-  const { t, version } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+  const version = langContext?.version;
+
   const [recipeTypes, setRecipeTypes] = useState<string[]>([]);
   const [newTypeName, setNewTypeName] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [feedback, setFeedback] = useState('');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   
   // Reposition / Reorder States
   const [isReordering, setIsReordering] = useState(false);
@@ -26,10 +41,12 @@ export default function RecipeTypeAdminPage() {
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined' 
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -68,7 +85,7 @@ export default function RecipeTypeAdminPage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -89,27 +106,64 @@ export default function RecipeTypeAdminPage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadTypes = () => {
-    setRecipeTypes(getStoredRecipeTypes());
-  };
+  // Hydrate Recipe Types Exclusively from Server Storage
+  const loadTypesFromServer = useCallback(async () => {
+    setIsLoading(true);
+    purgeLegacyBrowserAdminStorage();
+    try {
+      const serverData = await fetchServerAdminSettings();
+      if (serverData && Array.isArray(serverData.recipeTypes) && serverData.recipeTypes.length > 0) {
+        setRecipeTypes(serverData.recipeTypes);
+        setMemoryRecipeTypes(serverData.recipeTypes);
+      } else {
+        const fallback = getStoredRecipeTypes();
+        const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES;
+        setRecipeTypes(activeList);
+        setMemoryRecipeTypes(activeList);
+      }
+    } catch (err) {
+      console.error('[RecipeTypeAdminPage] Error loading server recipe types:', err);
+      const fallback = getStoredRecipeTypes();
+      setRecipeTypes(fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    document.title = `${t('recipeTypeTitle') || 'Recipe Types'} - Admin Console`;
-    loadTypes();
+    document.title = `${t('recipeTypeTitle', 'Recipe Types')} - ${t('adminConsole', 'Admin Console')}`;
+    loadTypesFromServer();
 
-    const handleSync = () => setRecipeTypes(getStoredRecipeTypes());
+    const handleSync = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setRecipeTypes(e.detail);
+      } else {
+        loadTypesFromServer();
+      }
+    };
+
     window.addEventListener('zecratary_recipe_types_changed', handleSync);
-    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_recipe_types_changed', handleSync);
-      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [t, version]);
+  }, [t, version, loadTypesFromServer]);
 
   const notify = (msg: string) => {
     setFeedback(msg);
     setTimeout(() => setFeedback(''), 3000);
+  };
+
+  // Centralized Server-Backed Commit (Zero LocalStorage)
+  const commitRecipeTypes = async (updated: string[]) => {
+    setRecipeTypes(updated);
+    setMemoryRecipeTypes(updated);
+    await saveRecipeTypes(updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
   };
 
   // Drag & Drop Handlers
@@ -131,7 +185,7 @@ export default function RecipeTypeAdminPage() {
 
   const handleDrop = () => {
     setDraggedIndex(null);
-    saveRecipeTypes(recipeTypes);
+    commitRecipeTypes(recipeTypes);
   };
 
   const moveType = (index: number, direction: 'up' | 'down') => {
@@ -142,14 +196,13 @@ export default function RecipeTypeAdminPage() {
     const temp = list[index];
     list[index] = list[targetIndex];
     list[targetIndex] = temp;
-    setRecipeTypes(list);
-    saveRecipeTypes(list);
+    commitRecipeTypes(list);
   };
 
   const toggleRepositionMode = () => {
     if (isReordering) {
-      saveRecipeTypes(recipeTypes);
-      notify(t('recipeTypeOrderSaved') || 'Recipe type order saved successfully!');
+      commitRecipeTypes(recipeTypes);
+      notify(t('recipeTypeOrderSaved', 'Recipe type order saved successfully!'));
       setIsReordering(false);
     } else {
       setEditingIndex(null);
@@ -163,15 +216,14 @@ export default function RecipeTypeAdminPage() {
     if (!clean) return;
 
     if (recipeTypes.some((tKey) => tKey.toLowerCase() === clean.toLowerCase())) {
-      alert(t('recipeTypeExists') || 'This recipe type already exists.');
+      alert(t('recipeTypeExists', 'This recipe type already exists.'));
       return;
     }
 
     const updated = [...recipeTypes, clean];
-    setRecipeTypes(updated);
-    saveRecipeTypes(updated);
+    commitRecipeTypes(updated);
     setNewTypeName('');
-    notify(`${t('recipeTypeAdded') || 'Added recipe type'} "${clean}"`);
+    notify(`${t('recipeTypeAdded', 'Added recipe type')} "${clean}"`);
   };
 
   const handleSaveEdit = (index: number) => {
@@ -182,34 +234,31 @@ export default function RecipeTypeAdminPage() {
       (tKey, i) => i !== index && tKey.toLowerCase() === clean.toLowerCase()
     );
     if (duplicate) {
-      alert(t('recipeTypeExists') || 'This recipe type already exists.');
+      alert(t('recipeTypeExists', 'This recipe type already exists.'));
       return;
     }
 
     const updated = [...recipeTypes];
     updated[index] = clean;
-    setRecipeTypes(updated);
-    saveRecipeTypes(updated);
+    commitRecipeTypes(updated);
     setEditingIndex(null);
     setEditingValue('');
-    notify(`${t('recipeTypeUpdated') || 'Updated recipe type'} "${clean}"`);
+    notify(`${t('recipeTypeUpdated', 'Updated recipe type')} "${clean}"`);
   };
 
   const handleDeleteType = (index: number, name: string) => {
-    const confirmMsg = t('confirmDeleteRecipeType') || 'Are you sure you want to delete recipe type';
+    const confirmMsg = t('confirmDeleteRecipeType', 'Are you sure you want to delete recipe type');
     if (!confirm(`${confirmMsg} "${name}"?`)) return;
     const updated = recipeTypes.filter((_, i) => i !== index);
-    setRecipeTypes(updated);
-    saveRecipeTypes(updated);
-    notify(`${t('recipeTypeRemoved') || 'Removed recipe type'} "${name}"`);
+    commitRecipeTypes(updated);
+    notify(`${t('recipeTypeRemoved', 'Removed recipe type')} "${name}"`);
   };
 
   const handleResetDefaults = () => {
-    if (!confirm(t('resetRecipeTypesConfirm') || 'Are you sure you want to reset recipe types to default?')) return;
-    setRecipeTypes(DEFAULT_RECIPE_TYPES);
-    saveRecipeTypes(DEFAULT_RECIPE_TYPES);
+    if (!confirm(t('resetRecipeTypesConfirm', 'Are you sure you want to reset recipe types to default?'))) return;
+    commitRecipeTypes(DEFAULT_RECIPE_TYPES);
     setIsReordering(false);
-    notify(t('resetRecipeTypesSuccess') || 'Recipe types reset to default successfully!');
+    notify(t('resetRecipeTypesSuccess', 'Recipe types reset to default successfully!'));
   };
 
   return (
@@ -224,14 +273,29 @@ export default function RecipeTypeAdminPage() {
       >
         <div>
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('recipeTypeTitle') || 'Recipe Types'}
+            {t('recipeTypeTitle', 'Recipe Types')}
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('recipeTypeSubtitle') || 'Manage custom recipe categories and types'}
+            {t('recipeTypeSubtitle', 'Manage custom recipe categories and types')}
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={loadTypesFromServer}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            style={{
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#334155' : '#cbd5e1'
+            }}
+            title="Reload from server store"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <span>{t('refreshBtn', 'Reload')}</span>
+          </button>
+
           <button
             onClick={handleResetDefaults}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
@@ -249,7 +313,7 @@ export default function RecipeTypeAdminPage() {
               e.currentTarget.style.color = isDayMode ? '#334155' : '#cbd5e1';
             }}
           >
-            <RotateCcw className="h-4 w-4" /> {t('resetDefaults') || 'Reset Defaults'}
+            <RotateCcw className="h-4 w-4" /> {t('resetDefaults', 'Reset Defaults')}
           </button>
         </div>
       </div>
@@ -280,14 +344,14 @@ export default function RecipeTypeAdminPage() {
         >
           <div className="flex items-center gap-2.5">
             <MoreVertical className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
-            <span>{t('repositionBannerRecipeType') || 'Drag items or use arrows to reorder recipe types. Click Done when finished.'}</span>
+            <span>{t('repositionBannerRecipeType', 'Drag items or use arrows to reorder recipe types. Click Done when finished.')}</span>
           </div>
           <button
             onClick={toggleRepositionMode}
             className="px-3 py-1 text-white font-bold rounded-lg transition text-[11px] shrink-0 cursor-pointer shadow-sm"
             style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
           >
-            {t('done') || 'Done'}
+            {t('done', 'Done')}
           </button>
         </div>
       )}
@@ -302,13 +366,13 @@ export default function RecipeTypeAdminPage() {
           }}
         >
           <h2 className="text-base font-extrabold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            <Plus className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addNewRecipeType') || 'Add New Recipe Type'}
+            <Plus className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addNewRecipeType', 'Add New Recipe Type')}
           </h2>
           <form onSubmit={handleAddType} className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               required
-              placeholder={t('recipeTypePlaceholder') || 'e.g. Soup, Salad, Curry...'}
+              placeholder={t('recipeTypePlaceholder', 'e.g. Soup, Salad, Curry...')}
               value={newTypeName}
               onChange={(e) => setNewTypeName(e.target.value)}
               className="flex-1 border rounded-xl px-4 py-3 text-sm outline-none transition"
@@ -327,7 +391,7 @@ export default function RecipeTypeAdminPage() {
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
             >
-              <Plus className="h-4 w-4" /> {t('addRecipeTypeBtn') || 'Add Recipe Type'}
+              <Plus className="h-4 w-4" /> {t('addRecipeTypeBtn', 'Add Recipe Type')}
             </button>
           </form>
         </div>
@@ -347,7 +411,7 @@ export default function RecipeTypeAdminPage() {
         >
           <div className="flex items-center gap-3">
             <span className="text-sm font-extrabold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              {t('activeRecipeTypes') || 'Active Recipe Types'} ({recipeTypes.length})
+              {t('activeRecipeTypes', 'Active Recipe Types')} ({recipeTypes.length})
             </span>
             <button
               type="button"
@@ -365,17 +429,17 @@ export default function RecipeTypeAdminPage() {
             >
               {isReordering ? (
                 <>
-                  <Check className="h-3.5 w-3.5 text-white" /> {t('doneRepositioning') || 'Done Repositioning'}
+                  <Check className="h-3.5 w-3.5 text-white" /> {t('doneRepositioning', 'Done Repositioning')}
                 </>
               ) : (
                 <>
-                  <ArrowUpDown className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('reposition') || 'Reposition'}
+                  <ArrowUpDown className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('reposition', 'Reposition')}
                 </>
               )}
             </button>
           </div>
           <span className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-            {isReordering ? (t('repositionActive') || 'Repositioning Mode Active') : (t('recipeTypeRealtimeSync') || 'Changes sync in real-time across recipe forms')}
+            {isReordering ? t('repositionActive', 'Repositioning Mode Active') : t('recipeTypeRealtimeSync', 'Changes sync in real-time across recipe forms')}
           </span>
         </div>
 
@@ -428,7 +492,7 @@ export default function RecipeTypeAdminPage() {
                         borderColor: 'var(--color-emerald, #10b981)',
                         color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                       }}
-                      title={t('save') || 'Save'}
+                      title={t('save', 'Save')}
                     >
                       <Check className="h-3.5 w-3.5" />
                     </button>
@@ -440,7 +504,7 @@ export default function RecipeTypeAdminPage() {
                         borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                         color: isDayMode ? '#334155' : '#cbd5e1'
                       }}
-                      title={t('cancel') || 'Cancel'}
+                      title={t('cancel', 'Cancel')}
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -456,7 +520,7 @@ export default function RecipeTypeAdminPage() {
                               onClick={() => moveType(idx, 'up')}
                               disabled={idx === 0}
                               className="p-0.5 hover:text-black disabled:opacity-20 cursor-pointer"
-                              title={t('moveUp') || 'Move Up'}
+                              title={t('moveUp', 'Move Up')}
                             >
                               <ArrowUp className="h-3 w-3" />
                             </button>
@@ -465,7 +529,7 @@ export default function RecipeTypeAdminPage() {
                               onClick={() => moveType(idx, 'down')}
                               disabled={idx === recipeTypes.length - 1}
                               className="p-0.5 hover:text-black disabled:opacity-20 cursor-pointer"
-                              title={t('moveDown') || 'Move Down'}
+                              title={t('moveDown', 'Move Down')}
                             >
                               <ArrowDown className="h-3 w-3" />
                             </button>
@@ -473,7 +537,7 @@ export default function RecipeTypeAdminPage() {
                           <div 
                             className="cursor-grab active:cursor-grabbing p-1" 
                             style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
-                            title={t('dragToReposition') || 'Click and drag to reposition'}
+                            title={t('dragToReposition', 'Click and drag to reposition')}
                           >
                             <MoreVertical className="h-4 w-4" />
                           </div>
@@ -498,7 +562,7 @@ export default function RecipeTypeAdminPage() {
                             borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                             color: isDayMode ? '#334155' : '#cbd5e1'
                           }}
-                          title={t('editRecipeTypeTooltip') || 'Edit Recipe Type'}
+                          title={t('editRecipeTypeTooltip', 'Edit Recipe Type')}
                         >
                           <Edit3 className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
                         </button>
@@ -510,7 +574,7 @@ export default function RecipeTypeAdminPage() {
                             borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                             color: isDayMode ? '#64748b' : '#94a3b8'
                           }}
-                          title={t('deleteRecipeTypeTooltip') || 'Delete Recipe Type'}
+                          title={t('deleteRecipeTypeTooltip', 'Delete Recipe Type')}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>

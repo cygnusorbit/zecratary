@@ -80,6 +80,7 @@ export async function POST(req: NextRequest) {
         ...(body.socialLogin || {})
       },
       subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || [],
+      recipeTypes: body.recipeTypes || current.recipeTypes || [],
       supportedLanguages: body.supportedLanguages || current.supportedLanguages || [],
       ingredientCategories: body.ingredientCategories || current.ingredientCategories || [],
       chefAiSettings: {

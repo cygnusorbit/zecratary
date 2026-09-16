@@ -5,6 +5,15 @@ export function purgeLegacyBrowserAdminStorage(): void {
   if (typeof window === 'undefined') return;
   const legacyKeys = [
     'zecratary_admin_settings',
+    'socialLogin',
+    'zecratary_social_login',
+    'social_login_config',
+    'zecratary_recipetypes',
+    'recipe_types',
+    'zecratary_recipe_types',
+    'zecratary_default_plan',
+    'zecratary_default_plan_slug',
+    'zecratary_deleted_plan_slugs',
     'payment_transactions',
     'payment_settings',
     'zecratary_currency',

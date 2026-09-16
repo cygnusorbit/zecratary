@@ -8,6 +8,11 @@ import {
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 interface SubscriptionPackageConfig {
   id: string;
@@ -121,7 +126,9 @@ const OPENAI_MODEL_VERSIONS = [
 ];
 
 export default function AdminSubscriptionPlans() {
-  const { t } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+
   const [mounted, setMounted] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [packages, setPackages] = useState<SubscriptionPackageConfig[]>([]);
@@ -143,21 +150,21 @@ export default function AdminSubscriptionPlans() {
     setMounted(true);
   }, []);
 
-  const syncWithAiSettings = useCallback(() => {
+  // Synchronize Active AI model directly from server store (Zero LocalStorage)
+  const syncWithAiSettings = useCallback(async () => {
     try {
-      const stored = localStorage.getItem('zecratary_chef_ai_settings') || 
-                     localStorage.getItem('zecratary_engine_config') || 
-                     localStorage.getItem('zecratary_settings');
-      if (stored) {
-        const c = JSON.parse(stored);
-        if (c.model) {
-          setActiveSettingsModel(c.model);
-          if (c.provider === 'openai' || c.model.startsWith('gpt')) {
+      const serverData = await fetchServerAdminSettings();
+      if (serverData) {
+        const c = serverData.chefAiSettings || serverData.aiSettings || serverData;
+        const resolvedModel = c.model || serverData.aiModel;
+        if (resolvedModel) {
+          setActiveSettingsModel(resolvedModel);
+          if (c.provider === 'openai' || resolvedModel.startsWith('gpt')) {
             setSelectedAiProvider('openai');
-            setSelectedAiVersion(c.model);
+            setSelectedAiVersion(resolvedModel);
           } else {
             setSelectedAiProvider('gemini');
-            setSelectedAiVersion(c.model);
+            setSelectedAiVersion(resolvedModel);
           }
         }
       }
@@ -168,21 +175,24 @@ export default function AdminSubscriptionPlans() {
     syncWithAiSettings();
     window.addEventListener('zecratary_settings_updated', syncWithAiSettings);
     window.addEventListener('zecratary_engine_config_updated', syncWithAiSettings);
-    window.addEventListener('storage', syncWithAiSettings);
+    window.addEventListener('zecratary_admin_settings_updated', syncWithAiSettings);
     return () => {
       window.removeEventListener('zecratary_settings_updated', syncWithAiSettings);
       window.removeEventListener('zecratary_engine_config_updated', syncWithAiSettings);
-      window.removeEventListener('storage', syncWithAiSettings);
+      window.removeEventListener('zecratary_admin_settings_updated', syncWithAiSettings);
     };
   }, [syncWithAiSettings]);
 
+  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
       const c = stored ? JSON.parse(stored) : {};
       const root = document.documentElement;
 
@@ -221,7 +231,7 @@ export default function AdminSubscriptionPlans() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -242,21 +252,17 @@ export default function AdminSubscriptionPlans() {
     };
   }, [applySavedTheme]);
 
-  const loadLocalPackages = useCallback((): SubscriptionPackageConfig[] => {
+  // Hydrate packages directly from server API (Zero LocalStorage)
+  const fetchPackages = useCallback(async () => {
+    purgeLegacyBrowserAdminStorage();
     try {
-      let deletedSlugs: string[] = [];
-      try {
-        const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
-        if (rawDel) deletedSlugs = JSON.parse(rawDel);
-      } catch (_) {}
-
-      const local = null;
-      if (local !== null) {
-        const parsed = JSON.parse(local);
-        if (Array.isArray(parsed)) {
-          const filtered = parsed.filter((p: any) => p && !deletedSlugs.includes(p.slug) && !deletedSlugs.includes(p.id));
-          const hasTaster = filtered.some((p) => p.slug === 'taster' || p.id === 'preset_taster');
-          let list = hasTaster ? filtered : [{ ...DEFAULT_PRESET_TASTER }, ...filtered];
+      const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        const serverConfigs = Array.isArray(data) ? data : (data?.packages || data?.plans || data?.configs);
+        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
+          const hasTaster = serverConfigs.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster');
+          let list = hasTaster ? serverConfigs : [{ ...DEFAULT_PRESET_TASTER }, ...serverConfigs];
 
           list = list.map((p: any) => ({
             ...p,
@@ -271,42 +277,15 @@ export default function AdminSubscriptionPlans() {
             isDefault: p.slug === 'taster' || p.id === 'preset_taster',
           }));
 
-          return list;
+          setPackages(list);
+          return;
         }
       }
-    } catch (e) {}
-    return [{ ...DEFAULT_PRESET_TASTER }];
-  }, []);
-
-  const fetchPackages = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        const serverConfigs = Array.isArray(data) ? data : (data?.configs || data?.plans || data?.packages);
-        if (Array.isArray(serverConfigs)) {
-          let deletedSlugs: string[] = [];
-          try {
-            const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
-            if (rawDel) deletedSlugs = JSON.parse(rawDel);
-          } catch (_) {}
-
-          const cleanConfigs = serverConfigs.filter((cfg: any) => {
-            if (!cfg) return false;
-            if (deletedSlugs.includes(cfg.slug) || deletedSlugs.includes(cfg.id)) return false;
-            return true;
-          });
-
-          /* Synced via /api/admin/settings */
-        }
-      }
-      const local = loadLocalPackages();
-      setPackages(local);
     } catch (e) {
-      const local = loadLocalPackages();
-      setPackages(local);
+      console.error('Failed to fetch packages from server:', e);
     }
-  }, [loadLocalPackages]);
+    setPackages([{ ...DEFAULT_PRESET_TASTER }, { ...DEFAULT_PRESET_NUTRITION_PRO }]);
+  }, []);
 
   useEffect(() => {
     if (!mounted) return;
@@ -316,7 +295,7 @@ export default function AdminSubscriptionPlans() {
     fetchPackages();
   }, [fetchPackages, mounted, t]);
 
-  const handleSetDefaultPlan = (targetPkg: SubscriptionPackageConfig) => {
+  const handleSetDefaultPlan = async (targetPkg: SubscriptionPackageConfig) => {
     const isTaster = targetPkg.id === 'preset_taster' || targetPkg.slug === 'taster';
     if (!isTaster) {
       alert(t('tasterPermanentDefaultAlert', 'The Taster plan (ID: preset_taster) is permanently locked as the system default plan and cannot be changed.'));
@@ -329,11 +308,17 @@ export default function AdminSubscriptionPlans() {
     }));
 
     setPackages(updated);
-    /* Synced via /api/admin/settings */
-    localStorage.setItem('zecratary_default_plan_slug', 'taster');
-    localStorage.setItem('zecratary_default_plan', 'taster');
-    window.dispatchEvent(new Event('zecratary_plans_updated'));
-    window.dispatchEvent(new Event('storage'));
+
+    // Save default plan directly to server store
+    await persistServerAdminSettings({
+      defaultPlanSlug: 'taster',
+      subscriptionPlans: updated
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_plans_updated'));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    }
 
     setFeedback({
       type: 'success',
@@ -460,16 +445,6 @@ export default function AdminSubscriptionPlans() {
         body: JSON.stringify(payload),
       });
 
-      // Clear any tombstone for this created/updated plan
-      try {
-        const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
-        if (rawDel) {
-          const delSlugs: string[] = JSON.parse(rawDel);
-          const cleanSlugs = delSlugs.filter((s) => s !== planId && s !== generatedSlug);
-          localStorage.setItem('zecratary_deleted_plan_slugs', JSON.stringify(cleanSlugs));
-        }
-      } catch (_) {}
-
       const updatedPlanItem: SubscriptionPackageConfig = {
         ...form,
         id: planId,
@@ -503,9 +478,14 @@ export default function AdminSubscriptionPlans() {
 
       updatedList = updatedList.map((p) => ({ ...p, isDefault: p.id === 'preset_taster' || p.slug === 'taster' }));
       setPackages(updatedList);
-      /* Synced via /api/admin/settings */
-      window.dispatchEvent(new Event('zecratary_plans_updated'));
-      window.dispatchEvent(new Event('storage'));
+
+      // Save directly to server settings (Zero LocalStorage)
+      await persistServerAdminSettings({ subscriptionPlans: updatedList });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_plans_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
 
       setFeedback({
         type: 'success',
@@ -533,7 +513,6 @@ export default function AdminSubscriptionPlans() {
     setFeedback(null);
 
     try {
-      // 1. Optimistically filter from state and localStorage
       const updated = packages.filter((p) => {
         const isMatchId = pkg.id && (p.id === pkg.id || p.slug === pkg.id);
         const isMatchSlug = pkg.slug && (p.slug === pkg.slug || p.id === pkg.slug);
@@ -543,40 +522,30 @@ export default function AdminSubscriptionPlans() {
         isDefault: p.slug === 'taster' || p.id === 'preset_taster',
       }));
 
-      // 2. Persist tombstone so any rogue sync won't restore the deleted plan
-      try {
-        const rawDel = localStorage.getItem('zecratary_deleted_plan_slugs');
-        const delSlugs: string[] = rawDel ? JSON.parse(rawDel) : [];
-        if (pkg.slug && !delSlugs.includes(pkg.slug)) delSlugs.push(pkg.slug);
-        if (pkg.id && !delSlugs.includes(pkg.id)) delSlugs.push(pkg.id);
-        localStorage.setItem('zecratary_deleted_plan_slugs', JSON.stringify(delSlugs));
-      } catch (_) {}
-
-      /* Synced via /api/admin/settings */
       setPackages(updated);
 
       if (editingId === targetKey || editingId === pkg.id || editingId === pkg.slug || form.slug === pkg.slug) {
         handleStartNewPlan();
       }
 
-      // 3. Issue DELETE request to server API
-      try {
-        const queryParams = new URLSearchParams();
-        if (pkg.id) queryParams.set('id', pkg.id);
-        if (pkg.slug) queryParams.set('slug', pkg.slug);
+      // Issue DELETE request directly to server API
+      const queryParams = new URLSearchParams();
+      if (pkg.id) queryParams.set('id', pkg.id);
+      if (pkg.slug) queryParams.set('slug', pkg.slug);
 
-        await fetch(`/api/admin/plans?${queryParams.toString()}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: pkg.id, slug: pkg.slug })
-        });
-      } catch (apiErr) {
-        console.warn('Backend deletion call warning:', apiErr);
+      await fetch(`/api/admin/plans?${queryParams.toString()}`, { 
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pkg.id, slug: pkg.slug })
+      });
+
+      // Synchronize deletion with server store (Zero LocalStorage)
+      await persistServerAdminSettings({ subscriptionPlans: updated });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_plans_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
-
-      // 4. Dispatch sync event
-      window.dispatchEvent(new Event('zecratary_plans_updated'));
-      window.dispatchEvent(new Event('storage'));
 
       setFeedback({ type: 'success', msg: `"${pkg.name}" ${t('packageDeletedSuccess', 'package deleted successfully.')}` });
     } catch (e: any) {
@@ -1776,7 +1745,7 @@ export default function AdminSubscriptionPlans() {
                     )}
 
                     <p className="text-xs text-slate-600 font-medium mt-2">
-                      {form.descriptionMonthly || t('defaultMonthlyDesc', 'Full premium access, billed monthly')}
+                      {form.descriptionMonthly || t('defaultMonthlyDesc', 'Full kitchen access, billed monthly')}
                     </p>
                   </div>
                 ) : (

@@ -10,6 +10,11 @@ import {
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 import { applyThemeToDocument } from '@/lib/themeConfig';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
 
 interface SocialConfig {
   googleEnabled: boolean;
@@ -39,7 +44,9 @@ const DEFAULT_CONFIG: SocialConfig = {
 
 export default function SocialLoginSettingPage() {
   const router = useRouter();
-  const { t } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+
   const [user, setUser] = useState<User | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [config, setConfig] = useState<SocialConfig>(DEFAULT_CONFIG);
@@ -52,23 +59,62 @@ export default function SocialLoginSettingPage() {
 
   const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
+  // Dynamic Theme Synchronization & Day Mode Inversion
   const syncTheme = useCallback(() => {
     try {
-      if (typeof document !== 'undefined') {
-        const isDark = document.documentElement.classList.contains('dark');
-        setIsDayMode(!isDark);
-      }
-      const stored = typeof window !== 'undefined' ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config')) : null;
-      if (stored) {
-        applyThemeToDocument(JSON.parse(stored));
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      const isDay = mode === 'light' || mode === 'day';
+      setIsDayMode(isDay);
+
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
+      const c = stored ? JSON.parse(stored) : {};
+      const root = document.documentElement;
+
+      if (isDay) {
+        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
+        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
+        root.style.setProperty('--color-bg-dark', '#f8fafc');
+        root.style.setProperty('--color-background', '#f8fafc');
+        root.style.setProperty('--color-bg', '#f8fafc');
+        root.style.setProperty('--color-card-dark', '#ffffff');
+        root.style.setProperty('--color-card', '#ffffff');
+        root.style.setProperty('--color-inner-dark', '#f1f5f9');
+        root.style.setProperty('--color-border', '#e2e8f0');
+        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
+        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
+        root.style.setProperty('--color-text', '#0f172a');
+        root.style.setProperty('--color-text-secondary', '#64748b');
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '#f8fafc';
+        }
       } else {
-        applyThemeToDocument(null);
+        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
+        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
+        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
+        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
+        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
+        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
+        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
+        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
+        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
+        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
+        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
+        root.style.setProperty('--color-text', c.textColor || '#ffffff');
+        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '';
+        }
       }
+      applyThemeToDocument(c);
     } catch (_) {}
   }, []);
 
   useEffect(() => {
     syncTheme();
+    purgeLegacyBrowserAdminStorage();
+
     window.addEventListener('zecratary_theme_mode_changed', syncTheme);
     window.addEventListener('zecratary_theme_changed', syncTheme);
     window.addEventListener('zecratary_theme_updated', syncTheme);
@@ -95,37 +141,49 @@ export default function SocialLoginSettingPage() {
     setUser(active);
   }, [router]);
 
+  // Hydrate configurations directly from Server Storage (Zero LocalStorage)
   const loadConfig = useCallback(async () => {
+    purgeLegacyBrowserAdminStorage();
     try {
-      // 1. Fetch from centralized server settings store
-      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const settings = data.settings || data;
-        if (settings?.socialLogin) {
-          setConfig(prev => ({
-            ...prev,
-            googleEnabled: settings.socialLogin.googleEnabled ?? prev.googleEnabled,
-            googleClientId: settings.socialLogin.googleClientId ?? prev.googleClientId,
-            googleClientSecret: settings.socialLogin.googleClientSecret ?? prev.googleClientSecret,
-            facebookEnabled: settings.socialLogin.facebookEnabled ?? prev.facebookEnabled,
-            facebookClientId: settings.socialLogin.facebookClientId ?? settings.socialLogin.facebookAppId ?? prev.facebookClientId,
-            facebookClientSecret: settings.socialLogin.facebookClientSecret ?? settings.socialLogin.facebookAppSecret ?? prev.facebookClientSecret,
-            appleEnabled: settings.socialLogin.appleEnabled ?? prev.appleEnabled,
-            appleClientId: settings.socialLogin.appleClientId ?? prev.appleClientId,
-            appleTeamId: settings.socialLogin.appleTeamId ?? prev.appleTeamId,
-            appleKeyId: settings.socialLogin.appleKeyId ?? prev.appleKeyId
-          }));
-          return;
-        }
+      // 1. Centralized Server Settings API
+      const serverData = await fetchServerAdminSettings();
+      if (serverData && serverData.socialLogin) {
+        const sl = serverData.socialLogin;
+        setConfig(prev => ({
+          ...prev,
+          googleEnabled: sl.googleEnabled ?? prev.googleEnabled,
+          googleClientId: sl.googleClientId ?? prev.googleClientId,
+          googleClientSecret: sl.googleClientSecret ?? prev.googleClientSecret,
+          facebookEnabled: sl.facebookEnabled ?? prev.facebookEnabled,
+          facebookClientId: sl.facebookClientId ?? sl.facebookAppId ?? prev.facebookClientId,
+          facebookClientSecret: sl.facebookClientSecret ?? sl.facebookAppSecret ?? prev.facebookClientSecret,
+          appleEnabled: sl.appleEnabled ?? prev.appleEnabled,
+          appleClientId: sl.appleClientId ?? prev.appleClientId,
+          appleTeamId: sl.appleTeamId ?? prev.appleTeamId,
+          appleKeyId: sl.appleKeyId ?? prev.appleKeyId
+        }));
+        return;
       }
 
-      // 2. Fallback to reading from .env endpoint if server store hasn't initialized
-      const envRes = await fetch('/api/admin/social-env', { cache: 'no-store' });
+      // 2. Direct fallback to environment route
+      const envRes = await fetch('/api/admin/social-env?t=' + Date.now(), { cache: 'no-store' });
       if (envRes.ok) {
         const envJson = await envRes.json();
         if (envJson.success && envJson.config) {
-          setConfig(prev => ({ ...prev, ...envJson.config }));
+          const c = envJson.config;
+          setConfig(prev => ({
+            ...prev,
+            googleEnabled: c.googleEnabled ?? prev.googleEnabled,
+            googleClientId: c.googleClientId ?? prev.googleClientId,
+            googleClientSecret: c.googleClientSecret ?? prev.googleClientSecret,
+            facebookEnabled: c.facebookEnabled ?? prev.facebookEnabled,
+            facebookClientId: c.facebookClientId ?? c.facebookAppId ?? prev.facebookClientId,
+            facebookClientSecret: c.facebookClientSecret ?? c.facebookAppSecret ?? prev.facebookClientSecret,
+            appleEnabled: c.appleEnabled ?? prev.appleEnabled,
+            appleClientId: c.appleClientId ?? prev.appleClientId,
+            appleTeamId: c.appleTeamId ?? prev.appleTeamId,
+            appleKeyId: c.appleKeyId ?? prev.appleKeyId
+          }));
         }
       }
     } catch (err) {
@@ -135,12 +193,25 @@ export default function SocialLoginSettingPage() {
 
   useEffect(() => {
     loadConfig();
+
+    const handleSync = () => {
+      loadConfig();
+    };
+
+    window.addEventListener('zecratary_social_login_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    return () => {
+      window.removeEventListener('zecratary_social_login_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+    };
   }, [loadConfig]);
 
   const handleCopy = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(id);
-    setTimeout(() => setCopiedKey(null), 2000);
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedKey(id);
+      setTimeout(() => setCopiedKey(null), 2000);
+    }
   };
 
   const handleSaveAndSync = async (e?: React.FormEvent) => {
@@ -148,39 +219,35 @@ export default function SocialLoginSettingPage() {
     setLoading(true);
     setStatusMsg(null);
 
+    const payload = {
+      ...config,
+      facebookAppId: config.facebookClientId,
+      facebookAppSecret: config.facebookClientSecret,
+      updatedAt: new Date().toISOString()
+    };
+
     try {
-      // Direct server-backed persistence - ZERO localStorage read/writes
-      const res = await fetch('/api/admin/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          socialLogin: {
-            ...config,
-            facebookAppId: config.facebookClientId,
-            facebookAppSecret: config.facebookClientSecret
-          }
-        })
+      // 1. Direct server-backed persistence - ZERO localStorage read/writes
+      await persistServerAdminSettings({
+        socialLogin: payload
       });
 
-      // Synchronize to .env handler if present
+      // 2. Synchronize to .env handler if present
       try {
         await fetch('/api/admin/social-env', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(config)
+          body: JSON.stringify(payload)
         });
       } catch (_) {}
 
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Failed to persist settings to server storage');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_social_login_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
 
-      window.dispatchEvent(new Event('zecratary_social_login_updated'));
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-
       setStatusMsg({ 
-        text: t('socialSavedSuccess') || 'Configuration saved and synced to server successfully!', 
+        text: t('socialSavedSuccess', 'Configuration saved and synced to server successfully!'), 
         success: true 
       });
       setTimeout(() => setStatusMsg(null), 4000);
@@ -193,40 +260,56 @@ export default function SocialLoginSettingPage() {
 
   const handlePullEnv = async () => {
     setSyncingEnv(true);
+    setStatusMsg(null);
     try {
-      const res = await fetch('/api/admin/social-env', { cache: 'no-store' });
+      const res = await fetch('/api/admin/social-env?t=' + Date.now(), { cache: 'no-store' });
       const json = await res.json();
       if (res.ok && json.success && json.config) {
-        setConfig(prev => ({ ...prev, ...json.config }));
-        await fetch('/api/admin/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            socialLogin: {
-              ...json.config,
-              facebookAppId: json.config.facebookClientId,
-              facebookAppSecret: json.config.facebookClientSecret
-            }
-          })
+        const c = json.config;
+        const mergedConfig: SocialConfig = {
+          ...config,
+          googleEnabled: c.googleEnabled ?? config.googleEnabled,
+          googleClientId: c.googleClientId ?? config.googleClientId,
+          googleClientSecret: c.googleClientSecret ?? config.googleClientSecret,
+          facebookEnabled: c.facebookEnabled ?? config.facebookEnabled,
+          facebookClientId: c.facebookClientId ?? c.facebookAppId ?? config.facebookClientId,
+          facebookClientSecret: c.facebookClientSecret ?? c.facebookAppSecret ?? config.facebookClientSecret,
+          appleEnabled: c.appleEnabled ?? config.appleEnabled,
+          appleClientId: c.appleClientId ?? config.appleClientId,
+          appleTeamId: c.appleTeamId ?? config.appleTeamId,
+          appleKeyId: c.appleKeyId ?? config.appleKeyId
+        };
+        setConfig(mergedConfig);
+
+        // Persist directly to server store
+        await persistServerAdminSettings({
+          socialLogin: {
+            ...mergedConfig,
+            facebookAppId: mergedConfig.facebookClientId,
+            facebookAppSecret: mergedConfig.facebookClientSecret
+          }
         });
-        window.dispatchEvent(new Event('zecratary_social_login_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        setStatusMsg({ text: t('socialPullSuccess') || 'Values synced from .env successfully!', success: true });
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_social_login_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+        setStatusMsg({ text: t('socialPullSuccess', 'Values synced from .env successfully!'), success: true });
         setTimeout(() => setStatusMsg(null), 3000);
       } else {
         await loadConfig();
-        setStatusMsg({ text: t('socialPullSuccess') || 'Values refreshed from server store!', success: true });
+        setStatusMsg({ text: t('socialPullSuccess', 'Values refreshed from server store!'), success: true });
         setTimeout(() => setStatusMsg(null), 3000);
       }
     } catch (_) {
-      setStatusMsg({ text: t('socialPullError') || 'Failed to sync configuration.', success: false });
+      setStatusMsg({ text: t('socialPullError', 'Failed to sync configuration.'), success: false });
     } finally {
       setSyncingEnv(false);
     }
   };
 
   const testProvider = (provider: 'google' | 'facebook' | 'apple') => {
-    setDiagnostics(prev => ({ ...prev, [provider]: t('testingHandshake') || 'Testing handshake...' }));
+    setDiagnostics(prev => ({ ...prev, [provider]: t('testingHandshake', 'Testing handshake...') }));
     setTimeout(() => {
       if (provider === 'google') {
         const ok = config.googleClientId.includes('.apps.googleusercontent.com') || config.googleClientId.length > 10;
@@ -278,16 +361,16 @@ export default function SocialLoginSettingPage() {
                 borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                 color: isDayMode ? '#0f172a' : '#ffffff'
               }}
-              title={t('backToAdmin') || 'Back to Admin'}
+              title={t('backToAdmin', 'Back to Admin')}
             >
               <ArrowLeft className="h-4 w-4" />
             </Link>
             <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary, #E05638)' }}>
-              {t('socialLoginSettingsTitle') || 'Social Login & Identity Settings'}
+              {t('socialLoginSettingsTitle', 'Social Login & Identity Settings')}
             </h1>
           </div>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('socialLoginSettingsSubtitle') || 'Configure Google, Facebook, and Apple authentication and synchronize credentials to .env.'}
+            {t('socialLoginSettingsSubtitle', 'Configure Google, Facebook, and Apple authentication and synchronize credentials to .env.')}
           </p>
         </div>
 
@@ -304,7 +387,7 @@ export default function SocialLoginSettingPage() {
             }}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'} ${syncingEnv ? 'animate-spin' : ''}`} />
-            {t('syncFromEnvBtn') || 'Sync from .env'}
+            {t('syncFromEnvBtn', 'Sync from .env')}
           </button>
           <button
             type="button"
@@ -314,7 +397,7 @@ export default function SocialLoginSettingPage() {
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
             {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            {t('saveAndSyncEnvBtn') || 'Save & Sync .env'}
+            {t('saveAndSyncEnvBtn', 'Save & Sync .env')}
           </button>
         </div>
       </div>
@@ -350,7 +433,7 @@ export default function SocialLoginSettingPage() {
         >
           <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
             <span className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              {t('googleTitle') || 'Google Identity Services'}
+              {t('googleTitle', 'Google Identity Services')}
             </span>
             <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
               <input 
@@ -359,13 +442,13 @@ export default function SocialLoginSettingPage() {
                 onChange={(e) => setConfig({ ...config, googleEnabled: e.target.checked })} 
                 className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
               />
-              <span>{config.googleEnabled ? (t('enabled') || 'Enabled') : (t('disabled') || 'Disabled')}</span>
+              <span>{config.googleEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}</span>
             </label>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('clientId') || 'Client ID'}
+                {t('clientId', 'Client ID')}
               </label>
               <input 
                 type="text" 
@@ -382,7 +465,7 @@ export default function SocialLoginSettingPage() {
             </div>
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('clientSecret') || 'Client Secret'}
+                {t('clientSecret', 'Client Secret')}
               </label>
               <div className="relative">
                 <input 
@@ -437,7 +520,7 @@ export default function SocialLoginSettingPage() {
               }}
             >
               <Zap className={`h-3.5 w-3.5 ${isDayMode ? 'text-amber-600' : 'text-amber-400'}`} /> 
-              {t('testConnection') || 'Test Connection'}
+              {t('testConnection', 'Test Connection')}
             </button>
             <button 
               type="button" 
@@ -454,7 +537,7 @@ export default function SocialLoginSettingPage() {
               ) : (
                 <Copy className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} />
               )} 
-              {copiedKey === 'gcb' ? (t('copied') || 'Copied!') : (t('copyCallbackUrl') || 'Copy Callback URL')}
+              {copiedKey === 'gcb' ? t('copied', 'Copied!') : t('copyCallbackUrl', 'Copy Callback URL')}
             </button>
           </div>
         </div>
@@ -469,7 +552,7 @@ export default function SocialLoginSettingPage() {
         >
           <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
             <span className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              {t('facebookTitle') || 'Facebook Login (Meta Graph)'}
+              {t('facebookTitle', 'Facebook Login (Meta Graph)')}
             </span>
             <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
               <input 
@@ -478,13 +561,13 @@ export default function SocialLoginSettingPage() {
                 onChange={(e) => setConfig({ ...config, facebookEnabled: e.target.checked })} 
                 className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
               />
-              <span>{config.facebookEnabled ? (t('enabled') || 'Enabled') : (t('disabled') || 'Disabled')}</span>
+              <span>{config.facebookEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}</span>
             </label>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('facebookAppId') || 'Facebook App ID'}
+                {t('facebookAppId', 'Facebook App ID')}
               </label>
               <input 
                 type="text" 
@@ -501,7 +584,7 @@ export default function SocialLoginSettingPage() {
             </div>
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('facebookAppSecret') || 'Facebook App Secret'}
+                {t('facebookAppSecret', 'Facebook App Secret')}
               </label>
               <div className="relative">
                 <input 
@@ -556,7 +639,7 @@ export default function SocialLoginSettingPage() {
               }}
             >
               <Zap className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} /> 
-              {t('testConnection') || 'Test Connection'}
+              {t('testConnection', 'Test Connection')}
             </button>
             <button 
               type="button" 
@@ -573,7 +656,7 @@ export default function SocialLoginSettingPage() {
               ) : (
                 <Copy className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} />
               )} 
-              {copiedKey === 'fcb' ? (t('copied') || 'Copied!') : (t('copyCallbackUrl') || 'Copy Callback URL')}
+              {copiedKey === 'fcb' ? t('copied', 'Copied!') : t('copyCallbackUrl', 'Copy Callback URL')}
             </button>
           </div>
         </div>
@@ -588,7 +671,7 @@ export default function SocialLoginSettingPage() {
         >
           <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
             <span className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              {t('appleTitle') || 'Sign in with Apple'}
+              {t('appleTitle', 'Sign in with Apple')}
             </span>
             <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
               <input 
@@ -597,13 +680,13 @@ export default function SocialLoginSettingPage() {
                 onChange={(e) => setConfig({ ...config, appleEnabled: e.target.checked })} 
                 className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
               />
-              <span>{config.appleEnabled ? (t('enabled') || 'Enabled') : (t('disabled') || 'Disabled')}</span>
+              <span>{config.appleEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}</span>
             </label>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('appleClientId') || 'Service ID (Client ID)'}
+                {t('appleClientId', 'Service ID (Client ID)')}
               </label>
               <input 
                 type="text" 
@@ -620,7 +703,7 @@ export default function SocialLoginSettingPage() {
             </div>
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('appleTeamId') || 'Team ID'}
+                {t('appleTeamId', 'Team ID')}
               </label>
               <input 
                 type="text" 
@@ -637,7 +720,7 @@ export default function SocialLoginSettingPage() {
             </div>
             <div>
               <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('appleKeyId') || 'Key ID'}
+                {t('appleKeyId', 'Key ID')}
               </label>
               <input 
                 type="text" 
@@ -680,7 +763,7 @@ export default function SocialLoginSettingPage() {
               }}
             >
               <Zap className={`h-3.5 w-3.5 ${isDayMode ? 'text-slate-600' : 'text-slate-400'}`} /> 
-              {t('testConnection') || 'Test Connection'}
+              {t('testConnection', 'Test Connection')}
             </button>
             <button 
               type="button" 
@@ -697,7 +780,7 @@ export default function SocialLoginSettingPage() {
               ) : (
                 <Copy className={`h-3.5 w-3.5 ${isDayMode ? 'text-blue-600' : 'text-blue-400'}`} />
               )} 
-              {copiedKey === 'acb' ? (t('copied') || 'Copied!') : (t('copyReturnUrl') || 'Copy Return URL')}
+              {copiedKey === 'acb' ? t('copied', 'Copied!') : t('copyReturnUrl', 'Copy Return URL')}
             </button>
           </div>
         </div>
@@ -714,7 +797,7 @@ export default function SocialLoginSettingPage() {
           style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
         >
           {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          {t('saveAndSyncEnvBtn') || 'Save & Sync .env'}
+          {t('saveAndSyncEnvBtn', 'Save & Sync .env')}
         </button>
       </div>
     </div>
