@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.2.2",
+  "version": "7.2.3",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.2.2",
+  "version": "7.2.3",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -16120,7 +16120,7 @@ export default function AdminSubscriptionPlans() {
     } catch (e) {
       console.error('Failed to fetch packages from server:', e);
     }
-    setPackages([{ ...DEFAULT_PRESET_TASTER }, { ...DEFAULT_PRESET_NUTRITION_PRO }]);
+    setPackages([{ ...DEFAULT_PRESET_TASTER }]);
   }, []);
 
   useEffect(() => {
@@ -16336,7 +16336,7 @@ export default function AdminSubscriptionPlans() {
     }
   };
 
-  const handleDeletePackage = async (pkg: SubscriptionPackageConfig) => {
+    const handleDeletePackage = async (pkg: SubscriptionPackageConfig) => {
     if (pkg.slug === 'taster' || pkg.id === 'preset_taster') {
       alert(t('tasterCannotDeleteAlert', 'The Taster plan is required as the default free fallback and cannot be deleted.'));
       return;
@@ -16364,18 +16364,23 @@ export default function AdminSubscriptionPlans() {
         handleStartNewPlan();
       }
 
-      // Issue DELETE request directly to server API
+      // 1. Issue DELETE request directly to server API
       const queryParams = new URLSearchParams();
       if (pkg.id) queryParams.set('id', pkg.id);
       if (pkg.slug) queryParams.set('slug', pkg.slug);
 
-      await fetch(`/api/admin/plans?${queryParams.toString()}`, { 
+      const delRes = await fetch(`/api/admin/plans?${queryParams.toString()}`, { 
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: pkg.id, slug: pkg.slug })
       });
 
-      // Synchronize deletion with server store (Zero LocalStorage)
+      if (!delRes.ok) {
+        const errData = await delRes.json().catch(() => null);
+        throw new Error(errData?.error || 'Failed to delete plan from database.');
+      }
+
+      // 2. Synchronize deletion with server settings
       await persistServerAdminSettings({ subscriptionPlans: updated });
 
       if (typeof window !== 'undefined') {
@@ -16386,6 +16391,7 @@ export default function AdminSubscriptionPlans() {
       setFeedback({ type: 'success', msg: `"${pkg.name}" ${t('packageDeletedSuccess', 'package deleted successfully.')}` });
     } catch (e: any) {
       setFeedback({ type: 'error', msg: e.message || t('errorDeletingPlan', 'Error deleting package.') });
+      await fetchPackages();
     } finally {
       setDeletingId(null);
     }
@@ -17767,28 +17773,49 @@ export default function RecipeTypeAdminPage() {
     };
   }, [applyGlobalTheme]);
 
-  // Hydrate Recipe Types Exclusively from Server Storage
+  // Hydrate Recipe Types Exclusively from PostgreSQL Server Storage
   const loadTypesFromServer = useCallback(async () => {
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
+
+    let loadedTypes: string[] | null = null;
+
     try {
-      const serverData = await fetchServerAdminSettings();
-      if (serverData && Array.isArray(serverData.recipeTypes) && serverData.recipeTypes.length > 0) {
-        setRecipeTypes(serverData.recipeTypes);
-        setMemoryRecipeTypes(serverData.recipeTypes);
-      } else {
-        const fallback = getStoredRecipeTypes();
-        const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES;
-        setRecipeTypes(activeList);
-        setMemoryRecipeTypes(activeList);
+      // 1. Direct fetch from dedicated PostgreSQL recipe-type route
+      const res = await fetch('/api/admin/recipe-type?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data?.recipeTypes || data?.types);
+        if (Array.isArray(list) && list.length > 0) {
+          loadedTypes = list;
+        }
       }
-    } catch (err) {
-      console.error('[RecipeTypeAdminPage] Error loading server recipe types:', err);
-      const fallback = getStoredRecipeTypes();
-      setRecipeTypes(fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES);
-    } finally {
-      setIsLoading(false);
+    } catch (_) {}
+
+    // 2. Fallback to settings endpoint if needed
+    if (!loadedTypes || loadedTypes.length === 0) {
+      try {
+        const serverData = await fetchServerAdminSettings();
+        const list = (Array.isArray(serverData) ? serverData : null) ||
+                     (Array.isArray(serverData?.recipeTypes) ? serverData.recipeTypes : null) ||
+                     (Array.isArray(serverData?.settings?.recipeTypes) ? serverData.settings.recipeTypes : null);
+        if (Array.isArray(list) && list.length > 0) {
+          loadedTypes = list;
+        }
+      } catch (_) {}
     }
+
+    if (loadedTypes && loadedTypes.length > 0) {
+      setRecipeTypes(loadedTypes);
+      setMemoryRecipeTypes(loadedTypes);
+    } else {
+      const fallback = getStoredRecipeTypes();
+      const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES;
+      setRecipeTypes(activeList);
+      setMemoryRecipeTypes(activeList);
+    }
+
+    setIsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -17796,19 +17823,18 @@ export default function RecipeTypeAdminPage() {
     loadTypesFromServer();
 
     const handleSync = (e: any) => {
-      if (e?.detail && Array.isArray(e.detail)) {
+      if (e?.detail && Array.isArray(e.detail) && e.detail.length > 0) {
         setRecipeTypes(e.detail);
-      } else {
-        loadTypesFromServer();
+        setMemoryRecipeTypes(e.detail);
       }
     };
 
     window.addEventListener('zecratary_recipe_types_changed', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('zecratary_recipe_types_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_recipe_types_changed', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_recipe_types_updated', handleSync);
     };
   }, [t, version, loadTypesFromServer]);
 
@@ -17817,13 +17843,29 @@ export default function RecipeTypeAdminPage() {
     setTimeout(() => setFeedback(''), 3000);
   };
 
-  // Centralized Server-Backed Commit (Zero LocalStorage)
+  // Centralized Server-Backed Commit with Live Database Persistence
   const commitRecipeTypes = async (updated: string[]) => {
     setRecipeTypes(updated);
     setMemoryRecipeTypes(updated);
-    await saveRecipeTypes(updated);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+
+    try {
+      // 1. Save directly to dedicated PostgreSQL endpoint
+      const res = await fetch('/api/admin/recipe-type', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipeTypes: updated })
+      });
+
+      // 2. Also broadcast through shared helper
+      await saveRecipeTypes(updated);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_recipe_types_changed', { detail: updated }));
+        window.dispatchEvent(new CustomEvent('zecratary_recipe_types_updated', { detail: updated }));
+      }
+    } catch (err: any) {
+      console.error('[RecipeTypeAdminPage] Save error:', err);
+      notify(t('errorSaving', 'Error saving to database'));
     }
   };
 
@@ -30691,96 +30733,66 @@ export default function ManualRecipePage() {
 ```typescript
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  User as UserIcon, 
-  Mail, 
-  Shield, 
-  Award, 
-  Calendar, 
-  Moon, 
-  Sun, 
-  Palette, 
-  Lock, 
-  CheckCircle2, 
-  AlertCircle, 
-  Save, 
-  LogOut, 
-  ArrowRight, 
-  Sparkles, 
-  ChefHat, 
-  BookOpen, 
-  Heart,
-  RefreshCw,
-  Sliders
+  User as UserIcon, Mail, Lock, CheckCircle2, AlertCircle, Calendar, 
+  LogOut, Check, CreditCard, Zap, Sparkles, RefreshCw, Shield, 
+  Clock, Cpu, Repeat, Link2, Unlink, Key, Palette, Moon, Sun, ArrowRight, Heart
 } from 'lucide-react';
-import { getCurrentUser, logout, setCurrentUser, initAuthStorage, User } from '@/lib/auth';
+import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
-  applyThemeToDocument, 
-  toggleThemeMode, 
-  getEffectiveThemeMode, 
-  saveThemeColors 
+  applyThemeToDocument, toggleThemeMode, getEffectiveThemeMode, saveThemeColors 
 } from '@/lib/themeConfig';
 
+type SocialProvider = 'google' | 'facebook' | 'apple';
+
+interface ExtendedUser extends User {
+  linkedProviders?: SocialProvider[];
+}
+
+interface SubscriptionPlanItem {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  priceCents: number;
+  priceDollars?: number;
+  priceFormatted?: string;
+  interval: 'MONTH' | 'YEAR';
+  aiRecipeLimit?: number;
+  recipeLibraryLimit?: number;
+  socialScrapeLimit?: number;
+  canViewMacros?: boolean;
+  allowedAiModels?: string[] | string;
+  badge?: string;
+  saveBadge?: string;
+  subPrice?: string;
+  strikethroughPrice?: string;
+  buttonText?: string;
+  features?: string[];
+  isFree?: boolean;
+  tokenLimit?: number;
+  tokenReimburseFrequency?: 'once' | 'weekly' | 'monthly';
+}
+
 const PROFILE_PALETTES = [
-  { 
-    name: 'Zecratary Coral', 
-    primary: '#E05638', 
-    hover: '#c94529', 
-    accent: '#10b981', 
-    background: '#070b13', 
-    card: '#0b0f17', 
-    border: '#1e293b' 
-  },
-  { 
-    name: 'Emerald Forest', 
-    primary: '#10b981', 
-    hover: '#059669', 
-    accent: '#3b82f6', 
-    background: '#06130d', 
-    card: '#0a1d14', 
-    border: '#133526' 
-  },
-  { 
-    name: 'Cyber Blue', 
-    primary: '#2563eb', 
-    hover: '#1d4ed8', 
-    accent: '#10b981', 
-    background: '#080d1a', 
-    card: '#0c152b', 
-    border: '#1e293b' 
-  },
-  { 
-    name: 'Royal Purple', 
-    primary: '#8b5cf6', 
-    hover: '#7c3aed', 
-    accent: '#ec4899', 
-    background: '#0f081c', 
-    card: '#180d2e', 
-    border: '#2a1650' 
-  },
-  { 
-    name: 'Amber Gold', 
-    primary: '#f59e0b', 
-    hover: '#d97706', 
-    accent: '#10b981', 
-    background: '#120d04', 
-    card: '#1c1507', 
-    border: '#36270a' 
-  },
-  { 
-    name: 'Deep Midnight', 
-    primary: '#38bdf8', 
-    hover: '#0284c7', 
-    accent: '#a855f7', 
-    background: '#020617', 
-    card: '#080e22', 
-    border: '#172554' 
-  },
+  { name: 'Zecratary Coral', primary: '#E05638', hover: '#c94529', accent: '#10b981', background: '#070b13', card: '#0b0f17', border: '#1e293b' },
+  { name: 'Emerald Forest', primary: '#10b981', hover: '#059669', accent: '#3b82f6', background: '#06130d', card: '#0a1d14', border: '#133526' },
+  { name: 'Cyber Blue', primary: '#2563eb', hover: '#1d4ed8', accent: '#10b981', background: '#080d1a', card: '#0c152b', border: '#1e293b' },
+  { name: 'Royal Purple', primary: '#8b5cf6', hover: '#7c3aed', accent: '#ec4899', background: '#0f081c', card: '#180d2e', border: '#2a1650' },
+  { name: 'Amber Gold', primary: '#f59e0b', hover: '#d97706', accent: '#10b981', background: '#120d04', card: '#1c1507', border: '#36270a' },
+  { name: 'Deep Midnight', primary: '#38bdf8', hover: '#0284c7', accent: '#a855f7', background: '#020617', card: '#080e22', border: '#172554' },
 ];
+
+const sanitizeSinglePlan = (planInput?: string | string[]): string => {
+  if (!planInput) return 'taster';
+  let raw = Array.isArray(planInput) ? (planInput[0] || '') : String(planInput);
+  if (raw.includes(',')) raw = raw.split(',')[0] || '';
+  return raw.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '') || 'taster';
+};
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -30793,37 +30805,42 @@ export default function ProfilePage() {
     return fallback;
   }, [translate]);
 
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUserState] = useState<ExtendedUser | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [activePalette, setActivePalette] = useState<string>('');
-  const [savedCount, setSavedCount] = useState<number>(0);
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [notification, setNotification] = useState<{ text: string; success: boolean } | null>(null);
 
-  // Edit Profile Form State
-  const [displayName, setDisplayName] = useState<string>('');
-  const [dietPreference, setDietPreference] = useState<string>('none');
-  const [cookingLevel, setCookingLevel] = useState<string>('intermediate');
-  const [isSavingProfile, setIsSavingProfile] = useState<boolean>(false);
+  const [processingSocial, setProcessingSocial] = useState<SocialProvider | null>(null);
+  const [plans, setPlans] = useState<SubscriptionPlanItem[]>([]);
+  const [selectedInterval, setSelectedInterval] = useState<'ALL' | 'MONTH' | 'YEAR'>('ALL');
+  const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
+  const [savedCount, setSavedCount] = useState<number>(0);
 
-  // Password Change State
-  const [currentPassword, setCurrentPassword] = useState<string>('');
-  const [newPassword, setNewPassword] = useState<string>('');
-  const [confirmPassword, setConfirmPassword] = useState<string>('');
-  const [isUpdatingPassword, setIsUpdatingPassword] = useState<boolean>(false);
+  const [tokenUsage, setTokenUsage] = useState({
+    promptTokens: 1420,
+    completionTokens: 850,
+    totalTokens: 2270,
+    requestCount: 14,
+    monthlyLimit: 50000,
+    reimburseFrequency: 'monthly'
+  });
+
+  const isFetchingRef = useRef(false);
 
   const syncTheme = useCallback(() => {
+    const mode = getEffectiveThemeMode();
+    setIsDayMode(mode === 'light');
     try {
-      const mode = getEffectiveThemeMode();
-      const day = mode === 'light';
-      setIsDayMode(day);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      const stored = localStorage.getItem('zecratary_theme_colors');
       if (stored) {
         const c = JSON.parse(stored);
         applyThemeToDocument(c);
-        const match = PROFILE_PALETTES.find(
-          p => p.primary.toLowerCase() === (c.primary || c.primaryColor || '').toLowerCase()
-        );
+        const match = PROFILE_PALETTES.find(p => p.primary.toLowerCase() === (c.primary || c.primaryColor || '').toLowerCase());
         if (match) setActivePalette(match.name);
       } else {
         applyThemeToDocument(null);
@@ -30845,33 +30862,96 @@ export default function ProfilePage() {
     };
   }, [syncTheme]);
 
-  useEffect(() => {
-    initAuthStorage();
-    const active = getCurrentUser();
-    if (!active) {
-      router.replace('/login');
-      return;
-    }
-    setUser(active);
-    setDisplayName(active.name || '');
+  const loadProfileData = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
 
-    fetch('/api/saved-recipes', { cache: 'no-store' })
-      .then(res => res.json())
-      .then(data => {
-        if (data?.recipes && Array.isArray(data.recipes)) {
-          setSavedCount(data.recipes.length);
+    try {
+      initAuthStorage();
+      let active = getCurrentUser() as ExtendedUser | null;
+      if (!active) {
+        router.replace('/login');
+        return;
+      }
+
+      // Fetch user from PostgreSQL
+      try {
+        const uRes = await fetch('/api/admin/users', { cache: 'no-store' });
+        if (uRes.ok) {
+          const uData = await uRes.json();
+          const list = Array.isArray(uData.users) ? uData.users : [];
+          const matched = list.find((x: any) => x.id === active?.id || x.email?.toLowerCase() === active?.email?.toLowerCase());
+          if (matched) {
+            active = { ...active, ...matched, subscriptionPlan: sanitizeSinglePlan(matched.subscriptionPlan) };
+          }
         }
-      })
-      .catch(() => {});
+      } catch (_) {}
+
+      // Fetch payment verification from PostgreSQL
+      try {
+        const pRes = await fetch('/api/admin/payment', { cache: 'no-store' });
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          const txs = Array.isArray(pData.transactions) ? pData.transactions : [];
+          const userEmail = active.email.toLowerCase().trim();
+          const activeTx = txs.find((t: any) => 
+            (t.customerEmail || '').toLowerCase().trim() === userEmail &&
+            t.status === 'succeeded' &&
+            (!t.expiryDate || new Date(t.expiryDate).getTime() > Date.now())
+          );
+          if (activeTx) {
+            active.subscriptionPlan = sanitizeSinglePlan(activeTx.planSlug);
+            (active as any).planExpiryDate = activeTx.expiryDate;
+          } else {
+            active.subscriptionPlan = 'taster';
+          }
+        }
+      } catch (_) {}
+
+      // Fetch available plans from PostgreSQL
+      try {
+        const plansRes = await fetch('/api/admin/plans', { cache: 'no-store' });
+        if (plansRes.ok) {
+          const pData = await plansRes.json();
+          const list = Array.isArray(pData.plans) ? pData.plans : [];
+          setPlans(list);
+          const current = list.find((p: any) => p.slug === active?.subscriptionPlan);
+          if (current && current.tokenLimit !== undefined) {
+            setTokenUsage(prev => ({
+              ...prev,
+              monthlyLimit: current.tokenLimit,
+              reimburseFrequency: current.tokenReimburseFrequency || 'monthly'
+            }));
+          }
+        }
+      } catch (_) {}
+
+      // Fetch saved recipes count from PostgreSQL
+      try {
+        const rRes = await fetch('/api/recipes/saved', { cache: 'no-store' });
+        if (rRes.ok) {
+          const rData = await rRes.json();
+          if (Array.isArray(rData.recipes)) setSavedCount(rData.recipes.length);
+        }
+      } catch (_) {}
+
+      setUserState(active);
+      setName(active.name || '');
+      setEmail(active.email || '');
+    } finally {
+      isFetchingRef.current = false;
+    }
   }, [router]);
+
+  useEffect(() => {
+    loadProfileData();
+  }, [loadProfileData]);
 
   const handleModeToggle = () => {
     const nextMode = toggleThemeMode();
     setIsDayMode(nextMode === 'light');
     setNotification({
-      text: nextMode === 'light' 
-        ? t('profile.dayModeActivated', 'Day Mode activated.') 
-        : t('profile.darkModeActivated', 'Dark Mode activated.'),
+      text: nextMode === 'light' ? t('profile.dayModeActivated', 'Day Mode activated.') : t('profile.darkModeActivated', 'Dark Mode activated.'),
       success: true
     });
     setTimeout(() => setNotification(null), 3000);
@@ -30893,25 +30973,22 @@ export default function ProfilePage() {
       textSecondary: isDayMode ? '#64748b' : '#94a3b8'
     };
     await saveThemeColors(colors);
-    setNotification({
-      text: `${t('profile.paletteApplied', 'Palette applied')}: ${preset.name}`,
-      success: true
-    });
+    setNotification({ text: `${t('profile.paletteApplied', 'Palette applied')}: ${preset.name}`, success: true });
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const handleSaveProfile = async (e: React.FormEvent) => {
+  const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    setIsSavingProfile(true);
+    if (password && password !== confirmPassword) {
+      setNotification({ text: t('profile.passwordMismatch', 'Passwords do not match.'), success: false });
+      return;
+    }
 
     try {
-      const updatedUser: User = {
-        ...user,
-        name: displayName.trim() || user.name
-      };
+      const updatedUser: ExtendedUser = { ...user, name: name.trim() || user.name };
       setCurrentUser(updatedUser);
-      setUser(updatedUser);
+      setUserState(updatedUser);
 
       await fetch('/api/admin/users', {
         method: 'POST',
@@ -30925,80 +31002,100 @@ export default function ProfilePage() {
         })
       });
 
-      setNotification({ text: t('profile.savedSuccess', 'Profile details updated successfully.'), success: true });
+      setPassword('');
+      setConfirmPassword('');
+      setNotification({ text: t('profile.savedSuccess', 'Profile changes saved in PostgreSQL.'), success: true });
       setTimeout(() => setNotification(null), 3500);
     } catch (_) {
       setNotification({ text: t('profile.saveError', 'Failed to save profile changes.'), success: false });
+    }
+  };
+
+  const handleSelectPlan = async (plan: SubscriptionPlanItem) => {
+    if (!user) return;
+    setPaymentLoading(plan.id || plan.slug);
+
+    try {
+      const isFree = Boolean(plan.isFree || plan.priceDollars === 0 || plan.priceCents === 0);
+      const targetSlug = sanitizeSinglePlan(plan.slug);
+      const userEmail = user.email.toLowerCase().trim();
+
+      const expiry = isFree ? null : new Date(Date.now() + 30 * 86400000).toISOString();
+
+      // Record transaction directly in PostgreSQL
+      if (!isFree) {
+        await fetch('/api/admin/payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerName: user.name,
+            customerEmail: userEmail,
+            planName: plan.name,
+            planSlug: targetSlug,
+            amount: plan.priceDollars || (plan.priceCents ? plan.priceCents / 100 : 0),
+            currency: 'USD',
+            gateway: 'stripe',
+            status: 'succeeded',
+            testMode: true,
+            expiryDate: expiry
+          })
+        });
+      }
+
+      // Update user plan in PostgreSQL
+      await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: user.id,
+          name: user.name,
+          email: userEmail,
+          role: user.role,
+          subscriptionPlan: targetSlug,
+          planExpiryDate: expiry
+        })
+      });
+
+      const updatedUser = { ...user, subscriptionPlan: targetSlug, planExpiryDate: expiry };
+      setCurrentUser(updatedUser);
+      setUserState(updatedUser);
+
+      setNotification({ text: `${t('profile.planChanged', 'Plan updated to')}: ${plan.name}`, success: true });
+      setTimeout(() => setNotification(null), 4000);
+    } catch (err: any) {
+      setNotification({ text: err.message || 'Plan update failed.', success: false });
     } finally {
-      setIsSavingProfile(false);
+      setPaymentLoading(null);
     }
-  };
-
-  const handlePasswordUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newPassword !== confirmPassword) {
-      setNotification({ text: t('profile.passwordMismatch', 'New passwords do not match.'), success: false });
-      return;
-    }
-    if (newPassword.length < 6) {
-      setNotification({ text: t('profile.passwordLength', 'Password must be at least 6 characters.'), success: false });
-      return;
-    }
-
-    setIsUpdatingPassword(true);
-    setTimeout(() => {
-      setIsUpdatingPassword(false);
-      setCurrentPassword('');
-      newPassword && setNewPassword('');
-      confirmPassword && setConfirmPassword('');
-      setNotification({ text: t('profile.passwordSuccess', 'Password updated successfully.'), success: true });
-      setTimeout(() => setNotification(null), 3500);
-    }, 600);
-  };
-
-  const handleLogout = () => {
-    logout();
-    router.replace('/login');
   };
 
   if (!user) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
-        <div 
-          className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-          style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }}
-        />
+        <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }} />
       </div>
     );
   }
 
-  const roleLabel = user.role === 'admin' ? t('common.administrator', 'Administrator') : t('common.member', 'Member');
-  const planLabel = (user.subscriptionPlan || 'taster').toUpperCase();
+  const isCurrentPlan = (p: SubscriptionPlanItem) => sanitizeSinglePlan(p.slug) === sanitizeSinglePlan(user.subscriptionPlan);
 
   return (
     <div 
-      className="max-w-5xl mx-auto space-y-8 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="max-w-6xl mx-auto space-y-8 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
       style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
     >
-      {/* NOTIFICATION BANNER */}
       {notification && (
-        <div 
-          className={`p-3.5 border rounded-2xl text-xs font-bold flex items-center gap-2 shadow-lg animate-in fade-in ${
-            notification.success
-              ? isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-              : isDayMode ? 'bg-red-50 border-red-300 text-red-800' : 'bg-red-950/40 border-red-800/80 text-red-300'
-          }`}
-        >
-          {notification.success ? (
-            <CheckCircle2 className={`h-4 w-4 shrink-0 ${isDayMode ? 'text-emerald-600' : 'text-emerald-400'}`} />
-          ) : (
-            <AlertCircle className={`h-4 w-4 shrink-0 ${isDayMode ? 'text-red-600' : 'text-red-400'}`} />
-          )}
+        <div className={`p-3.5 border rounded-2xl text-xs font-bold flex items-center gap-2 shadow-lg animate-in fade-in ${
+          notification.success 
+            ? isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+            : isDayMode ? 'bg-red-50 border-red-300 text-red-800' : 'bg-red-950/40 border-red-800/80 text-red-300'
+        }`}>
+          {notification.success ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
           <span>{notification.text}</span>
         </div>
       )}
 
-      {/* HEADER WITH ACCOUNT HERO */}
+      {/* ACCOUNT HERO */}
       <div 
         className="border rounded-3xl p-6 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 transition-colors duration-200"
         style={{
@@ -31007,36 +31104,17 @@ export default function ProfilePage() {
         }}
       >
         <div className="flex items-center gap-4">
-          <div 
-            className="w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl text-white shadow-lg shrink-0"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-          >
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl text-white shadow-lg shrink-0" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
             {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
           </div>
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                {user.name}
-              </h1>
-              <span 
-                className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border"
-                style={{ 
-                  backgroundColor: isDayMode ? '#eff6ff' : '#1e293b', 
-                  borderColor: isDayMode ? '#bfdbfe' : '#334155',
-                  color: isDayMode ? '#1d4ed8' : '#60a5fa'
-                }}
-              >
-                {roleLabel}
+              <h1 className="text-xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{user.name}</h1>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border" style={{ backgroundColor: isDayMode ? '#eff6ff' : '#1e293b', borderColor: isDayMode ? '#bfdbfe' : '#334155', color: isDayMode ? '#1d4ed8' : '#60a5fa' }}>
+                {user.role}
               </span>
-              <span 
-                className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border"
-                style={{ 
-                  backgroundColor: isDayMode ? '#ecfdf5' : '#064e3b', 
-                  borderColor: isDayMode ? '#a7f3d0' : '#059669',
-                  color: isDayMode ? '#047857' : '#34d399'
-                }}
-              >
-                {planLabel} {t('common.plan', 'Plan')}
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border" style={{ backgroundColor: isDayMode ? '#ecfdf5' : '#064e3b', borderColor: isDayMode ? '#a7f3d0' : '#059669', color: isDayMode ? '#047857' : '#34d399' }}>
+                {user.subscriptionPlan || 'Taster'}
               </span>
             </div>
             <p className="text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
@@ -31045,100 +31123,21 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* TOP QUICK ACTION BUTTONS */}
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
           {user.role === 'admin' && (
-            <Link
-              href="/admin"
-              className="px-4 py-2 border rounded-xl text-xs font-bold transition flex items-center gap-1.5 hover:opacity-80 shadow-xs"
-              style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d',
-                borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            >
+            <Link href="/admin" className="px-4 py-2 border rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs" style={{ backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}>
               <Shield className="h-3.5 w-3.5 text-[var(--color-primary)]" />
               {t('common.adminPanel', 'Admin Panel')}
             </Link>
           )}
-
-          <Link
-            href="/package"
-            className="px-4 py-2 rounded-xl text-xs font-bold text-white transition flex items-center gap-1.5 shadow-md hover:opacity-90"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            {t('profile.upgradePlan', 'Upgrade Plan')}
-          </Link>
-
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="px-3.5 py-2 border rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-            style={{
-              backgroundColor: isDayMode ? '#fef2f2' : '#2a1215',
-              borderColor: isDayMode ? '#fecaca' : '#5c1d24',
-              color: isDayMode ? '#dc2626' : '#f87171'
-            }}
-          >
+          <button type="button" onClick={() => { logoutUser(); router.replace('/login'); }} className="px-3.5 py-2 border rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs text-red-500 hover:bg-red-500/10">
             <LogOut className="h-3.5 w-3.5" />
             {t('common.logout', 'Sign Out')}
           </button>
         </div>
       </div>
 
-      {/* METRIC / USAGE TILES */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-        <div 
-          className="border rounded-2xl p-4 shadow-md space-y-1 transition-colors duration-200"
-          style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-          }}
-        >
-          <span className="font-bold flex items-center gap-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-            <Heart className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-            {t('profile.savedRecipes', 'Saved Recipes')}
-          </span>
-          <div className="text-2xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            {savedCount}
-          </div>
-        </div>
-
-        <div 
-          className="border rounded-2xl p-4 shadow-md space-y-1 transition-colors duration-200"
-          style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-          }}
-        >
-          <span className="font-bold flex items-center gap-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-            <ChefHat className="h-3.5 w-3.5 text-[var(--color-accent)]" />
-            {t('profile.activePlanTier', 'Active Tier')}
-          </span>
-          <div className="text-2xl font-black capitalize" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            {user.subscriptionPlan || 'Taster'}
-          </div>
-        </div>
-
-        <div 
-          className="border rounded-2xl p-4 shadow-md space-y-1 transition-colors duration-200"
-          style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-          }}
-        >
-          <span className="font-bold flex items-center gap-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-            <Palette className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-            {t('profile.currentMode', 'Display Mode')}
-          </span>
-          <div className="text-2xl font-black capitalize" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            {isDayMode ? t('profile.dayMode', 'Day Mode') : t('profile.darkMode', 'Dark Mode')}
-          </div>
-        </div>
-      </div>
-
-      {/* SECTION 1: APPEARANCE, DAY/DARK MODE & COLOR THEME CONTROLS */}
+      {/* THEME & APPEARANCE CONTROLS */}
       <div 
         className="border rounded-3xl p-6 shadow-xl space-y-6 transition-colors duration-200"
         style={{
@@ -31147,92 +31146,32 @@ export default function ProfilePage() {
         }}
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <Palette className="h-5 w-5 text-[var(--color-primary)]" />
-              <h2 className="text-base font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                {t('profile.appearanceThemeTitle', 'Appearance & Theme Synchronization')}
-              </h2>
-            </div>
-            <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-              {t('profile.appearanceThemeDesc', 'Toggle between Day (Light) and Dark (Night) mode or switch your coordinated theme color palette.')}
-            </p>
+          <div className="flex items-center gap-2">
+            <Palette className="h-5 w-5 text-[var(--color-primary)]" />
+            <h2 className="text-base font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              {t('profile.appearanceThemeTitle', 'Appearance & Theme Synchronization')}
+            </h2>
           </div>
-
-          {/* DAY/DARK MODE TOGGLE BUTTON */}
-          <button
-            type="button"
-            onClick={handleModeToggle}
-            className="px-4 py-2.5 border rounded-2xl font-bold text-xs flex items-center gap-2 cursor-pointer transition shadow-md hover:opacity-90 shrink-0"
-            style={{
-              backgroundColor: isDayMode ? '#f8fafc' : '#141b2d',
-              borderColor: isDayMode ? '#cbd5e1' : '#334155',
-              color: isDayMode ? '#0f172a' : '#ffffff'
-            }}
-          >
-            {isDayMode ? (
-              <>
-                <Sun className="h-4 w-4 text-amber-500" />
-                <span>{t('profile.switchToDark', 'Switch to Dark Mode')}</span>
-              </>
-            ) : (
-              <>
-                <Moon className="h-4 w-4 text-blue-400" />
-                <span>{t('profile.switchToDay', 'Switch to Day Mode')}</span>
-              </>
-            )}
+          <button type="button" onClick={handleModeToggle} className="px-4 py-2 border rounded-2xl font-bold text-xs flex items-center gap-2 cursor-pointer shadow-md hover:opacity-90 shrink-0" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#141b2d', borderColor: isDayMode ? '#cbd5e1' : '#334155', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+            {isDayMode ? <><Sun className="h-4 w-4 text-amber-500" /><span>Switch to Dark Mode</span></> : <><Moon className="h-4 w-4 text-blue-400" /><span>Switch to Day Mode</span></>}
           </button>
         </div>
 
-        {/* COOPERATIVE COLOR PALETTE PICKER */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-              {t('profile.quickPalettes', 'Coordinated Color Palettes:')}
-            </span>
-            {user.role === 'admin' && (
-              <Link 
-                href="/admin" 
-                className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1"
-              >
-                <span>{t('profile.fullCustomizer', 'Open Full Hex Customizer')}</span>
-                <ArrowRight className="h-3 w-3" />
-              </Link>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
-            {PROFILE_PALETTES.map((preset) => {
-              const isSelected = activePalette === preset.name;
-              return (
-                <button
-                  key={preset.name}
-                  type="button"
-                  onClick={() => handleSelectPalette(preset)}
-                  className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1.5 transition text-left cursor-pointer shadow-xs ${
-                    isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-85'
-                  }`}
-                  style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                    borderColor: isSelected ? 'var(--color-primary)' : isDayMode ? '#cbd5e1' : '#1e293b'
-                  }}
-                >
-                  <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.primary }} />
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.accent }} />
-                    <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.background, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
-                  </div>
-                  <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    {preset.name}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+          {PROFILE_PALETTES.map((preset) => (
+            <button key={preset.name} type="button" onClick={() => handleSelectPalette(preset)} className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1.5 transition text-left cursor-pointer shadow-xs ${activePalette === preset.name ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-85'}`} style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: activePalette === preset.name ? 'var(--color-primary)' : isDayMode ? '#cbd5e1' : '#1e293b' }}>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.primary }} />
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.accent }} />
+                <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.background, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
+              </div>
+              <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{preset.name}</span>
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* SECTION 2: EDIT PROFILE & PREFERENCES */}
+      {/* CREDENTIALS FORM */}
       <div 
         className="border rounded-3xl p-6 shadow-xl space-y-6 transition-colors duration-200"
         style={{
@@ -31242,108 +31181,41 @@ export default function ProfilePage() {
       >
         <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
           <UserIcon className="h-5 w-5 text-[var(--color-primary)]" />
-          <h2 className="text-base font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            {t('profile.accountDetails', 'Personal Details & Preferences')}
-          </h2>
+          <h2 className="text-base font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Personal Credentials</h2>
         </div>
 
-        <form onSubmit={handleSaveProfile} className="space-y-4 text-xs">
+        <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('profile.displayNameLabel', 'Full Name')}
-              </label>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 font-bold outline-none transition"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-              />
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Full Name</label>
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full border rounded-xl px-3 py-2 font-bold outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
             </div>
-
             <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('profile.emailLabel', 'Email Address (Account ID)')}
-              </label>
-              <input
-                type="email"
-                disabled
-                value={user.email}
-                className="w-full border rounded-xl px-3 py-2 font-mono outline-none opacity-60 cursor-not-allowed"
-                style={{
-                  backgroundColor: isDayMode ? '#e2e8f0' : '#141b2d',
-                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-              />
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Email Address</label>
+              <input type="email" disabled value={email} className="w-full border rounded-xl px-3 py-2 font-mono outline-none opacity-60 cursor-not-allowed" style={{ backgroundColor: isDayMode ? '#e2e8f0' : '#141b2d', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('profile.dietaryPreference', 'Dietary Preference')}
-              </label>
-              <select
-                value={dietPreference}
-                onChange={(e) => setDietPreference(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 font-bold outline-none cursor-pointer"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-              >
-                <option value="none">{t('diet.none', 'No Restrictions / Omnivore')}</option>
-                <option value="vegetarian">{t('diet.vegetarian', 'Vegetarian')}</option>
-                <option value="vegan">{t('diet.vegan', 'Vegan')}</option>
-                <option value="keto">{t('diet.keto', 'Ketogenic (Low Carb)')}</option>
-                <option value="gluten-free">{t('diet.glutenFree', 'Gluten-Free')}</option>
-              </select>
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>New Password (optional)</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full border rounded-xl px-3 py-2 font-mono outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
             </div>
-
             <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('profile.cookingExperience', 'Cooking Experience Level')}
-              </label>
-              <select
-                value={cookingLevel}
-                onChange={(e) => setCookingLevel(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 font-bold outline-none cursor-pointer"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-              >
-                <option value="beginner">{t('experience.beginner', 'Beginner / Home Cook')}</option>
-                <option value="intermediate">{t('experience.intermediate', 'Intermediate Foodie')}</option>
-                <option value="advanced">{t('experience.advanced', 'Advanced Culinary Enthusiast')}</option>
-                <option value="pro">{t('experience.pro', 'Professional Chef')}</option>
-              </select>
+              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Confirm Password</label>
+              <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" className="w-full border rounded-xl px-3 py-2 font-mono outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
             </div>
           </div>
 
           <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={isSavingProfile}
-              className="px-5 py-2.5 rounded-xl text-white font-extrabold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            >
-              {isSavingProfile ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              {t('profile.saveChanges', 'Save Changes')}
+            <button type="submit" className="px-5 py-2.5 rounded-xl text-white font-extrabold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
+              Save Credentials
             </button>
           </div>
         </form>
       </div>
 
-      {/* SECTION 3: SECURITY & PASSWORD UPDATE */}
+      {/* SUBSCRIPTION PLAN UPGRADES / DOWNGRADES */}
       <div 
         className="border rounded-3xl p-6 shadow-xl space-y-6 transition-colors duration-200"
         style={{
@@ -31351,86 +31223,45 @@ export default function ProfilePage() {
           borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
         }}
       >
-        <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-          <Lock className="h-5 w-5 text-[var(--color-primary)]" />
-          <h2 className="text-base font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            {t('profile.securityTitle', 'Security & Password')}
-          </h2>
+        <div className="border-b pb-3 flex items-center justify-between" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+          <div className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5 text-[var(--color-primary)]" />
+            <h2 className="text-base font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Subscription Membership Plans</h2>
+          </div>
+          <span className="text-xs font-mono text-emerald-500 font-bold">{tokenUsage.monthlyLimit.toLocaleString()} Tokens / {tokenUsage.reimburseFrequency}</span>
         </div>
 
-        <form onSubmit={handlePasswordUpdate} className="space-y-4 text-xs">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('profile.currentPassword', 'Current Password')}
-              </label>
-              <input
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-              />
-            </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+          {plans.map((p) => {
+            const active = isCurrentPlan(p);
+            return (
+              <div key={p.id || p.slug} className={`border rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-sm ${active ? 'ring-2 ring-emerald-500' : ''}`} style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: active ? '#10b981' : isDayMode ? '#cbd5e1' : '#1e293b' }}>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-start">
+                    <h3 className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{p.name}</h3>
+                    {active && <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">Active</span>}
+                  </div>
+                  <div className="text-2xl font-black text-[var(--color-primary)]">
+                    {p.isFree ? 'Free' : `$${Number(p.priceDollars || 0).toFixed(2)}`}
+                    <span className="text-xs font-normal text-slate-500">/{p.interval === 'YEAR' ? 'yr' : 'mo'}</span>
+                  </div>
+                  <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{p.description}</p>
+                </div>
 
-            <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('profile.newPassword', 'New Password')}
-              </label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-              />
-            </div>
-
-            <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                {t('profile.confirmPassword', 'Confirm New Password')}
-              </label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
-                style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={isUpdatingPassword}
-              className="px-5 py-2.5 border rounded-xl font-bold text-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:opacity-80"
-              style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d',
-                borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                color: isDayMode ? '#0f172a' : '#ffffff'
-              }}
-            >
-              {isUpdatingPassword ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />}
-              {t('profile.updatePasswordBtn', 'Update Password')}
-            </button>
-          </div>
-        </form>
+                <button
+                  type="button"
+                  disabled={active || paymentLoading === (p.id || p.slug)}
+                  onClick={() => handleSelectPlan(p)}
+                  className="w-full py-2.5 rounded-xl font-black text-xs text-white transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  style={{ backgroundColor: active ? '#10b981' : 'var(--color-primary, #E05638)' }}
+                >
+                  {paymentLoading === (p.id || p.slug) ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : active ? <Check className="h-3.5 w-3.5" /> : null}
+                  {active ? 'Current Active Plan' : p.isFree ? 'Switch to Free' : `Change to ${p.name}`}
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -31841,120 +31672,39 @@ export default function UsersRedirectPage() {
 ## File: `apps/web/src/app/api/auth/google-session/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function syncUserToStore(user: any): any {
-  const cwd = process.cwd();
-  const paths = [
-    path.join(cwd, 'apps/web/data/users.json'),
-    path.join(cwd, 'data/users.json')
-  ];
-
-  let resolvedUser = user;
-
-  for (const p of paths) {
-    try {
-      let usersList: any[] = [];
-      if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, 'utf-8');
-        usersList = JSON.parse(raw);
-        if (!Array.isArray(usersList)) usersList = [];
-      } else {
-        const dir = path.dirname(p);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      }
-
-      const existingIndex = usersList.findIndex(
-        (u) => u && u.email && u.email.toLowerCase() === user.email.toLowerCase()
-      );
-
-      if (existingIndex >= 0) {
-        usersList[existingIndex] = {
-          ...usersList[existingIndex],
-          name: user.name || usersList[existingIndex].name,
-          picture: user.picture || usersList[existingIndex].picture,
-          avatar: user.picture || usersList[existingIndex].avatar
-        };
-        resolvedUser = usersList[existingIndex];
-      } else {
-        usersList.unshift(user);
-      }
-
-      fs.writeFileSync(p, JSON.stringify(usersList, null, 2), 'utf-8');
-    } catch (err) {
-      console.error('[google-session] Error syncing user to store:', p, err);
-    }
-  }
-
-  return resolvedUser;
-}
-
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const body = await req.json();
-    const profile = body.profile;
-    const requestedCallback = body.callbackUrl;
-
-    if (!profile || !profile.email) {
-      return NextResponse.json({ error: 'Missing profile email' }, { status: 400 });
+    const sessionCookie = req.cookies.get('zecratary_session')?.value;
+    if (!sessionCookie) {
+      return NextResponse.json({ authenticated: false }, { status: 401 });
     }
 
-    const email = profile.email.toLowerCase().trim();
-    const name = profile.name || profile.given_name || email.split('@')[0];
-    const picture = profile.picture || '';
-    const googleId = profile.sub || profile.id || Date.now().toString();
-
-    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
-
-    const candidateUser = {
-      id: `usr_g_${googleId}`,
-      name,
-      email,
-      role: isEmailAdmin ? 'admin' : 'user',
-      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
-      picture,
-      avatar: picture,
-      createdAt: new Date().toISOString()
-    };
-
-    const finalUser = syncUserToStore(candidateUser);
-
-    // Prevent circular redirects to /login
-    let targetUrl = requestedCallback;
-    if (!targetUrl || targetUrl === '/login' || targetUrl.startsWith('/login?')) {
-      targetUrl = finalUser.role === 'admin' ? '/admin' : '/profile';
+    let parsed: any;
+    try {
+      parsed = JSON.parse(decodeURIComponent(sessionCookie));
+    } catch (_) {
+      parsed = JSON.parse(sessionCookie);
     }
 
-    const response = NextResponse.json({
-      success: true,
-      user: finalUser,
-      redirectUrl: targetUrl
-    });
+    if (!parsed?.email) {
+      return NextResponse.json({ authenticated: false }, { status: 401 });
+    }
 
-    const serializedUser = JSON.stringify(finalUser);
-    response.cookies.set('zecratary_current_user', serializedUser, {
-      path: '/',
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 86400 * 7
-    });
+    const rows = await query('SELECT id, name, email, role, subscription_plan AS "subscriptionPlan" FROM users WHERE email = $1 LIMIT 1', [parsed.email.toLowerCase().trim()]);
+    if (rows.length === 0) {
+      return NextResponse.json({ authenticated: false }, { status: 401 });
+    }
 
-    response.cookies.set('zecratary_auth_session', serializedUser, {
-      path: '/',
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 86400 * 7
-    });
-
-    return response;
+    return NextResponse.json({
+      authenticated: true,
+      user: rows[0]
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
-    console.error('[google-session] Error:', err);
-    return NextResponse.json({ error: err.message || 'Session creation failed' }, { status: 500 });
+    return NextResponse.json({ authenticated: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -32117,131 +31867,35 @@ export async function POST(req: Request) {
 ## File: `apps/web/src/app/api/auth/callback/google/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function getAdminSettings(): any {
-  const cwd = process.cwd();
-  const paths = [
-    path.join(cwd, 'apps/web/data/admin_settings.json'),
-    path.join(cwd, 'data/admin_settings.json')
-  ];
-  for (const p of paths) {
-    if (fs.existsSync(p)) {
-      try {
-        const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
-        if (parsed && typeof parsed === 'object') return parsed;
-      } catch (_) {}
-    }
-  }
-  return {};
-}
-
-function getRedirectUri(req: NextRequest): string {
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || new URL(req.url).host;
-  const proto = req.headers.get('x-forwarded-proto') || (req.url.startsWith('https') ? 'https' : 'http');
-  return `${proto}://${host}/api/auth/callback/google`;
-}
-
-function syncUserToStore(user: any): any {
-  const cwd = process.cwd();
-  const paths = [
-    path.join(cwd, 'apps/web/data/users.json'),
-    path.join(cwd, 'data/users.json')
-  ];
-
-  let resolvedUser = user;
-
-  for (const p of paths) {
-    try {
-      let usersList: any[] = [];
-      if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, 'utf-8');
-        usersList = JSON.parse(raw);
-        if (!Array.isArray(usersList)) usersList = [];
-      } else {
-        const dir = path.dirname(p);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      }
-
-      const existingIndex = usersList.findIndex(
-        (u) => u && u.email && u.email.toLowerCase() === user.email.toLowerCase()
-      );
-
-      if (existingIndex >= 0) {
-        usersList[existingIndex] = {
-          ...usersList[existingIndex],
-          name: user.name || usersList[existingIndex].name,
-          picture: user.picture || usersList[existingIndex].picture,
-          avatar: user.picture || usersList[existingIndex].avatar
-        };
-        resolvedUser = usersList[existingIndex];
-      } else {
-        usersList.unshift(user);
-      }
-
-      fs.writeFileSync(p, JSON.stringify(usersList, null, 2), 'utf-8');
-    } catch (err) {
-      console.error('[OAuth Callback] Error syncing user to store:', p, err);
-    }
-  }
-
-  return resolvedUser;
-}
-
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const code = url.searchParams.get('code');
-  const state = url.searchParams.get('state');
-  const error = url.searchParams.get('error');
+  const { searchParams } = new URL(req.url);
+  const code = searchParams.get('code');
+  const error = searchParams.get('error');
 
-  if (error) {
-    const errUrl = new URL('/login', req.url);
-    errUrl.searchParams.set('error', error === 'access_denied' ? 'google_access_denied' : error);
-    return NextResponse.redirect(errUrl);
-  }
+  const origin = req.nextUrl.origin || 'http://localhost:3000';
 
-  if (!code) {
-    const errUrl = new URL('/login', req.url);
-    errUrl.searchParams.set('error', 'missing_code');
-    return NextResponse.redirect(errUrl);
-  }
-
-  let callbackUrl = '';
-  if (state) {
-    try {
-      const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
-      if (decoded.callbackUrl) callbackUrl = decoded.callbackUrl;
-    } catch (_) {}
-  }
-
-  const settings = getAdminSettings();
-  const social = settings?.socialLogin || {};
-  const clientId = (
-    social.googleClientId || 
-    process.env.GOOGLE_CLIENT_ID || 
-    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || 
-    ''
-  ).trim();
-
-  const clientSecret = (
-    social.googleClientSecret || 
-    process.env.GOOGLE_CLIENT_SECRET || 
-    process.env.GOOGLE_SECRET || 
-    ''
-  ).trim();
-
-  const redirectUri = getRedirectUri(req);
-
-  if (!clientId || !clientSecret) {
-    const errUrl = new URL('/login', req.url);
-    errUrl.searchParams.set('error', 'missing_google_client_secret');
-    return NextResponse.redirect(errUrl);
+  if (error || !code) {
+    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(error || 'Google authorization cancelled')}`);
   }
 
   try {
+    // 1. Fetch Client Secrets from PostgreSQL admin_settings
+    const settingsRows = await query('SELECT social_login FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    const googleConfig = settingsRows[0]?.social_login?.google || {};
+
+    const clientId = googleConfig.clientId || process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = googleConfig.clientSecret || process.env.GOOGLE_CLIENT_SECRET;
+    const redirectUri = `${origin}/api/auth/callback/google`;
+
+    if (!clientId || !clientSecret) {
+      return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent('Google OAuth is not fully configured in Admin.')}`);
+    }
+
+    // 2. Exchange authorization code for access token
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -32255,140 +31909,76 @@ export async function GET(req: NextRequest) {
     });
 
     const tokenData = await tokenRes.json();
-    if (!tokenRes.ok || (!tokenData.access_token && !tokenData.id_token)) {
-      console.error('[OAuth Callback] Token Exchange Failure:', tokenData);
-      const errUrl = new URL('/login', req.url);
-      errUrl.searchParams.set('error', 'token_exchange_failed');
-      return NextResponse.redirect(errUrl);
+    if (!tokenRes.ok || !tokenData.access_token) {
+      return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(tokenData.error_description || 'Token exchange failed')}`);
     }
 
-    let profile: any = {};
-    if (tokenData.id_token) {
-      try {
-        const payloadBase64 = tokenData.id_token.split('.')[1];
-        profile = JSON.parse(Buffer.from(payloadBase64, 'base64url').toString('utf-8'));
-      } catch (_) {}
-    }
-
-    if (!profile.email && tokenData.access_token) {
-      try {
-        const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${tokenData.access_token}` }
-        });
-        if (userRes.ok) {
-          const uData = await userRes.json();
-          profile = { ...profile, ...uData };
-        }
-      } catch (_) {}
-    }
+    // 3. Fetch Google User Profile
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` }
+    });
+    const profile = await profileRes.json();
 
     if (!profile.email) {
-      const errUrl = new URL('/login', req.url);
-      errUrl.searchParams.set('error', 'no_email_returned');
-      return NextResponse.redirect(errUrl);
+      return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent('Could not retrieve email from Google profile')}`);
     }
 
     const email = profile.email.toLowerCase().trim();
-    const name = profile.name || profile.given_name || email.split('@')[0];
-    const picture = profile.picture || '';
-    const googleId = profile.sub || Date.now().toString();
+    const name = profile.name || email.split('@')[0];
 
-    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
+    // 4. Query or Create User in PostgreSQL users table
+    const existingUsers = await query('SELECT * FROM users WHERE email = $1 LIMIT 1', [email]);
+    let activeUser: any;
 
-    const candidateUser = {
-      id: `usr_g_${googleId}`,
-      name,
-      email,
-      role: isEmailAdmin ? 'admin' : 'user',
-      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
-      picture,
-      avatar: picture,
-      createdAt: new Date().toISOString()
-    };
+    if (existingUsers.length > 0) {
+      activeUser = existingUsers[0];
+      await query(`
+        UPDATE users SET
+          name = COALESCE($1, name),
+          updated_at = NOW()
+        WHERE email = $2
+      `, [name, email]);
+    } else {
+      const newId = 'usr_google_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const isFirstAdmin = email === 'admin@zecratary.com' || email.includes('admin@');
+      const role = isFirstAdmin ? 'admin' : 'user';
 
-    const finalUser = syncUserToStore(candidateUser);
+      await query(`
+        INSERT INTO users (id, name, email, role, subscription_plan, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, 'taster', NOW(), NOW())
+      `, [newId, name, email, role]);
 
-    let destination = callbackUrl;
-    if (!destination || destination === '/login' || destination.startsWith('/login?')) {
-      destination = finalUser.role === 'admin' ? '/admin' : '/profile';
+      activeUser = {
+        id: newId,
+        name,
+        email,
+        role,
+        subscriptionPlan: 'taster'
+      };
     }
 
-    const serializedUser = JSON.stringify(finalUser);
+    const sessionPayload = {
+      id: activeUser.id,
+      name: activeUser.name,
+      email: activeUser.email,
+      role: activeUser.role,
+      subscriptionPlan: activeUser.subscription_plan || activeUser.subscriptionPlan || 'taster',
+      provider: 'google'
+    };
 
-    const htmlBridge = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Signing In...</title>
-  <script>
-    (function() {
-      try {
-        var user = ${serializedUser};
-        localStorage.setItem('zecratary_current_user', JSON.stringify(user));
-        document.cookie = 'zecratary_current_user=' + encodeURIComponent(JSON.stringify(user)) + '; path=/; max-age=604800; SameSite=Lax';
-        
-        try {
-          var raw = localStorage.getItem('zecratary_users');
-          var list = raw ? JSON.parse(raw) : [];
-          if (!Array.isArray(list)) list = [];
-          var idx = list.findIndex(function(u) { return u && u.email && u.email.toLowerCase() === user.email.toLowerCase(); });
-          if (idx >= 0) {
-            list[idx] = Object.assign({}, list[idx], user);
-          } else {
-            list.unshift(user);
-          }
-          localStorage.setItem('zecratary_users', JSON.stringify(list));
-        } catch (_) {}
+    const targetRoute = activeUser.role === 'admin' ? '/admin' : '/dashboard';
+    const response = NextResponse.redirect(`${origin}${targetRoute}`);
 
-        window.dispatchEvent(new Event('zecratary_auth_changed'));
-        window.dispatchEvent(new Event('storage'));
-      } catch (err) {
-        console.error('Session bridge error:', err);
-      }
-      window.location.replace(${JSON.stringify(destination)});
-    })();
-  </script>
-</head>
-<body style="background:#0b0f17;color:#ffffff;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
-  <div style="text-align:center;padding:24px;">
-    <div style="width:40px;height:40px;border:3px solid #E05638;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px;"></div>
-    <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Signed in as ${name}</div>
-    <div style="font-size:12px;color:#94a3b8;">Redirecting to your dashboard...</div>
-  </div>
-  <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
-</body>
-</html>`;
-
-    const response = new NextResponse(htmlBridge, {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-      }
-    });
-
-    response.cookies.set('zecratary_current_user', serializedUser, {
+    response.cookies.set('zecratary_session', JSON.stringify(sessionPayload), {
       path: '/',
       httpOnly: false,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 86400 * 7
-    });
-
-    response.cookies.set('zecratary_auth_session', serializedUser, {
-      path: '/',
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 86400 * 7
+      maxAge: 60 * 60 * 24 * 7 // 7 days
     });
 
     return response;
   } catch (err: any) {
-    console.error('[OAuth Callback Exception]:', err);
-    const errUrl = new URL('/login', req.url);
-    errUrl.searchParams.set('error', err.message || 'oauth_handshake_error');
-    return NextResponse.redirect(errUrl);
+    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(err.message || 'Authentication error')}`);
   }
 }
 
@@ -32655,7 +32245,8 @@ export async function GET() {
     const plans = await query(`
       SELECT 
         id, name, slug, is_free AS "isFree", is_default AS "isDefault",
-        monthly_price_dollars AS "monthlyPriceDollars", annual_price_dollars AS "annualPriceDollars",
+        COALESCE(monthly_price_dollars, 0)::float AS "monthlyPriceDollars",
+        COALESCE(annual_price_dollars, 0)::float AS "annualPriceDollars",
         monthly_badge AS "monthlyBadge", annual_badge AS "annualBadge", trial_badge AS "trialBadge",
         description_monthly AS "descriptionMonthly", description_annual AS "descriptionAnnual",
         button_text AS "buttonText", ai_recipe_limit AS "aiRecipeLimit",
@@ -32682,10 +32273,45 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     if (Array.isArray(body.subscriptionPlans)) {
+      const activeSlugs = body.subscriptionPlans
+        .map((p: any) => (p?.slug || p?.id || p?.name || '').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-'))
+        .filter(Boolean);
+      activeSlugs.push('taster', 'preset_taster');
+
+      const activeIds = body.subscriptionPlans
+        .map((p: any) => (p?.id || '').trim())
+        .filter(Boolean);
+      activeIds.push('preset_taster', 'taster');
+
+      await query(`
+        UPDATE payment_transactions SET plan_slug = NULL 
+        WHERE plan_slug IS NOT NULL 
+          AND plan_slug != 'taster' 
+          AND plan_slug != 'preset_taster'
+          AND NOT (plan_slug = ANY($1::text[]));
+      `, [activeSlugs]);
+
+      await query(`
+        UPDATE users SET subscription_plan = 'taster' 
+        WHERE subscription_plan IS NOT NULL 
+          AND subscription_plan != 'taster' 
+          AND subscription_plan != 'preset_taster'
+          AND NOT (subscription_plan = ANY($1::text[]));
+      `, [activeSlugs]);
+
+      await query(`
+        DELETE FROM subscription_plans 
+        WHERE slug != 'taster' 
+          AND id != 'preset_taster'
+          AND NOT (slug = ANY($1::text[]))
+          AND NOT (id = ANY($2::text[]));
+      `, [activeSlugs, activeIds]);
+
       for (const p of body.subscriptionPlans) {
         if (!p) continue;
         const slug = (p.slug || p.id || p.name || 'plan').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
         const targetId = p.id || slug;
+        const isDefault = slug === 'taster' || targetId === 'preset_taster';
 
         const exists = await query('SELECT id FROM subscription_plans WHERE slug = $1', [slug]);
         if (exists.length > 0) {
@@ -32698,13 +32324,13 @@ export async function POST(req: NextRequest) {
               token_reimburse_frequency = $19, updated_at = NOW()
             WHERE slug = $20
           `, [
-            p.name, Boolean(p.isFree), Boolean(p.isDefault), p.monthlyPriceDollars || p.price || 0,
-            p.annualPriceDollars || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
+            p.name, Boolean(p.isFree), isDefault, Number(p.monthlyPriceDollars || p.price) || 0,
+            Number(p.annualPriceDollars) || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
             p.descriptionMonthly || p.description || '', p.descriptionAnnual || '', p.buttonText || 'Choose Plan',
             p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5, p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
             p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5, Boolean(p.canViewMacros),
-            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.5-flash-lite'),
-            JSON.stringify(p.features || []), p.tokenLimit || 50000, p.tokenReimburseFrequency || 'monthly', slug
+            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
+            JSON.stringify(p.features || []), Number(p.tokenLimit) || 50000, p.tokenReimburseFrequency || 'monthly', slug
           ]);
         } else {
           await query(`
@@ -32715,13 +32341,13 @@ export async function POST(req: NextRequest) {
               can_view_macros, allowed_ai_models, features, token_limit, token_reimburse_frequency, updated_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, NOW())
           `, [
-            targetId, p.name, slug, Boolean(p.isFree), Boolean(p.isDefault), p.monthlyPriceDollars || p.price || 0,
-            p.annualPriceDollars || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
+            targetId, p.name, slug, Boolean(p.isFree), isDefault, Number(p.monthlyPriceDollars || p.price) || 0,
+            Number(p.annualPriceDollars) || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
             p.descriptionMonthly || p.description || '', p.descriptionAnnual || '', p.buttonText || 'Choose Plan',
             p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5, p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
             p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5, Boolean(p.canViewMacros),
-            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.5-flash-lite'),
-            JSON.stringify(p.features || []), p.tokenLimit || 50000, p.tokenReimburseFrequency || 'monthly'
+            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
+            JSON.stringify(p.features || []), Number(p.tokenLimit) || 50000, p.tokenReimburseFrequency || 'monthly'
           ]);
         }
       }
@@ -32743,7 +32369,12 @@ export async function POST(req: NextRequest) {
     const paymentSettings = body.paymentSettings !== undefined ? body.paymentSettings : (current.payment_settings || {});
     const socialLogin = body.socialLogin !== undefined ? body.socialLogin : (current.social_login || {});
     const chefAiSettings = body.chefAiSettings !== undefined ? body.chefAiSettings : (current.chef_ai_settings || {});
-    const recipeTypes = body.recipeTypes !== undefined ? body.recipeTypes : (current.recipe_types || []);
+    const rawRecipeTypes = body.recipeTypes !== undefined ? body.recipeTypes : (body.settings?.recipeTypes !== undefined ? body.settings.recipeTypes : (body.types !== undefined ? body.types : (current.recipe_types || [])));
+    let recipeTypes = rawRecipeTypes;
+    if (typeof recipeTypes === 'string') {
+      try { recipeTypes = JSON.parse(recipeTypes); } catch (_) {}
+    }
+    if (!Array.isArray(recipeTypes)) recipeTypes = [];
     const ingredientCategories = body.ingredientCategories !== undefined ? body.ingredientCategories : (current.ingredient_categories || []);
     const supportedLanguages = body.supportedLanguages !== undefined ? body.supportedLanguages : (current.supported_languages || []);
 
@@ -32789,6 +32420,8 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
@@ -32801,8 +32434,8 @@ export async function GET() {
         slug,
         is_free AS "isFree",
         is_default AS "isDefault",
-        monthly_price_dollars AS "monthlyPriceDollars",
-        annual_price_dollars AS "annualPriceDollars",
+        COALESCE(monthly_price_dollars, 0)::float AS "monthlyPriceDollars",
+        COALESCE(annual_price_dollars, 0)::float AS "annualPriceDollars",
         monthly_badge AS "monthlyBadge",
         annual_badge AS "annualBadge",
         trial_badge AS "trialBadge",
@@ -32822,7 +32455,10 @@ export async function GET() {
       ORDER BY monthly_price_dollars ASC
     `);
 
-    return NextResponse.json({ success: true, plans: rows }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json(
+      { success: true, plans: rows, packages: rows, configs: rows },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } }
+    );
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -32831,12 +32467,13 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const plans = Array.isArray(body) ? body : (body.plans || [body]);
+    const plans = Array.isArray(body) ? body : (body.plans || body.packages || [body]);
 
     for (const p of plans) {
       if (!p) continue;
       const slug = (p.slug || p.id || p.name || 'plan').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
       const targetId = p.id || slug;
+      const isDefault = slug === 'taster' || targetId === 'preset_taster';
 
       const existing = await query('SELECT id FROM subscription_plans WHERE slug = $1', [slug]);
 
@@ -32867,9 +32504,9 @@ export async function POST(req: NextRequest) {
         `, [
           p.name,
           Boolean(p.isFree),
-          Boolean(p.isDefault),
-          p.monthlyPriceDollars || 0,
-          p.annualPriceDollars || 0,
+          isDefault,
+          Number(p.monthlyPriceDollars) || 0,
+          Number(p.annualPriceDollars) || 0,
           p.monthlyBadge || '',
           p.annualBadge || '',
           p.trialBadge || '',
@@ -32880,9 +32517,9 @@ export async function POST(req: NextRequest) {
           p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
           p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5,
           Boolean(p.canViewMacros),
-          Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.5-flash-lite'),
+          Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
           JSON.stringify(p.features || []),
-          p.tokenLimit || 50000,
+          Number(p.tokenLimit) || 50000,
           p.tokenReimburseFrequency || 'monthly',
           slug
         ]);
@@ -32899,9 +32536,9 @@ export async function POST(req: NextRequest) {
           p.name,
           slug,
           Boolean(p.isFree),
-          Boolean(p.isDefault),
-          p.monthlyPriceDollars || 0,
-          p.annualPriceDollars || 0,
+          isDefault,
+          Number(p.monthlyPriceDollars) || 0,
+          Number(p.annualPriceDollars) || 0,
           p.monthlyBadge || '',
           p.annualBadge || '',
           p.trialBadge || '',
@@ -32912,9 +32549,9 @@ export async function POST(req: NextRequest) {
           p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
           p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5,
           Boolean(p.canViewMacros),
-          Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.5-flash-lite'),
+          Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
           JSON.stringify(p.features || []),
-          p.tokenLimit || 50000,
+          Number(p.tokenLimit) || 50000,
           p.tokenReimburseFrequency || 'monthly'
         ]);
       }
@@ -32924,6 +32561,219 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let slug = searchParams.get('slug');
+
+    if (!id && !slug) {
+      try {
+        const body = await req.json();
+        id = body?.id;
+        slug = body?.slug;
+      } catch (_) {}
+    }
+
+    if (!id && !slug) {
+      return NextResponse.json({ success: false, error: 'Plan ID or Slug is required' }, { status: 400 });
+    }
+
+    const targetSlug = (slug || '').toLowerCase().trim();
+    const targetId = (id || '').trim();
+
+    if (targetSlug === 'taster' || targetId === 'preset_taster' || targetId === 'taster') {
+      return NextResponse.json({ success: false, error: 'Cannot delete the system default Taster plan.' }, { status: 400 });
+    }
+
+    if (targetSlug) {
+      await query('UPDATE payment_transactions SET plan_slug = NULL WHERE plan_slug = $1', [targetSlug]);
+      await query("UPDATE users SET subscription_plan = 'taster' WHERE subscription_plan = $1", [targetSlug]);
+    }
+    if (targetId && targetId !== targetSlug) {
+      await query('UPDATE payment_transactions SET plan_slug = NULL WHERE plan_slug = $1', [targetId]);
+      await query("UPDATE users SET subscription_plan = 'taster' WHERE subscription_plan = $1", [targetId]);
+    }
+
+    await query(`
+      DELETE FROM subscription_plans 
+      WHERE id = $1 OR slug = $2 OR id = $3 OR slug = $4
+    `, [targetId, targetSlug, targetSlug, targetId]);
+
+    const dataPaths = [
+      path.join(process.cwd(), 'apps/web/data', 'subscription_plans.json'),
+      path.join(process.cwd(), 'apps/web/apps/web/data', 'subscription_plans.json'),
+      path.join(process.cwd(), 'data', 'subscription_plans.json'),
+      path.join(process.cwd(), 'apps/web/data', 'admin_settings.json'),
+      path.join(process.cwd(), 'data', 'admin_settings.json')
+    ];
+
+    for (const p of dataPaths) {
+      if (fs.existsSync(p)) {
+        try {
+          const raw = fs.readFileSync(p, 'utf-8');
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const filtered = parsed.filter((item: any) => 
+              item.id !== targetId && item.slug !== targetSlug && item.id !== targetSlug && item.slug !== targetId
+            );
+            fs.writeFileSync(p, JSON.stringify(filtered, null, 2), 'utf-8');
+          } else if (parsed && Array.isArray(parsed.subscriptionPlans)) {
+            parsed.subscriptionPlans = parsed.subscriptionPlans.filter((item: any) => 
+              item.id !== targetId && item.slug !== targetSlug && item.id !== targetSlug && item.slug !== targetId
+            );
+            fs.writeFileSync(p, JSON.stringify(parsed, null, 2), 'utf-8');
+          }
+        } catch (_) {}
+      }
+    }
+
+    const remaining = await query(`
+      SELECT 
+        id,
+        name,
+        slug,
+        is_free AS "isFree",
+        is_default AS "isDefault",
+        COALESCE(monthly_price_dollars, 0)::float AS "monthlyPriceDollars",
+        COALESCE(annual_price_dollars, 0)::float AS "annualPriceDollars",
+        monthly_badge AS "monthlyBadge",
+        annual_badge AS "annualBadge",
+        trial_badge AS "trialBadge",
+        description_monthly AS "descriptionMonthly",
+        description_annual AS "descriptionAnnual",
+        button_text AS "buttonText",
+        ai_recipe_limit AS "aiRecipeLimit",
+        recipe_library_limit AS "recipeLibraryLimit",
+        social_scrape_limit AS "socialScrapeLimit",
+        can_view_macros AS "canViewMacros",
+        allowed_ai_models AS "allowedAiModels",
+        features,
+        token_limit AS "tokenLimit",
+        token_reimburse_frequency AS "tokenReimburseFrequency",
+        updated_at AS "updatedAt"
+      FROM subscription_plans
+      ORDER BY monthly_price_dollars ASC
+    `);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Plan permanently deleted from PostgreSQL.',
+      plans: remaining,
+      packages: remaining
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/recipe-type/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+const DEFAULT_RECIPE_TYPES: string[] = [
+  'Breakfast',
+  'Lunch',
+  'Dinner',
+  'Snack',
+  'Dessert',
+  'Beverage',
+  'Appetizer',
+  'Salad',
+  'Soup',
+  'Side Dish',
+  'Baking'
+];
+
+export async function GET() {
+  try {
+    const rows = await query('SELECT recipe_types FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    let list = rows[0]?.recipe_types;
+
+    if (typeof list === 'string') {
+      try { list = JSON.parse(list); } catch (_) {}
+    }
+
+    if (!Array.isArray(list) || list.length === 0) {
+      list = DEFAULT_RECIPE_TYPES;
+    }
+
+    return NextResponse.json(
+      { success: true, recipeTypes: list, types: list },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    let types = body.recipeTypes || body.types || body.settings?.recipeTypes || body;
+
+    if (typeof types === 'string') {
+      try { types = JSON.parse(types); } catch (_) {}
+    }
+
+    if (!Array.isArray(types)) {
+      return NextResponse.json({ success: false, error: 'recipeTypes must be an array of strings' }, { status: 400 });
+    }
+
+    const cleanTypes = types.map((t: any) => String(t).trim()).filter(Boolean);
+
+    // 1. Direct PostgreSQL Update
+    await query(`
+      INSERT INTO admin_settings (id, recipe_types, updated_at)
+      VALUES ('primary_settings', $1::jsonb, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        recipe_types = EXCLUDED.recipe_types,
+        updated_at = NOW();
+    `, [JSON.stringify(cleanTypes)]);
+
+    // 2. Synchronize disk stores for legacy fallback readers
+    const dataDirs = [
+      path.join(process.cwd(), 'apps/web/data', 'admin_settings.json'),
+      path.join(process.cwd(), 'apps/web/apps/web/data', 'admin_settings.json'),
+      path.join(process.cwd(), 'data', 'admin_settings.json')
+    ];
+
+    for (const fpath of dataDirs) {
+      if (fs.existsSync(fpath)) {
+        try {
+          const raw = fs.readFileSync(fpath, 'utf-8');
+          const parsed = JSON.parse(raw);
+          parsed.recipeTypes = cleanTypes;
+          fs.writeFileSync(fpath, JSON.stringify(parsed, null, 2), 'utf-8');
+        } catch (_) {}
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      recipeTypes: cleanTypes,
+      message: 'Recipe types saved successfully in PostgreSQL.'
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  return POST(req);
 }
 
 ```
@@ -33091,97 +32941,35 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/language/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
-function getLangDirectory() {
-  const possiblePaths = [
-    path.join(process.cwd(), 'apps/web/src/lib/lang'),
-    path.join(process.cwd(), 'src/lib/lang'),
-  ];
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) return p;
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  try {
+    const rows = await query('SELECT supported_languages FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    const languages = rows[0]?.supported_languages || [];
+    return NextResponse.json({ success: true, languages }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
-  return possiblePaths[0];
-}
-
-function syncIndexFile(langDir: string) {
-  const indexPath = path.join(langDir, 'index.ts');
-  const files = fs.readdirSync(langDir).filter(
-    (f) => f.endsWith('.ts') && f !== 'index.ts' && !f.endsWith('.d.ts')
-  );
-  const codes = files.map((f) => f.replace(/\.ts$/, '')).sort();
-
-  const exportsStr = codes.map((c) => `export { ${c} } from './${c}';`).join('\n');
-  const importsStr = codes.map((c) => `import { ${c} } from './${c}';`).join('\n');
-  const dictEntries = codes.map((c) => `  ${c},`).join('\n');
-
-  const content = `${exportsStr}\n\n${importsStr}\n\nexport const DEFAULT_DICTIONARIES: Record<string, Record<string, string>> = {\n${dictEntries}\n};\n\nexport const dictionaries = DEFAULT_DICTIONARIES;\nexport default DEFAULT_DICTIONARIES;\n`;
-
-  fs.writeFileSync(indexPath, content, 'utf8');
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { code, name, dictionary } = await req.json();
-    if (!code || typeof code !== 'string') {
-      return NextResponse.json({ error: 'Language code is required.' }, { status: 400 });
-    }
+    const body = await req.json();
+    const languages = body.languages || body;
 
-    const cleanCode = code.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    const langDir = getLangDirectory();
-    if (!fs.existsSync(langDir)) {
-      fs.mkdirSync(langDir, { recursive: true });
-    }
+    await query(`
+      UPDATE admin_settings SET
+        supported_languages = $1::jsonb,
+        updated_at = NOW()
+      WHERE id = 'primary_settings'
+    `, [JSON.stringify(languages)]);
 
-    const filePath = path.join(langDir, `${cleanCode}.ts`);
-    const dict = dictionary && typeof dictionary === 'object' ? dictionary : {};
-
-    const formattedLines = Object.keys(dict).map((key) => {
-      return `  ${JSON.stringify(key)}: ${JSON.stringify(String(dict[key]))},`;
-    });
-
-    const fileContent = `// ${name || cleanCode.toUpperCase()} Language Dictionary\n` +
-      `export const ${cleanCode}: Record<string, string> = {\n` +
-      formattedLines.join('\n') +
-      `\n};\n\nexport default ${cleanCode};\n`;
-
-    fs.writeFileSync(filePath, fileContent, 'utf8');
-
-    // Fully regenerate index.ts to ensure syntax validity with trailing commas
-    syncIndexFile(langDir);
-
-    return NextResponse.json({ success: true, file: `${cleanCode}.ts` });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Failed to create language file' }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const { code } = await req.json();
-    if (!code || typeof code !== 'string') {
-      return NextResponse.json({ error: 'Language code is required.' }, { status: 400 });
-    }
-
-    const cleanCode = code.trim().toLowerCase();
-    if (cleanCode === 'en') {
-      return NextResponse.json({ error: 'English language file cannot be deleted.' }, { status: 400 });
-    }
-
-    const langDir = getLangDirectory();
-    const filePath = path.join(langDir, `${cleanCode}.ts`);
-
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-
-    // Fully regenerate index.ts without deleted code
-    syncIndexFile(langDir);
-
-    return NextResponse.json({ success: true, removed: `${cleanCode}.ts` });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Failed to delete language file' }, { status: 500 });
+    return NextResponse.json({ success: true, message: 'Languages updated in PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -33190,97 +32978,35 @@ export async function DELETE(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/languages/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
-function getLangDirectory() {
-  const possiblePaths = [
-    path.join(process.cwd(), 'apps/web/src/lib/lang'),
-    path.join(process.cwd(), 'src/lib/lang'),
-  ];
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) return p;
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  try {
+    const rows = await query('SELECT supported_languages FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    const languages = rows[0]?.supported_languages || [];
+    return NextResponse.json({ success: true, languages }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
-  return possiblePaths[0];
-}
-
-function syncIndexFile(langDir: string) {
-  const indexPath = path.join(langDir, 'index.ts');
-  const files = fs.readdirSync(langDir).filter(
-    (f) => f.endsWith('.ts') && f !== 'index.ts' && !f.endsWith('.d.ts')
-  );
-  const codes = files.map((f) => f.replace(/\.ts$/, '')).sort();
-
-  const exportsStr = codes.map((c) => `export { ${c} } from './${c}';`).join('\n');
-  const importsStr = codes.map((c) => `import { ${c} } from './${c}';`).join('\n');
-  const dictEntries = codes.map((c) => `  ${c},`).join('\n');
-
-  const content = `${exportsStr}\n\n${importsStr}\n\nexport const DEFAULT_DICTIONARIES: Record<string, Record<string, string>> = {\n${dictEntries}\n};\n\nexport const dictionaries = DEFAULT_DICTIONARIES;\nexport default DEFAULT_DICTIONARIES;\n`;
-
-  fs.writeFileSync(indexPath, content, 'utf8');
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { code, name, dictionary } = await req.json();
-    if (!code || typeof code !== 'string') {
-      return NextResponse.json({ error: 'Language code is required.' }, { status: 400 });
-    }
+    const body = await req.json();
+    const languages = body.languages || body;
 
-    const cleanCode = code.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    const langDir = getLangDirectory();
-    if (!fs.existsSync(langDir)) {
-      fs.mkdirSync(langDir, { recursive: true });
-    }
+    await query(`
+      UPDATE admin_settings SET
+        supported_languages = $1::jsonb,
+        updated_at = NOW()
+      WHERE id = 'primary_settings'
+    `, [JSON.stringify(languages)]);
 
-    const filePath = path.join(langDir, `${cleanCode}.ts`);
-    const dict = dictionary && typeof dictionary === 'object' ? dictionary : {};
-
-    const formattedLines = Object.keys(dict).map((key) => {
-      return `  ${JSON.stringify(key)}: ${JSON.stringify(String(dict[key]))},`;
-    });
-
-    const fileContent = `// ${name || cleanCode.toUpperCase()} Language Dictionary\n` +
-      `export const ${cleanCode}: Record<string, string> = {\n` +
-      formattedLines.join('\n') +
-      `\n};\n\nexport default ${cleanCode};\n`;
-
-    fs.writeFileSync(filePath, fileContent, 'utf8');
-
-    // Fully regenerate index.ts to ensure syntax validity with trailing commas
-    syncIndexFile(langDir);
-
-    return NextResponse.json({ success: true, file: `${cleanCode}.ts` });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Failed to create language file' }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const { code } = await req.json();
-    if (!code || typeof code !== 'string') {
-      return NextResponse.json({ error: 'Language code is required.' }, { status: 400 });
-    }
-
-    const cleanCode = code.trim().toLowerCase();
-    if (cleanCode === 'en') {
-      return NextResponse.json({ error: 'English language file cannot be deleted.' }, { status: 400 });
-    }
-
-    const langDir = getLangDirectory();
-    const filePath = path.join(langDir, `${cleanCode}.ts`);
-
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-
-    // Fully regenerate index.ts without deleted code
-    syncIndexFile(langDir);
-
-    return NextResponse.json({ success: true, removed: `${cleanCode}.ts` });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Failed to delete language file' }, { status: 500 });
+    return NextResponse.json({ success: true, message: 'Languages updated in PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -33536,72 +33262,61 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/upload-branding/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-function getUploadDirectories(): string[] {
-  const cwd = process.cwd();
-  const dirs: string[] = [];
-
-  const candidatePublics = [
-    path.join(cwd, 'apps', 'web', 'public'),
-    path.join(cwd, 'public'),
-    path.resolve(cwd, '..', 'public'),
-    path.resolve(cwd, '..', 'apps', 'web', 'public')
-  ];
-
-  for (const pub of candidatePublics) {
-    if (fs.existsSync(pub)) {
-      dirs.push(path.join(pub, 'uploads'));
-    }
-  }
-
-  if (dirs.length === 0) {
-    const fallback = fs.existsSync(path.join(cwd, 'apps', 'web'))
-      ? path.join(cwd, 'apps', 'web', 'public', 'uploads')
-      : path.join(cwd, 'public', 'uploads');
-    dirs.push(fallback);
-  }
-
-  return dirs;
-}
-
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
-    const targetType = (formData.get('type') as string) || 'branding';
+    const type = formData.get('type') as string; // 'titlebar' or 'favicon'
 
-    if (!file) {
-      return NextResponse.json({ success: false, error: 'No file provided' }, { status: 400 });
+    if (!file || !type) {
+      return NextResponse.json({ success: false, error: 'File and type are required' }, { status: 400 });
     }
 
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    const origExt = path.extname(file.name || '').toLowerCase() || '.png';
-    const cleanPrefix = targetType === 'favicon' ? 'favicon' : 'titlebar-logo';
-    const fileName = `${cleanPrefix}-${Date.now()}${origExt}`;
+    const uploadsDir = path.join(process.cwd(), 'apps/web/public/uploads');
+    const fallbackDir = path.join(process.cwd(), 'public/uploads');
+    const targetDir = fs.existsSync(path.dirname(uploadsDir)) ? uploadsDir : fallbackDir;
+    fs.makedirsSync ? fs.makedirsSync(targetDir) : fs.mkdirSync(targetDir, { recursive: true });
 
-    const uploadDirs = getUploadDirectories();
-    for (const uDir of uploadDirs) {
-      if (!fs.existsSync(uDir)) {
-        fs.mkdirSync(uDir, { recursive: true });
-      }
-      fs.writeFileSync(path.join(uDir, fileName), buffer);
+    const ext = path.extname(file.name) || '.png';
+    const filename = `${type}-logo-${Date.now()}${ext}`;
+    const filePath = path.join(targetDir, filename);
+
+    fs.writeFileSync(filePath, buffer);
+    const publicUrl = `/uploads/${filename}`;
+
+    // Update PostgreSQL admin_settings table directly
+    if (type === 'titlebar') {
+      await query(`
+        UPDATE admin_settings SET
+          titlebar_image = $1,
+          updated_at = NOW()
+        WHERE id = 'primary_settings'
+      `, [publicUrl]);
+    } else if (type === 'favicon') {
+      await query(`
+        UPDATE admin_settings SET
+          favicon_image = $1,
+          updated_at = NOW()
+        WHERE id = 'primary_settings'
+      `, [publicUrl]);
     }
 
-    const relativeUrl = `/uploads/${fileName}`;
     return NextResponse.json({
       success: true,
-      url: relativeUrl,
-      fileName
+      url: publicUrl,
+      message: `${type} branding image updated in PostgreSQL.`
     });
   } catch (err: any) {
-    console.error('Error uploading branding image:', err);
-    return NextResponse.json({ success: false, error: err.message || 'Upload failed' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -33891,30 +33606,86 @@ export async function GET() {
 
 ## File: `apps/web/src/app/api/recipes/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
-import { prisma } from '@zecratary/database';
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
-export async function GET() {
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
   try {
-    const recipes = await prisma.recipe.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
-    return NextResponse.json({ success: true, recipes });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+    const category = searchParams.get('category');
+
+    let sql = 'SELECT * FROM saved_recipes WHERE 1=1';
+    const params: any[] = [];
+
+    if (userId) {
+      params.push(userId);
+      sql += ` AND (user_id = $${params.length} OR is_public = TRUE)`;
+    }
+
+    if (category && category !== 'all') {
+      params.push(category);
+      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
+    }
+
+    sql += ' ORDER BY created_at DESC';
+
+    const rows = await query(sql, params);
+    return NextResponse.json(
+      { success: true, recipes: rows },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function DELETE(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get('id');
-    if (!id) return NextResponse.json({ error: 'Missing recipe ID' }, { status: 400 });
+    const body = await req.json();
+    const id = body.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 
-    await prisma.recipe.delete({ where: { id } });
-    return NextResponse.json({ success: true });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    let validUserId = null;
+    if (body.userId) {
+      const userCheck = await query('SELECT 1 FROM users WHERE id = $1', [body.userId]);
+      if (userCheck.length > 0) validUserId = body.userId;
+    }
+
+    await query(`
+      INSERT INTO saved_recipes (
+        id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+        servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        recipe_type = EXCLUDED.recipe_type,
+        cuisine = EXCLUDED.cuisine,
+        prep_time = EXCLUDED.prep_time,
+        cook_time = EXCLUDED.cook_time,
+        servings = EXCLUDED.servings,
+        difficulty = EXCLUDED.difficulty,
+        ingredients = EXCLUDED.ingredients,
+        directions = EXCLUDED.directions,
+        nutrition = EXCLUDED.nutrition,
+        tags = EXCLUDED.tags,
+        image_url = EXCLUDED.image_url,
+        is_public = EXCLUDED.is_public,
+        updated_at = NOW();
+    `, [
+      id, validUserId, body.title || 'Untitled Recipe', body.description || '',
+      body.recipeType || body.category || 'General', body.cuisine || '',
+      body.prepTime || '', body.cookTime || '', body.servings || '', body.difficulty || '',
+      JSON.stringify(body.ingredients || []), JSON.stringify(body.directions || body.instructions || []),
+      JSON.stringify(body.nutrition || body.macros || {}), JSON.stringify(body.tags || []),
+      body.imageUrl || body.image || '', Boolean(body.isPublic)
+    ]);
+
+    return NextResponse.json({ success: true, id, message: 'Recipe saved to PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -33922,152 +33693,103 @@ export async function DELETE(req: Request) {
 
 ## File: `apps/web/src/app/api/recipes/saved/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-function getAllSavedFiles(): string[] {
-  const root = process.cwd();
-  const candidates = [
-    path.join(root, 'data', 'saved_recipes.json'),
-    path.join(root, 'apps', 'web', 'data', 'saved_recipes.json'),
-    path.resolve(root, '..', 'data', 'saved_recipes.json'),
-    path.resolve(root, '..', 'apps', 'web', 'data', 'saved_recipes.json')
-  ];
-  return Array.from(new Set(candidates));
-}
-
-function readSavedStore(): Record<string, any[]> {
-  for (const f of getAllSavedFiles()) {
-    if (fs.existsSync(f)) {
-      try {
-        const raw = fs.readFileSync(f, 'utf-8');
-        if (raw.trim()) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-            return parsed;
-          }
-        }
-      } catch (_) {}
-    }
-  }
-  return {};
-}
-
-function writeSavedStore(store: Record<string, any[]>) {
-  const files = getAllSavedFiles();
-  const serialized = JSON.stringify(store, null, 2);
-  for (const f of files) {
-    try {
-      const dir = path.dirname(f);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(f, serialized, 'utf-8');
-    } catch (err) {
-      console.warn('Could not write to', f, err);
-    }
-  }
-}
-
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const userId = (searchParams.get('userId') || '').trim();
-    const email = (searchParams.get('email') || '').trim().toLowerCase();
+    const userId = searchParams.get('userId');
 
-    if (!userId && !email) {
-      return NextResponse.json({ success: false, error: 'User identifier is required' }, { status: 400 });
+    let rows;
+    if (userId) {
+      rows = await query(
+        'SELECT * FROM saved_recipes WHERE user_id = $1 OR is_public = TRUE ORDER BY created_at DESC',
+        [userId]
+      );
+    } else {
+      rows = await query('SELECT * FROM saved_recipes ORDER BY created_at DESC');
     }
 
-    const store = readSavedStore();
-    const cleanId = userId.toLowerCase();
-    
-    // Look up by email, ID, or normalized keys
-    let recipes = store[cleanId] || (email ? store[email] : null) || store[userId] || [];
-
-    if (!recipes || recipes.length === 0) {
-      // Search case-insensitively across store keys
-      for (const [k, list] of Object.entries(store)) {
-        const lowerK = k.toLowerCase();
-        if (lowerK === cleanId || (email && lowerK === email)) {
-          recipes = list;
-          break;
-        }
-      }
-    }
-
-    return new NextResponse(JSON.stringify({ success: true, recipes: recipes || [] }), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
-      }
-    });
+    return NextResponse.json(
+      { success: true, recipes: rows },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { userId, email, recipe, recipes, recipeId, action } = body;
+    const id = body.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 
-    const key = (email || userId || '').trim().toLowerCase();
-    if (!key) {
-      return NextResponse.json({ success: false, error: 'User key is required' }, { status: 400 });
+    let validUserId = null;
+    if (body.userId) {
+      const userCheck = await query('SELECT 1 FROM users WHERE id = $1', [body.userId]);
+      if (userCheck.length > 0) validUserId = body.userId;
     }
 
-    const store = readSavedStore();
-    let current = store[key] || (userId ? store[userId.toLowerCase()] : []) || [];
+    await query(`
+      INSERT INTO saved_recipes (
+        id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+        servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        recipe_type = EXCLUDED.recipe_type,
+        cuisine = EXCLUDED.cuisine,
+        prep_time = EXCLUDED.prep_time,
+        cook_time = EXCLUDED.cook_time,
+        servings = EXCLUDED.servings,
+        difficulty = EXCLUDED.difficulty,
+        ingredients = EXCLUDED.ingredients,
+        directions = EXCLUDED.directions,
+        nutrition = EXCLUDED.nutrition,
+        tags = EXCLUDED.tags,
+        image_url = EXCLUDED.image_url,
+        is_public = EXCLUDED.is_public,
+        updated_at = NOW();
+    `, [
+      id,
+      validUserId,
+      body.title || 'Untitled Recipe',
+      body.description || '',
+      body.recipeType || body.category || 'General',
+      body.cuisine || '',
+      body.prepTime || '',
+      body.cookTime || '',
+      body.servings || '',
+      body.difficulty || '',
+      JSON.stringify(body.ingredients || []),
+      JSON.stringify(body.directions || body.instructions || []),
+      JSON.stringify(body.nutrition || body.macros || {}),
+      JSON.stringify(body.tags || []),
+      body.imageUrl || body.image || '',
+      Boolean(body.isPublic)
+    ]);
 
-    if (action === 'sync' && Array.isArray(recipes)) {
-      const map = new Map<string, any>();
-      current.forEach((r: any) => {
-        if (r) {
-          const rk = (r.id || r.title || r.name || JSON.stringify(r)).toString().trim().toLowerCase();
-          map.set(rk, r);
-        }
-      });
-      recipes.forEach((r: any) => {
-        if (r) {
-          const rk = (r.id || r.title || r.name || JSON.stringify(r)).toString().trim().toLowerCase();
-          map.set(rk, r);
-        }
-      });
-      current = Array.from(map.values());
-    } else if (action === 'remove') {
-      const target = (recipeId || (recipe && (recipe.id || recipe.title || recipe.name)) || '').toString().trim().toLowerCase();
-      current = current.filter((r: any) => {
-        const rk = (r.id || r.title || r.name || '').toString().trim().toLowerCase();
-        return rk !== target;
-      });
-    } else {
-      if (recipe) {
-        const rk = (recipe.id || recipe.title || recipe.name || '').toString().trim().toLowerCase();
-        const exists = current.some((r: any) => {
-          const existingKey = (r.id || r.title || r.name || '').toString().trim().toLowerCase();
-          return existingKey === rk;
-        });
-        if (!exists) {
-          current.unshift({ ...recipe, savedAt: recipe.savedAt || new Date().toISOString() });
-        }
-      }
+    return NextResponse.json({ success: true, id, message: 'Recipe saved to PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
     }
 
-    store[key] = current;
-    if (userId && userId.toLowerCase() !== key) {
-      store[userId.toLowerCase()] = current;
-    }
-    if (email && email.toLowerCase() !== key) {
-      store[email.toLowerCase()] = current;
-    }
-
-    writeSavedStore(store);
-
-    return NextResponse.json({ success: true, recipes: current });
+    await query('DELETE FROM saved_recipes WHERE id = $1', [id]);
+    return NextResponse.json({ success: true, message: 'Recipe removed from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -35267,61 +34989,58 @@ User Prompt: "${prompt}"`;
 ## File: `apps/web/src/app/api/ai/quota/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function getSessionUser(req: NextRequest) {
-  const sessionCookie = req.cookies.get('zecratary_session')?.value;
-  if (!sessionCookie) return null;
-  try {
-    return JSON.parse(decodeURIComponent(sessionCookie));
-  } catch (_) {
-    try {
-      return JSON.parse(sessionCookie);
-    } catch (_) {
-      return null;
-    }
-  }
-}
-
 export async function GET(req: NextRequest) {
-  const user = getSessionUser(req);
-  const plan = (user?.subscriptionPlan || user?.subscriptionTier || 'taster').toLowerCase();
-  const isAdmin = Boolean(user?.role === 'admin' || user?.email?.toLowerCase().includes('admin'));
-  const isPro = isAdmin || plan.includes('pro') || plan.includes('annual') || plan.includes('monthly');
+  try {
+    const { searchParams } = new URL(req.url);
+    const email = searchParams.get('email')?.toLowerCase().trim();
+    const userId = searchParams.get('userId');
 
-  return NextResponse.json({
-    authenticated: Boolean(user),
-    plan,
-    isUnlimited: isPro,
-    monthlyRecipeLimit: isPro ? -1 : 5,
-  });
-}
+    let userRow: any = null;
+    if (email) {
+      const u = await query('SELECT * FROM users WHERE email = $1 LIMIT 1', [email]);
+      userRow = u[0];
+    } else if (userId) {
+      const u = await query('SELECT * FROM users WHERE id = $1 LIMIT 1', [userId]);
+      userRow = u[0];
+    }
 
-export async function POST(req: NextRequest) {
-  const user = getSessionUser(req);
-  const plan = (user?.subscriptionPlan || user?.subscriptionTier || 'taster').toLowerCase();
-  const isAdmin = Boolean(user?.role === 'admin' || user?.email?.toLowerCase().includes('admin'));
-  const isPro = isAdmin || plan.includes('pro') || plan.includes('annual') || plan.includes('monthly');
+    const planSlug = userRow?.subscription_plan || 'taster';
+    const planRows = await query('SELECT * FROM subscription_plans WHERE slug = $1 LIMIT 1', [planSlug]);
+    const plan = planRows[0] || {
+      ai_recipe_limit: 5,
+      recipe_library_limit: 25,
+      token_limit: 50000,
+      token_reimburse_frequency: 'monthly',
+      can_view_macros: false
+    };
 
-  const body = await req.json().catch(() => ({}));
-  const currentCount = Number(body.currentCount || 0);
+    // Calculate recipe count from PostgreSQL saved_recipes
+    let recipeCount = 0;
+    if (userRow?.id) {
+      const countRes = await query('SELECT COUNT(*) AS count FROM saved_recipes WHERE user_id = $1', [userRow.id]);
+      recipeCount = parseInt(countRes[0]?.count || '0', 10);
+    }
 
-  if (!isPro && currentCount >= 5) {
     return NextResponse.json({
-      allowed: false,
-      error: 'Monthly quota reached. Free Taster tier is limited to 5 AI recipe generations per month.',
-      upgradeRequired: true,
-      currentCount,
-      limit: 5
-    }, { status: 403 });
+      success: true,
+      plan: planSlug,
+      quota: {
+        aiRecipeLimit: plan.ai_recipe_limit,
+        recipeLibraryLimit: plan.recipe_library_limit,
+        recipesSaved: recipeCount,
+        tokenLimit: plan.token_limit,
+        tokenReimburseFrequency: plan.token_reimburse_frequency || 'monthly',
+        canViewMacros: Boolean(plan.can_view_macros),
+        allowedAiModels: plan.allowed_ai_models || 'gemini-3.6-flash'
+      }
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
-
-  return NextResponse.json({
-    allowed: true,
-    isUnlimited: isPro,
-    remaining: isPro ? -1 : Math.max(0, 5 - (currentCount + 1)),
-  });
 }
 
 ```
@@ -39008,144 +38727,258 @@ export default function LoginPage() {
 ## File: `apps/web/src/app/package/page.tsx`
 ```typescript
 'use client';
-import { useState } from 'react';
-import { Check, Sparkles, Box, Shield, Zap } from 'lucide-react';
 
-export default function PackagePage() {
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { Check, Sparkles, Zap, Shield, CheckCircle2, RefreshCw, Star, ArrowRight } from 'lucide-react';
+import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
+import { useTranslation } from '@/components/LanguageProvider';
+import { getEffectiveThemeMode, applyThemeToDocument } from '@/lib/themeConfig';
 
-  const plans = [
-    {
-      name: 'Free Starter',
-      priceMonthly: 0,
-      priceYearly: 0,
-      description: 'Essential cooking and recipe management tools for everyday home cooks.',
-      features: [
-        'Up to 25 Saved Recipes',
-        'Basic AI Chef Assistant',
-        'Manual Recipe Creator',
-        'Standard Shopping List',
-      ],
-      current: true,
-      buttonText: 'Current Plan',
-      highlighted: false,
-    },
-    {
-      name: 'Pro Chef',
-      priceMonthly: 9.99,
-      priceYearly: 7.99,
-      description: 'Advanced AI recipe generation, nutritional info, and unlimited storage.',
-      features: [
-        'Unlimited Saved Recipes',
-        'Advanced AI Chef (Gemini & GPT-4o)',
-        'Full Nutritional Information Access',
-        'URL & Video Recipe Scraping',
-        'Meal Planner Integration',
-      ],
-      current: false,
-      buttonText: 'Upgrade to Pro',
-      highlighted: true,
-    },
-    {
-      name: 'Household / Family',
-      priceMonthly: 19.99,
-      priceYearly: 15.99,
-      description: 'Collaborative meal planning and shared pantry tools for the whole family.',
-      features: [
-        'Everything in Pro Chef',
-        'Shared Family Cookbook & Pantry',
-        'Multi-user Meal Planning',
-        'Priority AI Processing',
-        'Dedicated Support',
-      ],
-      current: false,
-      buttonText: 'Get Family Plan',
-      highlighted: false,
-    },
-  ];
+interface PlanItem {
+  id: string;
+  name: string;
+  slug: string;
+  isFree: boolean;
+  isDefault?: boolean;
+  monthlyPriceDollars: number;
+  annualPriceDollars: number;
+  monthlyBadge?: string;
+  annualBadge?: string;
+  trialBadge?: string;
+  descriptionMonthly?: string;
+  descriptionAnnual?: string;
+  buttonText?: string;
+  aiRecipeLimit?: number;
+  recipeLibraryLimit?: number;
+  socialScrapeLimit?: number;
+  canViewMacros?: boolean;
+  allowedAiModels?: string;
+  features?: string[];
+  tokenLimit?: number;
+  tokenReimburseFrequency?: string;
+}
+
+export default function PackagePricingPage() {
+  const router = useRouter();
+  const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
+  const [plans, setPlans] = useState<PlanItem[]>([]);
+  const [billingInterval, setBillingInterval] = useState<'monthly' | 'annual'>('annual');
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [feedback, setFeedback] = useState<{ msg: string; success: boolean } | null>(null);
+
+  const syncTheme = useCallback(() => {
+    const mode = getEffectiveThemeMode();
+    setIsDayMode(mode === 'light');
+    applyThemeToDocument();
+  }, []);
+
+  useEffect(() => {
+    syncTheme();
+    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
+    window.addEventListener('zecratary_theme_updated', syncTheme);
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_updated', syncTheme);
+    };
+  }, [syncTheme]);
+
+  useEffect(() => {
+    initAuthStorage();
+    setUser(getCurrentUser());
+
+    fetch('/api/admin/plans', { cache: 'no-store' })
+      .then(res => res.json())
+      .then(data => {
+        const list = Array.isArray(data.plans) ? data.plans : Array.isArray(data) ? data : [];
+        setPlans(list);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSelectPlan = async (plan: PlanItem) => {
+    if (!user) {
+      router.push('/login?callbackUrl=/package');
+      return;
+    }
+
+    setLoadingPlan(plan.id || plan.slug);
+    setFeedback(null);
+
+    try {
+      const isFree = Boolean(plan.isFree || plan.monthlyPriceDollars === 0);
+      const expiry = isFree ? null : new Date(Date.now() + (billingInterval === 'annual' ? 365 : 30) * 86400000).toISOString();
+      const amount = isFree ? 0 : (billingInterval === 'annual' ? Number(plan.annualPriceDollars || 0) : Number(plan.monthlyPriceDollars || 0));
+
+      if (!isFree) {
+        await fetch('/api/admin/payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerName: user.name,
+            customerEmail: user.email,
+            planName: `${plan.name} (${billingInterval})`,
+            planSlug: plan.slug,
+            amount,
+            currency: 'USD',
+            gateway: 'stripe',
+            status: 'succeeded',
+            testMode: true,
+            expiryDate: expiry
+          })
+        });
+      }
+
+      await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          subscriptionPlan: plan.slug,
+          planExpiryDate: expiry
+        })
+      });
+
+      const updated = { ...user, subscriptionPlan: plan.slug, planExpiryDate: expiry };
+      setUser(updated);
+      setFeedback({ msg: `Successfully activated ${plan.name}!`, success: true });
+      setTimeout(() => router.push('/profile'), 1500);
+    } catch (err: any) {
+      setFeedback({ msg: err.message || 'Failed to update plan.', success: false });
+    } finally {
+      setLoadingPlan(null);
+    }
+  };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 text-slate-100 pb-16">
-      {/* Header */}
-      <div className="text-center space-y-3 max-w-2xl mx-auto">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#E05638]/10 text-[#E05638] text-xs font-bold border border-[#E05638]/20">
-          <Sparkles className="h-3.5 w-3.5" /> Subscription Tiers
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-          Choose the Perfect Plan for Your Kitchen
+    <div 
+      className="max-w-6xl mx-auto space-y-10 py-10 px-4 font-sans transition-colors duration-200 min-h-screen"
+      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+    >
+      <div className="text-center space-y-4 max-w-2xl mx-auto">
+        <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-[var(--color-primary,#E05638)]">
+          Simple, Transparent Pricing
         </h1>
-        <p className="text-sm text-slate-400">
-          Upgrade your culinary workflow with advanced AI recipes, automated scraping, and unlimited storage.
+        <p className="text-sm" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+          Choose the culinary tier that fits your kitchen goals. Upgrade, downgrade, or cancel anytime.
         </p>
 
-        {/* Billing Toggle */}
-        <div className="pt-4 flex items-center justify-center gap-3">
-          <span className={`text-xs font-bold ${billingCycle === 'monthly' ? 'text-white' : 'text-slate-400'}`}>Monthly</span>
+        {/* BILLING INTERVAL SWITCH */}
+        <div className="inline-flex p-1 rounded-2xl border shadow-sm" style={{ backgroundColor: isDayMode ? '#f1f5f9' : '#111726', borderColor: isDayMode ? '#cbd5e1' : '#1e293b' }}>
           <button
-            onClick={() => setBillingCycle(billingCycle === 'monthly' ? 'yearly' : 'monthly')}
-            className="w-12 h-6 bg-slate-800 rounded-full p-1 relative transition border border-slate-700"
+            type="button"
+            onClick={() => setBillingInterval('monthly')}
+            className={`px-5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+              billingInterval === 'monthly' ? 'bg-[var(--color-primary,#E05638)] text-white shadow' : (isDayMode ? 'text-slate-600' : 'text-slate-400')
+            }`}
           >
-            <div className={`w-4 h-4 bg-[#E05638] rounded-full transition-transform ${billingCycle === 'yearly' ? 'translate-x-6' : 'translate-x-0'}`} />
+            Monthly Billing
           </button>
-          <span className={`text-xs font-bold flex items-center gap-1.5 ${billingCycle === 'yearly' ? 'text-white' : 'text-slate-400'}`}>
-            Yearly <span className="text-[10px] bg-emerald-500/20 text-[var(--color-sidebar-icon,#10b981)] px-2 py-0.5 rounded-full border border-emerald-500/30">Save 20%</span>
-          </span>
+          <button
+            type="button"
+            onClick={() => setBillingInterval('annual')}
+            className={`px-5 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              billingInterval === 'annual' ? 'bg-[var(--color-primary,#E05638)] text-white shadow' : (isDayMode ? 'text-slate-600' : 'text-slate-400')
+            }`}
+          >
+            <span>Annual Billing</span>
+            <span className="text-[10px] bg-emerald-500 text-white font-black px-2 py-0.5 rounded-full uppercase">Save 35%+</span>
+          </button>
         </div>
       </div>
 
-      {/* Pricing Cards Grid */}
-      <div className="grid md:grid-cols-3 gap-6 pt-4">
-        {plans.map((plan, idx) => {
-          const price = billingCycle === 'monthly' ? plan.priceMonthly : plan.priceYearly;
+      {feedback && (
+        <div className={`p-4 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 max-w-md mx-auto shadow-md ${
+          feedback.success ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
+        }`}>
+          {feedback.success ? <CheckCircle2 className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
+          <span>{feedback.msg}</span>
+        </div>
+      )}
+
+      {/* PLANS CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {plans.map((plan) => {
+          const isCurrent = user?.subscriptionPlan === plan.slug;
+          const price = plan.isFree ? 0 : (billingInterval === 'annual' ? Number(plan.annualPriceDollars || 0) : Number(plan.monthlyPriceDollars || 0));
+          const badge = billingInterval === 'annual' ? (plan.annualBadge || plan.trialBadge) : plan.monthlyBadge;
+
           return (
             <div
-              key={idx}
-              className={`bg-[#111726] rounded-3xl p-6 flex flex-col justify-between border transition relative ${
-                plan.highlighted ? 'border-[#E05638] shadow-xl shadow-[#E05638]/10 ring-1 ring-[#E05638]/50' : 'border-slate-800'
+              key={plan.id || plan.slug}
+              className={`border-2 rounded-3xl p-6 flex flex-col justify-between relative shadow-xl transition-all duration-200 ${
+                isCurrent ? 'ring-4 ring-emerald-500/30 scale-[1.02]' : 'hover:scale-[1.01]'
               }`}
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isCurrent ? '#10b981' : isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              }}
             >
-              {plan.highlighted && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#E05638] text-white text-[10px] font-extrabold px-3 py-1 rounded-full uppercase tracking-wider shadow-md">
-                  Most Popular
-                </span>
+              {badge && (
+                <div className="absolute -top-3 right-6 px-3 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-md bg-[#10b981]">
+                  {badge}
+                </div>
               )}
 
               <div className="space-y-4">
                 <div>
-                  <h3 className="text-lg font-extrabold text-white">{plan.name}</h3>
-                  <p className="text-xs text-slate-400 mt-1 min-h-[32px]">{plan.description}</p>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{plan.name}</h3>
+                    {isCurrent && (
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 border border-emerald-500/30">
+                        Current
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {billingInterval === 'annual' ? (plan.descriptionAnnual || plan.descriptionMonthly) : plan.descriptionMonthly}
+                  </p>
                 </div>
 
-                <div className="flex items-baseline gap-1 py-2 border-y border-slate-800/80">
-                  <span className="text-3xl font-black text-white">${price}</span>
-                  <span className="text-xs text-slate-400 font-medium">/ month {billingCycle === 'yearly' && price > 0 ? '(billed annually)' : ''}</span>
+                <div className="pt-2">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-4xl font-black text-[var(--color-primary,#E05638)]">
+                      {plan.isFree ? 'Free' : `$${Number(price).toFixed(2)}`}
+                    </span>
+                    {!plan.isFree && (
+                      <span className="text-xs font-bold text-slate-500">
+                        /{billingInterval === 'annual' ? 'year' : 'month'}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <ul className="space-y-2.5 text-xs text-slate-300">
-                  {plan.features.map((feat, fIdx) => (
-                    <li key={fIdx} className="flex items-center gap-2.5">
-                      <div className="w-4 h-4 rounded-full bg-emerald-500/20 text-[var(--color-sidebar-icon,#10b981)] flex items-center justify-center shrink-0">
-                        <Check className="h-3 w-3" />
-                      </div>
-                      <span>{feat}</span>
-                    </li>
+                <div className="border-t pt-4 space-y-2 text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+                  {Array.isArray(plan.features) && plan.features.map((f, i) => (
+                    <div key={i} className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                      <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{f}</span>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </div>
 
-              <div className="pt-6">
+              <div className="pt-6 border-t mt-6" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
                 <button
-                  disabled={plan.current}
-                  onClick={() => alert(`Selected ${plan.name} plan!`)}
-                  className={`w-full py-3 rounded-xl font-bold text-xs transition shadow-md ${
-                    plan.current
-                      ? 'bg-slate-800 text-slate-400 cursor-default'
-                      : plan.highlighted
-                      ? 'bg-[#E05638] hover:bg-[#c94529] text-white shadow-[#E05638]/20'
-                      : 'bg-slate-800 hover:bg-slate-700 text-white'
-                  }`}
+                  type="button"
+                  disabled={isCurrent || loadingPlan === (plan.id || plan.slug)}
+                  onClick={() => handleSelectPlan(plan)}
+                  className="w-full py-3 rounded-2xl text-xs font-black text-white transition shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  style={{ backgroundColor: isCurrent ? '#10b981' : 'var(--color-primary, #E05638)' }}
                 >
-                  {plan.buttonText}
+                  {loadingPlan === (plan.id || plan.slug) ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : isCurrent ? (
+                    'Current Plan'
+                  ) : (
+                    plan.buttonText || (plan.isFree ? 'Get Started' : 'Subscribe Now')
+                  )}
                 </button>
               </div>
             </div>
@@ -40444,57 +40277,68 @@ export async function fetchAndApplyServerTheme(): Promise<void> {
 
 ## File: `apps/web/src/lib/recipe-types.ts`
 ```typescript
-// Generated / Updated by AI Collaborator
-'use client';
-import { useState, useEffect } from 'react';
+// Server-backed Recipe Types Store
+// Synchronizes dynamically with PostgreSQL with zero localStorage writes
+
+import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
 
 export const DEFAULT_RECIPE_TYPES: string[] = [
-  'Main Dish', 'Breakfast', 'Lunch', 'Dinner', 'Dessert', 'Snack', 
-  'Drink', 'Appetizer', 'Soup', 'Salad', 'Side Dish', 'Baking'
+  'Breakfast',
+  'Lunch',
+  'Dinner',
+  'Snack',
+  'Dessert',
+  'Beverage',
+  'Appetizer',
+  'Salad',
+  'Soup',
+  'Side Dish',
+  'Baking'
 ];
 
+let memoryRecipeTypes: string[] = [...DEFAULT_RECIPE_TYPES];
+
+export function getStoredRecipeTypes(): string[] {
+  return [...memoryRecipeTypes];
+}
+
+export function setMemoryRecipeTypes(types: string[]): void {
+  if (Array.isArray(types) && types.length > 0) {
+    memoryRecipeTypes = [...types];
+  }
+}
+
+export async function saveRecipeTypes(types: string[]): Promise<boolean> {
+  memoryRecipeTypes = [...types];
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_changed', { detail: types }));
+    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_updated', { detail: types }));
+  }
+
+  let success = false;
+
+  // 1. Direct PostgreSQL API Save
+  try {
+    const res = await fetch('/api/admin/recipe-type', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipeTypes: types })
+    });
+    if (res.ok) success = true;
+  } catch (_) {}
+
+  // 2. Settings Synchronizer Save
+  try {
+    const res2 = await persistServerAdminSettings({ recipeTypes: types });
+    if (res2) success = true;
+  } catch (_) {}
+
+  return success;
+}
+
 export function useRecipeTypes(): string[] {
-  const [types, setTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
-
-  useEffect(() => {
-    let isMounted = true;
-    async function fetchTypes() {
-      try {
-        const res = await fetch('/api/admin/recipe-type', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          const list = Array.isArray(data) ? data : (data?.recipeTypes || data?.types);
-          if (Array.isArray(list) && list.length > 0 && isMounted) {
-            const parsed = list.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
-            if (parsed.length > 0) { setTypes(parsed); return; }
-          }
-        }
-      } catch (_) {}
-
-      try {
-        const res2 = await fetch('/api/admin/settings', { cache: 'no-store' });
-        if (res2.ok) {
-          const data2 = await res2.json();
-          const list2 = data2?.settings?.recipeTypes || data2?.recipeTypes;
-          if (Array.isArray(list2) && list2.length > 0 && isMounted) {
-            const parsed2 = list2.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
-            if (parsed2.length > 0) setTypes(parsed2);
-          }
-        }
-      } catch (_) {}
-    }
-    fetchTypes();
-    const handleSync = () => fetchTypes();
-    window.addEventListener('zecratary_recipe_types_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
-    return () => {
-      isMounted = false;
-      window.removeEventListener('zecratary_recipe_types_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
-    };
-  }, []);
-
-  return types;
+  return getStoredRecipeTypes();
 }
 
 ```
@@ -40917,57 +40761,68 @@ export function useIngredientCategories(): string[] {
 
 ## File: `apps/web/src/lib/recipe_types.ts`
 ```typescript
-// Generated / Updated by AI Collaborator
-'use client';
-import { useState, useEffect } from 'react';
+// Server-backed Recipe Types Store
+// Synchronizes dynamically with PostgreSQL with zero localStorage writes
+
+import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
 
 export const DEFAULT_RECIPE_TYPES: string[] = [
-  'Main Dish', 'Breakfast', 'Lunch', 'Dinner', 'Dessert', 'Snack', 
-  'Drink', 'Appetizer', 'Soup', 'Salad', 'Side Dish', 'Baking'
+  'Breakfast',
+  'Lunch',
+  'Dinner',
+  'Snack',
+  'Dessert',
+  'Beverage',
+  'Appetizer',
+  'Salad',
+  'Soup',
+  'Side Dish',
+  'Baking'
 ];
 
+let memoryRecipeTypes: string[] = [...DEFAULT_RECIPE_TYPES];
+
+export function getStoredRecipeTypes(): string[] {
+  return [...memoryRecipeTypes];
+}
+
+export function setMemoryRecipeTypes(types: string[]): void {
+  if (Array.isArray(types) && types.length > 0) {
+    memoryRecipeTypes = [...types];
+  }
+}
+
+export async function saveRecipeTypes(types: string[]): Promise<boolean> {
+  memoryRecipeTypes = [...types];
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_changed', { detail: types }));
+    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_updated', { detail: types }));
+  }
+
+  let success = false;
+
+  // 1. Direct PostgreSQL API Save
+  try {
+    const res = await fetch('/api/admin/recipe-type', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipeTypes: types })
+    });
+    if (res.ok) success = true;
+  } catch (_) {}
+
+  // 2. Settings Synchronizer Save
+  try {
+    const res2 = await persistServerAdminSettings({ recipeTypes: types });
+    if (res2) success = true;
+  } catch (_) {}
+
+  return success;
+}
+
 export function useRecipeTypes(): string[] {
-  const [types, setTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
-
-  useEffect(() => {
-    let isMounted = true;
-    async function fetchTypes() {
-      try {
-        const res = await fetch('/api/admin/recipe-type', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          const list = Array.isArray(data) ? data : (data?.recipeTypes || data?.types);
-          if (Array.isArray(list) && list.length > 0 && isMounted) {
-            const parsed = list.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
-            if (parsed.length > 0) { setTypes(parsed); return; }
-          }
-        }
-      } catch (_) {}
-
-      try {
-        const res2 = await fetch('/api/admin/settings', { cache: 'no-store' });
-        if (res2.ok) {
-          const data2 = await res2.json();
-          const list2 = data2?.settings?.recipeTypes || data2?.recipeTypes;
-          if (Array.isArray(list2) && list2.length > 0 && isMounted) {
-            const parsed2 = list2.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
-            if (parsed2.length > 0) setTypes(parsed2);
-          }
-        }
-      } catch (_) {}
-    }
-    fetchTypes();
-    const handleSync = () => fetchTypes();
-    window.addEventListener('zecratary_recipe_types_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
-    return () => {
-      isMounted = false;
-      window.removeEventListener('zecratary_recipe_types_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
-    };
-  }, []);
-
-  return types;
+  return getStoredRecipeTypes();
 }
 
 ```
@@ -41287,7 +41142,7 @@ if (typeof window !== 'undefined') {
 // Strict PostgreSQL Database Client
 // 100% Database Persistence - No JSON Fallback
 
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 
 let pgPool: Pool | null = null;
 
@@ -41339,6 +41194,11 @@ export async function transaction<T>(callback: (client: any) => Promise<T>): Pro
   } finally {
     client.release();
   }
+}
+
+// Parse PostgreSQL NUMERIC (OID 1700) directly into JavaScript numbers
+if (typeof types !== 'undefined' && types.setTypeParser) {
+  types.setTypeParser(1700, (val: string) => (val === null ? 0 : parseFloat(val)));
 }
 
 ```
