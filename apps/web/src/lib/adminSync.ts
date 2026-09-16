@@ -5,6 +5,11 @@ export function purgeLegacyBrowserAdminStorage(): void {
   if (typeof window === 'undefined') return;
   const legacyKeys = [
     'zecratary_admin_settings',
+    'payment_transactions',
+    'payment_settings',
+    'zecratary_currency',
+    'zecratary_payment_transactions',
+    'zecratary_payment_settings',
     'theme_colors',
     'site_config',
     'zecratary_theme_config',

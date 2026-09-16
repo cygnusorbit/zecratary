@@ -196,5 +196,24 @@
     "cardBackground": "#0b0f17",
     "cardBorder": "#1e293b",
     "textSecondary": "#94a3b8"
+  },
+  "paymentSettings": {
+    "activeGateway": "stripe",
+    "currency": "USD",
+    "testMode": true,
+    "stripeConnected": false,
+    "stripe": {
+      "enabled": true,
+      "publishableKey": "",
+      "secretKey": "",
+      "webhookSecret": ""
+    },
+    "paypal": {
+      "enabled": false,
+      "clientId": "",
+      "clientSecret": "",
+      "webhookId": "",
+      "environment": "sandbox"
+    }
   }
 }

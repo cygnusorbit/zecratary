@@ -1,107 +1,44 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-interface PaymentTransaction {
-  id: string;
-  customerName: string;
-  customerEmail: string;
-  planName: string;
-  planSlug?: string;
-  amount: number;
-  currency: string;
-  gateway: 'stripe' | 'paypal' | 'manual';
-  status: 'succeeded' | 'failed' | 'refunded' | 'pending';
-  failureReason?: string;
-  testMode?: boolean;
-  createdAt: string;
-  expiryDate?: string;
+export const dynamic = 'force-dynamic';
+
+function getDataPaths(filename: string): string[] {
+  return [
+    path.join(process.cwd(), 'apps/web/data', filename),
+    path.join(process.cwd(), 'data', filename)
+  ];
 }
 
-const INITIAL_TRANSACTIONS: PaymentTransaction[] = [
-  {
-    id: 'tx_10928301',
-    customerName: 'Sarah Jenkins',
-    customerEmail: 'sarah.j@example.com',
-    planName: 'Nutrition Pro (Monthly)',
-    planSlug: 'nutrition-pro-monthly',
-    amount: 8.99,
-    currency: 'USD',
-    gateway: 'stripe',
-    status: 'succeeded',
-    createdAt: '2026-09-01T14:22:10Z',
-    expiryDate: '2026-10-01T14:22:10Z',
-  },
-  {
-    id: 'tx_10928302',
-    customerName: 'Marcus Vance',
-    customerEmail: 'marcus.v@example.com',
-    planName: 'Nutrition Pro (Annual)',
-    planSlug: 'nutrition-pro-annual',
-    amount: 59.99,
-    currency: 'USD',
-    gateway: 'paypal',
-    status: 'succeeded',
-    createdAt: '2026-09-01T11:05:44Z',
-    expiryDate: '2027-09-01T11:05:44Z',
-  },
-  {
-    id: 'tx_10928303',
-    customerName: 'Elena Rostova',
-    customerEmail: 'elena.rostova@domain.com',
-    planName: 'Nutrition Pro (Monthly)',
-    planSlug: 'nutrition-pro-monthly',
-    amount: 8.99,
-    currency: 'USD',
-    gateway: 'stripe',
-    status: 'failed',
-    failureReason: 'Card issuer declined: Insufficient funds',
-    createdAt: '2026-08-31T18:49:12Z',
-    expiryDate: '2026-09-30T18:49:12Z',
-  },
-  {
-    id: 'tx_10928304',
-    customerName: 'David Kim',
-    customerEmail: 'david.kim@techcorp.io',
-    planName: 'Nutrition Pro (Monthly)',
-    planSlug: 'nutrition-pro-monthly',
-    amount: 8.99,
-    currency: 'USD',
-    gateway: 'stripe',
-    status: 'succeeded',
-    createdAt: '2026-08-30T09:15:02Z',
-    expiryDate: '2026-09-30T09:15:02Z',
-  },
-  {
-    id: 'tx_10928305',
-    customerName: 'Chloe Dupont',
-    customerEmail: 'c.dupont@atelier.fr',
-    planName: 'Nutrition Pro (Monthly)',
-    planSlug: 'nutrition-pro-monthly',
-    amount: 8.99,
-    currency: 'USD',
-    gateway: 'paypal',
-    status: 'failed',
-    failureReason: 'PayPal account authorization timed out',
-    createdAt: '2026-08-29T22:30:19Z',
-    expiryDate: '2026-09-29T22:30:19Z',
-  },
-  {
-    id: 'tx_10928306',
-    customerName: "Liam O'Connor",
-    customerEmail: 'liam.oc@irishfoodies.ie',
-    planName: 'Nutrition Pro (Annual)',
-    planSlug: 'nutrition-pro-annual',
-    amount: 59.99,
-    currency: 'USD',
-    gateway: 'stripe',
-    status: 'refunded',
-    failureReason: 'Customer requested cancellation within 24h grace period',
-    createdAt: '2026-08-28T16:04:55Z',
-    expiryDate: '2027-08-28T16:04:55Z',
+function readJsonFile<T>(filename: string, fallback: T): T {
+  const paths = getDataPaths(filename);
+  for (const p of paths) {
+    if (fs.existsSync(p)) {
+      try {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) as T;
+      } catch (_) {}
+    }
   }
-];
+  return fallback;
+}
+
+function writeJsonFile<T>(filename: string, data: T): void {
+  const paths = getDataPaths(filename);
+  for (const p of paths) {
+    try {
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (_) {}
+  }
+}
 
 const DEFAULT_SETTINGS = {
-  activeGateway: 'stripe' as const,
+  activeGateway: 'stripe',
   currency: 'USD',
   testMode: true,
   stripeConnected: false,
@@ -109,119 +46,146 @@ const DEFAULT_SETTINGS = {
     enabled: true,
     publishableKey: '',
     secretKey: '',
-    webhookSecret: '',
+    webhookSecret: ''
   },
   paypal: {
     enabled: false,
     clientId: '',
     clientSecret: '',
     webhookId: '',
-    environment: 'sandbox' as const,
-  },
+    environment: 'sandbox'
+  }
 };
 
 export async function GET() {
-  try {
-    const settings = {
-      ...DEFAULT_SETTINGS,
-      stripeConnected: Boolean(process.env.STRIPE_SECRET_KEY),
-      stripe: {
-        enabled: Boolean(process.env.STRIPE_SECRET_KEY),
-        publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
-        secretKey: process.env.STRIPE_SECRET_KEY ? '••••••••' + process.env.STRIPE_SECRET_KEY.slice(-4) : '',
-        webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ? '••••••••' + process.env.STRIPE_WEBHOOK_SECRET.slice(-4) : '',
-      },
-      paypal: {
-        enabled: Boolean(process.env.PAYPAL_CLIENT_SECRET),
-        clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '',
-        clientSecret: process.env.PAYPAL_CLIENT_SECRET ? '••••••••' + process.env.PAYPAL_CLIENT_SECRET.slice(-4) : '',
-        webhookId: process.env.PAYPAL_WEBHOOK_ID || '',
-        environment: (process.env.PAYPAL_MODE as 'sandbox' | 'live') || 'sandbox',
-      },
-    };
-
-    return NextResponse.json({
-      success: true,
-      transactions: INITIAL_TRANSACTIONS,
-      settings,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  const adminSettings = readJsonFile('admin_settings.json', {} as any);
+  const settings = adminSettings.paymentSettings || DEFAULT_SETTINGS;
+  if (adminSettings.currency) {
+    settings.currency = adminSettings.currency;
   }
+  const transactions = readJsonFile('payment_transactions.json', []);
+
+  return NextResponse.json({
+    success: true,
+    settings,
+    transactions
+  }, {
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+    }
+  });
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    if (body.action === 'add_transaction') {
-      const newTransaction = {
-        id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
-        createdAt: body.transaction.createdAt || new Date().toISOString(),
-        ...body.transaction,
-      };
-      return NextResponse.json({
-        success: true,
-        message: 'Payment transaction added successfully',
-        transaction: newTransaction,
-      });
-    }
-
-    if (body.action === 'update_transaction') {
-      return NextResponse.json({
-        success: true,
-        message: 'Payment transaction updated successfully',
-        transaction: body.transaction,
-      });
-    }
-
-    if (body.action === 'delete_transaction') {
-      return NextResponse.json({
-        success: true,
-        message: 'Payment transaction removed successfully',
-        id: body.id,
-      });
-    }
-
+    // 1. Stripe Connect Action
     if (body.action === 'connect_stripe') {
-      const stripeClientId = process.env.STRIPE_CONNECT_CLIENT_ID;
-      if (stripeClientId) {
-        const redirectUri = encodeURIComponent(`${req.headers.get('origin') || ''}/admin/payment?connected=stripe`);
-        return NextResponse.json({
-          success: true,
-          url: `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${stripeClientId}&scope=read_write&redirect_uri=${redirectUri}`,
-        });
-      }
-      return NextResponse.json({
-        success: true,
-        connected: true,
-        message: 'Stripe credentials validated and connected successfully!',
-      });
+      const adminSettings = readJsonFile('admin_settings.json', {} as any);
+      const currentSettings = adminSettings.paymentSettings || DEFAULT_SETTINGS;
+      const updated = {
+        ...currentSettings,
+        stripeConnected: true,
+        stripe: {
+          ...currentSettings.stripe,
+          enabled: true,
+          secretKey: body.secretKey || currentSettings.stripe.secretKey,
+          publishableKey: body.publishableKey || currentSettings.stripe.publishableKey
+        }
+      };
+      adminSettings.paymentSettings = updated;
+      writeJsonFile('admin_settings.json', adminSettings);
+      return NextResponse.json({ success: true, message: 'Stripe Gateway enabled and verified.' });
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Payment configuration saved successfully',
-      settings: body,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Failed to process payment request' }, { status: 500 });
+    // 2. Add Transaction Action
+    if (body.action === 'add_transaction' && body.transaction) {
+      const transactions = readJsonFile('payment_transactions.json', [] as any[]);
+      const newTx = body.transaction;
+      const cleanEmail = (newTx.customerEmail || '').toLowerCase().trim();
+
+      const updatedTxs = transactions.map((tItem: any) => {
+        const isSucceeded = ['succeeded', 'succeded', 'success', 'paid', 'completed'].includes(String(newTx.status).toLowerCase());
+        if (
+          isSucceeded &&
+          tItem.customerEmail.toLowerCase() === cleanEmail &&
+          ['succeeded', 'pending'].includes(String(tItem.status).toLowerCase())
+        ) {
+          return {
+            ...tItem,
+            status: 'refunded',
+            expiryDate: new Date().toISOString()
+          };
+        }
+        return tItem;
+      });
+
+      updatedTxs.unshift(newTx);
+      writeJsonFile('payment_transactions.json', updatedTxs);
+      return NextResponse.json({ success: true, transaction: newTx });
+    }
+
+    // 3. Update Transaction Action
+    if (body.action === 'update_transaction' && body.transaction) {
+      const transactions = readJsonFile('payment_transactions.json', [] as any[]);
+      const updatedTx = body.transaction;
+      const cleanEmail = (updatedTx.customerEmail || '').toLowerCase().trim();
+      const isSucceeded = ['succeeded', 'succeded', 'success', 'paid', 'completed'].includes(String(updatedTx.status).toLowerCase());
+
+      const updatedTxs = transactions.map((tItem: any) => {
+        if (tItem.id === updatedTx.id) return updatedTx;
+        if (
+          isSucceeded &&
+          tItem.customerEmail.toLowerCase() === cleanEmail &&
+          ['succeeded', 'pending'].includes(String(tItem.status).toLowerCase())
+        ) {
+          return {
+            ...tItem,
+            status: 'refunded',
+            expiryDate: new Date().toISOString()
+          };
+        }
+        return tItem;
+      });
+
+      writeJsonFile('payment_transactions.json', updatedTxs);
+      return NextResponse.json({ success: true, transaction: updatedTx });
+    }
+
+    // 4. Update Gateway Settings
+    const adminSettings = readJsonFile('admin_settings.json', {} as any);
+    const mergedSettings = {
+      ...(adminSettings.paymentSettings || DEFAULT_SETTINGS),
+      ...body
+    };
+    adminSettings.paymentSettings = mergedSettings;
+    if (body.currency) {
+      adminSettings.currency = body.currency;
+    }
+    writeJsonFile('admin_settings.json', adminSettings);
+
+    return NextResponse.json({ success: true, settings: mergedSettings });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Failed to process request' }, { status: 500 });
   }
 }
 
-export async function DELETE(req: Request) {
+export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
+
     if (!id) {
-      return NextResponse.json({ error: 'Missing transaction ID' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
     }
-    return NextResponse.json({
-      success: true,
-      message: `Transaction ${id} deleted successfully`,
-      id,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const transactions = readJsonFile('payment_transactions.json', [] as any[]);
+    const updated = transactions.filter((t: any) => t.id !== id);
+    writeJsonFile('payment_transactions.json', updated);
+
+    return NextResponse.json({ success: true, message: 'Transaction deleted' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Failed to delete transaction' }, { status: 500 });
   }
 }

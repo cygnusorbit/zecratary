@@ -1,0 +1,16 @@
+[
+  {
+    "id": "tx_demo_101",
+    "customerName": "Demo Customer",
+    "customerEmail": "demo@zecratary.com",
+    "planName": "Nutrition Pro (Monthly)",
+    "planSlug": "nutrition-pro-monthly",
+    "amount": 8.99,
+    "currency": "USD",
+    "gateway": "stripe",
+    "status": "succeeded",
+    "testMode": true,
+    "createdAt": "2026-09-10T14:30:00.000Z",
+    "expiryDate": "2026-10-10T23:59:59.000Z"
+  }
+]

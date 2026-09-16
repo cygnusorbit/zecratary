@@ -1,8 +1,8 @@
 {
   "siteName": "Zecratary",
   "siteDescription": "Smart Meal Planning & Recipe Assistant",
-  "titlebarEmoji": "🍳",
-  "faviconEmoji": "🍳",
+  "titlebarEmoji": "\ud83c\udf73",
+  "faviconEmoji": "\ud83c\udf73",
   "aiProvider": "gemini",
   "aiModel": "gemini-3.5-flash-lite",
   "currency": "USD",
@@ -108,5 +108,24 @@
     "cardBorder": "#172554",
     "textSecondary": "#7dd3fc"
   },
-  "supportedLanguages": []
+  "supportedLanguages": [],
+  "paymentSettings": {
+    "activeGateway": "stripe",
+    "currency": "USD",
+    "testMode": true,
+    "stripeConnected": false,
+    "stripe": {
+      "enabled": true,
+      "publishableKey": "",
+      "secretKey": "",
+      "webhookSecret": ""
+    },
+    "paypal": {
+      "enabled": false,
+      "clientId": "",
+      "clientSecret": "",
+      "webhookId": "",
+      "environment": "sandbox"
+    }
+  }
 }
