@@ -5,7 +5,7 @@
     "email": "ed1226@gmail.com",
     "password": "password123",
     "role": "user",
-    "subscriptionPlan": "nutrition-pro-monthly",
+    "subscriptionPlan": "nutrition-pro-annual",
     "subscriptionTier": "taster",
     "createdAt": "2026-09-14T13:11:39.978Z",
     "avatar": "https://lh3.googleusercontent.com/a/ACg8ocJMUfGHR6gzjK1YpyJbqmWWgaKL6fJNjOSREHSJAbyaHMuKfg=s96-c",
@@ -16,8 +16,8 @@
     "planInterval": "MONTH",
     "subscriptionStatus": "active",
     "lastPaymentDate": "2026-09-14T16:17:44.621Z",
-    "planExpiryDate": "2026-10-14T16:17:44.621Z",
-    "expiryDate": "2026-10-14T16:17:44.621Z",
+    "planExpiryDate": "2027-09-16T23:59:59.000Z",
+    "expiryDate": "2027-09-16T23:59:59.000Z",
     "updatedAt": "2026-09-14T16:17:44.621Z"
   },
   {
@@ -26,9 +26,11 @@
     "email": "demo@zecratary.com",
     "password": "123456",
     "role": "user",
-    "subscriptionPlan": "taster",
+    "subscriptionPlan": "nutrition-pro-monthly",
     "subscriptionTier": "taster",
-    "createdAt": "2026-09-14T13:11:12.150Z"
+    "createdAt": "2026-09-14T13:11:12.150Z",
+    "planExpiryDate": "2026-10-16T23:59:59.000Z",
+    "expiryDate": "2026-10-16T23:59:59.000Z"
   },
   {
     "id": "usr_admin_1",

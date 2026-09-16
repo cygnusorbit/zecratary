@@ -1,8 +1,8 @@
 {
   "siteName": "Zecratary",
   "siteDescription": "Smart Meal Planning & Recipe Assistant",
-  "titlebarEmoji": "\ud83c\udf73",
-  "faviconEmoji": "\ud83c\udf73",
+  "titlebarEmoji": "🍳",
+  "faviconEmoji": "🍳",
   "aiProvider": "gemini",
   "aiModel": "gemini-3.5-flash-lite",
   "currency": "USD",
@@ -27,47 +27,62 @@
   },
   "subscriptionPlans": [
     {
-      "id": "sub_free",
-      "name": "Free Tier",
-      "price": 0,
-      "interval": "monthly",
+      "id": "preset_taster",
+      "name": "Taster",
+      "slug": "taster",
+      "isFree": true,
+      "isDefault": true,
+      "monthlyPriceDollars": 0,
+      "annualPriceDollars": 0,
+      "monthlyBadge": "",
+      "annualBadge": "",
+      "trialBadge": "",
+      "descriptionMonthly": "Free tier with limited features",
+      "descriptionAnnual": "Free tier with limited features",
+      "buttonText": "Manage",
+      "aiRecipeLimit": 5,
+      "recipeLibraryLimit": 25,
+      "socialScrapeLimit": 5,
+      "canViewMacros": false,
+      "allowedAiModels": "gemini-3.5-flash-lite,gpt-3.5-turbo",
+      "featuresText": "Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition",
       "features": [
-        "Standard Recipes",
-        "Weekly Meal Planner",
-        "Basic Shopping List"
+        "Create up to 5 AI-powered recipes per month",
+        "Personal recipe library (25 total recipes)",
+        "Smart ingredient repurposing",
+        "Automated shopping list creation",
+        "Direct online grocery shopping links",
+        "Meal planner",
+        "Ingredient photo recognition"
       ],
-      "isPopular": false,
-      "description": "Essential kitchen companion for home cooks"
+      "tokenLimit": 500,
+      "tokenReimburseFrequency": "monthly"
     },
     {
-      "id": "sub_pro",
-      "name": "Pro Chef",
-      "price": 9.99,
-      "interval": "monthly",
-      "features": [
-        "AI Recipe Generator",
-        "Nutrition Analytics",
-        "Cloud Sync",
-        "Priority Support"
-      ],
-      "isPopular": true,
-      "description": "Full AI capabilities and nutritional tracking"
-    },
-    {
-      "id": "sub_enterprise",
-      "name": "Culinary Master",
-      "price": 24.99,
-      "interval": "monthly",
-      "features": [
-        "Multi-User Kitchen Accounts",
-        "Custom Recipe Books",
-        "Automated Pantry Reordering"
-      ],
-      "isPopular": false,
-      "description": "Advanced features for professional kitchens"
+      "id": "plan_1789546898584",
+      "name": "Nutrition Pro",
+      "slug": "nutrition-pro",
+      "isFree": false,
+      "isDefault": false,
+      "monthlyPriceDollars": 8.99,
+      "annualPriceDollars": 59.99,
+      "monthlyBadge": "Billed Immediately",
+      "annualBadge": "Save 44%",
+      "trialBadge": "7-Day Free Trial",
+      "descriptionMonthly": "Full premium access, billed monthly",
+      "descriptionAnnual": "Best value - all premium features, billed annually",
+      "buttonText": "Choose Plan",
+      "aiRecipeLimit": -1,
+      "recipeLibraryLimit": -1,
+      "socialScrapeLimit": -1,
+      "canViewMacros": true,
+      "allowedAiModels": "gemini-3.6-flash,gpt-4o",
+      "featuresText": "Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)",
+      "tokenLimit": 10000,
+      "tokenReimburseFrequency": "monthly"
     }
   ],
-  "updatedAt": "2026-09-16T05:53:12.453Z",
+  "updatedAt": "2026-09-16T08:22:09.078Z",
   "chefAiSettings": {
     "provider": "gemini",
     "apiKey": "AQ.Ab8RN6IhH6iaU_4chRKwnTIyKxG4bBTJURnex1GtD9nPAttcOQ",
@@ -109,36 +124,5 @@
     "textSecondary": "#7dd3fc"
   },
   "supportedLanguages": [],
-  "paymentSettings": {
-    "activeGateway": "stripe",
-    "currency": "USD",
-    "testMode": true,
-    "stripeConnected": false,
-    "stripe": {
-      "enabled": true,
-      "publishableKey": "",
-      "secretKey": "",
-      "webhookSecret": ""
-    },
-    "paypal": {
-      "enabled": false,
-      "clientId": "",
-      "clientSecret": "",
-      "webhookId": "",
-      "environment": "sandbox"
-    }
-  },
-  "recipeTypes": [
-    "Breakfast",
-    "Lunch",
-    "Dinner",
-    "Snack",
-    "Dessert",
-    "Beverage",
-    "Appetizer",
-    "Salad",
-    "Soup",
-    "Side Dish",
-    "Baking"
-  ]
+  "recipeTypes": []
 }

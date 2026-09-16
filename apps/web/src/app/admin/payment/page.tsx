@@ -71,12 +71,6 @@ interface AppUser {
   subscriptionPlan?: string;
 }
 
-const DEFAULT_AVAILABLE_PLANS: PlanOption[] = [
-  { id: 'taster', name: 'Taster (Free)', slug: 'taster', priceFormatted: 'Free', priceDollars: 0, isFree: true },
-  { id: 'nutrition-pro-monthly', name: 'Nutrition Pro (Monthly)', slug: 'nutrition-pro-monthly', priceFormatted: '$8.99/mo', priceDollars: 8.99, interval: 'MONTH' },
-  { id: 'nutrition-pro-annual', name: 'Nutrition Pro (Annual)', slug: 'nutrition-pro-annual', priceFormatted: '$59.99/yr', priceDollars: 59.99, interval: 'YEAR' },
-];
-
 const SUPPORTED_CURRENCIES = [
   { code: 'USD', label: 'USD - United States Dollar ($)', symbol: '$' },
   { code: 'EUR', label: 'EUR - Euro (€)', symbol: '€' },
@@ -157,7 +151,7 @@ export default function AdminPaymentPage() {
 
   const [activeTab, setActiveTab] = useState<'history' | 'settings'>('history');
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
-  const [availablePlans, setAvailablePlans] = useState<PlanOption[]>(DEFAULT_AVAILABLE_PLANS);
+  const [availablePlans, setAvailablePlans] = useState<PlanOption[]>([]);
   const [registeredUsers, setRegisteredUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [connectingStripe, setConnectingStripe] = useState(false);
@@ -327,25 +321,55 @@ export default function AdminPaymentPage() {
   };
 
   // Load Plans from Server Settings API (Zero LocalStorage)
-  const loadPlans = useCallback(async () => {
+      const loadPlans = useCallback(async () => {
     let parsedPlans: PlanOption[] = [];
     try {
       const serverData = await fetchServerAdminSettings();
       if (serverData && Array.isArray(serverData.subscriptionPlans) && serverData.subscriptionPlans.length > 0) {
         serverData.subscriptionPlans.forEach((cfg: any) => {
-          const isZeroCost = cfg.price === 0 || cfg.isFree;
-          const price = Number(cfg.price || 0);
-          const interval = cfg.interval ? (cfg.interval.toLowerCase().includes('year') ? 'YEAR' : 'MONTH') : 'MONTH';
+          const isZeroCost = cfg.price === 0 || cfg.isFree || (cfg.monthlyPriceDollars === 0 && cfg.annualPriceDollars === 0);
+          const baseSlug = cfg.slug || cfg.id || 'plan';
+          const baseName = cfg.name || 'Plan';
 
-          parsedPlans.push({
-            id: cfg.id || cfg.slug,
-            name: cfg.name + (isZeroCost ? ' (Free)' : ` (${interval === 'YEAR' ? 'Annual' : 'Monthly'})`),
-            slug: cfg.slug || cfg.id,
-            priceFormatted: isZeroCost ? 'Free' : `${activeCurrencySymbol}${price.toFixed(2)}${interval === 'YEAR' ? '/yr' : '/mo'}`,
-            priceDollars: price,
-            interval,
-            isFree: isZeroCost,
-          });
+          if (isZeroCost) {
+            parsedPlans.push({
+              id: cfg.id || baseSlug,
+              name: baseName + ' (Free)',
+              slug: baseSlug,
+              priceFormatted: 'Free',
+              priceDollars: 0,
+              interval: 'MONTH',
+              isFree: true,
+            });
+          } else {
+            const monthlyPrice = Number(cfg.monthlyPriceDollars ?? cfg.price ?? 0);
+            if (monthlyPrice > 0 || (!cfg.annualPriceDollars && monthlyPrice === 0)) {
+              const mSlug = baseSlug.endsWith('-monthly') ? baseSlug : `${baseSlug.replace(/-annual$/, '')}-monthly`;
+              parsedPlans.push({
+                id: `${cfg.id || baseSlug}-monthly`,
+                name: `${baseName} (Monthly)`,
+                slug: mSlug,
+                priceFormatted: `${activeCurrencySymbol}${monthlyPrice.toFixed(2)}/mo`,
+                priceDollars: monthlyPrice,
+                interval: 'MONTH',
+                isFree: false,
+              });
+            }
+
+            const annualPrice = Number(cfg.annualPriceDollars ?? 0);
+            if (annualPrice > 0) {
+              const aSlug = baseSlug.endsWith('-annual') ? baseSlug : `${baseSlug.replace(/-monthly$/, '')}-annual`;
+              parsedPlans.push({
+                id: `${cfg.id || baseSlug}-annual`,
+                name: `${baseName} (Annual)`,
+                slug: aSlug,
+                priceFormatted: `${activeCurrencySymbol}${annualPrice.toFixed(2)}/yr`,
+                priceDollars: annualPrice,
+                interval: 'YEAR',
+                isFree: false,
+              });
+            }
+          }
         });
       }
     } catch (_) {}
@@ -355,16 +379,53 @@ export default function AdminPaymentPage() {
         const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
-          if (data.success && Array.isArray(data.plans) && data.plans.length > 0) {
-            parsedPlans = data.plans.map((p: any) => ({
-              id: p.id || p.slug,
-              name: p.name + (p.interval ? ` (${p.interval === 'YEAR' ? 'Annual' : 'Monthly'})` : ''),
-              slug: p.slug,
-              priceFormatted: p.priceCents === 0 ? 'Free' : `${activeCurrencySymbol}${(p.priceCents / 100).toFixed(2)}`,
-              priceDollars: p.priceCents ? p.priceCents / 100 : (p.price || 0),
-              interval: p.interval,
-              isFree: p.priceCents === 0 || p.price === 0,
-            }));
+          const list = Array.isArray(data) ? data : (data.plans || data.packages || data.configs);
+          if (Array.isArray(list) && list.length > 0) {
+            list.forEach((p: any) => {
+              const isZeroCost = p.priceCents === 0 || p.monthlyPriceDollars === 0 || p.isFree || (p.price === 0 && !p.annualPriceDollars);
+              const baseSlug = p.slug || p.id || 'plan';
+              const baseName = p.name || 'Plan';
+
+              if (isZeroCost) {
+                parsedPlans.push({
+                  id: p.id || baseSlug,
+                  name: baseName + ' (Free)',
+                  slug: baseSlug,
+                  priceFormatted: 'Free',
+                  priceDollars: 0,
+                  interval: 'MONTH',
+                  isFree: true,
+                });
+              } else {
+                const monthlyPrice = p.priceCents ? p.priceCents / 100 : Number(p.monthlyPriceDollars || p.price || 0);
+                if (monthlyPrice > 0) {
+                  const mSlug = baseSlug.endsWith('-monthly') ? baseSlug : `${baseSlug.replace(/-annual$/, '')}-monthly`;
+                  parsedPlans.push({
+                    id: `${p.id || baseSlug}-monthly`,
+                    name: `${baseName} (Monthly)`,
+                    slug: mSlug,
+                    priceFormatted: `${activeCurrencySymbol}${monthlyPrice.toFixed(2)}/mo`,
+                    priceDollars: monthlyPrice,
+                    interval: 'MONTH',
+                    isFree: false,
+                  });
+                }
+
+                const annualPrice = Number(p.annualPriceDollars || 0);
+                if (annualPrice > 0) {
+                  const aSlug = baseSlug.endsWith('-annual') ? baseSlug : `${baseSlug.replace(/-monthly$/, '')}-annual`;
+                  parsedPlans.push({
+                    id: `${p.id || baseSlug}-annual`,
+                    name: `${baseName} (Annual)`,
+                    slug: aSlug,
+                    priceFormatted: `${activeCurrencySymbol}${annualPrice.toFixed(2)}/yr`,
+                    priceDollars: annualPrice,
+                    interval: 'YEAR',
+                    isFree: false,
+                  });
+                }
+              }
+            });
           }
         }
       } catch (_) {}
@@ -373,11 +434,42 @@ export default function AdminPaymentPage() {
     if (parsedPlans.length > 0) {
       setAvailablePlans(parsedPlans);
     } else {
-      setAvailablePlans(DEFAULT_AVAILABLE_PLANS);
+      setAvailablePlans([
+        { id: 'taster', name: 'Taster (Free)', slug: 'taster', priceFormatted: 'Free', priceDollars: 0, isFree: true },
+        { id: 'nutrition-pro-monthly', name: 'Nutrition Pro (Monthly)', slug: 'nutrition-pro-monthly', priceFormatted: `${activeCurrencySymbol}8.99/mo`, priceDollars: 8.99, interval: 'MONTH' },
+        { id: 'nutrition-pro-annual', name: 'Nutrition Pro (Annual)', slug: 'nutrition-pro-annual', priceFormatted: `${activeCurrencySymbol}59.99/yr`, priceDollars: 59.99, interval: 'YEAR' },
+      ]);
     }
   }, [activeCurrencySymbol]);
 
   // Load Registered Users from Server API (Zero LocalStorage)
+    // Validate user subscription against payment transactions: users without valid succeeded payment transactions revert to default free plan ('taster')
+  const validateAndSyncUserPlans = useCallback((usersList: AppUser[], txList: PaymentTransaction[]): AppUser[] => {
+    const now = new Date();
+    return usersList.map((u) => {
+      const currentPlan = sanitizeSinglePlan(u.subscriptionPlan);
+      if (currentPlan === 'taster' || currentPlan === 'free') {
+        return { ...u, subscriptionPlan: 'taster' };
+      }
+
+      // Check for valid succeeded and unexpired transaction for this user email
+      const userTx = txList.find((tx) => {
+        const matchesEmail = tx.customerEmail.toLowerCase().trim() === u.email.toLowerCase().trim();
+        const succeeded = isSucceeded(tx.status);
+        const matchesPlan = (tx.planSlug && sanitizeSinglePlan(tx.planSlug) === currentPlan) || (tx.planName && tx.planName.toLowerCase().includes(currentPlan.replace(/-/g, ' ')));
+        const notExpired = !tx.expiryDate || new Date(tx.expiryDate) > now;
+        return matchesEmail && succeeded && matchesPlan && notExpired;
+      });
+
+      if (!userTx) {
+        // Fallback to default free plan if no valid payment transaction exists
+        return { ...u, subscriptionPlan: 'taster' };
+      }
+
+      return u;
+    });
+  }, []);
+
   const loadUsers = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
@@ -388,9 +480,10 @@ export default function AdminPaymentPage() {
             ...u,
             subscriptionPlan: sanitizeSinglePlan(u.subscriptionPlan)
           }));
-          setRegisteredUsers(normalized);
-          if (normalized.length > 0 && !selectedUserId) {
-            setSelectedUserId(normalized[0].id);
+          const validated = validateAndSyncUserPlans(normalized, transactions);
+          setRegisteredUsers(validated);
+          if (validated.length > 0 && !selectedUserId) {
+            setSelectedUserId(validated[0].id);
           }
         }
       }
@@ -458,41 +551,19 @@ export default function AdminPaymentPage() {
     const currentPlan = sanitizeSinglePlan(currentSelectedUser.subscriptionPlan);
     const chosenPlan = sanitizeSinglePlan(selectedPlanSlug);
 
+    if (currentPlan !== 'taster' && chosenPlan !== 'taster') {
+      return {
+        isDuplicate: true,
+        isTransition: false,
+        message: `User "${currentSelectedUser.name}" already has an active plan ("${currentPlan}"). Existing users with an existing plan are not allowed to have another plan added. Please cancel the existing plan first.`
+      };
+    }
+
     if (currentPlan === chosenPlan && chosenPlan !== 'taster') {
       return {
         isDuplicate: true,
         isTransition: false,
         message: `User "${currentSelectedUser.name}" already has active plan "${chosenPlan}". Choose another plan or cancel the existing plan.`
-      };
-    }
-
-    if (currentPlan.includes('monthly') && chosenPlan.includes('annual')) {
-      return {
-        isDuplicate: false,
-        isTransition: true,
-        from: 'Monthly',
-        to: 'Annual',
-        message: `Upgrading "${currentSelectedUser.name}" from Monthly to Annual. The user's active Monthly plan will be automatically cancelled to enforce strictly 1 plan per email.`
-      };
-    }
-
-    if (currentPlan.includes('annual') && chosenPlan.includes('monthly')) {
-      return {
-        isDuplicate: false,
-        isTransition: true,
-        from: 'Annual',
-        to: 'Monthly',
-        message: `Changing "${currentSelectedUser.name}" from Annual to Monthly. The user's active Annual plan will be automatically cancelled to enforce strictly 1 plan per email.`
-      };
-    }
-
-    if (currentPlan !== 'taster' && chosenPlan !== 'taster' && currentPlan !== chosenPlan) {
-      return {
-        isDuplicate: false,
-        isTransition: true,
-        from: currentPlan,
-        to: chosenPlan,
-        message: `Changing plan to "${chosenPlan}". The user's previous "${currentPlan}" plan will be cancelled upon recording.`
       };
     }
 
@@ -790,7 +861,7 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const handleAddPaymentSubmit = async (e: React.FormEvent) => {
+    const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError('');
 
@@ -821,6 +892,25 @@ export default function AdminPaymentPage() {
       ? new Date(`${paymentExpiryDate}T23:59:59Z`).toISOString() 
       : undefined;
 
+    // Rule 1 & 4: If upgrading/downgrading with a successful payment, cancel (refund) previous active payment transactions
+    if (isSucceeded(normalizedStatus)) {
+      const existingUserTxs = transactions.filter(
+        (tItem) => tItem.customerEmail.toLowerCase() === customerEmail && isSucceeded(tItem.status)
+      );
+      for (const oldTx of existingUserTxs) {
+        const cancelledTx: PaymentTransaction = { 
+          ...oldTx, 
+          status: 'refunded', 
+          expiryDate: new Date().toISOString() 
+        };
+        await fetch('/api/admin/payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update_transaction', transaction: cancelledTx }),
+        }).catch(() => {});
+      }
+    }
+
     const newTx: PaymentTransaction = {
       id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
       customerName,
@@ -844,20 +934,22 @@ export default function AdminPaymentPage() {
         body: JSON.stringify({ action: 'add_transaction', transaction: newTx }),
       });
 
-      if (syncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) {
-        await fetch('/api/admin/users', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            ...targetUser, 
-            subscriptionPlan: singlePlanSlug,
-            planExpiryDate: formattedExpiryDate,
-            expiryDate: formattedExpiryDate
-          }),
-        }).catch(() => {});
-      }
+      // Rule 3: If no valid payment transaction, fallback user to default free plan ('taster')
+      const finalPlanToSync = (syncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) ? singlePlanSlug : 'taster';
+
+      await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          ...targetUser, 
+          subscriptionPlan: finalPlanToSync,
+          planExpiryDate: formattedExpiryDate,
+          expiryDate: formattedExpiryDate
+        }),
+      }).catch(() => {});
 
       await fetchData();
+      await loadUsers();
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
@@ -870,7 +962,7 @@ export default function AdminPaymentPage() {
       setFeedback({
         type: 'success',
         msg: isSwitched 
-          ? `Plan changed to ${planName} for ${customerName}! Previous plan was automatically cancelled.`
+          ? `Successfully upgraded/downgraded plan to ${planName} for ${customerName}. Previous payment was cancelled & new transaction created!`
           : `Payment of ${activeCurrencySymbol}${cleanAmount.toFixed(2)} recorded for ${customerName} (${planName})!`,
       });
     } catch (err: any) {
