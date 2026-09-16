@@ -11,7 +11,7 @@
   "allowRegistration": true,
   "socialLogin": {
     "googleEnabled": true,
-    "googleClientId": "479443923058-jeajhc080ad3kb0b57ighm8k101ip7q6.apps.googleusercontent.com",
+    "googleClientId": "",
     "googleClientSecret": "",
     "facebookEnabled": false,
     "facebookAppId": "",
@@ -67,5 +67,5 @@
       "description": "Advanced features for professional kitchens"
     }
   ],
-  "updatedAt": "2026-09-16T05:02:14.225Z"
+  "updatedAt": "2026-09-16T05:03:08.747Z"
 }
