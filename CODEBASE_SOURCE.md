@@ -3937,6 +3937,7 @@ export default function SavedRecipesPage() {
 
 ## File: `apps/web/src/app/pantry/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -3958,10 +3959,13 @@ export default function PantryPage() {
   const [sortAsc, setSortAsc] = useState(true);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   
+  // Safe default category fallback
+  const safeDefaultCategory = (Array.isArray(CATEGORIES) && CATEGORIES.length > 0) ? CATEGORIES[0] : 'Produce';
+
   // Add Modal State
   const [showAddModal, setShowAddModal] = useState(false);
   const [itemName, setItemName] = useState('');
-  const [itemCategory, setItemCategory] = useState(CATEGORIES[0] || 'Produce');
+  const [itemCategory, setItemCategory] = useState(safeDefaultCategory);
   const [itemQuantity, setItemQuantity] = useState('1');
   const [itemUnit, setItemUnit] = useState('Unit');
   const [expiryDate, setExpiryDate] = useState('');
@@ -4599,7 +4603,7 @@ export default function PantryPage() {
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 >
-                  {CATEGORIES.map((cat: string) => (
+                  {(Array.isArray(CATEGORIES) ? CATEGORIES : ['Produce', 'Dairy', 'Other']).map((cat: string) => (
                     <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {cat}
                     </option>
@@ -4768,7 +4772,7 @@ export default function PantryPage() {
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 >
-                  {CATEGORIES.map((cat: string) => (
+                  {(Array.isArray(CATEGORIES) ? CATEGORIES : ['Produce', 'Dairy', 'Other']).map((cat: string) => (
                     <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {cat}
                     </option>
@@ -29909,6 +29913,7 @@ export default function RegisterPage() {
 
 ## File: `apps/web/src/app/manual/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -29956,7 +29961,6 @@ export default function ManualRecipePage() {
   const [isReorderingSteps, setIsReorderingSteps] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Synchronize entire page & application theme CSS
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -30045,7 +30049,7 @@ export default function ManualRecipePage() {
   }, [router, t, applySavedTheme]);
 
   useEffect(() => {
-    if (recipeTypes.length > 0 && !recipeTypes.includes(form.recipeType)) {
+    if (recipeTypes && recipeTypes.length > 0 && !recipeTypes.includes(form.recipeType)) {
       setForm(prev => ({ ...prev, recipeType: recipeTypes[0] }));
     }
   }, [recipeTypes, form.recipeType]);
@@ -30160,26 +30164,17 @@ export default function ManualRecipePage() {
         createdAt: new Date().toISOString()
       };
 
-      const keys = ['zecratary_recipes', 'zecratary_saved_recipes'];
-      keys.forEach((k) => {
-        try {
-          const existing = JSON.parse(localStorage.getItem(k) || '[]');
-          const filtered = Array.isArray(existing) ? existing.filter((r: any) => r.id !== newRecipe.id) : [];
-          localStorage.setItem(k, JSON.stringify([newRecipe, ...filtered]));
-        } catch (_) {}
-      });
+      await fetch('/api/recipes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newRecipe)
+      }).catch(() => {});
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('storage'));
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
         window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       }
-
-      await fetch('/api/recipes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newRecipe)
-      }).catch(() => {});
 
       router.push('/saved');
     } catch (err) {
@@ -30189,7 +30184,6 @@ export default function ManualRecipePage() {
     }
   };
 
-  // Color tokens
   const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
   const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #111726)';
   const cInnerBg = isDayMode ? '#f1f5f9' : 'var(--color-inner, #070b13)';
@@ -30205,7 +30199,6 @@ export default function ManualRecipePage() {
       style={{ backgroundColor: cPageBg, color: cText }}
     >
       <div className="max-w-5xl mx-auto space-y-6">
-        {/* Top Header */}
         <div 
           className="flex items-center justify-between border-b pb-4"
           style={{ borderColor: cBorder }}
@@ -30233,7 +30226,6 @@ export default function ManualRecipePage() {
           </div>
         </div>
 
-        {/* Tabs Navigation */}
         <div 
           className="flex p-1.5 rounded-2xl border shadow-xs"
           style={{ backgroundColor: cInnerBg, borderColor: cBorder }}
@@ -30267,10 +30259,8 @@ export default function ManualRecipePage() {
         </div>
 
         <form onSubmit={handleSave} className="space-y-6">
-          {/* TAB 1: BASIC INFO */}
           {activeTab === 'info' && (
             <div className="space-y-6 animate-in fade-in">
-              {/* Photo Upload Card */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-[var(--color-primary,#E05638)] uppercase tracking-wider">
                   {t('photoLabel') || 'Photo'}
@@ -30292,7 +30282,6 @@ export default function ManualRecipePage() {
                 </label>
               </div>
 
-              {/* General Info Inputs Card */}
               <div 
                 className="border rounded-2xl p-6 space-y-4 text-xs shadow-xs"
                 style={{ backgroundColor: cCardBg, borderColor: cBorder }}
@@ -30313,8 +30302,6 @@ export default function ManualRecipePage() {
                       borderColor: cBorder,
                       color: cText
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = cBorder)}
                   />
                 </div>
 
@@ -30333,8 +30320,6 @@ export default function ManualRecipePage() {
                       borderColor: cBorder,
                       color: cText
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = cBorder)}
                   />
                 </div>
 
@@ -30410,8 +30395,6 @@ export default function ManualRecipePage() {
                   onClick={() => setActiveTab('ingredients')}
                   className="text-white font-bold px-6 py-3 rounded-xl text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
                   {t('nextStepsBtn') || 'Next: Ingredients →'}
                 </button>
@@ -30419,7 +30402,6 @@ export default function ManualRecipePage() {
             </div>
           )}
 
-          {/* TAB 2: INGREDIENTS */}
           {activeTab === 'ingredients' && (
             <div 
               className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
@@ -30573,8 +30555,6 @@ export default function ManualRecipePage() {
                   onClick={() => setActiveTab('steps')}
                   className="text-white font-bold px-6 py-2.5 rounded-xl text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
                   {t('nextStepsBtn') || 'Next: Steps →'}
                 </button>
@@ -30582,7 +30562,6 @@ export default function ManualRecipePage() {
             </div>
           )}
 
-          {/* TAB 3: STEPS */}
           {activeTab === 'steps' && (
             <div 
               className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
@@ -30694,8 +30673,6 @@ export default function ManualRecipePage() {
                   disabled={saving}
                   className="text-white font-bold px-8 py-3 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
                   style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
                   <Save className="h-4 w-4" /> {saving ? (t('savingRecipe') || 'Saving Recipe...') : (t('saveRecipe') || 'Save Recipe')}
                 </button>
@@ -40951,9 +40928,27 @@ export default function PackagePage() {
 
 ## File: `apps/web/src/constants/categories.ts`
 ```typescript
-import { DEFAULT_CATEGORIES } from '@/lib/categories';
-export const CATEGORIES = DEFAULT_CATEGORIES;
-export type Category = typeof DEFAULT_CATEGORIES[number];
+// Generated / Updated by AI Collaborator
+'use client';
+
+export const CATEGORIES: string[] = [
+  'Produce',
+  'Dairy',
+  'Meat and Poultry',
+  'Seafood',
+  'Grains and Pasta',
+  'Pantry Staples',
+  'Condiments and Sauces',
+  'Spices and Seasonings',
+  'Beverages',
+  'Frozen Foods',
+  'Snacks',
+  'Bakery',
+  'Canned Goods',
+  'Other'
+];
+
+export default CATEGORIES;
 
 ```
 
@@ -42009,103 +42004,212 @@ export default function ThemeSync() {
 
 ```
 
+## File: `apps/web/src/components/GlobalThemeSync.tsx`
+```typescript
+'use client';
+
+import { useEffect } from 'react';
+import { applyThemeToDocument, fetchAndApplyServerTheme } from '@/lib/themeConfig';
+
+export default function GlobalThemeSync() {
+  useEffect(() => {
+    fetchAndApplyServerTheme();
+
+    const handleThemeUpdate = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail) {
+        applyThemeToDocument(detail);
+      } else {
+        fetchAndApplyServerTheme();
+      }
+    };
+
+    window.addEventListener('zecratary_theme_updated', handleThemeUpdate);
+    window.addEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
+    window.addEventListener('zecratary_admin_settings_updated', handleThemeUpdate);
+
+    return () => {
+      window.removeEventListener('zecratary_theme_updated', handleThemeUpdate);
+      window.removeEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
+      window.removeEventListener('zecratary_admin_settings_updated', handleThemeUpdate);
+    };
+  }, []);
+
+  return null;
+}
+
+```
+
 ## File: `apps/web/src/lib/themeConfig.ts`
 ```typescript
-// Server-backed Theme Palette Engine
-// Zero browser localStorage writes
+// Global Server-Backed Theme Engine & Memory Store
 
-import { persistServerAdminSettings } from '@/lib/adminSync';
+export interface ThemeColors {
+  primary?: string;
+  primaryColor?: string;
+  primaryHover?: string;
+  accentEmerald?: string;
+  accentColor?: string;
+  accent?: string;
+  sidebarIconColor?: string;
+  sidebarIcon?: string;
+  backgroundColor?: string;
+  backgroundDark?: string;
+  cardBackground?: string;
+  cardBorder?: string;
+  textSecondary?: string;
+}
 
-export function applyThemeToDocument(colors?: any): void {
+// In-memory theme store cache (Zero LocalStorage)
+let memoryThemeColors: ThemeColors | null = null;
+
+export function setMemoryThemeColors(colors: ThemeColors | null | undefined): void {
+  if (colors) {
+    memoryThemeColors = { ...colors };
+  }
+}
+
+export function getMemoryThemeColors(): ThemeColors | null {
+  return memoryThemeColors;
+}
+
+export async function saveThemeColors(colors: ThemeColors): Promise<void> {
+  setMemoryThemeColors(colors);
+  try {
+    await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeColors: colors })
+    });
+  } catch (_) {}
+}
+
+export function applyThemeToDocument(colors: ThemeColors | null | undefined): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  if (!colors) return;
-  try {
-    const p = colors.primary || colors.primaryColor || '#E05638';
-    const ph = colors.primaryHover || '#c94529';
-    const ac = colors.accentEmerald || colors.accentColor || colors.accent || '#10b981';
-    const sbi = colors.sidebarIconColor || colors.sidebarIcon || ac;
-    const bg = colors.backgroundColor || colors.backgroundDark || '#070b13';
-    const card = colors.cardBackground || '#0b0f17';
-    const border = colors.cardBorder || '#1e293b';
-    const textSec = colors.textSecondary || '#94a3b8';
+  const isDayMode = typeof window !== 'undefined' && (localStorage.getItem('zecratary_theme_mode') === 'light' || localStorage.getItem('zecratary_theme_mode') === 'day');
+
+  const activeColors = colors || memoryThemeColors;
+
+  if (activeColors) {
+    const p = activeColors.primary || activeColors.primaryColor || '#E05638';
+    const ph = activeColors.primaryHover || '#c94529';
+    const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
+    const sbi = activeColors.sidebarIconColor || activeColors.sidebarIcon || ac;
+    const bg = activeColors.backgroundColor || activeColors.backgroundDark || '#070b13';
+    const card = activeColors.cardBackground || '#0b0f17';
+    const border = activeColors.cardBorder || '#1e293b';
+    const textSec = activeColors.textSecondary || '#94a3b8';
 
     root.style.setProperty('--color-primary', p);
     root.style.setProperty('--color-primary-hover', ph);
     root.style.setProperty('--color-accent', ac);
     root.style.setProperty('--color-emerald', ac);
     root.style.setProperty('--color-sidebar-icon', sbi);
-    root.style.setProperty('--color-bg', bg);
-    root.style.setProperty('--color-bg-dark', bg);
-    root.style.setProperty('--color-background', bg);
-    root.style.setProperty('--color-card', card);
-    root.style.setProperty('--color-card-dark', card);
-    root.style.setProperty('--color-border', border);
-    root.style.setProperty('--color-text-secondary', textSec);
-  } catch (_) {}
-}
 
-let memoryThemeColors: any = null;
-
-export function getStoredThemeColors(): any {
-  return memoryThemeColors ? { ...memoryThemeColors } : null;
-}
-
-export function setMemoryThemeColors(colors: any): void {
-  memoryThemeColors = colors ? { ...colors } : null;
-}
-
-export async function saveThemeColors(colors: any): Promise<boolean> {
-  memoryThemeColors = { ...colors };
-  applyThemeToDocument(colors);
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
-    window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+    if (isDayMode) {
+      root.classList.remove('dark');
+      root.classList.add('light');
+      root.style.setProperty('--color-bg', '#f8fafc');
+      root.style.setProperty('--color-bg-dark', '#f8fafc');
+      root.style.setProperty('--color-card', '#ffffff');
+      root.style.setProperty('--color-card-dark', '#ffffff');
+      root.style.setProperty('--color-border', '#e2e8f0');
+      root.style.setProperty('--color-border-dark', '#e2e8f0');
+      root.style.setProperty('--color-text', '#0f172a');
+      root.style.setProperty('--color-text-secondary', '#64748b');
+      if (document.body) {
+        document.body.style.backgroundColor = '#f8fafc';
+        document.body.style.color = '#0f172a';
+      }
+    } else {
+      root.classList.remove('light');
+      root.classList.add('dark');
+      root.style.setProperty('--color-bg', bg);
+      root.style.setProperty('--color-bg-dark', bg);
+      root.style.setProperty('--color-card', card);
+      root.style.setProperty('--color-card-dark', card);
+      root.style.setProperty('--color-border', border);
+      root.style.setProperty('--color-border-dark', border);
+      root.style.setProperty('--color-text', '#ffffff');
+      root.style.setProperty('--color-text-secondary', textSec);
+      if (document.body) {
+        document.body.style.backgroundColor = bg;
+        document.body.style.color = '#ffffff';
+      }
+    }
   }
-  return await persistServerAdminSettings({ themeColors: colors });
+}
+
+export async function fetchAndApplyServerTheme(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    const res = await fetch('/api/admin/settings', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.themeColors) {
+        setMemoryThemeColors(data.themeColors);
+        applyThemeToDocument(data.themeColors);
+      }
+    }
+  } catch (_) {}
 }
 
 ```
 
 ## File: `apps/web/src/lib/recipe-types.ts`
 ```typescript
-// Server-backed Recipe Types Store
-// Zero localStorage writes for recipe type management
-
-import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
+// Generated / Updated by AI Collaborator
+'use client';
+import { useState, useEffect } from 'react';
 
 export const DEFAULT_RECIPE_TYPES: string[] = [
-  'Breakfast',
-  'Lunch',
-  'Dinner',
-  'Snack',
-  'Dessert',
-  'Beverage',
-  'Appetizer',
-  'Salad',
-  'Soup',
-  'Side Dish',
-  'Baking'
+  'Main Dish', 'Breakfast', 'Lunch', 'Dinner', 'Dessert', 'Snack', 
+  'Drink', 'Appetizer', 'Soup', 'Salad', 'Side Dish', 'Baking'
 ];
 
-let memoryRecipeTypes: string[] = [...DEFAULT_RECIPE_TYPES];
+export function useRecipeTypes(): string[] {
+  const [types, setTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
 
-export function getStoredRecipeTypes(): string[] {
-  return [...memoryRecipeTypes];
-}
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchTypes() {
+      try {
+        const res = await fetch('/api/admin/recipe-type', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data?.recipeTypes || data?.types);
+          if (Array.isArray(list) && list.length > 0 && isMounted) {
+            const parsed = list.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
+            if (parsed.length > 0) { setTypes(parsed); return; }
+          }
+        }
+      } catch (_) {}
 
-export function setMemoryRecipeTypes(types: string[]): void {
-  if (Array.isArray(types) && types.length > 0) {
-    memoryRecipeTypes = [...types];
-  }
-}
+      try {
+        const res2 = await fetch('/api/admin/settings', { cache: 'no-store' });
+        if (res2.ok) {
+          const data2 = await res2.json();
+          const list2 = data2?.settings?.recipeTypes || data2?.recipeTypes;
+          if (Array.isArray(list2) && list2.length > 0 && isMounted) {
+            const parsed2 = list2.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
+            if (parsed2.length > 0) setTypes(parsed2);
+          }
+        }
+      } catch (_) {}
+    }
+    fetchTypes();
+    const handleSync = () => fetchTypes();
+    window.addEventListener('zecratary_recipe_types_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('zecratary_recipe_types_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+    };
+  }, []);
 
-export async function saveRecipeTypes(types: string[]): Promise<boolean> {
-  memoryRecipeTypes = [...types];
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_changed', { detail: types }));
-  }
-  return await persistServerAdminSettings({ recipeTypes: types });
+  return types;
 }
 
 ```
@@ -42467,46 +42571,118 @@ export function ThemeInitializer() {
 
 ## File: `apps/web/src/lib/categories.ts`
 ```typescript
-// Server-backed Ingredient Categories Store
-// Zero localStorage writes for category management
+// Generated / Updated by AI Collaborator
+'use client';
+import { useState, useEffect } from 'react';
 
-import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
-
-export const DEFAULT_CATEGORIES: string[] = [
-  'Produce',
-  'Dairy & Eggs',
-  'Meat & Poultry',
-  'Seafood',
-  'Bakery',
-  'Pantry & Dry Goods',
-  'Canned Goods',
-  'Baking & Cooking',
-  'Spices & Seasonings',
-  'Snacks',
-  'Beverages',
-  'Frozen Foods',
-  'Condiments & Sauces',
-  'Oils & Vinegars'
+export const DEFAULT_INGREDIENT_CATEGORIES: string[] = [
+  'Pantry Staples', 'Produce', 'Meat & Poultry', 'Seafood', 'Dairy & Eggs', 
+  'Dry Goods', 'Bakery', 'Canned Goods', 'Spices & Seasonings', 'Oils & Condiments', 'Frozen', 'Beverages', 'Other'
 ];
 
-let memoryCategories: string[] = [...DEFAULT_CATEGORIES];
-
 export function getStoredCategories(): string[] {
-  return [...memoryCategories];
+  return DEFAULT_INGREDIENT_CATEGORIES;
 }
 
-export function setMemoryCategories(cats: string[]): void {
-  if (Array.isArray(cats) && cats.length > 0) {
-    memoryCategories = [...cats];
-  }
+export function useIngredientCategories(): string[] {
+  const [categories, setCategories] = useState<string[]>(DEFAULT_INGREDIENT_CATEGORIES);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchCategories() {
+      try {
+        const res = await fetch('/api/admin/ingredient-categories', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data?.ingredientCategories || data?.categories);
+          if (Array.isArray(list) && list.length > 0 && isMounted) {
+            const parsed = list.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
+            if (parsed.length > 0) { setCategories(parsed); return; }
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const res2 = await fetch('/api/admin/settings', { cache: 'no-store' });
+        if (res2.ok) {
+          const data2 = await res2.json();
+          const list2 = data2?.settings?.ingredientCategories || data2?.ingredientCategories;
+          if (Array.isArray(list2) && list2.length > 0 && isMounted) {
+            const parsed2 = list2.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
+            if (parsed2.length > 0) setCategories(parsed2);
+          }
+        }
+      } catch (_) {}
+    }
+    fetchCategories();
+    const handleSync = () => fetchCategories();
+    window.addEventListener('zecratary_ingredient_categories_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('zecratary_ingredient_categories_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+    };
+  }, []);
+
+  return categories;
 }
 
-export async function saveCategories(cats: string[]): Promise<boolean> {
-  memoryCategories = [...cats];
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zecratary_categories_changed', { detail: cats }));
-  }
-  return await persistServerAdminSettings({ ingredientCategories: cats });
+```
+
+## File: `apps/web/src/lib/recipe_types.ts`
+```typescript
+// Generated / Updated by AI Collaborator
+'use client';
+import { useState, useEffect } from 'react';
+
+export const DEFAULT_RECIPE_TYPES: string[] = [
+  'Main Dish', 'Breakfast', 'Lunch', 'Dinner', 'Dessert', 'Snack', 
+  'Drink', 'Appetizer', 'Soup', 'Salad', 'Side Dish', 'Baking'
+];
+
+export function useRecipeTypes(): string[] {
+  const [types, setTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchTypes() {
+      try {
+        const res = await fetch('/api/admin/recipe-type', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data?.recipeTypes || data?.types);
+          if (Array.isArray(list) && list.length > 0 && isMounted) {
+            const parsed = list.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
+            if (parsed.length > 0) { setTypes(parsed); return; }
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const res2 = await fetch('/api/admin/settings', { cache: 'no-store' });
+        if (res2.ok) {
+          const data2 = await res2.json();
+          const list2 = data2?.settings?.recipeTypes || data2?.recipeTypes;
+          if (Array.isArray(list2) && list2.length > 0 && isMounted) {
+            const parsed2 = list2.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
+            if (parsed2.length > 0) setTypes(parsed2);
+          }
+        }
+      } catch (_) {}
+    }
+    fetchTypes();
+    const handleSync = () => fetchTypes();
+    window.addEventListener('zecratary_recipe_types_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('zecratary_recipe_types_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+    };
+  }, []);
+
+  return types;
 }
 
 ```
