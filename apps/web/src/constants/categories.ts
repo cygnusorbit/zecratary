@@ -1,3 +1,21 @@
-import { DEFAULT_CATEGORIES } from '@/lib/categories';
-export const CATEGORIES = DEFAULT_CATEGORIES;
-export type Category = typeof DEFAULT_CATEGORIES[number];
+// Generated / Updated by AI Collaborator
+'use client';
+
+export const CATEGORIES: string[] = [
+  'Produce',
+  'Dairy',
+  'Meat and Poultry',
+  'Seafood',
+  'Grains and Pasta',
+  'Pantry Staples',
+  'Condiments and Sauces',
+  'Spices and Seasonings',
+  'Beverages',
+  'Frozen Foods',
+  'Snacks',
+  'Bakery',
+  'Canned Goods',
+  'Other'
+];
+
+export default CATEGORIES;

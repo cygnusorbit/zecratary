@@ -112,7 +112,7 @@
       "tokenReimburseFrequency": "monthly"
     }
   ],
-  "updatedAt": "2026-09-16T10:49:47.031Z",
+  "updatedAt": "2026-09-16T14:15:21.827Z",
   "chefAiSettings": {
     "provider": "gemini",
     "apiKey": "AQ.Ab8RN6IhH6iaU_4chRKwnTIyKxG4bBTJURnex1GtD9nPAttcOQ",
@@ -139,19 +139,19 @@
   "titlebarImage": "",
   "faviconImage": "",
   "themeColors": {
-    "primary": "#38bdf8",
-    "primaryColor": "#38bdf8",
-    "primaryHover": "#0284c7",
-    "accentEmerald": "#a855f7",
-    "accentColor": "#a855f7",
-    "accent": "#a855f7",
-    "sidebarIconColor": "#38bdf8",
-    "sidebarIcon": "#38bdf8",
-    "backgroundColor": "#020617",
-    "backgroundDark": "#020617",
-    "cardBackground": "#080e22",
-    "cardBorder": "#172554",
-    "textSecondary": "#7dd3fc"
+    "primary": "#8b5cf6",
+    "primaryColor": "#8b5cf6",
+    "primaryHover": "#7c3aed",
+    "accentEmerald": "#ec4899",
+    "accentColor": "#ec4899",
+    "accent": "#ec4899",
+    "sidebarIconColor": "#c084fc",
+    "sidebarIcon": "#c084fc",
+    "backgroundColor": "#0f081c",
+    "backgroundDark": "#0f081c",
+    "cardBackground": "#180d2e",
+    "cardBorder": "#2a1650",
+    "textSecondary": "#d8b4fe"
   },
   "supportedLanguages": [],
   "recipeTypes": []

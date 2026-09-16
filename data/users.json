@@ -71,13 +71,5 @@
     "updatedAt": "2026-09-16T11:04:55.476Z",
     "planSlug": "nutrition-pro-max-monthly",
     "planId": "plan_1789555772317-monthly"
-  },
-  {
-    "id": "usr_demo_user",
-    "name": "Jordan Smith",
-    "email": "jordan@example.com",
-    "role": "user",
-    "subscriptionPlan": "taster",
-    "createdAt": "2026-02-15T10:00:00.000Z"
   }
 ]

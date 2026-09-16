@@ -1,3 +1,4 @@
+// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -19,10 +20,13 @@ export default function PantryPage() {
   const [sortAsc, setSortAsc] = useState(true);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   
+  // Safe default category fallback
+  const safeDefaultCategory = (Array.isArray(CATEGORIES) && CATEGORIES.length > 0) ? CATEGORIES[0] : 'Produce';
+
   // Add Modal State
   const [showAddModal, setShowAddModal] = useState(false);
   const [itemName, setItemName] = useState('');
-  const [itemCategory, setItemCategory] = useState(CATEGORIES[0] || 'Produce');
+  const [itemCategory, setItemCategory] = useState(safeDefaultCategory);
   const [itemQuantity, setItemQuantity] = useState('1');
   const [itemUnit, setItemUnit] = useState('Unit');
   const [expiryDate, setExpiryDate] = useState('');
@@ -660,7 +664,7 @@ export default function PantryPage() {
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 >
-                  {CATEGORIES.map((cat: string) => (
+                  {(Array.isArray(CATEGORIES) ? CATEGORIES : ['Produce', 'Dairy', 'Other']).map((cat: string) => (
                     <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {cat}
                     </option>
@@ -829,7 +833,7 @@ export default function PantryPage() {
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 >
-                  {CATEGORIES.map((cat: string) => (
+                  {(Array.isArray(CATEGORIES) ? CATEGORIES : ['Produce', 'Dairy', 'Other']).map((cat: string) => (
                     <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {cat}
                     </option>

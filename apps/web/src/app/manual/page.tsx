@@ -1,3 +1,4 @@
+// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -45,7 +46,6 @@ export default function ManualRecipePage() {
   const [isReorderingSteps, setIsReorderingSteps] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Synchronize entire page & application theme CSS
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -134,7 +134,7 @@ export default function ManualRecipePage() {
   }, [router, t, applySavedTheme]);
 
   useEffect(() => {
-    if (recipeTypes.length > 0 && !recipeTypes.includes(form.recipeType)) {
+    if (recipeTypes && recipeTypes.length > 0 && !recipeTypes.includes(form.recipeType)) {
       setForm(prev => ({ ...prev, recipeType: recipeTypes[0] }));
     }
   }, [recipeTypes, form.recipeType]);
@@ -249,26 +249,17 @@ export default function ManualRecipePage() {
         createdAt: new Date().toISOString()
       };
 
-      const keys = ['zecratary_recipes', 'zecratary_saved_recipes'];
-      keys.forEach((k) => {
-        try {
-          const existing = JSON.parse(localStorage.getItem(k) || '[]');
-          const filtered = Array.isArray(existing) ? existing.filter((r: any) => r.id !== newRecipe.id) : [];
-          localStorage.setItem(k, JSON.stringify([newRecipe, ...filtered]));
-        } catch (_) {}
-      });
+      await fetch('/api/recipes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newRecipe)
+      }).catch(() => {});
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('storage'));
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
         window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       }
-
-      await fetch('/api/recipes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newRecipe)
-      }).catch(() => {});
 
       router.push('/saved');
     } catch (err) {
@@ -278,7 +269,6 @@ export default function ManualRecipePage() {
     }
   };
 
-  // Color tokens
   const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
   const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #111726)';
   const cInnerBg = isDayMode ? '#f1f5f9' : 'var(--color-inner, #070b13)';
@@ -294,7 +284,6 @@ export default function ManualRecipePage() {
       style={{ backgroundColor: cPageBg, color: cText }}
     >
       <div className="max-w-5xl mx-auto space-y-6">
-        {/* Top Header */}
         <div 
           className="flex items-center justify-between border-b pb-4"
           style={{ borderColor: cBorder }}
@@ -322,7 +311,6 @@ export default function ManualRecipePage() {
           </div>
         </div>
 
-        {/* Tabs Navigation */}
         <div 
           className="flex p-1.5 rounded-2xl border shadow-xs"
           style={{ backgroundColor: cInnerBg, borderColor: cBorder }}
@@ -356,10 +344,8 @@ export default function ManualRecipePage() {
         </div>
 
         <form onSubmit={handleSave} className="space-y-6">
-          {/* TAB 1: BASIC INFO */}
           {activeTab === 'info' && (
             <div className="space-y-6 animate-in fade-in">
-              {/* Photo Upload Card */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-[var(--color-primary,#E05638)] uppercase tracking-wider">
                   {t('photoLabel') || 'Photo'}
@@ -381,7 +367,6 @@ export default function ManualRecipePage() {
                 </label>
               </div>
 
-              {/* General Info Inputs Card */}
               <div 
                 className="border rounded-2xl p-6 space-y-4 text-xs shadow-xs"
                 style={{ backgroundColor: cCardBg, borderColor: cBorder }}
@@ -402,8 +387,6 @@ export default function ManualRecipePage() {
                       borderColor: cBorder,
                       color: cText
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = cBorder)}
                   />
                 </div>
 
@@ -422,8 +405,6 @@ export default function ManualRecipePage() {
                       borderColor: cBorder,
                       color: cText
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = cBorder)}
                   />
                 </div>
 
@@ -499,8 +480,6 @@ export default function ManualRecipePage() {
                   onClick={() => setActiveTab('ingredients')}
                   className="text-white font-bold px-6 py-3 rounded-xl text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
                   {t('nextStepsBtn') || 'Next: Ingredients →'}
                 </button>
@@ -508,7 +487,6 @@ export default function ManualRecipePage() {
             </div>
           )}
 
-          {/* TAB 2: INGREDIENTS */}
           {activeTab === 'ingredients' && (
             <div 
               className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
@@ -662,8 +640,6 @@ export default function ManualRecipePage() {
                   onClick={() => setActiveTab('steps')}
                   className="text-white font-bold px-6 py-2.5 rounded-xl text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
                   {t('nextStepsBtn') || 'Next: Steps →'}
                 </button>
@@ -671,7 +647,6 @@ export default function ManualRecipePage() {
             </div>
           )}
 
-          {/* TAB 3: STEPS */}
           {activeTab === 'steps' && (
             <div 
               className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
@@ -783,8 +758,6 @@ export default function ManualRecipePage() {
                   disabled={saving}
                   className="text-white font-bold px-8 py-3 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
                   style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
                   <Save className="h-4 w-4" /> {saving ? (t('savingRecipe') || 'Saving Recipe...') : (t('saveRecipe') || 'Save Recipe')}
                 </button>
