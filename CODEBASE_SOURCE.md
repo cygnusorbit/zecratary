@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.2.4",
+  "version": "7.2.5",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.2.4",
+  "version": "7.2.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -284,6 +284,7 @@ export const config = {
 
 ## File: `apps/web/src/app/layout.tsx`
 ```typescript
+import GlobalThemeSync from '@/components/GlobalThemeSync';
 import { LanguageProvider } from '@/components/LanguageProvider';
 import './globals.css';
 import { ThemeInitializer } from '@/lib/theme';
@@ -302,6 +303,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="min-h-screen flex flex-col md:flex-row bg-[var(--color-bg)] text-slate-100 font-sans antialiased">
+        <GlobalThemeSync />
         <LanguageProvider>
           <ThemeInitializer />
         <Sidebar />
@@ -1278,9 +1280,9 @@ export default function SavedRecipesPage() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // Add to Plan / Calendar Modal State
+  // Add to Plan / Calendar Modal State (Dynamic Current Date)
   const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
-  const [planDate, setPlanDate] = useState('2026-08-28');
+  const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [planMealType, setPlanMealType] = useState('Dinner');
   const [planTime, setPlanTime] = useState('');
   const [planNotes, setPlanNotes] = useState('');
@@ -1330,7 +1332,7 @@ export default function SavedRecipesPage() {
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
       const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
@@ -1407,7 +1409,6 @@ export default function SavedRecipesPage() {
 
     try {
       setLoading(true);
-      // Fetches unified server data merged with any new imports
       const rawRecipes = await syncUserSavedRecipes(targetUserId);
 
       const userRecipes = rawRecipes.map((r: any) => {
@@ -1417,6 +1418,11 @@ export default function SavedRecipesPage() {
           userId: targetUserId,
           recipeType: cleanType,
           category: cleanType,
+          bookId: r.book_id || r.bookId || null,
+          isFavorite: Boolean(r.is_favorite || r.isFavorite),
+          isCooked: Boolean(r.is_cooked || r.isCooked),
+          rating: Number(r.rating) || 0,
+          note: r.note || '',
           tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
         };
       });
@@ -1424,7 +1430,15 @@ export default function SavedRecipesPage() {
       setRecipes(userRecipes);
 
       let parsedBooks = defaultBooks;
-      const localBooks = localStorage.getItem('zecratary_recipe_books');
+      try {
+        const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (bRes.ok) {
+          const bData = await bRes.json();
+          if (Array.isArray(bData.books) && bData.books.length > 0) parsedBooks = bData.books;
+        }
+      } catch (_) {}
+
+      const localBooks = localStorage.getItem('zecratary_recipe_books') || localStorage.getItem('zecratary_cookbooks');
       if (localBooks) {
         try {
           const parsed = JSON.parse(localBooks);
@@ -1440,7 +1454,7 @@ export default function SavedRecipesPage() {
 
       setBooks(userBooks.map((b: any) => ({
         ...b,
-        recipeCount: userRecipes.filter((r: any) => r.bookId === b.id).length
+        recipeCount: userRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
       })));
     } catch (e) {
       console.error('[SavedRecipesPage] Load error:', e);
@@ -1485,6 +1499,7 @@ export default function SavedRecipesPage() {
 
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipe_books_updated', handleSync);
     window.addEventListener('zecratary_categories_changed', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('storage', handleSync);
@@ -1492,6 +1507,7 @@ export default function SavedRecipesPage() {
     return () => {
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
       window.removeEventListener('zecratary_categories_changed', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('storage', handleSync);
@@ -1504,7 +1520,8 @@ export default function SavedRecipesPage() {
 
     const updatedWithId = updatedUserList.map(r => ({
       ...r,
-      userId: targetUserId
+      userId: targetUserId,
+      bookId: r.bookId || r.book_id || null
     }));
 
     setRecipes(updatedWithId);
@@ -1519,7 +1536,7 @@ export default function SavedRecipesPage() {
 
     const updatedBooks = books.map((b: any) => ({
       ...b,
-      recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id).length
+      recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
     }));
     setBooks(updatedBooks);
   };
@@ -1542,64 +1559,120 @@ export default function SavedRecipesPage() {
     }
   };
 
-  const handleAssignToBook = (bookId: string) => {
+  // 1. FIX "ADD TO COOKBOOK"
+  const handleAssignToBook = async (bookId: string) => {
     if (!selectedRecipe) return;
-    const isRemoving = selectedRecipe.bookId === bookId;
+    const isRemoving = selectedRecipe.bookId === bookId || selectedRecipe.book_id === bookId;
     const targetBookId = isRemoving ? null : bookId;
-    const updatedRecipe = { ...selectedRecipe, bookId: targetBookId };
+    
+    const updatedRecipe = {
+      ...selectedRecipe,
+      bookId: targetBookId,
+      book_id: targetBookId
+    };
     setSelectedRecipe(updatedRecipe);
 
-    const updatedList = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
-    saveAllRecipes(updatedList);
+    const updatedRecipes = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
+    setRecipes(updatedRecipes);
 
-    const bookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
-    const recName = selectedRecipe.title || selectedRecipe.name;
-    if (isRemoving) {
-      const msg = (t('removedFromBookAlert') || 'Removed "{title}" from "{book}"')
-        .replace('{title}', recName)
-        .replace('{book}', bookTitle);
-      alert(msg);
-    } else {
-      const msg = (t('assignedToBookAlert') || 'Added "{title}" to "{book}"!')
-        .replace('{title}', recName)
-        .replace('{book}', bookTitle);
-      alert(msg);
+    try {
+      // 1. Persist to PostgreSQL
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedRecipe)
+      });
+      // 2. Dispatch cross-view sync
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+    } catch (err) {
+      console.error('Error assigning recipe to book:', err);
     }
   };
 
+  // 2. FIX "ADD TO PLAN"
   const openAddToPlanModal = () => {
-    setPlanDate('2026-08-28');
+    const todayStr = new Date().toISOString().split('T')[0];
+    setPlanDate(todayStr);
     setPlanMealType('Dinner');
-    setPlanTime('');
+    setPlanTime('19:00');
     setPlanNotes('');
     setShowAddToPlanModal(true);
   };
 
-  const handleSaveToCalendar = (e: React.FormEvent) => {
+  const handleSaveToCalendar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRecipe || !currentUser) return;
 
-    const localPlan = localStorage.getItem('zecratary_meal_plan');
-    const currentPlan = localPlan ? JSON.parse(localPlan) : [];
+    const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
+    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80';
+    const targetUserId = currentUser.id || 'usr_admin_1';
 
-    const recName = selectedRecipe.title || selectedRecipe.name;
     const newPlanItem = {
-      id: 'plan_' + Date.now(),
-      userId: currentUser.id || 'usr_admin_1',
-      createdBy: currentUser.email,
-      creatorName: currentUser.name,
+      id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: currentUser.email || 'user@zecratary.local',
+      creatorName: currentUser.name || 'User',
       date: planDate,
       recipeId: selectedRecipe.id,
+      recipe_id: selectedRecipe.id,
       recipeName: recName,
-      image: selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80',
+      title: recName,
+      image: recImage,
+      imageUrl: recImage,
+      image_url: recImage,
       mealType: planMealType,
-      time: planTime,
-      notes: planNotes,
-      isLeftover: false
+      time: planTime || '',
+      notes: planNotes || '',
+      servings: currentTotalServings || selectedRecipe.servings || 4,
+      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 15,
+      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 25,
+      recipe: selectedRecipe,
+      isLeftover: false,
+      createdAt: new Date().toISOString()
     };
 
-    localStorage.setItem('zecratary_meal_plan', JSON.stringify([...currentPlan, newPlanItem]));
-    window.dispatchEvent(new Event('zecratary_planner_updated'));
+    // Save across meal plan storage slots
+    try {
+      const planKeys = ['zecratary_meal_plan', 'zecratary_meal_plans'];
+      for (const k of planKeys) {
+        const raw = localStorage.getItem(k);
+        const currentPlan = raw ? JSON.parse(raw) : [];
+        const updated = Array.isArray(currentPlan) ? [...currentPlan, newPlanItem] : [newPlanItem];
+        localStorage.setItem(k, JSON.stringify(updated));
+      }
+    } catch (_) {}
+
+    // Post to API endpoints if available
+    try {
+      await Promise.allSettled([
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        }),
+        fetch('/api/meal-plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        }),
+        fetch('/api/meal-plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        })
+      ]);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_planner_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plans_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
     setShowAddToPlanModal(false);
     const alertMsg = (t('scheduledMealAlert') || 'Successfully scheduled "{title}" in your meal plan!')
       .replace('{title}', recName);
@@ -1618,7 +1691,6 @@ export default function SavedRecipesPage() {
     if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
     
     try {
-      // 1. Direct DELETE requests to PostgreSQL API endpoints
       await Promise.allSettled([
         fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
           method: 'DELETE',
@@ -1637,25 +1709,21 @@ export default function SavedRecipesPage() {
         })
       ]);
 
-      // 2. Call deleteSavedRecipe helper
       if (typeof deleteSavedRecipe === 'function') {
         await deleteSavedRecipe(currentUser?.id || 'usr_admin_1', id).catch(() => {});
       }
 
-      // 3. Update component state
       const updated = recipes.filter(r => r.id !== id);
       setRecipes(updated);
       setSelectedRecipe(null);
       setIsEditing(false);
 
-      // 4. Update books count
       const updatedBooks = books.map((b: any) => ({
         ...b,
-        recipeCount: updated.filter((r: any) => r.bookId === b.id).length
+        recipeCount: updated.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
       }));
       setBooks(updatedBooks);
 
-      // 5. Clean residual local storage to prevent zombie resurrection
       try {
         const localKeys = ['zecratary_saved_recipes', 'zecratary_recipes', 'zecratary_user_recipes', 'saved_recipes', 'zecratary_imported_recipes'];
         for (const k of localKeys) {
@@ -1670,7 +1738,6 @@ export default function SavedRecipesPage() {
         }
       } catch (_) {}
 
-      // 6. Broadcast event
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
         window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
@@ -1726,6 +1793,12 @@ export default function SavedRecipesPage() {
     const defaultCat = categories[0] || 'Produce';
     const cleanType = getCleanRecipeType(selectedRecipe);
 
+    let rawIngredients = selectedRecipe.ingredients;
+    if (typeof rawIngredients === 'string') {
+      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+    }
+    if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
     setEditForm({
       title: selectedRecipe.title || selectedRecipe.name || '',
       description: selectedRecipe.description || '',
@@ -1735,8 +1808,8 @@ export default function SavedRecipesPage() {
       prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
       cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
       imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '',
-      ingredients: selectedRecipe.ingredients
-        ? selectedRecipe.ingredients.map((ing: any) => ({
+      ingredients: rawIngredients.length > 0
+        ? rawIngredients.map((ing: any) => ({
             amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
             unit: typeof ing === 'string' ? '' : ing.unit || '',
             item: typeof ing === 'string' ? ing : ing.item || ing.name || '',
@@ -1804,50 +1877,139 @@ export default function SavedRecipesPage() {
     return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
   };
 
+  // 3. FIX "SHOPPING LIST"
+  const parseIngredientString = (rawStr: string, defaultCat: string) => {
+    const trimmed = String(rawStr || '').trim();
+    if (!trimmed) return { amount: '1', unit: 'unit', item: '', category: defaultCat };
+
+    const regex = /^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)\s*([a-zA-Z]+)?\s+(?:of\s+)?(.*)$/i;
+    const match = trimmed.match(regex);
+
+    if (match) {
+      const amount = match[1].trim();
+      const possibleUnit = (match[2] || '').trim().toLowerCase();
+      const rest = match[3].trim();
+
+      const knownUnits = [
+        'cup', 'cups', 'tbsp', 'tbs', 'tablespoon', 'tablespoons', 'tsp', 'teaspoon', 'teaspoons',
+        'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'g', 'gram', 'grams', 'kg',
+        'ml', 'l', 'liter', 'liters', 'clove', 'cloves', 'can', 'cans', 'slice', 'slices',
+        'pinch', 'pinches', 'bunch', 'bunches', 'stalk', 'stalks', 'piece', 'pieces', 'dash'
+      ];
+
+      if (knownUnits.includes(possibleUnit)) {
+        return { amount, unit: possibleUnit, item: rest || trimmed, category: defaultCat };
+      } else if (possibleUnit) {
+        return { amount, unit: '', item: `${possibleUnit} ${rest}`.trim(), category: defaultCat };
+      }
+    }
+
+    return { amount: '1', unit: '', item: trimmed, category: defaultCat };
+  };
+
   const handleOpenShoppingModal = () => {
     if (!selectedRecipe) return;
     const defaultCat = categories[0] || 'Produce';
     const baseServings = selectedRecipe.servings || 4;
     const totalServings = baseServings * servingsMultiplier;
 
-    const items = (selectedRecipe.ingredients || []).map((ing: any, idx: number) => {
-      const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
-      const scaledAmt = calculateScaledAmount(rawAmt, baseServings, totalServings);
+    let rawIngredients = selectedRecipe.ingredients;
+    if (typeof rawIngredients === 'string') {
+      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+    }
+    if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
+    const items = rawIngredients.map((ing: any, idx: number) => {
+      let parsed = { amount: '', unit: '', item: '', category: defaultCat };
+
+      if (typeof ing === 'string') {
+        parsed = parseIngredientString(ing, defaultCat);
+      } else if (ing && typeof ing === 'object') {
+        parsed = {
+          amount: String(ing.amount || ing.quantity || '').trim(),
+          unit: String(ing.unit || '').trim(),
+          item: String(ing.item || ing.name || '').trim(),
+          category: String(ing.category || defaultCat).trim()
+        };
+      }
+
+      const scaledAmt = calculateScaledAmount(parsed.amount, baseServings, totalServings);
+
       return {
-        id: 'shop_item_' + idx,
+        id: 'shop_item_' + idx + '_' + Math.random().toString(36).substring(2, 6),
         selected: true,
-        amount: scaledAmt,
-        unit: typeof ing === 'string' ? '' : ing.unit || '',
-        name: typeof ing === 'string' ? ing : ing.item || ing.name || '',
-        category: typeof ing === 'string' ? defaultCat : ing.category || defaultCat
+        amount: scaledAmt !== '' ? scaledAmt : (parsed.amount || '1'),
+        unit: parsed.unit || '',
+        name: parsed.item || 'Ingredient',
+        category: parsed.category || defaultCat
       };
     });
+
     setShoppingModalIngredients(items);
     setIsShoppingModalOpen(true);
   };
 
-  const handleConfirmAddToShoppingList = () => {
+  const handleConfirmAddToShoppingList = async () => {
     const selectedItems = shoppingModalIngredients.filter(i => i.selected);
     if (selectedItems.length === 0) {
       alert(t('noIngredientsSelectedAlert') || 'No ingredients selected.');
       return;
     }
-    const local = localStorage.getItem('zecratary_shopping') || localStorage.getItem('zecratary_shopping_list');
-    const current = local ? JSON.parse(local) : [];
+
+    const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Recipe';
+    const recId = selectedRecipe?.id;
+    const targetUserId = currentUser?.id || 'usr_admin_1';
+
     const formatted = selectedItems.map(i => ({
-      id: 's_' + Date.now() + Math.random(),
-      userId: currentUser?.id || 'usr_admin_1',
-      createdBy: currentUser?.email,
-      creatorName: currentUser?.name,
+      id: 'shop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: currentUser?.email || 'user@zecratary.local',
+      creatorName: currentUser?.name || 'User',
       name: i.name,
-      amount: i.amount || '1',
+      item: i.name,
+      amount: String(i.amount || '1'),
+      quantity: String(i.amount || '1'),
       unit: i.unit || 'unit',
-      category: i.category,
-      checked: false
+      category: i.category || (categories[0] || 'Produce'),
+      checked: false,
+      completed: false,
+      recipeId: recId,
+      recipeTitle: recTitle,
+      createdAt: new Date().toISOString()
     }));
-    const updated = [...formatted, ...current];
-    localStorage.setItem('zecratary_shopping', JSON.stringify(updated));
-    localStorage.setItem('zecratary_shopping_list', JSON.stringify(updated));
+
+    try {
+      const keys = ['zecratary_shopping_list', 'zecratary_shopping'];
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        const currentList = raw ? JSON.parse(raw) : [];
+        const updated = Array.isArray(currentList) ? [...formatted, ...currentList] : formatted;
+        localStorage.setItem(k, JSON.stringify(updated));
+      }
+    } catch (_) {}
+
+    try {
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formatted)
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formatted)
+        })
+      ]);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_shopping_updated'));
+      window.dispatchEvent(new Event('zecratary_shopping_list_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
     setIsShoppingModalOpen(false);
     const alertMsg = (t('addedItemsShoppingAlert') || 'Added {count} items to your Shopping List!')
       .replace('{count}', String(selectedItems.length));
@@ -1883,8 +2045,12 @@ export default function SavedRecipesPage() {
       }
 
       if (selectedIngredientsList.length > 0) {
-        const recipeIngNames = Array.isArray(r.ingredients) 
-          ? r.ingredients.map((ing: any) => (typeof ing === 'string' ? ing : ing.item || ing.name || '').toLowerCase())
+        let rIng = r.ingredients;
+        if (typeof rIng === 'string') {
+          try { rIng = JSON.parse(rIng); } catch (_) { rIng = []; }
+        }
+        const recipeIngNames = Array.isArray(rIng) 
+          ? rIng.map((ing: any) => (typeof ing === 'string' ? ing : ing.item || ing.name || '').toLowerCase())
           : [];
         
         const hasAll = selectedIngredientsList.every(targetIng => 
@@ -1926,7 +2092,7 @@ export default function SavedRecipesPage() {
   const startIndex = (safeCurrentPage - 1) * itemsPerPage;
   const paginatedRecipes = filtered.slice(startIndex, startIndex + itemsPerPage);
 
-  const assignedBook = books.find(b => b.id === selectedRecipe?.bookId);
+  const assignedBook = books.find(b => b.id === (selectedRecipe?.bookId || selectedRecipe?.book_id));
   const baseServings = selectedRecipe?.servings || 4;
   const currentTotalServings = baseServings * servingsMultiplier;
   const recipeCategoryBadge = selectedRecipe ? getCleanRecipeType(selectedRecipe) : 'Main Dish';
@@ -2372,7 +2538,7 @@ export default function SavedRecipesPage() {
       ) : (
         <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-4 sm:gap-5`}>
           {paginatedRecipes.map((r) => {
-            const cardBook = books.find(b => b.id === r.bookId);
+            const cardBook = books.find(b => b.id === (r.bookId || r.book_id));
             const cardTypeBadge = getCleanRecipeType(r);
             const cfg = GRID_CONFIG[gridMode];
 
@@ -2396,7 +2562,7 @@ export default function SavedRecipesPage() {
                 <div>
                   <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: isDayMode ? '#f1f5f9' : '#1e293b' }}>
                     <img
-                      src={r.imageUrl || r.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'}
+                      src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'}
                       alt={r.title || r.name}
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
@@ -2583,7 +2749,7 @@ export default function SavedRecipesPage() {
                 <div className="space-y-5 pb-6">
                   <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
                     <img
-                      src={selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80'}
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || '/uploads/recipes/default.jpg'}
                       alt={selectedRecipe.title || selectedRecipe.name}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
@@ -2616,7 +2782,9 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
+                  {/* 3 CORE ACTION BUTTONS */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
+                    {/* 1. ADD TO COOKBOOK BUTTON & DROPDOWN */}
                     <div className="relative">
                       <button
                         type="button"
@@ -2633,7 +2801,7 @@ export default function SavedRecipesPage() {
                       >
                         <BookmarkPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary, #E05638)' }}/>
                         <span className="truncate">
-                          {assignedBook ? assignedBook.title : (t('addToBook') || 'Add to Book')}
+                          {assignedBook ? assignedBook.title : (t('addToCookbook') || t('addToBook') || 'Add to Cookbook')}
                         </span>
                         <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5"/>
                       </button>
@@ -2652,7 +2820,7 @@ export default function SavedRecipesPage() {
                             <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
                               <span>{t('selectCookbook') || 'Select Cookbook'}</span>
                               <Link 
-                                className="hover:underline" 
+                                className="hover:underline font-bold" 
                                 href="/books"
                                 style={{ color: 'var(--color-emerald, #10b981)' }}
                               >
@@ -2665,7 +2833,7 @@ export default function SavedRecipesPage() {
                                 <div className="text-xs px-2.5 py-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
                               ) : (
                                 books.map((b) => {
-                                  const isAssigned = selectedRecipe.bookId === b.id;
+                                  const isAssigned = (selectedRecipe.bookId || selectedRecipe.book_id) === b.id;
                                   return (
                                     <button
                                       key={b.id}
@@ -2695,10 +2863,11 @@ export default function SavedRecipesPage() {
                       )}
                     </div>
 
+                    {/* 2. ADD TO PLAN BUTTON */}
                     <button
                       type="button"
                       onClick={openAddToPlanModal}
-                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
                       style={{
                         borderColor: 'var(--color-primary, #E05638)',
                         color: 'var(--color-primary, #E05638)'
@@ -2707,9 +2876,11 @@ export default function SavedRecipesPage() {
                       <CalendarPlus className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }}/> {t('addToPlan') || 'Add to Plan'}
                     </button>
 
+                    {/* 3. SHOPPING LIST BUTTON */}
                     <button
+                      type="button"
                       onClick={handleOpenShoppingModal}
-                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
                       style={{
                         borderColor: 'var(--color-primary, #E05638)',
                         color: 'var(--color-primary, #E05638)'
@@ -2917,14 +3088,6 @@ export default function SavedRecipesPage() {
                         <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('createdManually') || 'Created manually'}</span>
                       )}
                     </div>
-                    {selectedRecipe.sourceUrl && (
-                      <p 
-                        className="italic text-[11px] font-medium"
-                        style={{ color: 'var(--color-emerald, #10b981)' }}
-                      >
-                        {t('recipeImportedExternal') || 'Recipe imported from external source'}
-                      </p>
-                    )}
                   </div>
 
                   <div className="border-t mx-5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }} />
@@ -3267,75 +3430,6 @@ export default function SavedRecipesPage() {
                         </div>
                       </div>
 
-                      <div>
-                        <label 
-                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
-                        >
-                          {t('sourceUrlOptional') || 'Source URL (Optional)'}
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="https://..."
-                          value={editForm.sourceUrl || ''}
-                          onChange={(e) => setEditForm({ ...editForm, sourceUrl: e.target.value })}
-                          className="w-full border rounded-xl p-3 text-xs outline-none"
-                          style={{
-                            backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#0f172a' : '#ffffff'
-                          }}
-                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                          onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label 
-                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary, #E05638)' }}
-                          >
-                            {t('prepTimeMins') || 'Preparation Time (mins)'}
-                          </label>
-                          <input
-                            type="number"
-                            value={editForm.prepTimeMinutes}
-                            onChange={(e) => setEditForm({ ...editForm, prepTimeMinutes: parseInt(e.target.value) || 0 })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none"
-                            style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              color: isDayMode ? '#0f172a' : '#ffffff'
-                            }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                          />
-                        </div>
-
-                        <div>
-                          <label 
-                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary, #E05638)' }}
-                          >
-                            {t('cookTimeMins') || 'Cooking Time (mins)'}
-                          </label>
-                          <input
-                            type="number"
-                            value={editForm.cookTimeMinutes}
-                            onChange={(e) => setEditForm({ ...editForm, cookTimeMinutes: parseInt(e.target.value) || 0 })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none"
-                            style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              color: isDayMode ? '#0f172a' : '#ffffff'
-                            }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                          />
-                        </div>
-                      </div>
-
                       <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                         <button
                           type="button"
@@ -3399,7 +3493,7 @@ export default function SavedRecipesPage() {
                             type="button"
                             onClick={() => setEditForm({
                               ...editForm,
-                              ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Pantry Staples' }]
+                              ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Produce' }]
                             })}
                             className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
                             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
@@ -3790,7 +3884,6 @@ export default function SavedRecipesPage() {
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                    placeholder="--:-- --"
                   />
                   <Clock className="h-4 w-4 absolute right-3.5 pointer-events-none" style={{ color: 'var(--color-primary, #E05638)' }}/>
                 </div>
@@ -3894,7 +3987,7 @@ export default function SavedRecipesPage() {
                       updated[idx].selected = !updated[idx].selected;
                       setShoppingModalIngredients(updated);
                     }}
-                    className="w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition"
+                    className="w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition shrink-0"
                     style={ing.selected ? {
                       backgroundColor: 'var(--color-primary, #E05638)',
                       borderColor: 'var(--color-primary, #E05638)',
@@ -3975,6 +4068,7 @@ export default function SavedRecipesPage() {
 
             <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
               <button
+                type="button"
                 onClick={() => setIsShoppingModalOpen(false)}
                 className="px-4 py-2 rounded-xl font-bold text-xs cursor-pointer"
                 style={{
@@ -3985,6 +4079,7 @@ export default function SavedRecipesPage() {
                 {t('cancel') || 'Cancel'}
               </button>
               <button
+                type="button"
                 onClick={handleConfirmAddToShoppingList}
                 className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
@@ -4939,6 +5034,7 @@ export default function ContactPage() {
 
 ## File: `apps/web/src/app/shopping/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -4960,24 +5056,39 @@ export default function ShoppingListPage() {
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
+  // Dynamic Categories from Settings
+  const availableCategories = (Array.isArray(CATEGORIES) && CATEGORIES.length > 0) ? CATEGORIES : [
+    'Produce', 'Dairy', 'Meat and Poultry', 'Seafood', 'Grains and Pasta',
+    'Pantry Staples', 'Condiments and Sauces', 'Spices and Seasonings',
+    'Beverages', 'Frozen Foods', 'Snacks', 'Bakery', 'Canned Goods', 'Other'
+  ];
+
   // Form states matching ingredient fields
   const [itemName, setItemName] = useState('');
   const [itemAmount, setItemAmount] = useState('1');
   const [itemUnit, setItemUnit] = useState('Unit');
-  const [itemCategory, setItemCategory] = useState<string>(CATEGORIES[0] || 'Produce');
+  const [itemCategory, setItemCategory] = useState<string>(availableCategories[0] || 'Produce');
 
   // Dynamic Theme Synchronization & Day Mode Inversion
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
+      let c: any = {};
+      const stored = typeof window !== 'undefined' 
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
+      if (stored) {
+        try { c = JSON.parse(stored); } catch (_) {}
+      }
+
       const root = document.documentElement;
 
       if (isDay) {
+        root.classList.remove('dark');
+        root.classList.add('light');
         root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
         root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
         root.style.setProperty('--color-bg-dark', '#f8fafc');
@@ -4993,30 +5104,60 @@ export default function ShoppingListPage() {
         root.style.setProperty('--color-text-secondary', '#64748b');
         if (typeof document !== 'undefined' && document.body) {
           document.body.style.backgroundColor = '#f8fafc';
+          document.body.style.color = '#0f172a';
         }
       } else {
+        const bg = c.backgroundColor || c.backgroundDark || '#070b13';
+        const card = c.cardBackground || c.cardDark || '#0b0f17';
+        const border = c.cardBorder || c.borderColor || '#1e293b';
+        const textSec = c.textSecondary || '#94a3b8';
+
+        root.classList.remove('light');
+        root.classList.add('dark');
         root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
         root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
+        root.style.setProperty('--color-bg-dark', bg);
+        root.style.setProperty('--color-background', bg);
+        root.style.setProperty('--color-bg', bg);
+        root.style.setProperty('--color-card-dark', card);
+        root.style.setProperty('--color-card', card);
+        root.style.setProperty('--color-inner-dark', c.innerDark || '#070b13');
+        root.style.setProperty('--color-border', border);
         root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
         root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
         root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
+        root.style.setProperty('--color-text-secondary', textSec);
         if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
+          document.body.style.backgroundColor = bg;
+          document.body.style.color = c.textColor || '#ffffff';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
     applyGlobalTheme();
+
+    fetch('/api/user/theme', { cache: 'no-store' })
+      .then(res => res.json())
+      .then(data => {
+        if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
+          localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
+          applyGlobalTheme();
+        }
+      })
+      .catch(() => {
+        fetch('/api/admin/settings', { cache: 'no-store' })
+          .then(res => res.json())
+          .then(data => {
+            if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
+              localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
+              applyGlobalTheme();
+            }
+          })
+          .catch(() => {});
+      });
+
     window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
     window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
     window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
@@ -5027,21 +5168,36 @@ export default function ShoppingListPage() {
       window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
       window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
       window.removeEventListener('storage', applyGlobalTheme);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
-      }
     };
   }, [applyGlobalTheme]);
 
-  // Load shopping list without purging checked items on load
-  const loadShoppingData = useCallback((user: User | null) => {
-    if (!user || typeof window === 'undefined') return;
+  // Load shopping list directly from PostgreSQL with safe fallback
+  const loadShoppingData = useCallback(async (user: User | null) => {
+    if (!user) return;
+    const targetUserId = user.id || 'usr_admin_1';
+
+    try {
+      const res = await fetch(`/api/shopping?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.items)) {
+          setItems(data.items);
+          localStorage.setItem('zecratary_shopping_list', JSON.stringify(data.items));
+          localStorage.setItem('zecratary_shopping', JSON.stringify(data.items));
+          localStorage.setItem('zecratary_shopping_seeded', 'true');
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[ShoppingListPage] Server fetch note:', err);
+    }
 
     try {
       const local = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
       let allItems: any[] = local ? JSON.parse(local) : [];
 
-      if (!Array.isArray(allItems) || allItems.length === 0) {
+      const hasSeeded = localStorage.getItem('zecratary_shopping_seeded');
+      if (!hasSeeded && (!Array.isArray(allItems) || allItems.length === 0)) {
         allItems = [
           { 
             id: 's_1_' + user.id, 
@@ -5064,23 +5220,30 @@ export default function ShoppingListPage() {
             name: 'roasted peanuts', 
             amount: '¼', 
             unit: 'cup', 
-            category: 'Snacks and Sweets', 
+            category: 'Snacks', 
             staple: false, 
             checked: false,
             createdAt: new Date().toISOString()
           }
         ];
+        localStorage.setItem('zecratary_shopping_seeded', 'true');
         localStorage.setItem('zecratary_shopping_list', JSON.stringify(allItems));
         localStorage.setItem('zecratary_shopping', JSON.stringify(allItems));
+        
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(allItems)
+        }).catch(() => {});
       }
 
-      const userItems = allItems.filter((i: any) => {
+      const userItems = Array.isArray(allItems) ? allItems.filter((i: any) => {
         return !i.userId || i.userId === user.id || i.createdBy === user.email;
-      });
+      }) : [];
 
       setItems(userItems);
     } catch (e) {
-      console.error('Failed to load shopping list', e);
+      console.error('Failed to load shopping list from cache', e);
     }
   }, []);
 
@@ -5107,11 +5270,13 @@ export default function ShoppingListPage() {
 
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_shopping_updated', handleSync);
+    window.addEventListener('zecratary_shopping_list_updated', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_shopping_updated', handleSync);
+      window.removeEventListener('zecratary_shopping_list_updated', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
     };
   }, [loadShoppingData, router, t]);
@@ -5130,6 +5295,7 @@ export default function ShoppingListPage() {
       const merged = [...updatedUserItems, ...otherUsersItems];
       localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
       localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
+      localStorage.setItem('zecratary_shopping_seeded', 'true');
 
       setItems(updatedUserItems);
 
@@ -5140,7 +5306,7 @@ export default function ShoppingListPage() {
     }
   };
 
-  const handleAddItem = (e: React.FormEvent) => {
+  const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!itemName.trim() || !currentUser) return;
 
@@ -5151,48 +5317,90 @@ export default function ShoppingListPage() {
       creatorName: currentUser.name,
       name: itemName.trim(),
       amount: itemAmount || '1',
-      unit: itemUnit || '',
-      category: itemCategory || 'Produce',
+      unit: itemUnit === 'Unit' ? '' : itemUnit || '',
+      category: itemCategory || availableCategories[0] || 'Produce',
       staple: false,
       checked: false,
       createdAt: new Date().toISOString()
     };
 
-    saveList([...items, newItem]);
+    const updated = [...items, newItem];
+    saveList(updated);
+
+    try {
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([newItem])
+      });
+    } catch (err) {
+      console.error('Failed to persist item to PostgreSQL:', err);
+    }
+
     setItemName('');
     setItemAmount('1');
     setItemUnit('Unit');
-    setItemCategory(CATEGORIES[0] || 'Produce');
+    setItemCategory(availableCategories[0] || 'Produce');
     setShowAddModal(false);
   };
 
-  const handleUpdateItem = (e: React.FormEvent) => {
+  const handleUpdateItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingItem || !editingItem.name.trim() || !currentUser) return;
 
-    const updated = items.map((i) =>
-      i.id === editingItem.id
-        ? {
-            ...editingItem,
-            userId: currentUser.id,
-            createdBy: currentUser.email,
-            creatorName: currentUser.name,
-          }
-        : i
-    );
+    const updatedItem = {
+      ...editingItem,
+      userId: currentUser.id,
+      createdBy: currentUser.email,
+      creatorName: currentUser.name,
+    };
 
+    const updated = items.map((i) => (i.id === editingItem.id ? updatedItem : i));
     saveList(updated);
+
+    try {
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([updatedItem])
+      });
+    } catch (err) {
+      console.error('Failed to update item in PostgreSQL:', err);
+    }
+
     setEditingItem(null);
   };
 
-  const toggleCheck = (id: string) => {
-    const updated = items.map((i) => (i.id === id ? { ...i, checked: !i.checked } : i));
+  const toggleCheck = async (id: string) => {
+    const target = items.find((i) => i.id === id);
+    if (!target) return;
+    const nextVal = !target.checked;
+    const updated = items.map((i) => (i.id === id ? { ...i, checked: nextVal } : i));
     saveList(updated);
+
+    try {
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ ...target, checked: nextVal }])
+      });
+    } catch (_) {}
   };
 
-  const toggleStaple = (id: string) => {
-    const updated = items.map((i) => (i.id === id ? { ...i, staple: !i.staple } : i));
+  const toggleStaple = async (id: string) => {
+    const target = items.find((i) => i.id === id);
+    if (!target) return;
+    const nextVal = !target.staple;
+    const updated = items.map((i) => (i.id === id ? { ...i, staple: nextVal } : i));
     saveList(updated);
+
+    try {
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ ...target, staple: nextVal }])
+      });
+    } catch (_) {}
   };
 
   const handleCopySingleItem = (item: any) => {
@@ -5211,23 +5419,73 @@ export default function ShoppingListPage() {
     alert(template.replace('{name}', item.name));
   };
 
-  const handleDeleteItem = (id: string) => {
+  const handleDeleteItem = async (id: string) => {
     const updated = items.filter((i) => i.id !== id);
     saveList(updated);
+
+    if (editingItem && editingItem.id === id) {
+      setEditingItem(null);
+    }
+
+    try {
+      await Promise.allSettled([
+        fetch(`/api/shopping?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        }),
+        fetch(`/api/shopping-list?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        })
+      ]);
+    } catch (err) {
+      console.error('Failed to delete item from PostgreSQL:', err);
+    }
   };
 
   const allCompleted = items.length > 0 && items.every((i) => i.checked);
 
-  const toggleAllComplete = () => {
+  const toggleAllComplete = async () => {
     if (items.length === 0) return;
     const targetState = !allCompleted;
     const updated = items.map((i) => ({ ...i, checked: targetState }));
     saveList(updated);
+
+    try {
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+    } catch (_) {}
   };
 
-  const handleRemoveCompleted = () => {
+  const handleRemoveCompleted = async () => {
+    const completedList = items.filter((i) => i.checked);
+    if (completedList.length === 0) return;
+
+    const completedIds = completedList.map((i) => i.id);
     const activeOnly = items.filter((i) => !i.checked);
     saveList(activeOnly);
+
+    try {
+      await Promise.allSettled([
+        fetch(`/api/shopping?action=remove_completed&userId=${encodeURIComponent(currentUser?.id || '')}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: completedIds, action: 'remove_completed', userId: currentUser?.id })
+        }),
+        fetch(`/api/shopping-list?action=remove_completed&userId=${encodeURIComponent(currentUser?.id || '')}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: completedIds, action: 'remove_completed', userId: currentUser?.id })
+        })
+      ]);
+    } catch (err) {
+      console.error('Failed to remove completed items from PostgreSQL:', err);
+    }
   };
 
   const handleCopyList = () => {
@@ -5321,8 +5579,8 @@ export default function ShoppingListPage() {
             disabled={items.length === 0}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
-              backgroundColor: isDayMode ? '#ecfdf5' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#a7f3d0' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
+              borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.35)',
               color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
             }}
             title={allCompleted ? (t('deselectAllItemsTooltip') || 'Deselect all items') : (t('selectAllItemsTooltip') || 'Select all items')}
@@ -5338,8 +5596,8 @@ export default function ShoppingListPage() {
             disabled={completedItems.length === 0}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
-              backgroundColor: isDayMode ? '#fef2f2' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#fecaca' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.12)',
+              borderColor: isDayMode ? '#fecaca' : 'rgba(239, 68, 68, 0.35)',
               color: isDayMode ? '#b91c1c' : '#f87171'
             }}
             title={t('removeCompletedTooltip') || 'Remove completed items'}
@@ -5356,7 +5614,7 @@ export default function ShoppingListPage() {
         <div className="relative flex-1 w-full">
           <Search 
             className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" 
-            style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+            style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
           />
           <input
             type="text"
@@ -5365,12 +5623,12 @@ export default function ShoppingListPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full border rounded-xl pl-11 pr-4 py-2.5 text-sm outline-none shadow-xs transition"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#0f172a' : '#ffffff'
             }}
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
           />
         </div>
 
@@ -5381,29 +5639,32 @@ export default function ShoppingListPage() {
             onClick={handleCopyList}
             className="flex-1 sm:flex-initial border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#0f172a' : '#ffffff'
             }}
           >
-            <Copy className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('copyList') || 'Copy List'}
+            <Copy className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} /> {t('copyList') || 'Copy List'}
           </button>
           
           <button
             type="button"
             onClick={() => setShowStaplesOnly(!showStaplesOnly)}
             className="flex-1 sm:flex-initial border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-            style={{
-              backgroundColor: showStaplesOnly 
-                ? (isDayMode ? '#fff7ed' : 'rgba(234, 88, 12, 0.15)') 
-                : (isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)'),
-              borderColor: showStaplesOnly
-                ? (isDayMode ? '#fdba74' : 'var(--color-border, #064e3b)')
-                : (isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)'),
-              color: showStaplesOnly && isDayMode ? '#c2410c' : (isDayMode ? '#0f172a' : '#ffffff')
+            style={showStaplesOnly ? {
+              backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.1)' : 'rgba(224, 86, 56, 0.18)',
+              borderColor: 'var(--color-primary, #E05638)',
+              color: 'var(--color-primary, #E05638)'
+            } : {
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#0f172a' : '#ffffff'
             }}
           >
-            <Star className="h-4 w-4 fill-[#E05638] text-[#E05638]" /> 
+            <Star 
+              className={`h-4 w-4 ${showStaplesOnly ? 'fill-current' : ''}`}
+              style={{ color: 'var(--color-primary, #E05638)' }} 
+            /> 
             {t('myStaples') || 'My Staples'}
           </button>
 
@@ -5431,8 +5692,8 @@ export default function ShoppingListPage() {
               key={cat} 
               className="border rounded-2xl p-5 space-y-3 shadow-sm transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #064e3b)'
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
               }}
             >
               <h2 
@@ -5463,7 +5724,7 @@ export default function ShoppingListPage() {
                           {item.name}
                         </h4>
                         {(item.amount || item.unit) && (
-                          <span className="text-xs font-medium block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                          <span className="text-xs font-medium block" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                             {item.amount} {item.unit}
                           </span>
                         )}
@@ -5475,7 +5736,7 @@ export default function ShoppingListPage() {
                         type="button"
                         onClick={() => toggleStaple(item.id)}
                         className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+                        style={{ color: item.staple ? 'var(--color-primary, #E05638)' : (isDayMode ? '#94a3b8' : '#64748b') }}
                         title={t('markAsStapleTooltip') || 'Mark as Staple'}
                       >
                         <Star className={`h-4 w-4 ${item.staple ? 'fill-current' : ''}`} />
@@ -5484,7 +5745,7 @@ export default function ShoppingListPage() {
                         type="button"
                         onClick={() => handleCopySingleItem(item)}
                         className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+                        style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
                         title={t('copyItemTooltip') || 'Copy item'}
                       >
                         <Copy className="h-4 w-4" />
@@ -5493,10 +5754,19 @@ export default function ShoppingListPage() {
                         type="button"
                         onClick={() => setEditingItem(item)}
                         className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+                        style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
                         title={t('editItemTooltip') || 'Edit item'}
                       >
                         <Edit3 className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteItem(item.id)}
+                        className="transition hover:text-red-500 cursor-pointer"
+                        style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
+                        title={t('deleteBtn') || 'Delete'}
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
@@ -5513,21 +5783,21 @@ export default function ShoppingListPage() {
           <div className="flex items-center gap-3">
             <h2 
               className="text-base font-extrabold whitespace-nowrap"
-              style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+              style={{ color: 'var(--color-emerald, #10b981)' }}
             >
               {t('completedItemsHeading') || 'Completed Items'}
             </h2>
             <div 
               className="h-px flex-1"
-              style={{ backgroundColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #064e3b)' }}
+              style={{ backgroundColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
             />
           </div>
 
           <div 
             className="border rounded-2xl p-5 space-y-3 shadow-sm transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #064e3b)'
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
             }}
           >
             {completedItems.map((item) => (
@@ -5557,7 +5827,7 @@ export default function ShoppingListPage() {
                     type="button"
                     onClick={() => toggleStaple(item.id)}
                     className="transition hover:opacity-80 cursor-pointer"
-                    style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+                    style={{ color: item.staple ? 'var(--color-primary, #E05638)' : (isDayMode ? '#94a3b8' : '#64748b') }}
                     title={t('markAsStapleTooltip') || 'Mark as Staple'}
                   >
                     <Star className={`h-4 w-4 ${item.staple ? 'fill-current' : ''}`} />
@@ -5566,10 +5836,19 @@ export default function ShoppingListPage() {
                     type="button"
                     onClick={() => setEditingItem(item)}
                     className="transition hover:opacity-80 cursor-pointer"
-                    style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+                    style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
                     title={t('editItemTooltip') || 'Edit item'}
                   >
                     <Edit3 className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteItem(item.id)}
+                    className="transition hover:text-red-500 cursor-pointer"
+                    style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
+                    title={t('deleteBtn') || 'Delete'}
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -5588,8 +5867,8 @@ export default function ShoppingListPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative text-xs cursor-default animate-in fade-in transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#0f172a' : '#ffffff'
             }}
           >
@@ -5598,7 +5877,7 @@ export default function ShoppingListPage() {
               onClick={() => setShowAddModal(false)}
               className="absolute top-4 right-4 p-2 rounded-full transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
                 color: isDayMode ? '#0f172a' : '#cbd5e1'
               }}
             >
@@ -5611,7 +5890,7 @@ export default function ShoppingListPage() {
 
             <form onSubmit={handleAddItem} className="space-y-4 text-xs">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('itemNameLabel') || 'Item Name *'}
                 </label>
                 <input
@@ -5622,18 +5901,18 @@ export default function ShoppingListPage() {
                   onChange={(e) => setItemName(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('amountQtyLabel') || 'Amount / Qty'}
                   </label>
                   <input
@@ -5643,16 +5922,16 @@ export default function ShoppingListPage() {
                     onChange={(e) => setItemAmount(e.target.value)}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('unitLabel') || 'Unit'}
                   </label>
                   <input
@@ -5662,18 +5941,18 @@ export default function ShoppingListPage() {
                     onChange={(e) => setItemUnit(e.target.value)}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('categoryLabel') || 'Category'}
                 </label>
                 <select
@@ -5681,28 +5960,28 @@ export default function ShoppingListPage() {
                   onChange={(e) => setItemCategory(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 >
-                  {CATEGORIES.map((cat: string) => (
-                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {availableCategories.map((cat: string) => (
+                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {cat}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #064e3b)' }}>
+              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
                   className="px-5 py-2.5 rounded-xl font-bold transition cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
                     color: isDayMode ? '#475569' : '#cbd5e1'
                   }}
                 >
@@ -5733,8 +6012,8 @@ export default function ShoppingListPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative text-xs cursor-default animate-in fade-in transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#0f172a' : '#ffffff'
             }}
           >
@@ -5743,7 +6022,7 @@ export default function ShoppingListPage() {
               onClick={() => setEditingItem(null)}
               className="absolute top-4 right-4 p-2 rounded-full transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
                 color: isDayMode ? '#0f172a' : '#cbd5e1'
               }}
             >
@@ -5756,7 +6035,7 @@ export default function ShoppingListPage() {
 
             <form onSubmit={handleUpdateItem} className="space-y-4 text-xs">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('itemNameLabel') || 'Item Name *'}
                 </label>
                 <input
@@ -5766,18 +6045,18 @@ export default function ShoppingListPage() {
                   onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('amountLabel') || 'Amount'}
                   </label>
                   <input
@@ -5787,16 +6066,16 @@ export default function ShoppingListPage() {
                     onChange={(e) => setEditingItem({ ...editingItem, amount: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('unitLabel') || 'Unit'}
                   </label>
                   <input
@@ -5806,18 +6085,18 @@ export default function ShoppingListPage() {
                     onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('categoryLabel') || 'Category'}
                 </label>
                 <select
@@ -5825,28 +6104,29 @@ export default function ShoppingListPage() {
                   onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
                   className="w-full border rounded-xl p-3 text-sm outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 >
-                  {CATEGORIES.map((cat: string) => (
-                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {availableCategories.map((cat: string) => (
+                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {cat}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #064e3b)' }}>
+              <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <button
                   type="button"
                   onClick={() => handleDeleteItem(editingItem.id)}
-                  className="px-4 py-2.5 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  className="px-4 py-2.5 rounded-xl font-bold border transition flex items-center gap-1.5 cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#fef2f2' : 'transparent',
+                    backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
+                    borderColor: isDayMode ? '#fca5a5' : 'rgba(239, 68, 68, 0.3)',
                     color: isDayMode ? '#b91c1c' : '#f87171'
                   }}
                 >
@@ -5858,7 +6138,7 @@ export default function ShoppingListPage() {
                     onClick={() => setEditingItem(null)}
                     className="px-5 py-2.5 rounded-xl font-bold transition cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                      backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
                       color: isDayMode ? '#475569' : '#cbd5e1'
                     }}
                   >
@@ -12574,6 +12854,16 @@ export default function SavedRecipesPage() {
 
 ```
 
+## File: `apps/web/src/app/template/page.tsx`
+```typescript
+import { redirect } from 'next/navigation';
+
+export default function TemplateRedirectPage() {
+  redirect('/templates');
+}
+
+```
+
 ## File: `apps/web/src/app/admin/page.tsx`
 ```typescript
 'use client';
@@ -13989,6 +14279,7 @@ export default function AdminSettingsPage() {
 
 ## File: `apps/web/src/app/admin/ai-settings/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -14003,6 +14294,7 @@ import {
   fetchServerAdminSettings, 
   persistServerAdminSettings 
 } from '@/lib/adminSync';
+import { applyThemeToDocument, fetchAndApplyServerTheme, getMemoryThemeColors, setMemoryThemeColors } from '@/lib/themeConfig';
 
 interface QuestionnaireSection {
   id: string;
@@ -14098,75 +14390,65 @@ export default function ChefAISettingsPage() {
   const [saved, setSaved] = useState(false);
 
   // Dynamic Theme Synchronization
-  const applySavedTheme = useCallback(() => {
+  const syncTheme = useCallback((incomingColors?: any) => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light' || mode === 'day';
+      const root = document.documentElement;
+      const isDay = mode === 'light' || mode === 'day' || root.classList.contains('light');
       setIsDayMode(isDay);
 
-      const stored = typeof window !== 'undefined'
-        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
-        : null;
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
+      let colors = incomingColors || (typeof getMemoryThemeColors === 'function' ? getMemoryThemeColors() : null);
+
+      if (colors && Object.keys(colors).length > 0) {
+        if (typeof setMemoryThemeColors === 'function') setMemoryThemeColors(colors);
+        if (typeof applyThemeToDocument === 'function') applyThemeToDocument(colors);
+      } else if (typeof fetchAndApplyServerTheme === 'function') {
+        fetchAndApplyServerTheme();
+      }
 
       if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) {
+        root.classList.remove('dark');
+        root.classList.add('light');
+        if (document.body) {
           document.body.style.backgroundColor = '#f8fafc';
+          document.body.style.color = '#0f172a';
         }
       } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
+        root.classList.remove('light');
+        root.classList.add('dark');
+        const bg = colors?.backgroundColor || colors?.backgroundDark || '#070b13';
+        if (document.body) {
+          document.body.style.backgroundColor = bg;
+          document.body.style.color = colors?.textColor || '#ffffff';
         }
       }
     } catch (_) {}
   }, []);
 
   useEffect(() => {
-    applySavedTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('storage', applySavedTheme);
+    syncTheme();
+
+    const handleThemeEvent = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      syncTheme(detail);
+    };
+
+    window.addEventListener('zecratary_theme_updated', handleThemeEvent);
+    window.addEventListener('zecratary_theme_mode_changed', handleThemeEvent);
+    window.addEventListener('zecratary_theme_changed', handleThemeEvent);
+    window.addEventListener('zecratary_admin_settings_updated', handleThemeEvent);
+    window.addEventListener('storage', handleThemeEvent);
 
     return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('storage', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
-      }
+      window.removeEventListener('zecratary_theme_updated', handleThemeEvent);
+      window.removeEventListener('zecratary_theme_mode_changed', handleThemeEvent);
+      window.removeEventListener('zecratary_theme_changed', handleThemeEvent);
+      window.removeEventListener('zecratary_admin_settings_updated', handleThemeEvent);
+      window.removeEventListener('storage', handleThemeEvent);
     };
-  }, [applySavedTheme]);
+  }, [syncTheme]);
 
-  // Fetch API Keys from .env
+  // Fetch API Keys from .env / PostgreSQL
   const fetchEnvKeys = async () => {
     try {
       const res = await fetch('/api/admin/keys?t=' + Date.now(), { cache: 'no-store' });
@@ -14196,12 +14478,16 @@ export default function ChefAISettingsPage() {
     return {};
   };
 
-  // Load Settings Exclusively from Server Storage (Zero LocalStorage)
+  // Load Settings Exclusively from Server Storage
   const loadSettingsFromServer = useCallback(async () => {
     purgeLegacyBrowserAdminStorage();
     try {
       const serverData = await fetchServerAdminSettings();
       if (serverData) {
+        if (serverData.themeColors && Object.keys(serverData.themeColors).length > 0) {
+          syncTheme(serverData.themeColors);
+        }
+
         const c = serverData.chefAiSettings || serverData.aiSettings || serverData;
         if (c.provider) setProvider(c.provider);
         else if (serverData.aiProvider) setProvider(serverData.aiProvider);
@@ -14236,7 +14522,7 @@ export default function ChefAISettingsPage() {
     } catch (err) {
       console.error('[ChefAISettings] Failed to load server settings:', err);
     }
-  }, []);
+  }, [syncTheme]);
 
   useEffect(() => {
     fetchEnvKeys();
@@ -14345,7 +14631,6 @@ export default function ChefAISettingsPage() {
       if (testData.success) {
         setTestResult({ success: true, message: `Connected to Google Gemini (${model || 'gemini-1.5-flash'}) & key synced!` });
 
-        // Persist directly to server storage without writing to localStorage
         await persistServerAdminSettings({
           aiProvider: 'gemini',
           aiModel: model || 'gemini-1.5-flash',
@@ -14394,7 +14679,6 @@ export default function ChefAISettingsPage() {
           message: `Synced ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} key (${cleanKey.substring(0, 8)}...) from .env successfully!`
         });
 
-        // Persist to server store with zero localStorage writes
         await persistServerAdminSettings({
           aiProvider: provider,
           chefAiSettings: {
@@ -14514,7 +14798,6 @@ export default function ChefAISettingsPage() {
       .filter(s => s.enabled !== false)
       .flatMap(s => s.questions);
 
-    // Save directly to server storage API (Zero LocalStorage writes)
     await persistServerAdminSettings({
       aiProvider: provider,
       aiModel: model,
@@ -14560,6 +14843,7 @@ export default function ChefAISettingsPage() {
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('zecratary_engine_config_updated'));
       window.dispatchEvent(new Event('zecratary_settings_updated'));
+      window.dispatchEvent(new Event('storage'));
     }
     
     setSaved(true);
@@ -14571,10 +14855,13 @@ export default function ChefAISettingsPage() {
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-24 font-sans px-2 sm:px-4 pt-2 transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      style={{ 
+        color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)',
+        transition: 'background-color 200ms ease, color 200ms ease'
+      }}
     >
       
-      {/* Autofill Background Override */}
+      {/* Autofill & Transition Overrides */}
       <style dangerouslySetInnerHTML={{ __html: `
         .settings-input:-webkit-autofill,
         .settings-input:-webkit-autofill:hover,
@@ -14589,12 +14876,12 @@ export default function ChefAISettingsPage() {
       `}} />
 
       {/* TOP HEADER */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4 transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
         <div>
           <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary, #E05638)' }}>
             <Settings className="h-6 w-6" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('aiAssistantConfigTitle', 'AI Assistant Configuration')}
           </h1>
-          <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+          <p className="text-xs mt-0.5" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>
             {t('aiAssistantConfigSubtitle', 'Update settings and functional AI provider models for the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('agentSuffix', 'agent')}
           </p>
         </div>
@@ -14604,7 +14891,7 @@ export default function ChefAISettingsPage() {
             <span 
               className="border px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 15%, transparent)',
+                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
                 borderColor: 'var(--color-emerald, #10b981)',
                 color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
               }}
@@ -14615,10 +14902,10 @@ export default function ChefAISettingsPage() {
           <button
             type="button"
             onClick={handleSave}
-            className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer"
+            className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90"
             style={{ 
               backgroundColor: 'var(--color-primary, #E05638)',
-              boxShadow: '0 8px 20px -4px color-mix(in srgb, var(--color-primary, #E05638) 30%, transparent)'
+              boxShadow: '0 8px 20px -4px rgba(224, 86, 56, 0.3)'
             }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
@@ -14629,7 +14916,7 @@ export default function ChefAISettingsPage() {
       </div>
 
       {/* HORIZONTAL CONFIGURATION TABS */}
-      <div className="flex border-b gap-6 overflow-x-auto transition-colors duration-200" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+      <div className="flex border-b gap-6 overflow-x-auto transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
         {[
           { id: 'general', label: t('tabGeneralConfig', 'General AI Configuration'), icon: Cpu },
           { id: 'questionnaire', label: `${t('tabQuestionnaires', 'Multi-Topic Questionnaires')} (${sections.filter(s => s.enabled !== false).length}/${sections.length} Active)`, icon: Layers },
@@ -14648,7 +14935,7 @@ export default function ChefAISettingsPage() {
               }`}
               style={{
                 borderColor: isActive ? 'var(--color-primary, #E05638)' : 'transparent',
-                color: isActive ? 'var(--color-primary, #E05638)' : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                color: isActive ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)')
               }}
             >
               <Icon className="h-4 w-4" /> {tab.label}
@@ -14665,8 +14952,8 @@ export default function ChefAISettingsPage() {
             <div 
               className="border rounded-3xl p-6 space-y-5 shadow-sm transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
               }}
             >
               <div className="flex items-center justify-between">
@@ -14677,7 +14964,7 @@ export default function ChefAISettingsPage() {
                   >
                     <Sparkles className="h-4 w-4" /> {t('aiEngineProviderTitle', 'AI Engine Provider & Model Selection')}
                   </h2>
-                  <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-xs mt-0.5" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('aiEngineProviderDesc', 'Select your active AI provider and model version. This choice controls which model processes prompts in')} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/api/ai</span>.
                   </p>
                 </div>
@@ -14686,30 +14973,30 @@ export default function ChefAISettingsPage() {
                     type="button"
                     onClick={() => autoConnectGemini(false)}
                     disabled={autoConnecting}
-                    className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 shadow-xs"
+                    className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 shadow-xs hover:opacity-90"
                     style={{
-                      backgroundColor: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.15)',
-                      borderColor: isDayMode ? '#fdba74' : 'rgba(224, 86, 56, 0.5)',
+                      backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)',
+                      borderColor: 'var(--color-primary, #E05638)',
                       color: 'var(--color-primary, #E05638)'
                     }}
                     title="Auto-connect and sync Gemini API key"
                   >
-                    <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse text-amber-500' : 'text-[#E05638]'}`} />
+                    <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse' : ''}`} style={{ color: autoConnecting ? '#f59e0b' : 'var(--color-primary, #E05638)' }} />
                     <span>{autoConnecting ? t('connecting', 'Connecting...') : t('autoConnectGemini', 'Auto-Connect Gemini')}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={handleReloadEnvKey}
-                    className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                    className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs hover:opacity-80"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#334155' : '#cbd5e1'
                     }}
                     title="Reload API Key from .env"
                   >
-                    <RefreshCw className={`h-3 w-3 ${syncingEnvKey ? 'animate-spin' : ''}`} style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} />
+                    <RefreshCw className={`h-3 w-3 ${syncingEnvKey ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald, #10b981)' }} />
                     <span>{t('syncFromEnv', 'Sync from .env')}</span>
                   </button>
                 </div>
@@ -14719,12 +15006,12 @@ export default function ChefAISettingsPage() {
                 <button
                   type="button"
                   onClick={() => handleProviderChange('gemini')}
-                  className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs"
+                  className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
                   style={{
                     backgroundColor: provider === 'gemini' 
-                      ? (isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 15%, transparent)') 
-                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                    borderColor: provider === 'gemini' ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                      ? (isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)') 
+                      : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
+                    borderColor: provider === 'gemini' ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
                     color: provider === 'gemini' ? (isDayMode ? '#991b1b' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
                   }}
                 >
@@ -14738,16 +15025,16 @@ export default function ChefAISettingsPage() {
                 <button
                   type="button"
                   onClick={() => handleProviderChange('openai')}
-                  className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs"
+                  className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
                   style={{
                     backgroundColor: provider === 'openai' 
-                      ? (isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 15%, transparent)') 
-                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                    borderColor: provider === 'openai' ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                      ? (isDayMode ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.2)') 
+                      : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
+                    borderColor: provider === 'openai' ? 'var(--color-emerald, #10b981)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
                     color: provider === 'openai' ? (isDayMode ? '#065f46' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
                   }}
                 >
-                  <Zap className="h-5 w-5 shrink-0" style={{ color: isDayMode ? '#059669' : '#34d399' }} />
+                  <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>OpenAI GPT</span>
                     <span className="text-[11px] opacity-75">GPT-4o / GPT-4 Turbo</span>
@@ -14771,12 +15058,12 @@ export default function ChefAISettingsPage() {
                       placeholder={provider === 'gemini' ? "AIzaSy..." : "sk-..."}
                       className="settings-input w-full border rounded-xl px-4 py-3 pr-36 font-mono text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                        borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                         color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                       onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
                     />
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                       <button
@@ -14792,7 +15079,7 @@ export default function ChefAISettingsPage() {
                         type="button"
                         onClick={handleTestApiKey}
                         disabled={testingKey}
-                        className="px-2.5 py-1.5 rounded-lg text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-md disabled:opacity-50"
+                        className="px-2.5 py-1.5 rounded-lg text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-md disabled:opacity-50 hover:opacity-90"
                         style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
                         title="Test API Key connection live"
                       >
@@ -14825,7 +15112,7 @@ export default function ChefAISettingsPage() {
                       <span className="leading-snug">{testResult.message}</span>
                     </div>
                   )}
-                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('persistedServerSyncNotice', 'Persisted directly to server storage and synced to disk environment.')}
                   </span>
                 </div>
@@ -14839,25 +15126,25 @@ export default function ChefAISettingsPage() {
                     onChange={(e) => setModel(e.target.value)}
                     className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition font-medium"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
                     {provider === 'gemini' ? (
                       <>
-                        <option value="gemini-3.6-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.6 Flash (Latest Recommended)</option>
-                        <option value="gemini-3.5-flash-lite" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.5 Flash Lite (Lightweight & Fast)</option>
+                        <option value="gemini-3.6-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.6 Flash (Latest Recommended)</option>
+                        <option value="gemini-3.5-flash-lite" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.5 Flash Lite (Lightweight & Fast)</option>
                       </>
                     ) : (
                       <>
-                        <option value="gpt-4o" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>GPT-4o (Advanced reasoning)</option>
-                        <option value="gpt-4-turbo" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>GPT-4 Turbo</option>
-                        <option value="gpt-3.5-turbo" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>GPT-3.5 Turbo (High speed)</option>
+                        <option value="gpt-4o" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>GPT-4o (Advanced reasoning)</option>
+                        <option value="gpt-4-turbo" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>GPT-4 Turbo</option>
+                        <option value="gpt-3.5-turbo" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>GPT-3.5 Turbo (High speed)</option>
                       </>
                     )}
                   </select>
-                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}
                   </span>
                 </div>
@@ -14872,11 +15159,11 @@ export default function ChefAISettingsPage() {
             <div 
               className="border rounded-3xl p-6 space-y-5 shadow-sm text-xs transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
               }}
             >
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
                 <div>
                   <h2 
                     className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
@@ -14884,14 +15171,14 @@ export default function ChefAISettingsPage() {
                   >
                     <Layers className="h-4 w-4" /> {t('questionnaireManagerTitle', 'Multi-Topic Questionnaire & Wizard Manager')}
                   </h2>
-                  <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-xs mt-0.5" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
                   </p>
                 </div>
                 <span 
                   className="border px-3 py-1 rounded-full font-bold text-xs shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 15%, transparent)',
+                    backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)',
                     borderColor: 'var(--color-primary, #E05638)',
                     color: 'var(--color-primary, #E05638)'
                   }}
@@ -14917,9 +15204,9 @@ export default function ChefAISettingsPage() {
                           className="p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between shadow-xs"
                           style={{
                             backgroundColor: isActive 
-                              ? (isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 15%, transparent)') 
-                              : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                            borderColor: isActive ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                              ? (isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)') 
+                              : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
+                            borderColor: isActive ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
                             opacity: isEnabled ? 1 : 0.65
                           }}
                         >
@@ -14937,10 +15224,10 @@ export default function ChefAISettingsPage() {
                                 {isEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                               </span>
                             </div>
-                            <p className="text-[10px] truncate" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{sec.description}</p>
+                            <p className="text-[10px] truncate" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>{sec.description}</p>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0 pl-2 border-l" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+                          <div className="flex items-center gap-2 shrink-0 pl-2 border-l" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
                             <button
                               type="button"
                               onClick={(e) => handleToggleSectionEnabled(sec.id, e)}
@@ -14974,8 +15261,8 @@ export default function ChefAISettingsPage() {
                   <div 
                     className="p-4 rounded-2xl border space-y-3 mt-4 transition-colors duration-200"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
                     }}
                   >
                     <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
@@ -14988,12 +15275,12 @@ export default function ChefAISettingsPage() {
                       onChange={(e) => setNewTopicTitle(e.target.value)}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                        borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                         color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                       onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
                     />
                     <input
                       type="text"
@@ -15002,18 +15289,18 @@ export default function ChefAISettingsPage() {
                       onChange={(e) => setNewTopicDesc(e.target.value)}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                        borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                         color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                       onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
                     />
                     <button
                       type="button"
                       onClick={handleAddTopicSection}
                       disabled={!newTopicTitle.trim()}
-                      className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md"
+                      className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md hover:opacity-90"
                       style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
                       onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
@@ -15026,13 +15313,13 @@ export default function ChefAISettingsPage() {
                 <div 
                   className="lg:col-span-7 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+                    backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)',
                     opacity: activeSection?.enabled !== false ? 1 : 0.7
                   }}
                 >
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                    <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
                       <div className="flex-1 min-w-0 pr-4">
                         <div className="flex items-center gap-2 mb-1">
                           <ListPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary, #E05638)' }} /> 
@@ -15064,12 +15351,12 @@ export default function ChefAISettingsPage() {
                             setSections(sections.map(s => s.id === activeSection?.id ? { ...s, description: newDesc } : s));
                           }}
                           className="text-[11px] bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none w-full transition-colors truncate"
-                          style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                          style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}
                           placeholder="Topic Description..."
                           title="Edit Topic Description"
                         />
                       </div>
-                      <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                         {activeSection?.questions.length || 0} {t('questionsCount', 'Questions')}
                       </span>
                     </div>
@@ -15085,14 +15372,14 @@ export default function ChefAISettingsPage() {
                             key={qIdx} 
                             className="flex items-center gap-2.5 border rounded-xl p-3 shadow-xs"
                             style={{
-                              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                              backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                              borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
                             }}
                           >
                             <span 
                               className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0"
                               style={{
-                                backgroundColor: isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 20%, transparent)',
+                                backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.15)' : 'rgba(224, 86, 56, 0.25)',
                                 color: 'var(--color-primary, #E05638)'
                               }}
                             >
@@ -15130,7 +15417,7 @@ export default function ChefAISettingsPage() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                  <div className="flex gap-2 pt-3 border-t" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
                     <input
                       type="text"
                       placeholder={`${t('addQuestionPrefix', 'Add question to')} "${activeSection?.topicTitle}"...`}
@@ -15139,17 +15426,17 @@ export default function ChefAISettingsPage() {
                       onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
                       className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                        borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                         color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                       onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
                     />
                     <button
                       type="button"
                       onClick={() => handleAddQuestionToTopic(activeSection.id)}
-                      className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md"
+                      className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90"
                       style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
                     >
                       <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
@@ -15163,8 +15450,8 @@ export default function ChefAISettingsPage() {
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs mt-6 transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
               }}
             >
               <h2 
@@ -15185,12 +15472,12 @@ export default function ChefAISettingsPage() {
                     <div
                       key={mode.id}
                       onClick={() => setResultDisplayMode(mode.id as any)}
-                      className="p-4 rounded-2xl border cursor-pointer transition space-y-2 shadow-xs"
+                      className="p-4 rounded-2xl border cursor-pointer transition space-y-2 shadow-xs hover:opacity-90"
                       style={{
                         backgroundColor: isSel 
-                          ? (isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 15%, transparent)') 
-                          : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                        borderColor: isSel ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                          ? (isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)') 
+                          : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
+                        borderColor: isSel ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
                         color: isSel ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
                       }}
                     >
@@ -15205,53 +15492,53 @@ export default function ChefAISettingsPage() {
               </div>
 
               {/* LIVE PREVIEW BOX */}
-              <div className="pt-3 border-t space-y-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="pt-3 border-t space-y-3" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
                 <div className="flex items-center justify-between">
                   <span className="font-bold flex items-center gap-1.5 text-xs" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                     <Eye className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('liveUiPreview', 'Live UI Preview')} ({resultDisplayMode.toUpperCase()} MODE)
                   </span>
-                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('liveUiPreviewNotice', 'Updates instantly when selecting above')}
                   </span>
                 </div>
 
                 <div 
-                  className="border rounded-2xl p-4 space-y-3 shadow-inner"
+                  className="border rounded-2xl p-4 space-y-3 shadow-inner transition-colors duration-200"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : '#0a0f1d',
-                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b'
+                    backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)'
                   }}
                 >
                   {resultDisplayMode === 'compact' && (
                     <div className="space-y-2 animate-in fade-in">
-                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
                         <span className="font-bold flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                          <Calendar className="h-3.5 w-3.5 text-[#E05638]" /> High Protein Plan (3 Days)
+                          <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('previewPlanTitle', 'High Protein Plan (3 Days)')}
                         </span>
-                        <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>3/3 Days</span>
+                        <span style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>3/3 Days</span>
                       </div>
                       <div className="space-y-1.5">
                         <div 
                           className="flex items-center justify-between p-2 rounded-xl border text-[11px]"
                           style={{
-                            backgroundColor: isDayMode ? '#ffffff' : '#111726',
-                            borderColor: isDayMode ? '#e2e8f0' : '#1e293b'
+                            backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                            borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
                           }}
                         >
-                          <span className="font-bold text-[#E05638]">Day 1 - Sunday:</span>
+                          <span className="font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>Day 1 - Sunday:</span>
                           <span className="font-medium" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Avocado Quinoa Bowl</span>
-                          <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>25m</span>
+                          <span style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>25m</span>
                         </div>
                         <div 
                           className="flex items-center justify-between p-2 rounded-xl border text-[11px]"
                           style={{
-                            backgroundColor: isDayMode ? '#ffffff' : '#111726',
-                            borderColor: isDayMode ? '#e2e8f0' : '#1e293b'
+                            backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                            borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
                           }}
                         >
-                          <span className="font-bold text-[#E05638]">Day 2 - Monday:</span>
+                          <span className="font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>Day 2 - Monday:</span>
                           <span className="font-medium" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Grilled Salmon Salad</span>
-                          <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>20m</span>
+                          <span style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>20m</span>
                         </div>
                       </div>
                     </div>
@@ -15259,18 +15546,18 @@ export default function ChefAISettingsPage() {
 
                   {resultDisplayMode === 'detailed' && (
                     <div className="space-y-3 animate-in fade-in">
-                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-                        <span className="font-bold uppercase tracking-wider text-[10px] text-[#E05638]">Detailed Master Plan Preview</span>
-                        <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>3 Days</span>
+                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+                        <span className="font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-primary, #E05638)' }}>Detailed Master Plan Preview</span>
+                        <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>3 Days</span>
                       </div>
                       <div 
                         className="border rounded-xl p-3 space-y-2 text-[11px]"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : '#151D2F',
-                          borderColor: isDayMode ? '#e2e8f0' : '#1e293b'
+                          backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                          borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
                         }}
                       >
-                        <div className="flex justify-between font-bold text-[#E05638]">
+                        <div className="flex justify-between font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>
                           <span>Day 1 - Sunday</span>
                           <span>DINNER</span>
                         </div>
@@ -15279,7 +15566,7 @@ export default function ChefAISettingsPage() {
                           <div className="space-y-0.5 flex-1">
                             <h5 className="font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Avocado Quinoa Bowl</h5>
                             <p className="text-[10px] line-clamp-1" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>Nutritious plant-based high-protein bowl with fresh lime dressing.</p>
-                            <span className="text-[9px] block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Ingredients: Quinoa, Avocado, Chickpeas, Olive Oil</span>
+                            <span className="text-[9px] block" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>Ingredients: Quinoa, Avocado, Chickpeas, Olive Oil</span>
                           </div>
                         </div>
                       </div>
@@ -15291,8 +15578,8 @@ export default function ChefAISettingsPage() {
                       <div 
                         className="rounded-xl overflow-hidden border"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : '#151D2F',
-                          borderColor: isDayMode ? '#e2e8f0' : '#1e293b'
+                          backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                          borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
                         }}
                       >
                         <div className="text-white px-3 py-2 flex items-center justify-between font-bold text-xs" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
@@ -15301,16 +15588,16 @@ export default function ChefAISettingsPage() {
                         </div>
                         <div className="p-3 space-y-2">
                           <div className="flex items-start gap-3">
-                            <div className="w-12 h-12 rounded-lg shrink-0 bg-cover bg-center border" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=150&q=80)', borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
+                            <div className="w-12 h-12 rounded-lg shrink-0 bg-cover bg-center border" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=150&q=80)', borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #334155)' }} />
                             <div className="min-w-0 flex-1">
-                              <span className="text-[10px] font-black uppercase text-[#E05638]">Dinner</span>
+                              <span className="text-[10px] font-black uppercase" style={{ color: 'var(--color-primary, #E05638)' }}>Dinner</span>
                               <h4 className="font-extrabold text-xs truncate" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Avocado Quinoa Bowl</h4>
                               <p className="text-[10px] line-clamp-1" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>Nutritious chef-curated home recipe suited to your diet.</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-3 text-[10px] pt-1 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b', color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                            <span className="flex items-center gap-1"><Clock className="h-3 w-3 text-emerald-500" /> 15m</span>
-                            <span className="flex items-center gap-1"><Flame className="h-3 w-3 text-[#E05638]" /> 20m</span>
+                          <div className="flex items-center gap-3 text-[10px] pt-1 border-t" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)', color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> 15m</span>
+                            <span className="flex items-center gap-1"><Flame className="h-3 w-3" style={{ color: 'var(--color-primary, #E05638)' }} /> 20m</span>
                             <span className="flex items-center gap-1"><Users className="h-3 w-3" /> 2 servings</span>
                           </div>
                         </div>
@@ -15329,11 +15616,11 @@ export default function ChefAISettingsPage() {
           <div 
             className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
             }}
           >
-            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
               <div>
                 <h2 
                   className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
@@ -15341,17 +15628,17 @@ export default function ChefAISettingsPage() {
                 >
                   <Mic className="h-4 w-4" /> {t('voiceInteractionHeader', 'Voice Interaction & Speech Configuration')}
                 </h2>
-                <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                <p className="text-xs mt-0.5" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('voiceInteractionDesc', 'Configure text-to-speech engine, voice models, playback speed, and auto-read behavior.')}
                 </p>
               </div>
 
               <div 
                 onClick={() => setEnableVoiceInteraction(!enableVoiceInteraction)}
-                className="flex items-center gap-3 cursor-pointer border px-4 py-2.5 rounded-2xl shadow-xs transition"
+                className="flex items-center gap-3 cursor-pointer border px-4 py-2.5 rounded-2xl shadow-xs transition hover:opacity-90"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                  backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                  borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)'
                 }}
               >
                 <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('enableVoiceMode', 'Enable Voice Mode')}</span>
@@ -15377,12 +15664,12 @@ export default function ChefAISettingsPage() {
                         key={ver}
                         type="button"
                         onClick={() => setVoiceEngine(ver as any)}
-                        className="p-3.5 rounded-2xl border text-left transition cursor-pointer shadow-xs"
+                        className="p-3.5 rounded-2xl border text-left transition cursor-pointer shadow-xs hover:opacity-90"
                         style={{
                           backgroundColor: isSel 
-                            ? (isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 20%, transparent)') 
-                            : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                          borderColor: isSel ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                            ? (isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)') 
+                            : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
+                          borderColor: isSel ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
                           color: isSel ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
                         }}
                       >
@@ -15403,15 +15690,15 @@ export default function ChefAISettingsPage() {
                   onChange={(e) => setSelectedVoiceName(e.target.value)}
                   className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                 >
-                  <option value="en-US-Neural2-F" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Aria (US Female - Warm & Professional)</option>
-                  <option value="en-US-Neural2-D" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Marcus (US Male - Deep & Authoritative)</option>
-                  <option value="en-GB-Neural2-A" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Oliver (UK Male - Refined Accent)</option>
-                  <option value="en-AU-Neural2-B" style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Matilda (Australian - Friendly & Casual)</option>
+                  <option value="en-US-Neural2-F" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Aria (US Female - Warm & Professional)</option>
+                  <option value="en-US-Neural2-D" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Marcus (US Male - Deep & Authoritative)</option>
+                  <option value="en-GB-Neural2-A" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Oliver (UK Male - Refined Accent)</option>
+                  <option value="en-AU-Neural2-B" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Matilda (Australian - Friendly & Casual)</option>
                 </select>
               </div>
             </div>
@@ -15420,7 +15707,7 @@ export default function ChefAISettingsPage() {
               <div className="space-y-2">
                 <div className="flex justify-between font-bold">
                   <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('speechSpeed', 'Speech Speed')}: {voiceSpeed}x</span>
-                  <span style={{ color: isDayMode ? '#059669' : '#34d399' }}>{voiceSpeed === 1.0 ? 'Normal' : voiceSpeed > 1.0 ? 'Fast' : 'Relaxed'}</span>
+                  <span style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}>{voiceSpeed === 1.0 ? 'Normal' : voiceSpeed > 1.0 ? 'Fast' : 'Relaxed'}</span>
                 </div>
                 <input
                   type="range"
@@ -15432,7 +15719,7 @@ export default function ChefAISettingsPage() {
                   className="w-full cursor-pointer"
                   style={{ accentColor: 'var(--color-primary, #E05638)' }}
                 />
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('speechSpeedDesc', 'Adjust the speaking pace of the AI assistant when reading recipe steps aloud.')}
                 </p>
               </div>
@@ -15440,17 +15727,17 @@ export default function ChefAISettingsPage() {
               <div className="space-y-2 flex flex-col justify-center">
                 <div 
                   onClick={() => setVoiceAutoPlay(!voiceAutoPlay)}
-                  className="flex items-center justify-between p-3.5 rounded-2xl border transition cursor-pointer shadow-xs"
+                  className="flex items-center justify-between p-3.5 rounded-2xl border transition cursor-pointer shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                    backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)'
                   }}
                 >
                   <div className="flex items-center gap-2.5">
                     <Volume2 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
                     <div>
                       <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('autoReadAiResponses', 'Auto-Read AI Responses')}</span>
-                      <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('autoReadAiResponsesDesc', 'Automatically speak answers aloud upon generation.')}</span>
+                      <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>{t('autoReadAiResponsesDesc', 'Automatically speak answers aloud upon generation.')}</span>
                     </div>
                   </div>
                   <div 
@@ -15465,15 +15752,15 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 4: AGENT PARAMETERS (INCLUDING AUTONOMOUS CAPABILITIES & KNOWLEDGE TUNING) */}
+        {/* TAB 4: AGENT PARAMETERS (AUTONOMOUS CAPABILITIES & KNOWLEDGE TUNING) */}
         {activeTab === 'advanced' && (
           <div className="space-y-6 animate-in fade-in">
             {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
             <div 
               className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
               }}
             >
               <h2 
@@ -15482,19 +15769,19 @@ export default function ChefAISettingsPage() {
               >
                 <Globe className="h-4 w-4" /> {t('autonomousCapabilitiesHeader', 'Autonomous Capabilities & Search Scope Control')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <p className="text-xs" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>
                 {t('autonomousCapabilitiesDesc', 'Control what data sources the AI agent searches and incorporates when responding on')} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/chef</span>.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
                 <div 
                   onClick={() => setEnableWebSearch(!enableWebSearch)}
-                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
+                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
                   style={{
                     backgroundColor: enableWebSearch 
-                      ? (isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 12%, transparent)') 
-                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                    borderColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                      ? (isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)') 
+                      : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
+                    borderColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
                     color: enableWebSearch ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
                   }}
                 >
@@ -15509,7 +15796,7 @@ export default function ChefAISettingsPage() {
                   </div>
                   <div>
                     <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('liveWebSearch', 'Live Web Search')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                       {t('liveWebSearchDesc', 'Allows AI to search external culinary web data, trends, and ingredient substitutes.')}
                     </span>
                   </div>
@@ -15517,17 +15804,17 @@ export default function ChefAISettingsPage() {
 
                 <div 
                   onClick={() => setEnablePantryContext(!enablePantryContext)}
-                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
+                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
                   style={{
                     backgroundColor: enablePantryContext 
-                      ? (isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 12%, transparent)') 
-                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                    borderColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                      ? (isDayMode ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.2)') 
+                      : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
+                    borderColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
                     color: enablePantryContext ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
                   }}
                 >
                   <div className="flex items-center justify-between">
-                    <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? (isDayMode ? '#059669' : 'var(--color-emerald, #10b981)') : '#64748b' }} />
+                    <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? 'var(--color-emerald, #10b981)' : '#64748b' }} />
                     <div 
                       className="w-9 h-5 rounded-full p-0.5 transition"
                       style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : '#334155') }}
@@ -15537,7 +15824,7 @@ export default function ChefAISettingsPage() {
                   </div>
                   <div>
                     <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('pantryContextSearch', 'Pantry Context Search')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                       {t('pantryContextSearchDesc', 'Automatically scans user pantry inventory to build recipes matching in-stock ingredients.')}
                     </span>
                   </div>
@@ -15545,12 +15832,12 @@ export default function ChefAISettingsPage() {
 
                 <div 
                   onClick={() => setStrictDietEnforcement(!strictDietEnforcement)}
-                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs"
+                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
                   style={{
                     backgroundColor: strictDietEnforcement 
                       ? (isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)') 
-                      : (isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)'),
-                    borderColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'),
+                      : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
+                    borderColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
                     color: strictDietEnforcement ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
                   }}
                 >
@@ -15565,7 +15852,7 @@ export default function ChefAISettingsPage() {
                   </div>
                   <div>
                     <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('strictDietaryFilters', 'Strict Dietary Filters')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                       {t('strictDietaryFiltersDesc', 'Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.')}
                     </span>
                   </div>
@@ -15577,8 +15864,8 @@ export default function ChefAISettingsPage() {
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
+                borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
               }}
             >
               <h2 
@@ -15589,11 +15876,11 @@ export default function ChefAISettingsPage() {
               </h2>
 
               {/* CREATIVITY & MAX PLAN DAYS */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
                 <div className="space-y-2">
                   <div className="flex justify-between font-bold">
                     <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('temperatureLabel', 'Temperature (Creativity)')}: {temperature}</span>
-                    <span style={{ color: isDayMode ? '#059669' : '#34d399' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
+                    <span style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
                   </div>
                   <input
                     type="range"
@@ -15605,7 +15892,7 @@ export default function ChefAISettingsPage() {
                     className="w-full cursor-pointer"
                     style={{ accentColor: 'var(--color-primary, #E05638)' }}
                   />
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('temperatureDesc', 'Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.')}
                   </p>
                 </div>
@@ -15622,14 +15909,14 @@ export default function ChefAISettingsPage() {
                     onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
                     className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
                   />
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('maxPlanDaysDesc', 'Maximum number of days the AI can structure in a single meal plan wizard sequence.')}
                   </p>
                 </div>
@@ -15641,7 +15928,7 @@ export default function ChefAISettingsPage() {
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
                     <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('knowledgeBaseHeader', 'Knowledge Base')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('knowledgeBaseDesc', 'Fine-tune the assistant to your needs by adding reference source documents or databases.')}
                   </p>
                 </div>
@@ -15650,8 +15937,8 @@ export default function ChefAISettingsPage() {
                   <div 
                     className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
@@ -15678,9 +15965,9 @@ export default function ChefAISettingsPage() {
                           setNewKbInput('');
                         }
                       }}
-                      className="w-6 h-6 rounded-lg font-bold flex items-center justify-center shrink-0 cursor-pointer transition"
+                      className="w-6 h-6 rounded-lg font-bold flex items-center justify-center shrink-0 cursor-pointer transition hover:opacity-80"
                       style={{
-                        backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                        backgroundColor: isDayMode ? 'var(--color-inner-dark, #e2e8f0)' : 'var(--color-card, #0b0f17)',
                         color: isDayMode ? '#0f172a' : '#ffffff'
                       }}
                     >
@@ -15695,7 +15982,7 @@ export default function ChefAISettingsPage() {
                       key={idx}
                       className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
                       style={{
-                        backgroundColor: isDayMode ? '#fee2e2' : 'color-mix(in srgb, var(--color-primary, #E05638) 15%, transparent)',
+                        backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)',
                         borderColor: 'var(--color-primary, #E05638)',
                         color: isDayMode ? '#991b1b' : '#ffffff'
                       }}
@@ -15714,12 +16001,12 @@ export default function ChefAISettingsPage() {
               </div>
 
               {/* CUSTOM VOCABULARY FEATURE */}
-              <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    <BookA className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
+                    <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('customVocabularyDesc', 'Enhance accuracy with specialized culinary or business terminology.')}
                   </p>
                 </div>
@@ -15728,8 +16015,8 @@ export default function ChefAISettingsPage() {
                   <div 
                     className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
@@ -15755,9 +16042,9 @@ export default function ChefAISettingsPage() {
                           setNewVocabInput('');
                         }
                       }}
-                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition"
+                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80"
                       style={{
-                        backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                        backgroundColor: isDayMode ? 'var(--color-inner-dark, #e2e8f0)' : 'var(--color-card, #0b0f17)',
                         color: isDayMode ? '#334155' : '#cbd5e1'
                       }}
                     >
@@ -15772,7 +16059,7 @@ export default function ChefAISettingsPage() {
                       key={idx}
                       className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
                       style={{
-                        backgroundColor: isDayMode ? '#ecfdf5' : 'color-mix(in srgb, var(--color-emerald, #10b981) 15%, transparent)',
+                        backgroundColor: isDayMode ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.2)' ,
                         borderColor: 'var(--color-emerald, #10b981)',
                         color: isDayMode ? '#065f46' : '#ffffff'
                       }}
@@ -15791,12 +16078,12 @@ export default function ChefAISettingsPage() {
               </div>
 
               {/* FILTER WORDS FEATURE */}
-              <div className="space-y-3 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
                     <Ban className="h-4 w-4 text-red-500" /> {t('filterWordsHeader', 'Filter Words')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('filterWordsDesc', 'Restricted words or ingredients remain unspoken or avoided in AI outputs.')}
                   </p>
                 </div>
@@ -15805,8 +16092,8 @@ export default function ChefAISettingsPage() {
                   <div 
                     className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                   >
@@ -15832,9 +16119,9 @@ export default function ChefAISettingsPage() {
                           setNewFilterInput('');
                         }
                       }}
-                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition"
+                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80"
                       style={{
-                        backgroundColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                        backgroundColor: isDayMode ? 'var(--color-inner-dark, #e2e8f0)' : 'var(--color-card, #0b0f17)',
                         color: isDayMode ? '#334155' : '#cbd5e1'
                       }}
                     >
@@ -15849,7 +16136,7 @@ export default function ChefAISettingsPage() {
                       key={idx}
                       className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
                       style={{
-                        backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
+                        backgroundColor: isDayMode ? 'rgba(239, 68, 68, 0.12)' : 'rgba(127, 29, 29, 0.3)',
                         borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.6)',
                         color: isDayMode ? '#991b1b' : '#ffffff'
                       }}
@@ -15868,7 +16155,7 @@ export default function ChefAISettingsPage() {
               </div>
 
               {/* SYSTEM PROMPT / PERSONA */}
-              <div className="space-y-2 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                   {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
                 </label>
@@ -15878,14 +16165,14 @@ export default function ChefAISettingsPage() {
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
                 />
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('systemPromptDesc', 'Defines how the AI agent behaves, formats responses, and handles user queries on the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('pageSuffix', 'page.')}
                 </p>
               </div>
@@ -26421,6 +26708,11 @@ const getCoverBgStyle = (color?: string) => {
   return { backgroundColor: color };
 };
 
+export const isRecipeInBook = (rec: any, bookId: string): boolean => {
+  if (!rec || !bookId) return false;
+  return rec.bookId === bookId || rec.book_id === bookId;
+};
+
 export default function BooksPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -26458,7 +26750,7 @@ export default function BooksPage() {
   const [noteText, setNoteText] = useState('');
   const [isNoteOpen, setIsNoteOpen] = useState(false);
 
-  // Recipe Editing State (Inside Recipe Popup)
+  // Recipe Editing State
   const [isEditingRecipe, setIsEditingRecipe] = useState(false);
   const [editRecipeTab, setEditRecipeTab] = useState<'info' | 'ingredients' | 'steps'>('info');
   const [editRecipeForm, setEditRecipeForm] = useState<any>({
@@ -26482,11 +26774,11 @@ export default function BooksPage() {
 
   // Add to Plan Modal State
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
-  const [planDate, setPlanDate] = useState('2026-08-28');
+  const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [planMealType, setPlanMealType] = useState('Dinner');
   const [planMealTime, setPlanMealTime] = useState('19:00');
 
-  // Dynamic Theme Synchronization & Color Inversion
+  // Dynamic Theme Synchronization
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -26553,31 +26845,80 @@ export default function BooksPage() {
     };
   }, [applyGlobalTheme]);
 
-  // Load books & recipes strictly isolated to the current user
-  const loadData = useCallback((user: User | null) => {
-    if (!user || typeof window === 'undefined') return;
+  // Load books & recipes directly from PostgreSQL with localStorage caching
+  const loadData = useCallback(async (user: User | null) => {
+    if (!user) return;
+    const activeUserId = user.id || 'usr_admin_1';
 
+    // 1. Fetch live recipes from PostgreSQL
+    let loadedRecipes: any[] = [];
     try {
-      const localBooks = localStorage.getItem('zecratary_recipe_books');
-      const localRecipes = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
-      
-      const allRecipes: any[] = localRecipes ? JSON.parse(localRecipes) : [];
-      const userRecipes = allRecipes.filter((r: any) => r.userId === user.id || r.createdBy === user.email);
-      setRecipes(userRecipes);
+      const rRes = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      if (rRes.ok) {
+        const rData = await rRes.json();
+        if (Array.isArray(rData.recipes)) {
+          loadedRecipes = rData.recipes;
+        }
+      }
+    } catch (_) {}
 
-      let allBooks: any[] = localBooks ? JSON.parse(localBooks) : [];
-      if (!Array.isArray(allBooks)) allBooks = [];
+    // Fallback/merge with local storage if offline
+    if (loadedRecipes.length === 0 && typeof window !== 'undefined') {
+      try {
+        const local = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
+        if (local) {
+          const arr = JSON.parse(local);
+          if (Array.isArray(arr)) loadedRecipes = arr;
+        }
+      } catch (_) {}
+    }
+    setRecipes(loadedRecipes);
 
-      const userBooks = allBooks
-        .filter((b: any) => b.userId === user.id || b.createdBy === user.email)
-        .map((b: any) => ({
-          ...b,
-          recipeCount: userRecipes.filter((r: any) => r.bookId === b.id).length
-        }));
+    // 2. Fetch live books from PostgreSQL
+    let loadedBooks: any[] = [];
+    try {
+      const bRes = await fetch(`/api/books?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      if (bRes.ok) {
+        const bData = await bRes.json();
+        if (Array.isArray(bData.books)) {
+          loadedBooks = bData.books;
+        }
+      }
+    } catch (_) {}
 
-      setBooks(userBooks);
-    } catch (e) {
-      console.error('Failed to load user books', e);
+    // Fallback/merge with local storage if PostgreSQL books not populated
+    if (loadedBooks.length === 0 && typeof window !== 'undefined') {
+      try {
+        const localB = localStorage.getItem('zecratary_recipe_books');
+        if (localB) {
+          const arrB = JSON.parse(localB);
+          if (Array.isArray(arrB) && arrB.length > 0) {
+            loadedBooks = arrB;
+            // Bridge existing local books into PostgreSQL
+            fetch('/api/books', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(arrB)
+            }).catch(() => {});
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Recalculate recipe counts dynamically based on loadedRecipes
+    const syncdBooks = loadedBooks.map((b: any) => ({
+      ...b,
+      recipeCount: loadedRecipes.filter((r: any) => isRecipeInBook(r, b.id)).length
+    }));
+
+    setBooks(syncdBooks);
+
+    // Mirror to local storage
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_recipe_books', JSON.stringify(syncdBooks));
+        localStorage.setItem('zecratary_saved_recipes', JSON.stringify(loadedRecipes));
+      } catch (_) {}
     }
   }, []);
 
@@ -26604,67 +26945,80 @@ export default function BooksPage() {
 
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipe_books_updated', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
     };
   }, [loadData, router, t]);
 
-  const saveBooks = (updatedUserBooks: any[]) => {
+  const saveBooks = async (updatedUserBooks: any[]) => {
     if (!currentUser) return;
+    setBooks(updatedUserBooks);
 
     try {
-      const raw = localStorage.getItem('zecratary_recipe_books');
-      const allBooks: any[] = raw ? JSON.parse(raw) : [];
-
-      const otherUsersBooks = allBooks.filter((b: any) => {
-        return b.userId !== currentUser.id && b.createdBy !== currentUser.email;
+      // 1. Direct PostgreSQL commit
+      await fetch('/api/books', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUserBooks)
       });
 
-      const merged = [...updatedUserBooks, ...otherUsersBooks];
-      setBooks(updatedUserBooks);
-      localStorage.setItem('zecratary_recipe_books', JSON.stringify(merged));
+      // 2. Mirror local cache
+      const raw = localStorage.getItem('zecratary_recipe_books');
+      const allBooks: any[] = raw ? JSON.parse(raw) : [];
+      const others = allBooks.filter((b: any) => b.userId !== currentUser.id && b.createdBy !== currentUser.email);
+      localStorage.setItem('zecratary_recipe_books', JSON.stringify([...updatedUserBooks, ...others]));
+
+      // 3. Emit sync events
+      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (e) {
-      console.error('Failed to save books', e);
+      console.error('Failed to save books to PostgreSQL', e);
     }
   };
 
-  const saveAllRecipes = (updatedUserList: any[]) => {
+  const saveAllRecipes = async (updatedUserList: any[]) => {
     if (!currentUser) return;
+    setRecipes(updatedUserList);
 
     try {
-      const raw = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      const allRecipes: any[] = raw ? JSON.parse(raw) : [];
-
-      const otherUsersRecipes = allRecipes.filter((r: any) => {
-        return r.userId !== currentUser.id && r.createdBy !== currentUser.email;
+      // 1. Direct PostgreSQL commit
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUserList)
       });
 
-      const merged = [...updatedUserList, ...otherUsersRecipes];
-      setRecipes(updatedUserList);
-      localStorage.setItem('zecratary_recipes', JSON.stringify(merged));
-      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(merged));
+      // 2. Mirror local storage
+      localStorage.setItem('zecratary_recipes', JSON.stringify(updatedUserList));
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updatedUserList));
 
+      // 3. Sync book counts
       const updatedBooks = books.map((b: any) => ({
         ...b,
-        recipeCount: updatedUserList.filter((r: any) => r.bookId === b.id).length
+        recipeCount: updatedUserList.filter((r: any) => isRecipeInBook(r, b.id)).length
       }));
-      saveBooks(updatedBooks);
+      await saveBooks(updatedBooks);
 
+      // 4. Dispatch events
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
         window.dispatchEvent(new Event('storage'));
       }
     } catch (e) {
-      console.error('Failed to save recipes', e);
+      console.error('Failed to save recipes to PostgreSQL', e);
     }
   };
 
-  const handleCreateBook = (e: React.FormEvent) => {
+  const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !currentUser) return;
 
@@ -26681,7 +27035,7 @@ export default function BooksPage() {
     };
 
     const updated = [...books, newBook];
-    saveBooks(updated);
+    await saveBooks(updated);
     setNewTitle('');
     setNewDesc('');
     setNewCoverColor(COVER_GRADIENTS[0].value);
@@ -26696,7 +27050,7 @@ export default function BooksPage() {
     setEditCoverColor(book.coverColor || COVER_GRADIENTS[0].value);
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingBook || !editTitle.trim() || !currentUser) return;
 
@@ -26714,7 +27068,7 @@ export default function BooksPage() {
         : b
     );
 
-    saveBooks(updated);
+    await saveBooks(updated);
 
     if (selectedBook?.id === editingBook.id) {
       setSelectedBook({
@@ -26731,12 +27085,25 @@ export default function BooksPage() {
     setEditingBook(null);
   };
 
-  const handleDeleteBook = (e: React.MouseEvent, id: string) => {
+  const handleDeleteBook = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (!confirm(t('confirmDeleteBook') || 'Are you sure you want to delete this recipe book?')) return;
-    const updated = books.filter((b) => b.id !== id);
-    saveBooks(updated);
-    if (selectedBook?.id === id) setSelectedBook(null);
+    
+    try {
+      await fetch(`/api/books?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const updated = books.filter((b) => b.id !== id);
+      setBooks(updated);
+      
+      // Update local recipes state removing book assignment
+      const cleanedRecipes = recipes.map(r => (isRecipeInBook(r, id) ? { ...r, bookId: null, book_id: null } : r));
+      setRecipes(cleanedRecipes);
+
+      if (selectedBook?.id === id) setSelectedBook(null);
+      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+    } catch (err) {
+      console.error('Error deleting book:', err);
+    }
   };
 
   const handleOpenRecipePopup = (rec: any) => {
@@ -26750,23 +27117,27 @@ export default function BooksPage() {
     setIsEditingRecipe(false);
   };
 
-  const updateViewingRecipeState = (key: string, val: any) => {
+  const updateViewingRecipeState = async (key: string, val: any) => {
     if (!viewingRecipe) return;
     const updatedRec = { ...viewingRecipe, [key]: val };
     setViewingRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
-    saveAllRecipes(updatedList);
+    await saveAllRecipes(updatedList);
   };
 
-  const handleAssignToBook = (bookId: string) => {
+  const handleAssignToBook = async (bookId: string) => {
     if (!viewingRecipe) return;
-    const isRemoving = viewingRecipe.bookId === bookId;
+    const isRemoving = isRecipeInBook(viewingRecipe, bookId);
     const targetBookId = isRemoving ? null : bookId;
-    const updatedRecipe = { ...viewingRecipe, bookId: targetBookId };
+    const updatedRecipe = { 
+      ...viewingRecipe, 
+      bookId: targetBookId,
+      book_id: targetBookId 
+    };
     setViewingRecipe(updatedRecipe);
 
     const updatedList = recipes.map(r => r.id === viewingRecipe.id ? updatedRecipe : r);
-    saveAllRecipes(updatedList);
+    await saveAllRecipes(updatedList);
 
     const targetBookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
     const recName = viewingRecipe.title || viewingRecipe.name;
@@ -26783,12 +27154,17 @@ export default function BooksPage() {
     }
   };
 
-  const handleDeleteRecipe = (id: string) => {
+  const handleDeleteRecipe = async (id: string) => {
     if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
-    const updated = recipes.filter(r => r.id !== id);
-    saveAllRecipes(updated);
-    setViewingRecipe(null);
-    setIsEditingRecipe(false);
+    try {
+      await fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const updated = recipes.filter(r => r.id !== id);
+      await saveAllRecipes(updated);
+      setViewingRecipe(null);
+      setIsEditingRecipe(false);
+    } catch (err) {
+      console.error('Error deleting recipe:', err);
+    }
   };
 
   const toggleStepComplete = (idx: number) => {
@@ -26834,7 +27210,7 @@ export default function BooksPage() {
     setIsEditingRecipe(true);
   };
 
-  const handleSaveRecipeEdit = () => {
+  const handleSaveRecipeEdit = async () => {
     if (!editRecipeForm.title.trim() || !currentUser) {
       alert(t('enterRecipeTitleAlert') || 'Please enter a recipe title.');
       setEditRecipeTab('info');
@@ -26852,7 +27228,7 @@ export default function BooksPage() {
 
     setViewingRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
-    saveAllRecipes(updatedList);
+    await saveAllRecipes(updatedList);
     setIsEditingRecipe(false);
   };
 
@@ -26961,7 +27337,6 @@ export default function BooksPage() {
     alert(alertMsg);
   };
 
-  // Filtered Books based on search query
   const filteredBooks = useMemo(() => {
     const q = search.toLowerCase().trim();
     if (!q) return books;
@@ -26971,12 +27346,10 @@ export default function BooksPage() {
     );
   }, [books, search]);
 
-  // Reset pagination on search or gridMode toggle
   useEffect(() => {
     setCurrentPage(1);
   }, [search, gridMode]);
 
-  // Pagination calculations
   const itemsPerPage = GRID_CONFIG[gridMode].perPage;
   const totalPages = Math.max(1, Math.ceil(filteredBooks.length / itemsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -26985,7 +27358,7 @@ export default function BooksPage() {
 
   const baseServings = viewingRecipe?.servings || 4;
   const currentTotalServings = baseServings * servingsMultiplier;
-  const assignedBook = books.find(b => b.id === viewingRecipe?.bookId);
+  const assignedBook = books.find(b => isRecipeInBook(viewingRecipe, b.id));
 
   return (
     <div 
@@ -27008,7 +27381,7 @@ export default function BooksPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* 3x3, 4x4, 5x5 Toggle Controls */}
+          {/* Density Selector */}
           <div 
             className="flex items-center p-1 rounded-xl border shadow-sm"
             style={{
@@ -27108,7 +27481,7 @@ export default function BooksPage() {
       ) : (
         <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-6`}>
           {paginatedBooks.map((book) => {
-            const count = recipes.filter((r: any) => r.bookId === book.id).length || book.recipeCount || 0;
+            const count = recipes.filter((r: any) => isRecipeInBook(r, book.id)).length;
             const cfg = GRID_CONFIG[gridMode];
             return (
               <div
@@ -27354,7 +27727,6 @@ export default function BooksPage() {
                   })}
                 </div>
 
-                {/* Edit Modal Custom Color Picker */}
                 <div 
                   className="mt-3 p-3 rounded-2xl border flex items-center justify-between transition"
                   style={{
@@ -27521,7 +27893,6 @@ export default function BooksPage() {
                   <Palette className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('backgroundColorLabel') || 'Background Color'}
                 </label>
                 
-                {/* 6 Preset Gradients */}
                 <div className="grid grid-cols-3 gap-2.5">
                   {COVER_GRADIENTS.map((g) => {
                     const isSelected = newCoverColor === g.value;
@@ -27541,7 +27912,6 @@ export default function BooksPage() {
                   })}
                 </div>
 
-                {/* Custom Color Selector Section */}
                 <div 
                   className="mt-3 p-3 rounded-2xl border flex items-center justify-between transition"
                   style={{
@@ -27680,7 +28050,7 @@ export default function BooksPage() {
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
                   {(t('recipesInThisBook') || 'Recipes in this Book ({count})')
-                    .replace('{count}', String(recipes.filter((r: any) => r.bookId === selectedBook.id).length))}
+                    .replace('{count}', String(recipes.filter((r: any) => isRecipeInBook(r, selectedBook.id)).length))}
                 </h3>
                 <Link
                   href="/saved"
@@ -27691,7 +28061,7 @@ export default function BooksPage() {
                 </Link>
               </div>
 
-              {recipes.filter((r: any) => r.bookId === selectedBook.id).length === 0 ? (
+              {recipes.filter((r: any) => isRecipeInBook(r, selectedBook.id)).length === 0 ? (
                 <div 
                   className="p-8 rounded-2xl text-center space-y-2 border"
                   style={{
@@ -27706,7 +28076,7 @@ export default function BooksPage() {
               ) : (
                 <div className="space-y-2.5">
                   {recipes
-                    .filter((r: any) => r.bookId === selectedBook.id)
+                    .filter((r: any) => isRecipeInBook(r, selectedBook.id))
                     .map((rec: any) => (
                       <div 
                         key={rec.id} 
@@ -27861,13 +28231,11 @@ export default function BooksPage() {
                             </div>
 
                             <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
-                              {books.filter((b) => !currentUser || b.userId === currentUser.id || b.createdBy === currentUser.email).length === 0 ? (
+                              {books.length === 0 ? (
                                 <div className="text-xs px-2.5 py-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
                               ) : (
-                                books
-                                  .filter((b) => !currentUser || b.userId === currentUser.id || b.createdBy === currentUser.email)
-                                  .map((b) => {
-                                  const isAssigned = viewingRecipe.bookId === b.id;
+                                books.map((b) => {
+                                  const isAssigned = isRecipeInBook(viewingRecipe, b.id);
                                   return (
                                     <button
                                       key={b.id}
@@ -28190,7 +28558,16 @@ export default function BooksPage() {
 
                     <button
                       onClick={() => handleDeleteRecipe(viewingRecipe.id)}
-                      className="bg-red-950/60 border border-red-500/40 text-red-400 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 hover:bg-red-900/50 transition cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                      style={isDayMode ? {
+                        backgroundColor: '#fef2f2',
+                        borderColor: '#fca5a5',
+                        color: '#dc2626'
+                      } : {
+                        backgroundColor: 'rgba(127, 29, 29, 0.4)',
+                        borderColor: 'rgba(239, 68, 68, 0.4)',
+                        color: '#f87171'
+                      }}
                     >
                       <Trash2 className="h-3.5 w-3.5" /> {t('deleteRecipeBtn') || 'Delete Recipe'}
                     </button>
@@ -30821,21 +31198,19 @@ export default function ManualRecipePage() {
 
 ## File: `apps/web/src/app/profile/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
-
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  User as UserIcon, Mail, Lock, CheckCircle2, AlertCircle, Calendar, 
-  LogOut, Check, CreditCard, Zap, Sparkles, RefreshCw, Shield, 
-  Clock, Cpu, Repeat, Link2, Unlink, Key, Palette, Moon, Sun, ArrowRight, Heart
+  User as UserIcon, Mail, Lock, CheckCircle, 
+  AlertCircle, Calendar, LogOut, Check, CreditCard,
+  Zap, Sparkles, CheckCircle2, RefreshCw, Shield,
+  Clock, Cpu, Repeat, Link2, Unlink, Key
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
-import { 
-  applyThemeToDocument, toggleThemeMode, getEffectiveThemeMode, saveThemeColors 
-} from '@/lib/themeConfig';
 
 type SocialProvider = 'google' | 'facebook' | 'apple';
 
@@ -30857,61 +31232,159 @@ interface SubscriptionPlanItem {
   socialScrapeLimit?: number;
   canViewMacros?: boolean;
   allowedAiModels?: string[] | string;
+  stripePriceId?: string;
   badge?: string;
   saveBadge?: string;
   subPrice?: string;
   strikethroughPrice?: string;
   buttonText?: string;
+  buttonTheme?: 'orange' | 'green';
   features?: string[];
   isFree?: boolean;
   tokenLimit?: number;
   tokenReimburseFrequency?: 'once' | 'weekly' | 'monthly';
 }
 
-const PROFILE_PALETTES = [
-  { name: 'Zecratary Coral', primary: '#E05638', hover: '#c94529', accent: '#10b981', background: '#070b13', card: '#0b0f17', border: '#1e293b' },
-  { name: 'Emerald Forest', primary: '#10b981', hover: '#059669', accent: '#3b82f6', background: '#06130d', card: '#0a1d14', border: '#133526' },
-  { name: 'Cyber Blue', primary: '#2563eb', hover: '#1d4ed8', accent: '#10b981', background: '#080d1a', card: '#0c152b', border: '#1e293b' },
-  { name: 'Royal Purple', primary: '#8b5cf6', hover: '#7c3aed', accent: '#ec4899', background: '#0f081c', card: '#180d2e', border: '#2a1650' },
-  { name: 'Amber Gold', primary: '#f59e0b', hover: '#d97706', accent: '#10b981', background: '#120d04', card: '#1c1507', border: '#36270a' },
-  { name: 'Deep Midnight', primary: '#38bdf8', hover: '#0284c7', accent: '#a855f7', background: '#020617', card: '#080e22', border: '#172554' },
-];
+interface PaymentTransaction {
+  id: string;
+  customerName: string;
+  customerEmail: string;
+  planName: string;
+  planSlug?: string;
+  amount: number;
+  currency: string;
+  gateway: 'stripe' | 'paypal' | 'manual';
+  status: 'succeeded' | 'failed' | 'refunded' | 'pending';
+  failureReason?: string;
+  testMode?: boolean;
+  createdAt: string;
+  expiryDate?: string;
+}
+
+interface TokenUsageData {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  requestCount: number;
+  monthlyLimit: number;
+  reimburseFrequency: 'once' | 'weekly' | 'monthly';
+}
+
+const SYSTEM_DEFAULT_FREE_PLAN: SubscriptionPlanItem = {
+  id: 'preset_taster',
+  name: 'Taster',
+  slug: 'taster',
+  description: 'Free tier with standard features',
+  priceCents: 0,
+  priceDollars: 0,
+  priceFormatted: 'Free',
+  interval: 'MONTH',
+  isFree: true,
+  badge: '',
+  saveBadge: '',
+  buttonText: 'Switch to Free',
+  buttonTheme: 'orange',
+  features: [
+    'Create up to 5 AI-powered recipes per month',
+    'Personal recipe library (25 total recipes)',
+    'Smart ingredient repurposing',
+    'Automated shopping list creation',
+    'Direct online grocery shopping links',
+    'Meal planner',
+    'Ingredient photo recognition'
+  ],
+  aiRecipeLimit: 5,
+  recipeLibraryLimit: 25,
+  socialScrapeLimit: 5,
+  canViewMacros: false,
+  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
+  tokenLimit: 50000,
+  tokenReimburseFrequency: 'monthly'
+};
 
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
-  if (!planInput) return 'taster';
-  let raw = Array.isArray(planInput) ? (planInput[0] || '') : String(planInput);
-  if (raw.includes(',')) raw = raw.split(',')[0] || '';
-  return raw.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '') || 'taster';
+  if (!planInput) return '';
+  let raw = '';
+  if (Array.isArray(planInput)) {
+    raw = planInput[0] ? String(planInput[0]).trim() : '';
+  } else if (typeof planInput === 'string') {
+    if (planInput.includes(',')) {
+      const parts = planInput.split(',').map(s => s.trim()).filter(Boolean);
+      raw = parts[0] || '';
+    } else {
+      raw = planInput.trim();
+    }
+  } else {
+    raw = String(planInput).trim();
+  }
+  return raw.toLowerCase().replace(/[^a-z0-9-]/g, '');
+};
+
+const normalizeTransaction = (t: any): PaymentTransaction => {
+  return {
+    id: String(t.id || t._id || ('tx_' + Date.now().toString(36))),
+    customerName: String(t.customerName || t.customer_name || 'Customer'),
+    customerEmail: String(t.customerEmail || t.customer_email || '').toLowerCase().trim(),
+    planName: String(t.planName || t.plan_name || 'Subscription Plan'),
+    planSlug: sanitizeSinglePlan(t.planSlug || t.plan_slug || ''),
+    amount: Number(t.amount || 0),
+    currency: String(t.currency || 'USD'),
+    gateway: (t.gateway || 'stripe') as any,
+    status: (t.status || 'succeeded').toLowerCase() as any,
+    failureReason: t.failureReason || t.failure_reason,
+    testMode: Boolean(t.testMode || t.test_mode),
+    createdAt: t.createdAt || t.created_at || new Date().toISOString(),
+    expiryDate: t.expiryDate || t.expiry_date || undefined,
+  };
+};
+
+const isSucceeded = (status?: string): boolean => {
+  if (!status) return false;
+  const s = status.toLowerCase();
+  return s === 'succeeded' || s === 'paid' || s === 'active' || s === 'complete' || s === 'completed';
+};
+
+const calculateRenewalExpiry = (startDate: Date = new Date(), interval?: 'MONTH' | 'YEAR'): string => {
+  if (!interval) return '';
+  const d = new Date(startDate);
+  if (interval === 'MONTH') {
+    d.setMonth(d.getMonth() + 1);
+  } else if (interval === 'YEAR') {
+    d.setFullYear(d.getFullYear() + 1);
+  }
+  return d.toISOString();
 };
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { t: translate } = useTranslation() || {};
-  const t = useCallback((key: string, fallback: string) => {
-    if (typeof translate === 'function') {
-      const val = translate(key);
-      if (val && val !== key) return val;
-    }
-    return fallback;
-  }, [translate]);
-
+  const { t } = useTranslation();
   const [user, setUserState] = useState<ExtendedUser | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
-  const [activePalette, setActivePalette] = useState<string>('');
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [notification, setNotification] = useState<{ text: string; success: boolean } | null>(null);
+  const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   const [processingSocial, setProcessingSocial] = useState<SocialProvider | null>(null);
-  const [plans, setPlans] = useState<SubscriptionPlanItem[]>([]);
+
+  const [plans, setPlans] = useState<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
+  const plansRef = useRef<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
+  plansRef.current = plans;
+
+  const isFetchingPlansRef = useRef(false);
+  const isReloadingUserRef = useRef(false);
+  const isFetchingThemeRef = useRef(false);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const [selectedInterval, setSelectedInterval] = useState<'ALL' | 'MONTH' | 'YEAR'>('ALL');
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
-  const [savedCount, setSavedCount] = useState<number>(0);
+  const [currencyCode, setCurrencyCode] = useState('USD');
+  const [currencySymbol, setCurrencySymbol] = useState('$');
 
-  const [tokenUsage, setTokenUsage] = useState({
+  const [tokenUsage, setTokenUsage] = useState<TokenUsageData>({
     promptTokens: 1420,
     completionTokens: 850,
     totalTokens: 2270,
@@ -30919,241 +31392,818 @@ export default function ProfilePage() {
     monthlyLimit: 50000,
     reimburseFrequency: 'monthly'
   });
+  const [activeModelName, setActiveModelName] = useState('gemini-1.5-flash');
 
-  const isFetchingRef = useRef(false);
-
-  const syncTheme = useCallback(() => {
-    const mode = getEffectiveThemeMode();
-    setIsDayMode(mode === 'light');
+  // Load server-backed theme & currency settings
+  const applySavedTheme = useCallback(async () => {
+    if (isFetchingThemeRef.current) return;
+    isFetchingThemeRef.current = true;
     try {
-      const stored = localStorage.getItem('zecratary_theme_colors');
-      if (stored) {
-        const c = JSON.parse(stored);
-        applyThemeToDocument(c);
-        const match = PROFILE_PALETTES.find(p => p.primary.toLowerCase() === (c.primary || c.primaryColor || '').toLowerCase());
-        if (match) setActivePalette(match.name);
-      } else {
-        applyThemeToDocument(null);
+      const res = await fetch('/api/system-settings', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.settings) {
+          const s = data.settings;
+          setIsDayMode(s.themeMode === 'light' || s.themeMode === 'day');
+
+          if (s.themeColors) {
+            const root = document.documentElement;
+            if (s.themeColors.primary || s.themeColors.primaryColor) {
+              root.style.setProperty('--color-primary', s.themeColors.primary || s.themeColors.primaryColor);
+            }
+            if (s.themeColors.primaryHover) {
+              root.style.setProperty('--color-primary-hover', s.themeColors.primaryHover);
+            }
+            if (s.themeColors.accentEmerald || s.themeColors.accentColor) {
+              root.style.setProperty('--color-emerald', s.themeColors.accentEmerald || s.themeColors.accentColor);
+              root.style.setProperty('--color-accent', s.themeColors.accentEmerald || s.themeColors.accentColor);
+            }
+          }
+
+          if (s.currency) {
+            setCurrencyCode(s.currency);
+            const symbols: Record<string, string> = {
+              USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
+              JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
+            };
+            setCurrencySymbol(symbols[s.currency] || '$');
+          }
+        }
       }
     } catch (_) {}
+    finally {
+      isFetchingThemeRef.current = false;
+    }
   }, []);
 
   useEffect(() => {
-    syncTheme();
-    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
-    window.addEventListener('zecratary_theme_changed', syncTheme);
-    window.addEventListener('zecratary_theme_updated', syncTheme);
-    window.addEventListener('storage', syncTheme);
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
-      window.removeEventListener('zecratary_theme_changed', syncTheme);
-      window.removeEventListener('zecratary_theme_updated', syncTheme);
-      window.removeEventListener('storage', syncTheme);
-    };
-  }, [syncTheme]);
+    applySavedTheme();
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
 
-  const loadProfileData = useCallback(async () => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+    };
+  }, [applySavedTheme]);
+
+  // Robust Current Plan Identification: Handles free & paid tiers bidirectionally
+  const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem): boolean => {
+    if (!user) return false;
+
+    const rawUser = user as any;
+    const userPlanRaw = rawUser.subscriptionPlan || rawUser.planSlug || rawUser.planId || rawUser.subscriptionTier || '';
+    const cleanUserPlan = sanitizeSinglePlan(userPlanRaw);
+    const planSlug = sanitizeSinglePlan(plan.slug);
+    const planId = sanitizeSinglePlan(plan.id);
+
+    const isPlanFree = Boolean(
+      plan.isFree || 
+      plan.priceCents === 0 || 
+      (plan.priceDollars !== undefined && plan.priceDollars === 0) ||
+      planSlug === 'taster' ||
+      planSlug === 'free' ||
+      planId === 'preset-taster' ||
+      planSlug.includes('taster') ||
+      planSlug.includes('free')
+    );
+
+    const isUserFree = Boolean(
+      !cleanUserPlan || 
+      cleanUserPlan === 'taster' || 
+      cleanUserPlan === 'free' || 
+      cleanUserPlan.includes('taster') || 
+      cleanUserPlan.includes('free')
+    );
+
+    // If target plan is free tier, matches if and only if user is currently on free tier
+    if (isPlanFree) {
+      return isUserFree;
+    }
+
+    // If user is currently on free tier, no paid tier matches
+    if (isUserFree) {
+      return false;
+    }
+
+    // Exact match by slug or id
+    if (cleanUserPlan === planSlug || cleanUserPlan === planId) {
+      return true;
+    }
+
+    if (rawUser.planId && (rawUser.planId === plan.id || rawUser.planId === plan.slug)) {
+      return true;
+    }
+
+    // Distinct interval matching for paid plans
+    const userInterval = (
+      rawUser.planInterval || 
+      (cleanUserPlan.endsWith('annual') || cleanUserPlan.endsWith('year') ? 'YEAR' : '') ||
+      (cleanUserPlan.endsWith('monthly') || cleanUserPlan.endsWith('month') ? 'MONTH' : '')
+    ).toUpperCase();
+
+    const planInterval = (
+      plan.interval || 
+      (planSlug.endsWith('annual') || planSlug.endsWith('year') ? 'YEAR' : 'MONTH')
+    ).toUpperCase();
+
+    const cleanUserBase = cleanUserPlan.replace(/-(monthly|annual|free)$/i, '');
+    const cleanPlanBase = planSlug.replace(/-(monthly|annual|free)$/i, '');
+
+    if (cleanUserBase && cleanPlanBase && cleanUserBase === cleanPlanBase) {
+      if (userInterval && planInterval) {
+        return userInterval === planInterval;
+      }
+      return planInterval === 'MONTH';
+    }
+
+    return false;
+  }, [user]);
+
+  const syncActivePlanTokens = useCallback((activeUserPlanSlug: string, currentPlans: SubscriptionPlanItem[]) => {
+    const cleanSlug = sanitizeSinglePlan(activeUserPlanSlug).toLowerCase();
+    const matchedPlan = currentPlans.find(p => 
+      p.slug.toLowerCase() === cleanSlug || 
+      p.id.toLowerCase() === cleanSlug ||
+      p.slug.toLowerCase().replace(/-(monthly|annual|free)$/i, '') === cleanSlug.replace(/-(monthly|annual|free)$/i, '')
+    );
+
+    let assignedLimit = 50000;
+    let assignedFrequency: 'once' | 'weekly' | 'monthly' = 'monthly';
+
+    if (matchedPlan) {
+      if (matchedPlan.tokenLimit !== undefined) {
+        assignedLimit = matchedPlan.tokenLimit;
+      }
+      if (matchedPlan.tokenReimburseFrequency) {
+        assignedFrequency = matchedPlan.tokenReimburseFrequency;
+      }
+    }
+
+    setTokenUsage(prev => {
+      if (prev.monthlyLimit === assignedLimit && prev.reimburseFrequency === assignedFrequency) {
+        return prev;
+      }
+      return {
+        ...prev,
+        monthlyLimit: assignedLimit,
+        reimburseFrequency: assignedFrequency
+      };
+    });
+  }, []);
+
+  // Synchronize available subscription plans dynamically from PostgreSQL /api/admin/plans
+  const syncPlansFromAdmin = useCallback(async () => {
+    if (isFetchingPlansRef.current) return;
+    isFetchingPlansRef.current = true;
+
+    let serverConfigs: any[] = [];
+    try {
+      const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data.configs || data.plans || data.packages || data.subscriptionPlans);
+        if (Array.isArray(list) && list.length > 0) {
+          serverConfigs = list;
+        }
+      }
+    } catch (_) {}
+    finally {
+      isFetchingPlansRef.current = false;
+    }
+
+    if (serverConfigs.length === 0) {
+      try {
+        const setRes = await fetch('/api/system-settings', { cache: 'no-store' });
+        if (setRes.ok) {
+          const setData = await setRes.json();
+          if (setData.success && Array.isArray(setData.settings?.subscriptionPlans)) {
+            serverConfigs = setData.settings.subscriptionPlans;
+          }
+        }
+      } catch (_) {}
+    }
+
+    const plansMap = new Map<string, SubscriptionPlanItem>();
+    const configs: any[] = [...serverConfigs];
+
+    // Guarantee system default free tier
+    const hasFree = configs.some((cfg: any) => 
+      cfg && (
+        cfg.isFree === true || 
+        cfg.slug === 'taster' || 
+        cfg.id === 'preset_taster' || 
+        (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0 && Number(cfg.price || 0) === 0)
+      )
+    );
+
+    if (!hasFree) {
+      configs.unshift({
+        id: SYSTEM_DEFAULT_FREE_PLAN.id,
+        name: SYSTEM_DEFAULT_FREE_PLAN.name,
+        slug: SYSTEM_DEFAULT_FREE_PLAN.slug,
+        isFree: true,
+        isDefault: true,
+        monthlyPriceDollars: 0,
+        annualPriceDollars: 0,
+        monthlyBadge: '',
+        annualBadge: '',
+        trialBadge: '',
+        descriptionMonthly: SYSTEM_DEFAULT_FREE_PLAN.description,
+        descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
+        buttonText: t('switchToFreeBtn') || 'Switch to Free',
+        features: SYSTEM_DEFAULT_FREE_PLAN.features,
+        tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
+        tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
+        aiRecipeLimit: SYSTEM_DEFAULT_FREE_PLAN.aiRecipeLimit,
+        recipeLibraryLimit: SYSTEM_DEFAULT_FREE_PLAN.recipeLibraryLimit,
+        socialScrapeLimit: SYSTEM_DEFAULT_FREE_PLAN.socialScrapeLimit,
+        canViewMacros: SYSTEM_DEFAULT_FREE_PLAN.canViewMacros,
+        allowedAiModels: SYSTEM_DEFAULT_FREE_PLAN.allowedAiModels
+      });
+    }
+
+    configs.forEach((cfg: any) => {
+      if (!cfg || !cfg.name) return;
+
+      let planFeatures: string[] = [];
+      if (Array.isArray(cfg.features) && cfg.features.length > 0) {
+        planFeatures = cfg.features.map((f: any) => String(f).trim()).filter(Boolean);
+      } else if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim()) {
+        planFeatures = cfg.featuresText.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
+      } else if (typeof cfg.descriptionMonthly === 'string' && cfg.descriptionMonthly.trim()) {
+        planFeatures = [cfg.descriptionMonthly.trim()];
+      }
+
+      const isFree = Boolean(
+        cfg.isFree || 
+        ((Number(cfg.monthlyPriceDollars) === 0 || cfg.monthlyPriceDollars === undefined) && 
+         (Number(cfg.annualPriceDollars) === 0 || cfg.annualPriceDollars === undefined) &&
+         (Number(cfg.price) === 0 || cfg.price === undefined))
+      );
+
+      const rawSlug = (cfg.slug || cfg.id || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
+      const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
+      const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
+      const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
+
+      if (isFree) {
+        const freeSlug = cleanBaseSlug || 'free';
+        plansMap.set(freeSlug, {
+          id: cfg.id || freeSlug,
+          name: cfg.name,
+          slug: freeSlug,
+          description: cfg.descriptionMonthly || cfg.descriptionAnnual || cfg.description || 'Free tier with standard features',
+          priceCents: 0,
+          priceDollars: 0,
+          priceFormatted: 'Free',
+          interval: 'MONTH',
+          isFree: true,
+          badge: cfg.badge || cfg.monthlyBadge || '',
+          saveBadge: '',
+          buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
+          buttonTheme: 'orange',
+          features: planFeatures,
+          aiRecipeLimit: cfg.aiRecipeLimit,
+          recipeLibraryLimit: cfg.recipeLibraryLimit,
+          socialScrapeLimit: cfg.socialScrapeLimit,
+          canViewMacros: Boolean(cfg.canViewMacros),
+          allowedAiModels: cfg.allowedAiModels,
+          tokenLimit,
+          tokenReimburseFrequency,
+        });
+      } else {
+        const hasMonthly = (cfg.monthlyPriceDollars !== undefined && Number(cfg.monthlyPriceDollars) > 0) || 
+                           (cfg.price !== undefined && Number(cfg.price) > 0 && cfg.interval !== 'yearly' && cfg.interval !== 'YEAR');
+        const hasAnnual = (cfg.annualPriceDollars !== undefined && Number(cfg.annualPriceDollars) > 0) || 
+                          (cfg.price !== undefined && Number(cfg.price) > 0 && (cfg.interval === 'yearly' || cfg.interval === 'YEAR'));
+
+        if (hasMonthly || !hasAnnual) {
+          const mPrice = Number(cfg.monthlyPriceDollars || cfg.price || 0);
+          const monthlySlug = `${cleanBaseSlug}-monthly`;
+          plansMap.set(monthlySlug, {
+            id: `${cfg.id || cleanBaseSlug}-monthly`,
+            name: cfg.name,
+            slug: monthlySlug,
+            description: cfg.descriptionMonthly || cfg.description || `Full access to ${cfg.name}, billed monthly`,
+            priceCents: Math.round(mPrice * 100),
+            priceDollars: mPrice,
+            priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
+            interval: 'MONTH',
+            isFree: false,
+            badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
+            saveBadge: '',
+            buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+            buttonTheme: 'green',
+            features: planFeatures,
+            aiRecipeLimit: cfg.aiRecipeLimit,
+            recipeLibraryLimit: cfg.recipeLibraryLimit,
+            socialScrapeLimit: cfg.socialScrapeLimit,
+            canViewMacros: Boolean(cfg.canViewMacros),
+            allowedAiModels: cfg.allowedAiModels,
+            tokenLimit,
+            tokenReimburseFrequency,
+          });
+        }
+
+        if (hasAnnual) {
+          const aPrice = Number(cfg.annualPriceDollars || (cfg.interval === 'yearly' || cfg.interval === 'YEAR' ? cfg.price : 0) || 0);
+          const annualSlug = `${cleanBaseSlug}-annual`;
+          const mEquivalent = (aPrice / 12).toFixed(2);
+          plansMap.set(annualSlug, {
+            id: `${cfg.id || cleanBaseSlug}-annual`,
+            name: cfg.name,
+            slug: annualSlug,
+            description: cfg.descriptionAnnual || cfg.description || `Best value - all ${cfg.name} features, billed annually`,
+            priceCents: Math.round(aPrice * 100),
+            priceDollars: aPrice,
+            priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
+            interval: 'YEAR',
+            isFree: false,
+            badge: cfg.trialBadge || cfg.annualBadge || 'Best Value',
+            saveBadge: cfg.annualBadge || '',
+            subPrice: `${currencySymbol}${mEquivalent}/month`,
+            strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars || cfg.price).toFixed(2)}/month` : undefined,
+            buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+            buttonTheme: 'green',
+            features: planFeatures,
+            aiRecipeLimit: cfg.aiRecipeLimit,
+            recipeLibraryLimit: cfg.recipeLibraryLimit,
+            socialScrapeLimit: cfg.socialScrapeLimit,
+            canViewMacros: Boolean(cfg.canViewMacros),
+            allowedAiModels: cfg.allowedAiModels,
+            tokenLimit,
+            tokenReimburseFrequency,
+          });
+        }
+      }
+    });
+
+    const dynamicPlans = Array.from(plansMap.values());
+    plansRef.current = dynamicPlans;
+    
+    setPlans(prev => {
+      if (JSON.stringify(prev) === JSON.stringify(dynamicPlans)) {
+        return prev;
+      }
+      return dynamicPlans;
+    });
+  }, [currencySymbol, t]);
+
+  // Revalidate active user against PostgreSQL without writing on read
+  const reloadActiveUser = useCallback(async () => {
+    if (isReloadingUserRef.current) return;
+    isReloadingUserRef.current = true;
 
     try {
       initAuthStorage();
       let active = getCurrentUser() as ExtendedUser | null;
+
+      if (!active && typeof document !== 'undefined') {
+        const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
+        if (match && match[1]) {
+          try {
+            const cookieData = JSON.parse(decodeURIComponent(match[1]));
+            if (cookieData && (cookieData.email || cookieData.id)) {
+              active = {
+                id: cookieData.id || 'usr_standard_default',
+                name: cookieData.name || 'Standard User',
+                email: cookieData.email || 'user@foodieprep.com',
+                role: cookieData.role || 'user',
+                subscriptionPlan: 'taster'
+              };
+              setCurrentUser(active);
+            }
+          } catch (_) {}
+        }
+      }
+
       if (!active) {
         router.replace('/login');
         return;
       }
 
-      // Fetch user from PostgreSQL
+      let matchedUser: ExtendedUser = { ...active };
+
+      // 1. Fetch user from PostgreSQL /api/admin/users
       try {
-        const uRes = await fetch('/api/admin/users', { cache: 'no-store' });
-        if (uRes.ok) {
-          const uData = await uRes.json();
-          const list = Array.isArray(uData.users) ? uData.users : [];
-          const matched = list.find((x: any) => x.id === active?.id || x.email?.toLowerCase() === active?.email?.toLowerCase());
-          if (matched) {
-            active = { ...active, ...matched, subscriptionPlan: sanitizeSinglePlan(matched.subscriptionPlan) };
+        const usersRes = await fetch('/api/admin/users', { cache: 'no-store' });
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          const usersList: any[] = Array.isArray(usersData.users) ? usersData.users : Array.isArray(usersData) ? usersData : [];
+          const fresh = usersList.find((u: any) => u.id === active?.id || u.email?.toLowerCase() === active?.email?.toLowerCase());
+          if (fresh) {
+            matchedUser = {
+              ...active,
+              ...fresh,
+              subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || fresh.subscription_plan || fresh.planSlug || fresh.planId || 'taster')
+            };
           }
         }
       } catch (_) {}
 
-      // Fetch payment verification from PostgreSQL
+      if (!matchedUser.linkedProviders) {
+        const initialLinked: SocialProvider[] = [];
+        if (matchedUser.id.startsWith('usr_google_')) initialLinked.push('google');
+        if (matchedUser.id.startsWith('usr_facebook_')) initialLinked.push('facebook');
+        if (matchedUser.id.startsWith('usr_apple_')) initialLinked.push('apple');
+        matchedUser.linkedProviders = initialLinked;
+      }
+
+      // 2. Fetch payment transactions directly from PostgreSQL /api/admin/payment
       try {
-        const pRes = await fetch('/api/admin/payment', { cache: 'no-store' });
-        if (pRes.ok) {
-          const pData = await pRes.json();
-          const txs = Array.isArray(pData.transactions) ? pData.transactions : [];
-          const userEmail = active.email.toLowerCase().trim();
-          const activeTx = txs.find((t: any) => 
-            (t.customerEmail || '').toLowerCase().trim() === userEmail &&
-            t.status === 'succeeded' &&
-            (!t.expiryDate || new Date(t.expiryDate).getTime() > Date.now())
+        const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
+        if (txRes.ok) {
+          const txData = await txRes.json();
+          const txList: PaymentTransaction[] = Array.isArray(txData.transactions) 
+            ? txData.transactions.map(normalizeTransaction) 
+            : [];
+
+          const now = new Date();
+          const userEmail = matchedUser.email.toLowerCase().trim();
+          const userTxs = txList.filter(t => t.customerEmail === userEmail);
+          userTxs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+          const latestActiveTx = userTxs.find(t => 
+            isSucceeded(t.status) && (!t.expiryDate || new Date(t.expiryDate).getTime() > now.getTime())
           );
-          if (activeTx) {
-            active.subscriptionPlan = sanitizeSinglePlan(activeTx.planSlug);
-            (active as any).planExpiryDate = activeTx.expiryDate;
-          } else {
-            active.subscriptionPlan = 'taster';
+
+          const currentPlan = sanitizeSinglePlan(matchedUser.subscriptionPlan || (matchedUser as any).planSlug || '');
+          const isPaid = currentPlan && currentPlan !== 'taster' && currentPlan !== 'free' && !currentPlan.includes('free') && !currentPlan.includes('taster');
+
+          if (latestActiveTx) {
+            matchedUser.subscriptionPlan = sanitizeSinglePlan(latestActiveTx.planSlug || matchedUser.subscriptionPlan);
+            (matchedUser as any).expiryDate = latestActiveTx.expiryDate;
+            (matchedUser as any).planExpiryDate = latestActiveTx.expiryDate;
+
+            const slug = (latestActiveTx.planSlug || '').toLowerCase();
+            if (slug.includes('annual') || slug.includes('year')) {
+              (matchedUser as any).planInterval = 'YEAR';
+            } else if (slug.includes('monthly') || slug.includes('month')) {
+              (matchedUser as any).planInterval = 'MONTH';
+            }
+          } else if (isPaid) {
+            // Revert to free tier if payment has expired or was refunded
+            matchedUser.subscriptionPlan = 'taster';
+            (matchedUser as any).planSlug = 'taster';
+            (matchedUser as any).planInterval = 'MONTH';
+            (matchedUser as any).expiryDate = '';
+            (matchedUser as any).planExpiryDate = '';
           }
         }
       } catch (_) {}
 
-      // Fetch available plans from PostgreSQL
-      try {
-        const plansRes = await fetch('/api/admin/plans', { cache: 'no-store' });
-        if (plansRes.ok) {
-          const pData = await plansRes.json();
-          const list = Array.isArray(pData.plans) ? pData.plans : [];
-          setPlans(list);
-          const current = list.find((p: any) => p.slug === active?.subscriptionPlan);
-          if (current && current.tokenLimit !== undefined) {
-            setTokenUsage(prev => ({
-              ...prev,
-              monthlyLimit: current.tokenLimit,
-              reimburseFrequency: current.tokenReimburseFrequency || 'monthly'
-            }));
-          }
-        }
-      } catch (_) {}
+      setCurrentUser(matchedUser);
 
-      // Fetch saved recipes count from PostgreSQL
-      try {
-        const rRes = await fetch('/api/recipes/saved', { cache: 'no-store' });
-        if (rRes.ok) {
-          const rData = await rRes.json();
-          if (Array.isArray(rData.recipes)) setSavedCount(rData.recipes.length);
+      setUserState(prev => {
+        if (prev && JSON.stringify(prev) === JSON.stringify(matchedUser)) {
+          return prev;
         }
-      } catch (_) {}
+        return matchedUser;
+      });
 
-      setUserState(active);
-      setName(active.name || '');
-      setEmail(active.email || '');
+      setName(prev => (prev === (matchedUser.name || '') ? prev : (matchedUser.name || '')));
+      setEmail(prev => (prev === (matchedUser.email || '') ? prev : (matchedUser.email || '')));
+
+      const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).subscriptionTier || (matchedUser as any).planSlug || '');
+      syncActivePlanTokens(userPlan, plansRef.current);
     } finally {
-      isFetchingRef.current = false;
+      isReloadingUserRef.current = false;
     }
-  }, [router]);
+  }, [router, syncActivePlanTokens]);
+
+  const syncPlansRef = useRef(syncPlansFromAdmin);
+  syncPlansRef.current = syncPlansFromAdmin;
+
+  const reloadUserRef = useRef(reloadActiveUser);
+  reloadUserRef.current = reloadActiveUser;
 
   useEffect(() => {
-    loadProfileData();
-  }, [loadProfileData]);
+    document.title = `${t('accountProfileTitle') || 'Account Profile'} - Zecratary`;
+  }, [t]);
 
-  const handleModeToggle = () => {
-    const nextMode = toggleThemeMode();
-    setIsDayMode(nextMode === 'light');
-    setNotification({
-      text: nextMode === 'light' ? t('profile.dayModeActivated', 'Day Mode activated.') : t('profile.darkModeActivated', 'Dark Mode activated.'),
-      success: true
-    });
-    setTimeout(() => setNotification(null), 3000);
-  };
+  useEffect(() => {
+    syncPlansRef.current();
+    reloadUserRef.current();
 
-  const handleSelectPalette = async (preset: typeof PROFILE_PALETTES[0]) => {
-    setActivePalette(preset.name);
-    const colors = {
-      primary: preset.primary,
-      primaryColor: preset.primary,
-      primaryHover: preset.hover,
-      accentEmerald: preset.accent,
-      accentColor: preset.accent,
-      accent: preset.accent,
-      backgroundColor: preset.background,
-      backgroundDark: preset.background,
-      cardBackground: preset.card,
-      cardBorder: preset.border,
-      textSecondary: isDayMode ? '#64748b' : '#94a3b8'
+    const handleDebouncedSync = () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        syncPlansRef.current();
+        reloadUserRef.current();
+      }, 300);
     };
-    await saveThemeColors(colors);
-    setNotification({ text: `${t('profile.paletteApplied', 'Palette applied')}: ${preset.name}`, success: true });
-    setTimeout(() => setNotification(null), 3000);
+
+    window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_users_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_users_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
+    };
+  }, []);
+
+  const handleToggleSocialLink = async (provider: SocialProvider) => {
+    if (!user) return;
+    setProcessingSocial(provider);
+    setError('');
+    setSuccessMsg('');
+
+    const isLinked = Boolean(user.linkedProviders?.includes(provider));
+    let updatedLinked = [...(user.linkedProviders || [])];
+
+    if (isLinked) {
+      if (updatedLinked.length === 1 && !user.password) {
+        setError(`Cannot unlink ${provider.toUpperCase()}: this is your only login method. Set a password first.`);
+        setProcessingSocial(null);
+        return;
+      }
+      updatedLinked = updatedLinked.filter(p => p !== provider);
+      setSuccessMsg(`Unlinked ${provider.toUpperCase()} account successfully.`);
+    } else {
+      updatedLinked.push(provider);
+      setSuccessMsg(`Successfully connected and linked ${provider.toUpperCase()}!`);
+    }
+
+    const updatedUser: ExtendedUser = {
+      ...user,
+      linkedProviders: updatedLinked
+    };
+
+    try {
+      await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUser)
+      });
+    } catch (_) {}
+
+    setCurrentUser(updatedUser);
+    setUserState(updatedUser);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_users_updated'));
+    }
+
+    setProcessingSocial(null);
+    setTimeout(() => setSuccessMsg(''), 4000);
   };
+
+  const userPlanBadge = useMemo(() => {
+    const matched = plans.find(p => checkIsCurrentPlan(p));
+    if (matched) {
+      const isAnnual = matched.interval === 'YEAR';
+      return {
+        label: `${matched.name}${matched.isFree ? ' (Free)' : isAnnual ? ' (Annual)' : ' (Monthly)'}`,
+        bg: matched.isFree 
+          ? 'rgba(16, 185, 129, 0.15)' 
+          : isAnnual 
+          ? 'rgba(59, 130, 246, 0.15)' 
+          : 'rgba(224, 86, 56, 0.15)',
+        border: matched.isFree 
+          ? 'var(--color-emerald, #10b981)' 
+          : isAnnual 
+          ? '#3b82f6' 
+          : 'var(--color-primary, #E05638)',
+        color: matched.isFree 
+          ? 'var(--color-emerald, #10b981)' 
+          : isAnnual 
+          ? '#60a5fa' 
+          : 'var(--color-primary, #E05638)',
+        icon: matched.isFree ? Sparkles : Zap,
+        matchedPlan: matched
+      };
+    }
+
+    const rawKey = ((user as any)?.subscriptionPlan || (user as any)?.subscriptionTier || (user as any)?.planSlug || (user as any)?.planId || '').toLowerCase().trim();
+    const planKey = sanitizeSinglePlan(rawKey);
+
+    if (!planKey || planKey === 'free' || planKey.includes('free') || planKey === 'taster' || planKey.includes('taster')) {
+      return {
+        label: `${t('taster') || 'Taster'} (Free)`,
+        bg: 'rgba(16, 185, 129, 0.15)',
+        border: 'var(--color-emerald, #10b981)',
+        color: 'var(--color-emerald, #10b981)',
+        icon: Sparkles,
+        matchedPlan: null
+      };
+    }
+
+    const formatted = planKey
+      .split('-')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+
+    return {
+      label: formatted,
+      bg: 'rgba(224, 86, 56, 0.15)',
+      border: 'var(--color-primary, #E05638)',
+      color: 'var(--color-primary, #E05638)',
+      icon: Zap,
+      matchedPlan: null
+    };
+  }, [user, plans, checkIsCurrentPlan, t]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    setSuccessMsg('');
+
     if (!user) return;
-    if (password && password !== confirmPassword) {
-      setNotification({ text: t('profile.passwordMismatch', 'Passwords do not match.'), success: false });
+
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanName || !cleanEmail) {
+      setError(t('nameAndEmailRequired') || 'Full Name and Email Address are required.');
       return;
     }
 
-    try {
-      const updatedUser: ExtendedUser = { ...user, name: name.trim() || user.name };
-      setCurrentUser(updatedUser);
-      setUserState(updatedUser);
+    if (password || confirmPassword) {
+      if (password.length < 4) {
+        setError(t('passwordLengthError') || 'New password must be at least 4 characters long.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError(t('passwordMismatchError') || 'New password and confirmation password do not match.');
+        return;
+      }
+    }
 
-      await fetch('/api/admin/users', {
+    const updatedUser: ExtendedUser = {
+      ...user,
+      name: cleanName,
+      email: cleanEmail,
+      password: password ? password : user.password,
+    };
+
+    try {
+      const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: user.id,
-          name: updatedUser.name,
-          email: user.email,
-          role: user.role,
-          subscriptionPlan: user.subscriptionPlan
-        })
+        body: JSON.stringify(updatedUser)
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.message) {
+          setError(data.message);
+          return;
+        }
+      }
+    } catch (_) {}
 
-      setPassword('');
-      setConfirmPassword('');
-      setNotification({ text: t('profile.savedSuccess', 'Profile changes saved in PostgreSQL.'), success: true });
-      setTimeout(() => setNotification(null), 3500);
-    } catch (_) {
-      setNotification({ text: t('profile.saveError', 'Failed to save profile changes.'), success: false });
+    setCurrentUser(updatedUser);
+    setUserState(updatedUser);
+    setPassword('');
+    setConfirmPassword('');
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_users_updated'));
+    }
+
+    setSuccessMsg(t('profileSavedSuccess') || 'Your profile changes have been saved successfully!');
+    setTimeout(() => setSuccessMsg(''), 4000);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    if (!confirm(t('confirmDeleteAccount') || 'Are you sure you want to permanently delete your account and all associated data? This action cannot be undone.')) {
+      return;
+    }
+    try {
+      const cleanEmail = user.email.toLowerCase().trim();
+      const userId = user.id;
+
+      await fetch('/api/admin/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: userId, email: cleanEmail }),
+      }).catch(() => {});
+
+      logoutUser();
+      router.replace('/login');
+    } catch (err: any) {
+      alert('Failed to delete account: ' + (err?.message || 'Server error'));
     }
   };
 
+  // Seamless plan selection: Supports switching to Free AND switching to any plan thereafter
   const handleSelectPlan = async (plan: SubscriptionPlanItem) => {
     if (!user) return;
-    setPaymentLoading(plan.id || plan.slug);
+    setPaymentLoading(plan.id);
+    setError('');
+    setSuccessMsg('');
 
     try {
-      const isFree = Boolean(plan.isFree || plan.priceDollars === 0 || plan.priceCents === 0);
-      const targetSlug = sanitizeSinglePlan(plan.slug);
+      const isFree = Boolean(
+        plan.priceCents === 0 || 
+        (plan.priceDollars !== undefined && plan.priceDollars === 0) || 
+        plan.isFree ||
+        plan.slug === 'taster' ||
+        plan.slug === 'free'
+      );
       const userEmail = user.email.toLowerCase().trim();
 
-      const expiry = isFree ? null : new Date(Date.now() + 30 * 86400000).toISOString();
+      // Rule 1: Prevent duplicate selection if exact plan is already active
+      if (checkIsCurrentPlan(plan)) {
+        setError(t('alreadySubscribedToPlan') || `You are already subscribed to ${plan.name} (${plan.isFree ? 'Free' : plan.interval === 'YEAR' ? 'Annual' : 'Monthly'}).`);
+        setPaymentLoading(null);
+        return;
+      }
 
-      // Record transaction directly in PostgreSQL
-      if (!isFree) {
+      const targetSlug = isFree ? 'taster' : sanitizeSinglePlan(plan.slug);
+      const newExpiryDate = isFree ? '' : calculateRenewalExpiry(new Date(), plan.interval);
+
+      // Rule 2 & 3: Atomically cancel/refund prior active transactions in PostgreSQL
+      try {
         await fetch('/api/admin/payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            customerName: user.name,
-            customerEmail: userEmail,
-            planName: plan.name,
-            planSlug: targetSlug,
-            amount: plan.priceDollars || (plan.priceCents ? plan.priceCents / 100 : 0),
-            currency: 'USD',
-            gateway: 'stripe',
-            status: 'succeeded',
-            testMode: true,
-            expiryDate: expiry
+          body: JSON.stringify({ 
+            action: 'cancel_user_transactions', 
+            email: userEmail 
           })
         });
+      } catch (_) {}
+
+      // Rule 4: Record fresh payment transaction in PostgreSQL if paid tier
+      if (!isFree) {
+        const newTx: PaymentTransaction = {
+          id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
+          customerName: user.name,
+          customerEmail: userEmail,
+          planName: `${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})`,
+          planSlug: targetSlug,
+          amount: plan.priceCents ? plan.priceCents / 100 : (plan.priceDollars || 0),
+          currency: currencyCode || 'USD',
+          gateway: 'stripe',
+          status: 'succeeded',
+          testMode: true,
+          createdAt: new Date().toISOString(),
+          expiryDate: newExpiryDate
+        };
+
+        await fetch('/api/admin/payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'add_transaction', transaction: newTx })
+        }).catch(() => {});
       }
 
-      // Update user plan in PostgreSQL
+      // Update user plan details in PostgreSQL via /api/admin/users
+      const updatedUserPayload: ExtendedUser = {
+        ...user,
+        subscriptionPlan: targetSlug,
+        subscriptionTier: targetSlug,
+        planSlug: targetSlug,
+        planId: plan.id,
+        planName: `${plan.name}${isFree ? ' (Free)' : plan.interval === 'YEAR' ? ' (Annual)' : ' (Monthly)'}`,
+        planInterval: isFree ? 'MONTH' : plan.interval,
+        subscriptionStatus: 'active',
+        lastPaymentDate: isFree ? '' : new Date().toISOString(),
+        planExpiryDate: newExpiryDate,
+        expiryDate: newExpiryDate,
+        updatedAt: new Date().toISOString()
+      } as any;
+
       await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: user.id,
-          name: user.name,
-          email: userEmail,
-          role: user.role,
-          subscriptionPlan: targetSlug,
-          planExpiryDate: expiry
-        })
-      });
+        body: JSON.stringify(updatedUserPayload)
+      }).catch(() => {});
 
-      const updatedUser = { ...user, subscriptionPlan: targetSlug, planExpiryDate: expiry };
-      setCurrentUser(updatedUser);
-      setUserState(updatedUser);
+      setCurrentUser(updatedUserPayload);
+      setUserState(updatedUserPayload);
+      syncActivePlanTokens(targetSlug, plansRef.current);
 
-      setNotification({ text: `${t('profile.planChanged', 'Plan updated to')}: ${plan.name}`, success: true });
-      setTimeout(() => setNotification(null), 4000);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+
+      const currentBase = sanitizeSinglePlan((user as any).subscriptionPlan || '').replace(/-(monthly|annual|free)$/i, '');
+      const isSwitchingPaid = currentBase && currentBase !== 'taster' && currentBase !== 'free';
+
+      setSuccessMsg(
+        isFree 
+          ? (t('switchedToFreeNotice') || `Switched to ${plan.name} (Free)! Previous subscription was cancelled.`)
+          : isSwitchingPaid
+          ? (t('planUpgradedNotice') || `Plan upgraded/downgraded to ${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})! Previous payment cancelled & new transaction recorded.`)
+          : (t('planSubscribedNotice') || `Subscribed successfully to ${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})!`)
+      );
+      setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err: any) {
-      setNotification({ text: err.message || 'Plan update failed.', success: false });
+      setError(err.message || 'Payment processing failed. Please try again.');
     } finally {
       setPaymentLoading(null);
     }
@@ -31162,196 +32212,920 @@ export default function ProfilePage() {
   if (!user) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }} />
+        <div 
+          className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+          style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }}
+        />
       </div>
     );
   }
 
-  const isCurrentPlan = (p: SubscriptionPlanItem) => sanitizeSinglePlan(p.slug) === sanitizeSinglePlan(user.subscriptionPlan);
+  const PlanHeaderIcon = userPlanBadge.icon;
+  const filteredPlans = plans.filter(p => {
+    if (selectedInterval === 'ALL') return true;
+    return p.isFree || p.priceCents === 0 || p.interval === selectedInterval;
+  });
+  const activeExpiryDate = (user as any).planExpiryDate || (user as any).expiryDate;
+
+  const isUnlimited = tokenUsage.monthlyLimit === -1;
+  const tokenPercentage = isUnlimited ? 5 : Math.min(Math.round((tokenUsage.totalTokens / tokenUsage.monthlyLimit) * 100), 100);
+
+  const getReimburseScheduleText = (freq: string) => {
+    switch(freq) {
+      case 'once': return 'Reimbursed: Once (Non-recurring)';
+      case 'weekly': return 'Reimbursed: Every Week from purchase date';
+      case 'monthly': return 'Reimbursed: Every Month from purchase date';
+      default: return 'Reimbursed: Monthly';
+    }
+  };
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-8 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200 min-h-screen"
+      style={{ 
+        color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)',
+        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)'
+      }}
     >
-      {notification && (
-        <div className={`p-3.5 border rounded-2xl text-xs font-bold flex items-center gap-2 shadow-lg animate-in fade-in ${
-          notification.success 
-            ? isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-            : isDayMode ? 'bg-red-50 border-red-300 text-red-800' : 'bg-red-950/40 border-red-800/80 text-red-300'
-        }`}>
-          {notification.success ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-          <span>{notification.text}</span>
+      <style dangerouslySetInnerHTML={{ __html: `
+        .profile-input:-webkit-autofill,
+        .profile-input:-webkit-autofill:hover,
+        .profile-input:-webkit-autofill:focus,
+        .profile-input:-webkit-autofill:active {
+          -webkit-box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'} inset !important;
+          box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'} inset !important;
+          -webkit-text-fill-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
+          caret-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
+          transition: background-color 50000s ease-in-out 0s !important;
+        }
+      `}} />
+
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
+             {t('accountProfileTitle') || 'Account Profile'}
+          </h1>
+          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+            {t('accountProfileSubtitle') || 'Manage your credentials, active AI token quotas, and subscription plan'}
+          </p>
+        </div>
+
+        {user.role === 'admin' && (
+          <div className="flex items-center gap-2">
+            <Link
+              href="/admin/social-login-setting"
+              className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              <Key className="h-3.5 w-3.5 text-orange-400" /> Social Settings
+            </Link>
+            <Link
+              href="/admin"
+              className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              <Shield className="h-3.5 w-3.5 text-emerald-400" /> {t('adminAccess') || 'Admin Access'}
+            </Link>
+            <Link
+              href="/admin/plans"
+              className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              <Zap className="h-3.5 w-3.5 text-orange-400" /> {t('subscriptionPlans') || 'Subscription Plans'}
+            </Link>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-2xl text-xs text-red-300 font-semibold flex items-center gap-2 shadow-lg">
+          <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
 
-      {/* ACCOUNT HERO */}
-      <div 
-        className="border rounded-3xl p-6 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 transition-colors duration-200"
-        style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-        }}
-      >
-        <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl text-white shadow-lg shrink-0" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
-            {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+      {successMsg && (
+        <div 
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
+          style={{
+            backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+            borderColor: 'var(--color-emerald, #10b981)',
+            color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+          }}
+        >
+          <CheckCircle className="h-4 w-4 shrink-0" />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
+      {/* USER DETAILS & TOKEN USAGE GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* MAIN PROFILE CARD */}
+        <div 
+          className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <div className="flex items-center gap-4">
+              <div 
+                className="w-14 h-14 rounded-2xl border flex items-center justify-center text-xl font-black shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: 'var(--color-primary, #E05638)'
+                }}
+              >
+                {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{user.name}</h1>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
+                    user.role === 'admin'
+                      ? (isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-emerald-950/60 border-emerald-500/60 text-emerald-400')
+                      : (isDayMode ? 'bg-slate-100 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-300')
+                  }`}>
+                    {user.role}
+                  </span>
+                </div>
+                <p className="text-xs font-mono" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{user.email}</p>
+                {user.id && (
+                  <p className="text-[11px] font-mono tracking-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    ID: {user.id}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="text-left sm:text-right text-[11px] space-y-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <div className="flex sm:justify-end items-center gap-1.5">
+                <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                <span>{t('joinedPrefix') || 'Joined: '} {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : (t('activeStatus') || 'Active')}</span>
+              </div>
+              
+              <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
+                <span className="font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('activeMembershipLabel') || 'Membership:'}</span>
+                <span 
+                  className="font-bold px-2.5 py-0.5 rounded-full text-[10px] uppercase border shadow-sm inline-flex items-center gap-1"
+                  style={{
+                    backgroundColor: userPlanBadge.bg,
+                    borderColor: userPlanBadge.border,
+                    color: userPlanBadge.color
+                  }}
+                >
+                  <PlanHeaderIcon className="h-3 w-3 shrink-0" />
+                  {userPlanBadge.label}
+                </span>
+              </div>
+
+              {activeExpiryDate ? (
+                <div className="flex sm:justify-end items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold pt-0.5">
+                  <Clock className="h-3 w-3" />
+                  <span>{t('renewalExpiryPrefix') || 'Expiry: '} {new Date(activeExpiryDate).toLocaleDateString()}</span>
+                </div>
+              ) : (
+                <div className="flex sm:justify-end items-center gap-1 text-[11px] italic pt-0.5" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                  <span>{t('freeTierNoExpiry') || 'Free Tier'}</span>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{user.name}</h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border" style={{ backgroundColor: isDayMode ? '#eff6ff' : '#1e293b', borderColor: isDayMode ? '#bfdbfe' : '#334155', color: isDayMode ? '#1d4ed8' : '#60a5fa' }}>
-                {user.role}
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border" style={{ backgroundColor: isDayMode ? '#ecfdf5' : '#064e3b', borderColor: isDayMode ? '#a7f3d0' : '#059669', color: isDayMode ? '#047857' : '#34d399' }}>
-                {user.subscriptionPlan || 'Taster'}
+
+          <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('fullNameLabel') || 'Full Name *'}</label>
+                <div className="relative">
+                  <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Jordan Smith"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('emailAddressLabel') || 'Email Address *'}</label>
+                <div className="relative">
+                  <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('newPasswordLabel') || 'New Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('leaveBlankCurrentPass') || '(leave blank)'}</span>
+                </label>
+                <div className="relative">
+                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('confirmPasswordLabel') || 'Confirm Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('repeatNewPass') || '(repeat)'}</span>
+                </label>
+                <div className="relative">
+                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  logoutUser();
+                  router.replace('/login');
+                }}
+                className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.2)',
+                  borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.5)',
+                  color: isDayMode ? '#b91c1c' : '#fca5a5'
+                }}
+              >
+                <LogOut className="h-4 w-4 text-red-500" /> {t('signOutBtn') || 'Sign Out'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDeleteAccount}
+                className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs text-red-400 hover:text-red-300 border-red-900/60 hover:bg-red-950/30"
+              >
+                Delete Account
+              </button>
+
+              <button
+                type="submit"
+                className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+              >
+                <Check className="h-4 w-4" /> {t('saveProfileBtn') || 'Save Profile'}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* AI TOKEN USAGE & CONSUMPTION CARD */}
+        <div 
+          className="lg:col-span-5 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
+          style={{
+            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                <Cpu className="h-5 w-5 text-orange-400" /> AI Token Usage & Quota
+              </h2>
+              <span 
+                className="text-[10px] font-mono px-2.5 py-1 rounded-lg border font-bold shadow-xs"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : '#0B101D',
+                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                  color: '#f97316'
+                }}
+              >
+                {activeModelName}
               </span>
             </div>
-            <p className="text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-              <Mail className="h-3.5 w-3.5" /> {user.email}
+
+            <div className="space-y-3">
+              <div className="flex justify-between items-baseline">
+                <span className="text-xs font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Token Allocation Limit</span>
+                <span className="text-sm font-black font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {tokenUsage.totalTokens.toLocaleString()}{' '}
+                  <span className="text-[11px]" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                    / {isUnlimited ? '∞ Unlimited' : tokenUsage.monthlyLimit.toLocaleString()}
+                  </span>
+                </span>
+              </div>
+
+              <div 
+                className="border rounded-full h-3.5 overflow-hidden p-0.5 shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
+                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b'
+                }}
+              >
+                <div 
+                  className="h-full rounded-full transition-all duration-500" 
+                  style={{ 
+                    width: isUnlimited ? '100%' : `${tokenPercentage}%`,
+                    backgroundColor: isUnlimited ? '#10b981' : tokenPercentage > 85 ? '#ef4444' : tokenPercentage > 60 ? '#f59e0b' : 'var(--color-primary, #E05638)'
+                  }}
+                />
+              </div>
+
+              <div className="flex justify-between text-[11px]">
+                <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{isUnlimited ? 'Unlimited Tokens Tier' : `${tokenPercentage}% of quota used`}</span>
+                <span className="text-emerald-500 dark:text-emerald-400 font-semibold">{tokenUsage.requestCount} AI Requests</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div 
+                className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                }}
+              >
+                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Prompt Input</span>
+                <span className="text-base font-black font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tokenUsage.promptTokens.toLocaleString()}</span>
+                <span className="text-[10px] block" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>Tokens (User & Context)</span>
+              </div>
+
+              <div 
+                className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                }}
+              >
+                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Completion Output</span>
+                <span className="text-base font-black text-emerald-500 dark:text-emerald-400 font-mono">{tokenUsage.completionTokens.toLocaleString()}</span>
+                <span className="text-[10px] block" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>Tokens (Generated Reply)</span>
+              </div>
+            </div>
+          </div>
+
+          <div 
+            className="p-4 rounded-2xl border text-[11px] space-y-2 shadow-inner"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#64748b' : '#94a3b8'
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <Repeat className="h-3.5 w-3.5 text-orange-400" /> Reimburse Schedule
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold uppercase bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                {tokenUsage.reimburseFrequency || 'monthly'}
+              </span>
+            </div>
+            <p className="leading-relaxed">
+              {getReimburseScheduleText(tokenUsage.reimburseFrequency)}. Quotas are automatically reimbursed based on your initial subscription purchase date.
             </p>
           </div>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          {user.role === 'admin' && (
-            <Link href="/admin" className="px-4 py-2 border rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs" style={{ backgroundColor: isDayMode ? '#f1f5f9' : '#141b2d', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              <Shield className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-              {t('common.adminPanel', 'Admin Panel')}
-            </Link>
-          )}
-          <button type="button" onClick={() => { logoutUser(); router.replace('/login'); }} className="px-3.5 py-2 border rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs text-red-500 hover:bg-red-500/10">
-            <LogOut className="h-3.5 w-3.5" />
-            {t('common.logout', 'Sign Out')}
-          </button>
-        </div>
       </div>
 
-      {/* THEME & APPEARANCE CONTROLS */}
+      {/* CONNECTED SOCIAL ACCOUNTS */}
       <div 
-        className="border rounded-3xl p-6 shadow-xl space-y-6 transition-colors duration-200"
+        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
           borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
         }}
       >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-          <div className="flex items-center gap-2">
-            <Palette className="h-5 w-5 text-[var(--color-primary)]" />
-            <h2 className="text-base font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              {t('profile.appearanceThemeTitle', 'Appearance & Theme Synchronization')}
-            </h2>
-          </div>
-          <button type="button" onClick={handleModeToggle} className="px-4 py-2 border rounded-2xl font-bold text-xs flex items-center gap-2 cursor-pointer shadow-md hover:opacity-90 shrink-0" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#141b2d', borderColor: isDayMode ? '#cbd5e1' : '#334155', color: isDayMode ? '#0f172a' : '#ffffff' }}>
-            {isDayMode ? <><Sun className="h-4 w-4 text-amber-500" /><span>Switch to Dark Mode</span></> : <><Moon className="h-4 w-4 text-blue-400" /><span>Switch to Day Mode</span></>}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
-          {PROFILE_PALETTES.map((preset) => (
-            <button key={preset.name} type="button" onClick={() => handleSelectPalette(preset)} className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1.5 transition text-left cursor-pointer shadow-xs ${activePalette === preset.name ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-85'}`} style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: activePalette === preset.name ? 'var(--color-primary)' : isDayMode ? '#cbd5e1' : '#1e293b' }}>
-              <div className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.primary }} />
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.accent }} />
-                <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.background, borderColor: isDayMode ? '#cbd5e1' : '#334155' }} />
-              </div>
-              <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{preset.name}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* CREDENTIALS FORM */}
-      <div 
-        className="border rounded-3xl p-6 shadow-xl space-y-6 transition-colors duration-200"
-        style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-        }}
-      >
-        <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-          <UserIcon className="h-5 w-5 text-[var(--color-primary)]" />
-          <h2 className="text-base font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Personal Credentials</h2>
-        </div>
-
-        <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Full Name</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full border rounded-xl px-3 py-2 font-bold outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
-            </div>
-            <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Email Address</label>
-              <input type="email" disabled value={email} className="w-full border rounded-xl px-3 py-2 font-mono outline-none opacity-60 cursor-not-allowed" style={{ backgroundColor: isDayMode ? '#e2e8f0' : '#141b2d', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>New Password (optional)</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full border rounded-xl px-3 py-2 font-mono outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
-            </div>
-            <div>
-              <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Confirm Password</label>
-              <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" className="w-full border rounded-xl px-3 py-2 font-mono outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#cbd5e1' : '#1e293b', color: isDayMode ? '#0f172a' : '#ffffff' }} />
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <button type="submit" className="px-5 py-2.5 rounded-xl text-white font-extrabold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
-              Save Credentials
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* SUBSCRIPTION PLAN UPGRADES / DOWNGRADES */}
-      <div 
-        className="border rounded-3xl p-6 shadow-xl space-y-6 transition-colors duration-200"
-        style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
-        }}
-      >
-        <div className="border-b pb-3 flex items-center justify-between" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-          <div className="flex items-center gap-2">
-            <CreditCard className="h-5 w-5 text-[var(--color-primary)]" />
-            <h2 className="text-base font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Subscription Membership Plans</h2>
-          </div>
-          <span className="text-xs font-mono text-emerald-500 font-bold">{tokenUsage.monthlyLimit.toLocaleString()} Tokens / {tokenUsage.reimburseFrequency}</span>
+        <div className="border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+          <h2 className="text-xl font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+            <Link2 className="h-5 w-5 text-[var(--color-primary)]" />
+            Connected Social Accounts
+          </h2>
+          <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+            Link external identities (Google, Facebook, Apple) to enable seamless one-click sign in.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-          {plans.map((p) => {
-            const active = isCurrentPlan(p);
-            return (
-              <div key={p.id || p.slug} className={`border rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-sm ${active ? 'ring-2 ring-emerald-500' : ''}`} style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: active ? '#10b981' : isDayMode ? '#cbd5e1' : '#1e293b' }}>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-start">
-                    <h3 className="font-black text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{p.name}</h3>
-                    {active && <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">Active</span>}
-                  </div>
-                  <div className="text-2xl font-black text-[var(--color-primary)]">
-                    {p.isFree ? 'Free' : `$${Number(p.priceDollars || 0).toFixed(2)}`}
-                    <span className="text-xs font-normal text-slate-500">/{p.interval === 'YEAR' ? 'yr' : 'mo'}</span>
-                  </div>
-                  <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{p.description}</p>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={active || paymentLoading === (p.id || p.slug)}
-                  onClick={() => handleSelectPlan(p)}
-                  className="w-full py-2.5 rounded-xl font-black text-xs text-white transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  style={{ backgroundColor: active ? '#10b981' : 'var(--color-primary, #E05638)' }}
-                >
-                  {paymentLoading === (p.id || p.slug) ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : active ? <Check className="h-3.5 w-3.5" /> : null}
-                  {active ? 'Current Active Plan' : p.isFree ? 'Switch to Free' : `Change to ${p.name}`}
-                </button>
+          {/* Google */}
+          <div 
+            className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+              <div>
+                <span className="block font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Google</span>
+                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('google') ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {user.linkedProviders?.includes('google') ? 'Connected' : 'Not linked'}
+                </span>
               </div>
-            );
-          })}
+            </div>
+            <button
+              type="button"
+              disabled={processingSocial !== null}
+              onClick={() => handleToggleSocialLink('google')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                user.linkedProviders?.includes('google')
+                  ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
+                  : 'text-white shadow-xs'
+              }`}
+              style={{
+                backgroundColor: user.linkedProviders?.includes('google') ? 'transparent' : 'var(--color-primary, #E05638)'
+              }}
+            >
+              {processingSocial === 'google' ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : user.linkedProviders?.includes('google') ? (
+                <>
+                  <Unlink className="h-3 w-3" /> Unlink
+                </>
+              ) : (
+                <>
+                  <Link2 className="h-3 w-3" /> Link
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Facebook */}
+          <div 
+            className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 fill-current text-blue-600 shrink-0" viewBox="0 0 24 24">
+                <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.312h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
+              </svg>
+              <div>
+                <span className="block font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Facebook</span>
+                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('facebook') ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {user.linkedProviders?.includes('facebook') ? 'Connected' : 'Not linked'}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={processingSocial !== null}
+              onClick={() => handleToggleSocialLink('facebook')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                user.linkedProviders?.includes('facebook')
+                  ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
+                  : 'text-white shadow-xs'
+              }`}
+              style={{
+                backgroundColor: user.linkedProviders?.includes('facebook') ? 'transparent' : 'var(--color-primary, #E05638)'
+              }}
+            >
+              {processingSocial === 'facebook' ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : user.linkedProviders?.includes('facebook') ? (
+                <>
+                  <Unlink className="h-3 w-3" /> Unlink
+                </>
+              ) : (
+                <>
+                  <Link2 className="h-3 w-3" /> Link
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Apple */}
+          <div 
+            className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24">
+                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.56.64-1.06 1.7-0.93 2.73 1.02.08 2.05-.48 2.66-1.23z" />
+              </svg>
+              <div>
+                <span className="block font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Apple</span>
+                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('apple') ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {user.linkedProviders?.includes('apple') ? 'Connected' : 'Not linked'}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={processingSocial !== null}
+              onClick={() => handleToggleSocialLink('apple')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                user.linkedProviders?.includes('apple')
+                  ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
+                  : 'text-white shadow-xs'
+              }`}
+              style={{
+                backgroundColor: user.linkedProviders?.includes('apple') ? 'transparent' : 'var(--color-primary, #E05638)'
+              }}
+            >
+              {processingSocial === 'apple' ? (
+                <RefreshCw className="h-3 w-3 animate-spin" />
+              ) : user.linkedProviders?.includes('apple') ? (
+                <>
+                  <Unlink className="h-3 w-3" /> Unlink
+                </>
+              ) : (
+                <>
+                  <Link2 className="h-3 w-3" /> Link
+                </>
+              )}
+            </button>
+          </div>
         </div>
+      </div>
+
+      {/* UPGRADE OR CHANGE MEMBERSHIP PLAN */}
+      <div 
+        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
+        style={{
+          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+        }}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+          <div>
+            <h2 className="text-xl font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              <CreditCard className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} />
+              {t('upgradeChangePlanTitle') || 'Upgrade or Change Membership Plan'}
+            </h2>
+            <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              {t('onePlanPerEmailSub') || 'Strictly 1 plan per email. Changing plans automatically cancels your prior plan and recalculates your expiry date.'}
+            </p>
+          </div>
+
+          <div 
+            className="flex items-center p-1 rounded-xl border text-xs font-bold self-start sm:self-auto shadow-xs"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedInterval('ALL')}
+              className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                selectedInterval === 'ALL'
+                  ? 'text-white shadow'
+                  : ''
+              }`}
+              style={selectedInterval === 'ALL' ? {
+                backgroundColor: 'var(--color-primary, #E05638)'
+              } : {
+                color: isDayMode ? '#64748b' : '#94a3b8'
+              }}
+            >
+              All Plans ({plans.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedInterval('MONTH')}
+              className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                selectedInterval === 'MONTH'
+                  ? 'text-white shadow'
+                  : ''
+              }`}
+              style={selectedInterval === 'MONTH' ? {
+                backgroundColor: 'var(--color-primary, #E05638)'
+              } : {
+                color: isDayMode ? '#64748b' : '#94a3b8'
+              }}
+            >
+              {t('monthlyBtn') || 'Monthly'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedInterval('YEAR')}
+              className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                selectedInterval === 'YEAR'
+                  ? 'text-white shadow'
+                  : ''
+              }`}
+              style={selectedInterval === 'YEAR' ? {
+                backgroundColor: 'var(--color-primary, #E05638)'
+              } : {
+                color: isDayMode ? '#64748b' : '#94a3b8'
+              }}
+            >
+              {t('annualSaveLabel') || 'Annual (Save up to 44%)'}
+            </button>
+          </div>
+        </div>
+
+        {/* ACTIVE MEMBERSHIP PLAN CARD BANNER */}
+        <div 
+          className="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm transition"
+          style={{
+            backgroundColor: isDayMode ? '#f0fdf4' : 'rgba(16, 185, 129, 0.08)',
+            borderColor: 'var(--color-emerald, #10b981)'
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div 
+              className="w-10 h-10 rounded-xl flex items-center justify-center shadow-xs"
+              style={{
+                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                color: 'var(--color-emerald, #10b981)'
+              }}
+            >
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  {t('currentSelectedPlanHeading') || 'Your Current Selected Plan'}
+                </span>
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                  {t('activeStatus') || 'Active'}
+                </span>
+              </div>
+              <h4 className="text-base font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                {userPlanBadge.label}
+              </h4>
+            </div>
+          </div>
+
+          <div className="text-xs sm:text-right" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+            <span className="block font-medium">
+              {activeExpiryDate 
+                ? `${t('renewalExpiryPrefix') || 'Renewal / Expiry: '} ${new Date(activeExpiryDate).toLocaleDateString()}` 
+                : (t('freeTierNoExpiry') || 'Free Tier (No Expiration)')}
+            </span>
+            <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
+              {tokenUsage.monthlyLimit === -1 ? (t('unlimitedAiTokens') || 'Unlimited AI Tokens') : `${tokenUsage.monthlyLimit.toLocaleString()} ${t('monthlyTokensSuffix') || 'Monthly Tokens'}`}
+            </span>
+          </div>
+        </div>
+
+        {/* ALL AVAILABLE PLANS GRID */}
+        {filteredPlans.length === 0 ? (
+          <div 
+            className="p-8 text-center rounded-2xl border text-xs"
+            style={{
+              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#64748b' : '#94a3b8'
+            }}
+          >
+            No plans configured in admin yet. Go to <Link href="/admin/plans" className="font-bold underline text-[var(--color-primary)]">Admin Plans</Link> to create plans.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
+            {filteredPlans.map((plan) => {
+              const isCurrent = checkIsCurrentPlan(plan);
+              const isFree = Boolean(
+                plan.priceCents === 0 || 
+                (plan.priceDollars !== undefined && plan.priceDollars === 0) || 
+                plan.isFree ||
+                plan.slug === 'taster' ||
+                plan.slug === 'free'
+              );
+
+              return (
+                <div 
+                  key={plan.id || plan.slug}
+                  className={`rounded-3xl p-6 border-2 relative flex flex-col justify-between shadow-xl transition-all duration-200 ${
+                    isCurrent 
+                      ? 'ring-4 ring-emerald-500/25 scale-[1.02]' 
+                      : 'hover:scale-[1.01]'
+                  }`}
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                    borderColor: isCurrent 
+                      ? 'var(--color-emerald, #10b981)' 
+                      : (plan.badge ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'))
+                  }}
+                >
+                  {(isCurrent || plan.saveBadge || plan.badge) && (
+                    <div 
+                      className="absolute -top-3.5 right-6 px-3 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-md flex items-center gap-1 z-10"
+                      style={{
+                        backgroundColor: isCurrent 
+                          ? 'var(--color-emerald, #10b981)' 
+                          : (plan.saveBadge ? 'var(--color-emerald, #10b981)' : 'var(--color-primary, #E05638)')
+                      }}
+                    >
+                      {isCurrent ? (
+                        <>
+                          <CheckCircle2 className="h-3 w-3" /> {t('currentPlanBadge') || 'Current Active Plan'}
+                        </>
+                      ) : (
+                        plan.saveBadge || plan.badge
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                            {plan.name}
+                          </h3>
+                          <span 
+                            className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border"
+                            style={{
+                              backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
+                              borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                              color: isDayMode ? '#475569' : '#94a3b8'
+                            }}
+                          >
+                            {isFree ? 'Free' : plan.interval === 'YEAR' ? 'Annual' : 'Monthly'}
+                          </span>
+                        </div>
+
+                        {isCurrent ? (
+                          <span 
+                            className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border flex items-center gap-1"
+                            style={{
+                              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+                              borderColor: 'var(--color-emerald, #10b981)',
+                              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                            }}
+                          >
+                            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                            {t('activeStatus') || 'Active'}
+                          </span>
+                        ) : (
+                          <span 
+                            className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border"
+                            style={{
+                              backgroundColor: isDayMode ? '#f8fafc' : 'rgba(148, 163, 184, 0.1)',
+                              borderColor: isDayMode ? '#e2e8f0' : '#1e293b',
+                              color: isDayMode ? '#64748b' : '#94a3b8'
+                            }}
+                          >
+                            Available
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs font-medium mt-1 min-h-[32px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                        {plan.description}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-orange-400 bg-orange-950/40 border border-orange-500/30 px-3 py-1.5 rounded-xl w-fit shadow-xs">
+                      <Cpu className="h-3.5 w-3.5" />
+                      <span>{plan.tokenLimit === -1 ? 'Unlimited Tokens' : `${(plan.tokenLimit || 0).toLocaleString()} Tokens`}</span>
+                      <span className="text-[10px] font-sans font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                        ({plan.tokenReimburseFrequency === 'once' ? 'Once' : plan.tokenReimburseFrequency === 'weekly' ? 'Weekly' : 'Monthly'})
+                      </span>
+                    </div>
+
+                    <div>
+                      {isFree ? (
+                        <div className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                          {t('free') || 'Free'}
+                        </div>
+                      ) : (
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                            {currencySymbol}{(plan.priceCents ? plan.priceCents / 100 : (plan.priceDollars || 0)).toFixed(2)}
+                          </span>
+                          <span className="text-xs font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                            /{plan.interval === 'YEAR' ? (t('perYear') || 'year') : (t('perMonth') || 'month')}
+                          </span>
+                        </div>
+                      )}
+
+                      {!isFree && plan.interval === 'YEAR' && plan.subPrice && (
+                        <div className="text-[11px] font-medium mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                          <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>{plan.subPrice}</span>{' '}
+                          {plan.strikethroughPrice && (
+                            <span className="line-through" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{plan.strikethroughPrice}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-2 border-t space-y-2 text-xs font-semibold" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)', color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      {plan.features && plan.features.length > 0 ? (
+                        plan.features.map((f, i) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <Check className="h-4 w-4 shrink-0 mt-0.5 text-emerald-500 dark:text-emerald-400" />
+                            <span className="leading-snug">{f}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="italic text-[11px]" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('includesFullTierFeatureAccess') || 'Includes full tier feature access.'}</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="pt-6 mt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                    <button
+                      type="button"
+                      disabled={isCurrent || paymentLoading === plan.id}
+                      onClick={() => handleSelectPlan(plan)}
+                      className="w-full py-3 rounded-2xl text-xs font-black text-white transition shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                      style={{
+                        backgroundColor: isCurrent 
+                          ? 'var(--color-emerald, #10b981)' 
+                          : 'var(--color-primary, #E05638)'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)';
+                      }}
+                    >
+                      {paymentLoading === plan.id ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" /> {t('processing') || 'Processing...'}
+                        </>
+                      ) : isCurrent ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4" /> {t('currentActivePlan') || 'Current Active Plan'}
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4" /> {isFree ? (t('switchToFreeBtn') || 'Switch to Free') : `${t('changeToPlanPrefix') || 'Change to '}${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})`}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -31755,6 +33529,332 @@ export default function UsersRedirectPage() {
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
     </div>
   );
+}
+
+```
+
+## File: `apps/web/src/app/book/page.tsx`
+```typescript
+import { redirect } from 'next/navigation';
+
+export default function BookRedirectPage() {
+  redirect('/books');
+}
+
+```
+
+## File: `apps/web/src/app/api/shopping/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+async function ensureTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS shopping_items (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        name VARCHAR(255) NOT NULL,
+        amount VARCHAR(64) DEFAULT '1',
+        unit VARCHAR(64) DEFAULT '',
+        category VARCHAR(64) DEFAULT 'Produce',
+        staple BOOLEAN DEFAULT FALSE,
+        checked BOOLEAN DEFAULT FALSE,
+        recipe_id VARCHAR(64),
+        recipe_title VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+  } catch (_) {}
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    await ensureTable();
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+
+    let sql = 'SELECT * FROM shopping_items WHERE 1=1';
+    const params: any[] = [];
+
+    if (userId) {
+      params.push(userId);
+      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL)`;
+    }
+
+    sql += ' ORDER BY created_at ASC';
+
+    const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id || 'usr_admin_1',
+      user_id: r.user_id || 'usr_admin_1',
+      name: r.name || '',
+      item: r.name || '',
+      amount: r.amount || '1',
+      unit: r.unit || '',
+      category: r.category || 'Produce',
+      staple: Boolean(r.staple),
+      checked: Boolean(r.checked),
+      recipeId: r.recipe_id || null,
+      recipeTitle: r.recipe_title || null,
+      createdAt: r.created_at || new Date().toISOString(),
+      updatedAt: r.updated_at || new Date().toISOString()
+    }));
+
+    return NextResponse.json(
+      { success: true, items: formatted },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    await ensureTable();
+    const body = await req.json();
+    const items = Array.isArray(body) ? body : (body.items || [body.item || body]);
+
+    for (const item of items) {
+      if (!item || !item.name) continue;
+      const id = String(item.id || 's_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)).slice(0, 64);
+      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
+      const name = String(item.name || item.item || '').trim().slice(0, 255);
+      const amount = String(item.amount || item.quantity || '1').slice(0, 64);
+      const unit = String(item.unit || '').slice(0, 64);
+      const category = String(item.category || 'Produce').slice(0, 64);
+      const staple = Boolean(item.staple);
+      const checked = Boolean(item.checked || item.completed);
+      const recipeId = item.recipeId || item.recipe_id ? String(item.recipeId || item.recipe_id).slice(0, 64) : null;
+      const recipeTitle = item.recipeTitle || item.recipe_title ? String(item.recipeTitle || item.recipe_title).slice(0, 255) : null;
+
+      await query(`
+        INSERT INTO shopping_items (
+          id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = COALESCE(EXCLUDED.user_id, shopping_items.user_id),
+          name = EXCLUDED.name,
+          amount = EXCLUDED.amount,
+          unit = EXCLUDED.unit,
+          category = EXCLUDED.category,
+          staple = EXCLUDED.staple,
+          checked = EXCLUDED.checked,
+          recipe_id = EXCLUDED.recipe_id,
+          recipe_title = EXCLUDED.recipe_title,
+          updated_at = NOW();
+      `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Shopping item(s) saved to PostgreSQL.' });
+  } catch (err: any) {
+    console.error('[POST /api/shopping] Error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await ensureTable();
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let action = searchParams.get('action');
+    let userId = searchParams.get('userId');
+
+    let bodyIds: string[] = [];
+    try {
+      const body = await req.json();
+      if (body) {
+        id = body.id || id;
+        action = body.action || action;
+        userId = body.userId || userId;
+        if (Array.isArray(body.ids)) bodyIds = body.ids;
+      }
+    } catch (_) {}
+
+    if (action === 'remove_completed') {
+      if (bodyIds.length > 0) {
+        await query('DELETE FROM shopping_items WHERE id = ANY($1::text[])', [bodyIds]);
+        await query('DELETE FROM shopping_list WHERE id = ANY($1::text[])', [bodyIds]).catch(() => {});
+      } else {
+        const sql = userId
+          ? "DELETE FROM shopping_items WHERE checked = TRUE AND (user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL)"
+          : "DELETE FROM shopping_items WHERE checked = TRUE";
+        const params = userId ? [userId] : [];
+        await query(sql, params);
+        await query(sql.replace('shopping_items', 'shopping_list'), params).catch(() => {});
+      }
+      return NextResponse.json({ success: true, message: 'Completed items removed from PostgreSQL.' });
+    }
+
+    if (bodyIds.length > 0) {
+      await query('DELETE FROM shopping_items WHERE id = ANY($1::text[])', [bodyIds]);
+      await query('DELETE FROM shopping_list WHERE id = ANY($1::text[])', [bodyIds]).catch(() => {});
+      return NextResponse.json({ success: true, message: 'Shopping items removed from PostgreSQL.' });
+    }
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Item ID is required' }, { status: 400 });
+    }
+
+    const cleanId = id.trim();
+    await query('DELETE FROM shopping_items WHERE id = $1', [cleanId]);
+    await query('DELETE FROM shopping_list WHERE id = $1', [cleanId]).catch(() => {});
+
+    return NextResponse.json({ success: true, message: 'Shopping item removed from PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/recipe-books/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+async function ensureBooksTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS recipe_books (
+        id VARCHAR(128) PRIMARY KEY,
+        user_id VARCHAR(64),
+        created_by VARCHAR(255),
+        creator_name VARCHAR(255),
+        title VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        cover_color VARCHAR(255) DEFAULT '',
+        recipe_ids JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_recipe_books_user_id ON recipe_books(user_id);
+    `);
+  } catch (_) {}
+}
+
+export async function GET(req: NextRequest) {
+  await ensureBooksTable();
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+
+    let sql = 'SELECT * FROM recipe_books';
+    const params: any[] = [];
+
+    if (userId) {
+      params.push(userId);
+      sql += ' WHERE user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
+    }
+
+    sql += ' ORDER BY created_at ASC';
+
+    const books = await query(sql, params);
+
+    // Dynamic count calculation from saved_recipes
+    const countRows = await query(`
+      SELECT book_id, COUNT(*) as count 
+      FROM saved_recipes 
+      WHERE book_id IS NOT NULL 
+      GROUP BY book_id
+    `);
+    const countMap: Record<string, number> = {};
+    countRows.forEach((r: any) => {
+      countMap[r.book_id] = Number(r.count) || 0;
+    });
+
+    const formatted = books.map((b: any) => ({
+      id: b.id,
+      userId: b.user_id || 'usr_admin_1',
+      createdBy: b.created_by || '',
+      creatorName: b.creator_name || 'Chef',
+      title: b.title || 'Untitled Cookbook',
+      description: b.description || '',
+      coverColor: b.cover_color || 'bg-gradient-to-r from-pink-600 via-rose-500 to-rose-600',
+      recipeCount: countMap[b.id] !== undefined ? countMap[b.id] : (Array.isArray(b.recipe_ids) ? b.recipe_ids.length : 0),
+      createdAt: b.created_at || new Date().toISOString()
+    }));
+
+    return NextResponse.json(
+      { success: true, books: formatted },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  await ensureBooksTable();
+  try {
+    const body = await req.json();
+    const items = Array.isArray(body) ? body : (body.books || [body.book || body]);
+
+    for (const b of items) {
+      if (!b || !b.id || !b.title) continue;
+      const targetUserId = b.userId || b.user_id || 'usr_admin_1';
+
+      await query(`
+        INSERT INTO recipe_books (
+          id, user_id, created_by, creator_name, title, description, cover_color, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          cover_color = EXCLUDED.cover_color,
+          recipe_ids = COALESCE(EXCLUDED.recipe_ids, recipe_books.recipe_ids),
+          updated_at = NOW();
+      `, [
+        b.id,
+        targetUserId,
+        b.createdBy || '',
+        b.creatorName || '',
+        b.title.trim(),
+        b.description || '',
+        b.coverColor || '',
+        JSON.stringify(b.recipeIds || b.recipe_ids || [])
+      ]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Cookbook(s) saved in PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+
+    if (!id) {
+      try {
+        const body = await req.json();
+        id = body?.id || id;
+      } catch (_) {}
+    }
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Book ID is required' }, { status: 400 });
+    }
+
+    const cleanId = id.trim();
+    await query('DELETE FROM recipe_books WHERE id = $1', [cleanId]);
+    await query('UPDATE saved_recipes SET book_id = NULL WHERE book_id = $1', [cleanId]);
+
+    return NextResponse.json({ success: true, message: 'Book deleted from PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
 }
 
 ```
@@ -32278,81 +34378,62 @@ export async function GET(
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+function getLocalJsonPath() {
+  const candidates = [
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'data', 'admin_settings.json')
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return candidates[0];
+}
+
 export async function GET() {
   try {
-    const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-    let settings: any = {};
+    let pgSettings: any = null;
+    try {
+      const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['default']);
+      if (rows && rows.length > 0) {
+        pgSettings = rows[0];
+      }
+    } catch (_) {}
 
-    if (rows.length > 0) {
-      const r = rows[0];
-      settings = {
-        id: r.id,
-        siteName: r.site_name || 'Zecratary',
-        titlebarEmoji: r.titlebar_emoji || '🍳',
-        titlebarImage: r.titlebar_image || '',
-        faviconEmoji: r.favicon_emoji || '🍳',
-        faviconImage: r.favicon_image || '',
-        currency: r.currency || 'USD',
-        aiProvider: r.ai_provider || 'gemini',
-        aiModel: r.ai_model || 'gemini-3.5-flash-lite',
-        themeColors: r.theme_colors || {},
-        paymentSettings: r.payment_settings || {},
-        socialLogin: r.social_login || {},
-        chefAiSettings: r.chef_ai_settings || {},
-        recipeTypes: r.recipe_types || [],
-        ingredientCategories: r.ingredient_categories || [],
-        supportedLanguages: r.supported_languages || [],
-        updatedAt: r.updated_at
-      };
-    } else {
-      await query(`
-        INSERT INTO admin_settings (id, site_name, updated_at)
-        VALUES ('primary_settings', 'Zecratary', NOW())
-        ON CONFLICT (id) DO NOTHING;
-      `);
-      settings = {
-        siteName: 'Zecratary',
-        titlebarEmoji: '🍳',
-        titlebarImage: '',
-        faviconEmoji: '🍳',
-        faviconImage: '',
-        currency: 'USD',
-        aiProvider: 'gemini',
-        aiModel: 'gemini-3.5-flash-lite',
-        themeColors: {},
-        paymentSettings: {},
-        socialLogin: {},
-        chefAiSettings: {},
-        recipeTypes: [],
-        ingredientCategories: [],
-        supportedLanguages: []
-      };
-    }
+    let jsonSettings: any = {};
+    try {
+      const p = getLocalJsonPath();
+      if (fs.existsSync(p)) {
+        jsonSettings = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      }
+    } catch (_) {}
 
-    const plans = await query(`
-      SELECT 
-        id, name, slug, is_free AS "isFree", is_default AS "isDefault",
-        COALESCE(monthly_price_dollars, 0)::float AS "monthlyPriceDollars",
-        COALESCE(annual_price_dollars, 0)::float AS "annualPriceDollars",
-        monthly_badge AS "monthlyBadge", annual_badge AS "annualBadge", trial_badge AS "trialBadge",
-        description_monthly AS "descriptionMonthly", description_annual AS "descriptionAnnual",
-        button_text AS "buttonText", ai_recipe_limit AS "aiRecipeLimit",
-        recipe_library_limit AS "recipeLibraryLimit", social_scrape_limit AS "socialScrapeLimit",
-        can_view_macros AS "canViewMacros", allowed_ai_models AS "allowedAiModels",
-        features, token_limit AS "tokenLimit", token_reimburse_frequency AS "tokenReimburseFrequency"
-      FROM subscription_plans
-      ORDER BY monthly_price_dollars ASC
-    `);
+    const themeColors = pgSettings?.theme_colors && Object.keys(pgSettings.theme_colors).length > 0
+      ? pgSettings.theme_colors
+      : (jsonSettings.themeColors || {});
 
-    settings.subscriptionPlans = plans;
+    const chefAiSettings = pgSettings?.chef_ai_settings && Object.keys(pgSettings.chef_ai_settings).length > 0
+      ? pgSettings.chef_ai_settings
+      : (jsonSettings.chefAiSettings || {});
 
-    return NextResponse.json(
-      { success: true, settings },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    const chefQuestionnaire = pgSettings?.chef_questionnaire && pgSettings.chef_questionnaire.length > 0
+      ? pgSettings.chef_questionnaire
+      : (jsonSettings.chefQuestionnaire || []);
+
+    const themeMode = pgSettings?.theme_mode || jsonSettings.themeMode || 'dark';
+
+    return NextResponse.json({
+      success: true,
+      themeColors,
+      themeMode,
+      chefAiSettings,
+      chefQuestionnaire,
+      ...jsonSettings
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -32362,143 +34443,49 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    if (Array.isArray(body.subscriptionPlans)) {
-      const activeSlugs = body.subscriptionPlans
-        .map((p: any) => (p?.slug || p?.id || p?.name || '').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-'))
-        .filter(Boolean);
-      activeSlugs.push('taster', 'preset_taster');
+    // 1. Update PostgreSQL
+    try {
+      const current = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['default']);
+      const curRow = (current && current.length > 0) ? current[0] : {};
 
-      const activeIds = body.subscriptionPlans
-        .map((p: any) => (p?.id || '').trim())
-        .filter(Boolean);
-      activeIds.push('preset_taster', 'taster');
-
-      await query(`
-        UPDATE payment_transactions SET plan_slug = NULL 
-        WHERE plan_slug IS NOT NULL 
-          AND plan_slug != 'taster' 
-          AND plan_slug != 'preset_taster'
-          AND NOT (plan_slug = ANY($1::text[]));
-      `, [activeSlugs]);
+      const nextTheme = body.themeColors ? { ...(curRow.theme_colors || {}), ...body.themeColors } : curRow.theme_colors;
+      const nextAi = body.chefAiSettings ? { ...(curRow.chef_ai_settings || {}), ...body.chefAiSettings } : curRow.chef_ai_settings;
+      const nextQ = body.chefQuestionnaire ? body.chefQuestionnaire : curRow.chef_questionnaire;
+      const nextMode = body.themeMode ? body.themeMode : curRow.theme_mode;
 
       await query(`
-        UPDATE users SET subscription_plan = 'taster' 
-        WHERE subscription_plan IS NOT NULL 
-          AND subscription_plan != 'taster' 
-          AND subscription_plan != 'preset_taster'
-          AND NOT (subscription_plan = ANY($1::text[]));
-      `, [activeSlugs]);
+        INSERT INTO admin_settings (id, theme_colors, theme_mode, chef_ai_settings, chef_questionnaire, updated_at)
+        VALUES ('default', $1::jsonb, $2, $3::jsonb, $4::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          theme_colors = COALESCE(EXCLUDED.theme_colors, admin_settings.theme_colors),
+          theme_mode = COALESCE(EXCLUDED.theme_mode, admin_settings.theme_mode),
+          chef_ai_settings = COALESCE(EXCLUDED.chef_ai_settings, admin_settings.chef_ai_settings),
+          chef_questionnaire = COALESCE(EXCLUDED.chef_questionnaire, admin_settings.chef_questionnaire),
+          updated_at = NOW();
+      `, [JSON.stringify(nextTheme || {}), nextMode || 'dark', JSON.stringify(nextAi || {}), JSON.stringify(nextQ || [])]);
+    } catch (_) {}
 
-      await query(`
-        DELETE FROM subscription_plans 
-        WHERE slug != 'taster' 
-          AND id != 'preset_taster'
-          AND NOT (slug = ANY($1::text[]))
-          AND NOT (id = ANY($2::text[]));
-      `, [activeSlugs, activeIds]);
-
-      for (const p of body.subscriptionPlans) {
-        if (!p) continue;
-        const slug = (p.slug || p.id || p.name || 'plan').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
-        const targetId = p.id || slug;
-        const isDefault = slug === 'taster' || targetId === 'preset_taster';
-
-        const exists = await query('SELECT id FROM subscription_plans WHERE slug = $1', [slug]);
-        if (exists.length > 0) {
-          await query(`
-            UPDATE subscription_plans SET
-              name = $1, is_free = $2, is_default = $3, monthly_price_dollars = $4, annual_price_dollars = $5,
-              monthly_badge = $6, annual_badge = $7, trial_badge = $8, description_monthly = $9, description_annual = $10,
-              button_text = $11, ai_recipe_limit = $12, recipe_library_limit = $13, social_scrape_limit = $14,
-              can_view_macros = $15, allowed_ai_models = $16, features = $17::jsonb, token_limit = $18,
-              token_reimburse_frequency = $19, updated_at = NOW()
-            WHERE slug = $20
-          `, [
-            p.name, Boolean(p.isFree), isDefault, Number(p.monthlyPriceDollars || p.price) || 0,
-            Number(p.annualPriceDollars) || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
-            p.descriptionMonthly || p.description || '', p.descriptionAnnual || '', p.buttonText || 'Choose Plan',
-            p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5, p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
-            p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5, Boolean(p.canViewMacros),
-            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
-            JSON.stringify(p.features || []), Number(p.tokenLimit) || 50000, p.tokenReimburseFrequency || 'monthly', slug
-          ]);
-        } else {
-          await query(`
-            INSERT INTO subscription_plans (
-              id, name, slug, is_free, is_default, monthly_price_dollars, annual_price_dollars,
-              monthly_badge, annual_badge, trial_badge, description_monthly, description_annual,
-              button_text, ai_recipe_limit, recipe_library_limit, social_scrape_limit,
-              can_view_macros, allowed_ai_models, features, token_limit, token_reimburse_frequency, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, NOW())
-          `, [
-            targetId, p.name, slug, Boolean(p.isFree), isDefault, Number(p.monthlyPriceDollars || p.price) || 0,
-            Number(p.annualPriceDollars) || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
-            p.descriptionMonthly || p.description || '', p.descriptionAnnual || '', p.buttonText || 'Choose Plan',
-            p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5, p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
-            p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5, Boolean(p.canViewMacros),
-            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
-            JSON.stringify(p.features || []), Number(p.tokenLimit) || 50000, p.tokenReimburseFrequency || 'monthly'
-          ]);
-        }
+    // 2. Update server JSON backup
+    try {
+      const p = getLocalJsonPath();
+      os.makedirs ? undefined : null;
+      let existing: any = {};
+      if (fs.existsSync(p)) {
+        try { existing = JSON.parse(fs.readFileSync(p, 'utf-8')); } catch (_) {}
       }
-    }
+      const updated = {
+        ...existing,
+        ...body,
+        themeColors: body.themeColors ? { ...(existing.themeColors || {}), ...body.themeColors } : existing.themeColors,
+        chefAiSettings: body.chefAiSettings ? { ...(existing.chefAiSettings || {}), ...body.chefAiSettings } : existing.chefAiSettings,
+        updatedAt: new Date().toISOString()
+      };
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(updated, null, 2), 'utf-8');
+    } catch (_) {}
 
-    const currentRows = await query('SELECT * FROM admin_settings WHERE id = $1', ['primary_settings']);
-    const current = currentRows[0] || {};
-
-    const siteName = body.siteName !== undefined ? body.siteName : (current.site_name || 'Zecratary');
-    const titlebarEmoji = body.titlebarEmoji !== undefined ? body.titlebarEmoji : (current.titlebar_emoji || '🍳');
-    const titlebarImage = body.titlebarImage !== undefined ? body.titlebarImage : (current.titlebar_image || '');
-    const faviconEmoji = body.faviconEmoji !== undefined ? body.faviconEmoji : (current.favicon_emoji || '🍳');
-    const faviconImage = body.faviconImage !== undefined ? body.faviconImage : (current.favicon_image || '');
-    const currency = body.currency !== undefined ? body.currency : (current.currency || 'USD');
-    const aiProvider = body.aiProvider !== undefined ? body.aiProvider : (current.ai_provider || 'gemini');
-    const aiModel = body.aiModel !== undefined ? body.aiModel : (current.ai_model || 'gemini-3.5-flash-lite');
-
-    const themeColors = body.themeColors !== undefined ? body.themeColors : (current.theme_colors || {});
-    const paymentSettings = body.paymentSettings !== undefined ? body.paymentSettings : (current.payment_settings || {});
-    const socialLogin = body.socialLogin !== undefined ? body.socialLogin : (current.social_login || {});
-    const chefAiSettings = body.chefAiSettings !== undefined ? body.chefAiSettings : (current.chef_ai_settings || {});
-    const rawRecipeTypes = body.recipeTypes !== undefined ? body.recipeTypes : (body.settings?.recipeTypes !== undefined ? body.settings.recipeTypes : (body.types !== undefined ? body.types : (current.recipe_types || [])));
-    let recipeTypes = rawRecipeTypes;
-    if (typeof recipeTypes === 'string') {
-      try { recipeTypes = JSON.parse(recipeTypes); } catch (_) {}
-    }
-    if (!Array.isArray(recipeTypes)) recipeTypes = [];
-    const ingredientCategories = body.ingredientCategories !== undefined ? body.ingredientCategories : (current.ingredient_categories || []);
-    const supportedLanguages = body.supportedLanguages !== undefined ? body.supportedLanguages : (current.supported_languages || []);
-
-    await query(`
-      INSERT INTO admin_settings (
-        id, site_name, titlebar_emoji, titlebar_image, favicon_emoji, favicon_image,
-        currency, ai_provider, ai_model, theme_colors, payment_settings, social_login,
-        chef_ai_settings, recipe_types, ingredient_categories, supported_languages, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        site_name = EXCLUDED.site_name,
-        titlebar_emoji = EXCLUDED.titlebar_emoji,
-        titlebar_image = EXCLUDED.titlebar_image,
-        favicon_emoji = EXCLUDED.favicon_emoji,
-        favicon_image = EXCLUDED.favicon_image,
-        currency = EXCLUDED.currency,
-        ai_provider = EXCLUDED.ai_provider,
-        ai_model = EXCLUDED.ai_model,
-        theme_colors = EXCLUDED.theme_colors,
-        payment_settings = EXCLUDED.payment_settings,
-        social_login = EXCLUDED.social_login,
-        chef_ai_settings = EXCLUDED.chef_ai_settings,
-        recipe_types = EXCLUDED.recipe_types,
-        ingredient_categories = EXCLUDED.ingredient_categories,
-        supported_languages = EXCLUDED.supported_languages,
-        updated_at = NOW();
-    `, [
-      'primary_settings', siteName, titlebarEmoji, titlebarImage, faviconEmoji, faviconImage,
-      currency, aiProvider, aiModel, JSON.stringify(themeColors), JSON.stringify(paymentSettings),
-      JSON.stringify(socialLogin), JSON.stringify(chefAiSettings), JSON.stringify(recipeTypes),
-      JSON.stringify(ingredientCategories), JSON.stringify(supportedLanguages)
-    ]);
-
-    return NextResponse.json({ success: true, message: 'Settings saved directly to PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Settings persisted successfully.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -32875,110 +34862,148 @@ import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+async function ensurePaymentTable() {
   try {
-    const rows = await query(`
-      SELECT 
-        id,
-        customer_name AS "customerName",
-        customer_email AS "customerEmail",
-        plan_name AS "planName",
-        plan_slug AS "planSlug",
-        amount,
-        currency,
-        gateway,
-        status,
-        failure_reason AS "failureReason",
-        test_mode AS "testMode",
-        expiry_date AS "expiryDate",
-        created_at AS "createdAt"
-      FROM payment_transactions
-      ORDER BY created_at DESC
+    await query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id VARCHAR(128) PRIMARY KEY,
+        customer_name VARCHAR(255),
+        customer_email VARCHAR(255),
+        plan_name VARCHAR(255),
+        plan_slug VARCHAR(128),
+        amount NUMERIC(10, 2) DEFAULT 0,
+        currency VARCHAR(16) DEFAULT 'USD',
+        gateway VARCHAR(64) DEFAULT 'stripe',
+        status VARCHAR(64) DEFAULT 'succeeded',
+        failure_reason TEXT,
+        test_mode BOOLEAN DEFAULT TRUE,
+        expiry_date TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_payment_transactions_email ON payment_transactions(customer_email);
     `);
+  } catch (_) {}
+}
 
-    return NextResponse.json({ success: true, transactions: rows }, { headers: { 'Cache-Control': 'no-store' } });
+export async function GET(req: NextRequest) {
+  await ensurePaymentTable();
+  try {
+    const { searchParams } = new URL(req.url);
+    const email = searchParams.get('email');
+
+    let sql = 'SELECT * FROM payment_transactions';
+    const params: any[] = [];
+    if (email) {
+      params.push(email.toLowerCase().trim());
+      sql += ' WHERE LOWER(customer_email) = $1';
+    }
+    sql += ' ORDER BY created_at DESC';
+
+    const rows = await query(sql, params);
+    const transactions = rows.map((r: any) => ({
+      id: r.id,
+      customerName: r.customer_name || 'Customer',
+      customerEmail: (r.customer_email || '').toLowerCase().trim(),
+      planName: r.plan_name || 'Subscription',
+      planSlug: r.plan_slug || '',
+      amount: Number(r.amount) || 0,
+      currency: r.currency || 'USD',
+      gateway: r.gateway || 'stripe',
+      status: r.status || 'succeeded',
+      failureReason: r.failure_reason,
+      testMode: Boolean(r.test_mode),
+      expiryDate: r.expiry_date ? new Date(r.expiry_date).toISOString() : undefined,
+      createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
+    }));
+
+    return NextResponse.json(
+      { success: true, transactions },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
+  await ensurePaymentTable();
   try {
     const body = await req.json();
-    const customerEmail = (body.customerEmail || body.email || '').toLowerCase().trim();
+    const action = body.action;
 
-    if (!customerEmail) {
-      return NextResponse.json({ success: false, error: 'Customer email is required' }, { status: 400 });
-    }
-
-    const customerName = body.customerName || body.name || 'Customer';
-    const planName = body.planName || 'Plan';
-    let planSlug = (body.planSlug || body.slug || planName).toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
-    const amount = parseFloat(body.amount) || 0;
-    const currency = body.currency || 'USD';
-    const gateway = body.gateway || 'stripe';
-    const status = body.status || 'succeeded';
-    const failureReason = body.failureReason || null;
-    const testMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
-    const expiryDate = body.expiryDate ? new Date(body.expiryDate) : null;
-    const txId = body.id || ('tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
-
-    if (planSlug) {
-      const planExists = await query('SELECT 1 FROM subscription_plans WHERE slug = $1', [planSlug]);
-      if (planExists.length === 0) {
-        let planId = 'plan_' + planSlug;
-        const idTaken = await query('SELECT 1 FROM subscription_plans WHERE id = $1', [planId]);
-        if (idTaken.length > 0) {
-          planId = `plan_${planSlug}_${Math.random().toString(36).substring(2, 6)}`;
-        }
+    // Atomic cancellation of active transactions for a given email
+    if (action === 'cancel_user_transactions') {
+      const email = (body.email || body.customerEmail || body.customer_email || '').toLowerCase().trim();
+      if (email) {
         await query(`
-          INSERT INTO subscription_plans (id, name, slug, monthly_price_dollars, is_free, updated_at)
-          VALUES ($1, $2, $3, $4, FALSE, NOW())
-        `, [planId, planName, planSlug, amount]);
+          UPDATE payment_transactions
+          SET status = 'refunded',
+              expiry_date = NOW(),
+              updated_at = NOW()
+          WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
+        `, [email]);
+        return NextResponse.json({ success: true, message: 'Prior transactions cancelled in PostgreSQL.' });
       }
     }
 
+    const tx = body.transaction || body;
+
+    if (action === 'update_transaction' && tx?.id) {
+      await query(`
+        UPDATE payment_transactions
+        SET status = $1,
+            expiry_date = $2,
+            updated_at = NOW()
+        WHERE id = $3
+      `, [
+        tx.status || 'refunded',
+        tx.expiryDate || tx.expiry_date || new Date().toISOString(),
+        tx.id
+      ]);
+      return NextResponse.json({ success: true, message: 'Transaction updated in PostgreSQL.' });
+    }
+
+    if (!tx || (!tx.customerEmail && !tx.customer_email)) {
+      return NextResponse.json({ success: false, error: 'Customer email is required.' }, { status: 400 });
+    }
+
+    const id = tx.id || 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+    const cName = tx.customerName || tx.customer_name || 'Customer';
+    const cEmail = (tx.customerEmail || tx.customer_email || '').toLowerCase().trim();
+    const pName = tx.planName || tx.plan_name || 'Subscription';
+    const pSlug = tx.planSlug || tx.plan_slug || '';
+    const amount = Number(tx.amount || 0);
+    const currency = tx.currency || 'USD';
+    const gateway = tx.gateway || 'stripe';
+    const status = tx.status || 'succeeded';
+    const failureReason = tx.failureReason || tx.failure_reason || null;
+    const testMode = tx.testMode !== undefined ? Boolean(tx.testMode) : true;
+    const expiryDate = tx.expiryDate || tx.expiry_date || null;
+
+    // Cancel prior active records for this user
+    await query(`
+      UPDATE payment_transactions
+      SET status = 'refunded',
+          expiry_date = NOW(),
+          updated_at = NOW()
+      WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active') AND id != $2
+    `, [cEmail, id]);
+
     await query(`
       INSERT INTO payment_transactions (
-        id, customer_name, customer_email, plan_name, plan_slug, amount, currency,
-        gateway, status, failure_reason, test_mode, expiry_date, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+        id, customer_name, customer_email, plan_name, plan_slug, amount,
+        currency, gateway, status, failure_reason, test_mode, expiry_date, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
       ON CONFLICT (id) DO UPDATE SET
         status = EXCLUDED.status,
-        failure_reason = EXCLUDED.failure_reason,
-        expiry_date = EXCLUDED.expiry_date
+        expiry_date = EXCLUDED.expiry_date,
+        updated_at = NOW()
     `, [
-      txId, customerName, customerEmail, planName, planSlug || null,
-      amount, currency, gateway, status, failureReason, testMode, expiryDate
+      id, cName, cEmail, pName, pSlug, amount, currency, gateway, status, failureReason, testMode, expiryDate
     ]);
 
-    if (status === 'succeeded' && planSlug) {
-      await query(`
-        UPDATE users SET
-          subscription_plan = $1,
-          plan_expiry_date = $2,
-          updated_at = NOW()
-        WHERE email = $3
-      `, [planSlug, expiryDate, customerEmail]);
-    }
-
-    return NextResponse.json({ success: true, message: 'Payment transaction saved to PostgreSQL.' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
-    }
-
-    await query('DELETE FROM payment_transactions WHERE id = $1', [id]);
-    return NextResponse.json({ success: true, message: 'Transaction deleted from PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Transaction saved in PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -33800,9 +35825,21 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const rows = await query('SELECT theme_colors FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-    const themeColors = rows.length > 0 ? rows[0].theme_colors : {};
-    return NextResponse.json({ success: true, themeColors }, { headers: { 'Cache-Control': 'no-store' } });
+    let themeColors = {};
+    let themeMode = 'dark';
+    try {
+      const rows = await query('SELECT theme_colors, theme_mode FROM admin_settings WHERE id = $1 LIMIT 1', ['default']);
+      if (rows && rows.length > 0) {
+        themeColors = rows[0].theme_colors || {};
+        themeMode = rows[0].theme_mode || 'dark';
+      }
+    } catch (_) {}
+
+    return NextResponse.json({
+      success: true,
+      themeColors,
+      themeMode
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -33811,16 +35848,300 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const colors = body.colors || body.themeColors || body;
+    const colors = body.themeColors || body;
 
+    try {
+      await query(`
+        INSERT INTO admin_settings (id, theme_colors, updated_at)
+        VALUES ('default', $1::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          theme_colors = COALESCE(EXCLUDED.theme_colors, admin_settings.theme_colors),
+          updated_at = NOW();
+      `, [JSON.stringify(colors)]);
+    } catch (_) {}
+
+    return NextResponse.json({ success: true, message: 'Theme updated in PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/books/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+async function ensureBooksTable() {
+  try {
     await query(`
-      UPDATE admin_settings SET
-        theme_colors = $1::jsonb,
-        updated_at = NOW()
-      WHERE id = 'primary_settings'
-    `, [JSON.stringify(colors)]);
+      CREATE TABLE IF NOT EXISTS recipe_books (
+        id VARCHAR(128) PRIMARY KEY,
+        user_id VARCHAR(64),
+        created_by VARCHAR(255),
+        creator_name VARCHAR(255),
+        title VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        cover_color VARCHAR(255) DEFAULT '',
+        recipe_ids JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_recipe_books_user_id ON recipe_books(user_id);
+    `);
+  } catch (_) {}
+}
 
-    return NextResponse.json({ success: true, message: 'Theme colors updated in PostgreSQL.' });
+export async function GET(req: NextRequest) {
+  await ensureBooksTable();
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+
+    let sql = 'SELECT * FROM recipe_books';
+    const params: any[] = [];
+
+    if (userId) {
+      params.push(userId);
+      sql += ' WHERE user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
+    }
+
+    sql += ' ORDER BY created_at ASC';
+
+    const books = await query(sql, params);
+
+    // Dynamic count calculation from saved_recipes
+    const countRows = await query(`
+      SELECT book_id, COUNT(*) as count 
+      FROM saved_recipes 
+      WHERE book_id IS NOT NULL 
+      GROUP BY book_id
+    `);
+    const countMap: Record<string, number> = {};
+    countRows.forEach((r: any) => {
+      countMap[r.book_id] = Number(r.count) || 0;
+    });
+
+    const formatted = books.map((b: any) => ({
+      id: b.id,
+      userId: b.user_id || 'usr_admin_1',
+      createdBy: b.created_by || '',
+      creatorName: b.creator_name || 'Chef',
+      title: b.title || 'Untitled Cookbook',
+      description: b.description || '',
+      coverColor: b.cover_color || 'bg-gradient-to-r from-pink-600 via-rose-500 to-rose-600',
+      recipeCount: countMap[b.id] !== undefined ? countMap[b.id] : (Array.isArray(b.recipe_ids) ? b.recipe_ids.length : 0),
+      createdAt: b.created_at || new Date().toISOString()
+    }));
+
+    return NextResponse.json(
+      { success: true, books: formatted },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  await ensureBooksTable();
+  try {
+    const body = await req.json();
+    const items = Array.isArray(body) ? body : (body.books || [body.book || body]);
+
+    for (const b of items) {
+      if (!b || !b.id || !b.title) continue;
+      const targetUserId = b.userId || b.user_id || 'usr_admin_1';
+
+      await query(`
+        INSERT INTO recipe_books (
+          id, user_id, created_by, creator_name, title, description, cover_color, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          cover_color = EXCLUDED.cover_color,
+          recipe_ids = COALESCE(EXCLUDED.recipe_ids, recipe_books.recipe_ids),
+          updated_at = NOW();
+      `, [
+        b.id,
+        targetUserId,
+        b.createdBy || '',
+        b.creatorName || '',
+        b.title.trim(),
+        b.description || '',
+        b.coverColor || '',
+        JSON.stringify(b.recipeIds || b.recipe_ids || [])
+      ]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Cookbook(s) saved in PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+
+    if (!id) {
+      try {
+        const body = await req.json();
+        id = body?.id || id;
+      } catch (_) {}
+    }
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Book ID is required' }, { status: 400 });
+    }
+
+    const cleanId = id.trim();
+    await query('DELETE FROM recipe_books WHERE id = $1', [cleanId]);
+    await query('UPDATE saved_recipes SET book_id = NULL WHERE book_id = $1', [cleanId]);
+
+    return NextResponse.json({ success: true, message: 'Book deleted from PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/meal-templates/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+async function ensureTemplatesTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS meal_plan_templates (
+        id VARCHAR(128) PRIMARY KEY,
+        user_id VARCHAR(64),
+        created_by VARCHAR(255),
+        title VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        days JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_meal_plan_templates_user_id ON meal_plan_templates(user_id);
+    `);
+  } catch (_) {}
+}
+
+export async function GET(req: NextRequest) {
+  await ensureTemplatesTable();
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+
+    let sql = 'SELECT * FROM meal_plan_templates';
+    const params: any[] = [];
+
+    if (userId) {
+      params.push(userId);
+      sql += ' WHERE user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
+    }
+
+    sql += ' ORDER BY created_at DESC';
+
+    const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => {
+      let days = r.days;
+      if (typeof days === 'string') {
+        try { days = JSON.parse(days); } catch (_) { days = []; }
+      }
+      return {
+        id: r.id,
+        userId: r.user_id || 'usr_admin_1',
+        createdBy: r.created_by || '',
+        title: r.title || 'Untitled Template',
+        description: r.description || '',
+        days: Array.isArray(days) ? days : [],
+        createdAt: r.created_at || new Date().toISOString(),
+        updatedAt: r.updated_at || new Date().toISOString()
+      };
+    });
+
+    return NextResponse.json(
+      { success: true, templates: formatted },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  await ensureTemplatesTable();
+  try {
+    const body = await req.json();
+    const items = Array.isArray(body) ? body : (body.templates || [body.template || body]);
+
+    for (const t of items) {
+      if (!t || !t.id || !t.title) continue;
+      const targetUserId = t.userId || t.user_id || 'usr_admin_1';
+
+      let days = t.days;
+      if (typeof days === 'string') {
+        try { days = JSON.parse(days); } catch (_) { days = []; }
+      }
+      if (!Array.isArray(days)) days = [];
+
+      await query(`
+        INSERT INTO meal_plan_templates (
+          id, user_id, created_by, title, description, days, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          days = EXCLUDED.days,
+          updated_at = NOW();
+      `, [
+        t.id,
+        targetUserId,
+        t.createdBy || '',
+        t.title.trim(),
+        t.description || '',
+        JSON.stringify(days)
+      ]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Template(s) saved in PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+
+    if (!id) {
+      try {
+        const body = await req.json();
+        id = body?.id || id;
+      } catch (_) {}
+    }
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Template ID is required' }, { status: 400 });
+    }
+
+    const cleanId = id.trim();
+    await query('DELETE FROM meal_plan_templates WHERE id = $1', [cleanId]);
+
+    return NextResponse.json({ success: true, message: 'Template deleted from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -33899,6 +36220,178 @@ export async function GET() {
       recentRecipes,
       recentTransactions
     }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/shopping-list/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+async function ensureTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS shopping_items (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        name VARCHAR(255) NOT NULL,
+        amount VARCHAR(64) DEFAULT '1',
+        unit VARCHAR(64) DEFAULT '',
+        category VARCHAR(64) DEFAULT 'Produce',
+        staple BOOLEAN DEFAULT FALSE,
+        checked BOOLEAN DEFAULT FALSE,
+        recipe_id VARCHAR(64),
+        recipe_title VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+  } catch (_) {}
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    await ensureTable();
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+
+    let sql = 'SELECT * FROM shopping_items WHERE 1=1';
+    const params: any[] = [];
+
+    if (userId) {
+      params.push(userId);
+      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL)`;
+    }
+
+    sql += ' ORDER BY created_at ASC';
+
+    const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id || 'usr_admin_1',
+      user_id: r.user_id || 'usr_admin_1',
+      name: r.name || '',
+      item: r.name || '',
+      amount: r.amount || '1',
+      unit: r.unit || '',
+      category: r.category || 'Produce',
+      staple: Boolean(r.staple),
+      checked: Boolean(r.checked),
+      recipeId: r.recipe_id || null,
+      recipeTitle: r.recipe_title || null,
+      createdAt: r.created_at || new Date().toISOString(),
+      updatedAt: r.updated_at || new Date().toISOString()
+    }));
+
+    return NextResponse.json(
+      { success: true, items: formatted },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    await ensureTable();
+    const body = await req.json();
+    const items = Array.isArray(body) ? body : (body.items || [body.item || body]);
+
+    for (const item of items) {
+      if (!item || !item.name) continue;
+      const id = String(item.id || 's_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)).slice(0, 64);
+      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
+      const name = String(item.name || item.item || '').trim().slice(0, 255);
+      const amount = String(item.amount || item.quantity || '1').slice(0, 64);
+      const unit = String(item.unit || '').slice(0, 64);
+      const category = String(item.category || 'Produce').slice(0, 64);
+      const staple = Boolean(item.staple);
+      const checked = Boolean(item.checked || item.completed);
+      const recipeId = item.recipeId || item.recipe_id ? String(item.recipeId || item.recipe_id).slice(0, 64) : null;
+      const recipeTitle = item.recipeTitle || item.recipe_title ? String(item.recipeTitle || item.recipe_title).slice(0, 255) : null;
+
+      await query(`
+        INSERT INTO shopping_items (
+          id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = COALESCE(EXCLUDED.user_id, shopping_items.user_id),
+          name = EXCLUDED.name,
+          amount = EXCLUDED.amount,
+          unit = EXCLUDED.unit,
+          category = EXCLUDED.category,
+          staple = EXCLUDED.staple,
+          checked = EXCLUDED.checked,
+          recipe_id = EXCLUDED.recipe_id,
+          recipe_title = EXCLUDED.recipe_title,
+          updated_at = NOW();
+      `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Shopping item(s) saved to PostgreSQL.' });
+  } catch (err: any) {
+    console.error('[POST /api/shopping] Error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await ensureTable();
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let action = searchParams.get('action');
+    let userId = searchParams.get('userId');
+
+    let bodyIds: string[] = [];
+    try {
+      const body = await req.json();
+      if (body) {
+        id = body.id || id;
+        action = body.action || action;
+        userId = body.userId || userId;
+        if (Array.isArray(body.ids)) bodyIds = body.ids;
+      }
+    } catch (_) {}
+
+    if (action === 'remove_completed') {
+      if (bodyIds.length > 0) {
+        await query('DELETE FROM shopping_items WHERE id = ANY($1::text[])', [bodyIds]);
+        await query('DELETE FROM shopping_list WHERE id = ANY($1::text[])', [bodyIds]).catch(() => {});
+      } else {
+        const sql = userId
+          ? "DELETE FROM shopping_items WHERE checked = TRUE AND (user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL)"
+          : "DELETE FROM shopping_items WHERE checked = TRUE";
+        const params = userId ? [userId] : [];
+        await query(sql, params);
+        await query(sql.replace('shopping_items', 'shopping_list'), params).catch(() => {});
+      }
+      return NextResponse.json({ success: true, message: 'Completed items removed from PostgreSQL.' });
+    }
+
+    if (bodyIds.length > 0) {
+      await query('DELETE FROM shopping_items WHERE id = ANY($1::text[])', [bodyIds]);
+      await query('DELETE FROM shopping_list WHERE id = ANY($1::text[])', [bodyIds]).catch(() => {});
+      return NextResponse.json({ success: true, message: 'Shopping items removed from PostgreSQL.' });
+    }
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Item ID is required' }, { status: 400 });
+    }
+
+    const cleanId = id.trim();
+    await query('DELETE FROM shopping_items WHERE id = $1', [cleanId]);
+    await query('DELETE FROM shopping_list WHERE id = $1', [cleanId]).catch(() => {});
+
+    return NextResponse.json({ success: true, message: 'Shopping item removed from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -34026,7 +36519,6 @@ export async function POST(req: NextRequest) {
 
       let targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
-      // Verify foreign key integrity against users table
       let validUserId: string | null = null;
       if (targetUserId) {
         const u = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
@@ -34034,9 +36526,7 @@ export async function POST(req: NextRequest) {
           validUserId = u[0].id;
         } else {
           const adminUser = await query("SELECT id FROM users WHERE id = 'usr_admin_1' OR role = 'admin' LIMIT 1");
-          if (adminUser.length > 0) {
-            validUserId = adminUser[0].id;
-          }
+          if (adminUser.length > 0) validUserId = adminUser[0].id;
         }
       }
 
@@ -34071,12 +36561,18 @@ export async function POST(req: NextRequest) {
       const difficulty = String(item.difficulty || 'Medium').slice(0, 32);
       const imageUrl = String(item.imageUrl || item.image || item.image_url || '');
       const sourceUrl = String(item.sourceUrl || item.source_url || '');
+      const bookId = item.bookId || item.book_id ? String(item.bookId || item.book_id).slice(0, 64) : null;
+      const isFavorite = Boolean(item.isFavorite || item.is_favorite);
+      const isCooked = Boolean(item.isCooked || item.is_cooked);
+      const rating = Number(item.rating) || 0;
+      const note = String(item.note || '');
 
       await query(`
         INSERT INTO saved_recipes (
           id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, nutrition, tags, image_url, source_url, is_public, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, NOW())
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, source_url,
+          book_id, is_favorite, is_cooked, rating, note, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19, $20, $21, $22, NOW())
         ON CONFLICT (id) DO UPDATE SET
           user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
           title = EXCLUDED.title,
@@ -34093,6 +36589,11 @@ export async function POST(req: NextRequest) {
           tags = EXCLUDED.tags,
           image_url = EXCLUDED.image_url,
           source_url = EXCLUDED.source_url,
+          book_id = EXCLUDED.book_id,
+          is_favorite = EXCLUDED.is_favorite,
+          is_cooked = EXCLUDED.is_cooked,
+          rating = EXCLUDED.rating,
+          note = EXCLUDED.note,
           is_public = EXCLUDED.is_public,
           updated_at = NOW();
       `, [
@@ -34112,6 +36613,11 @@ export async function POST(req: NextRequest) {
         JSON.stringify(tags),
         imageUrl,
         sourceUrl,
+        bookId,
+        isFavorite,
+        isCooked,
+        rating,
+        note,
         Boolean(item.isPublic || item.is_public)
       ]);
     }
@@ -34155,13 +36661,27 @@ import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+async function ensureColumns() {
+  try {
+    await query(`
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(128);
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE;
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE;
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT 0;
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '';
+    `);
+  } catch (_) {}
+}
+
 export async function GET(req: NextRequest) {
+  await ensureColumns();
   try {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
     const category = searchParams.get('category');
+    const bookId = searchParams.get('bookId');
 
-    let sql = 'SELECT * FROM saved_recipes WHERE 1=1';
+    let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
     const params: any[] = [];
 
     if (userId) {
@@ -34171,7 +36691,12 @@ export async function GET(req: NextRequest) {
 
     if (category && category !== 'all' && category !== 'All Types') {
       params.push(category);
-      sql += ` AND (LOWER(recipe_type) = LOWER($${params.length}) OR LOWER(recipe_type) LIKE LOWER($${params.length}))`;
+      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
+    }
+
+    if (bookId) {
+      params.push(bookId);
+      sql += ` AND book_id = $${params.length}`;
     }
 
     sql += ' ORDER BY created_at DESC';
@@ -34199,48 +36724,43 @@ export async function GET(req: NextRequest) {
         try { tags = JSON.parse(tags); } catch (_) { tags = []; }
       }
 
-      const prepMin = parseInt(String(r.prep_time || '15'), 10) || 15;
-      const cookMin = parseInt(String(r.cook_time || '25'), 10) || 25;
-      const cleanImg = r.image_url || r.imageUrl || r.image || '/uploads/recipes/default.jpg';
-      const cleanTitle = r.title || r.name || 'Untitled Recipe';
-      const cleanType = r.recipe_type || r.recipeType || r.category || 'Main Dish';
+      const activeBookId = r.book_id || r.bookId || null;
 
       return {
         ...r,
         id: r.id,
         userId: r.user_id || r.userId || 'usr_admin_1',
         user_id: r.user_id || r.userId || 'usr_admin_1',
-        title: cleanTitle,
-        name: cleanTitle,
+        title: r.title || r.name || 'Untitled Recipe',
+        name: r.title || r.name || 'Untitled Recipe',
         description: r.description || '',
-        recipeType: cleanType,
-        category: cleanType,
-        recipe_type: cleanType,
+        recipeType: r.recipe_type || 'Main Dish',
+        category: r.recipe_type || 'Main Dish',
+        recipe_type: r.recipe_type || 'Main Dish',
         cuisine: r.cuisine || '',
-        prepTime: r.prep_time || `${prepMin} mins`,
-        cookTime: r.cook_time || `${cookMin} mins`,
-        prepTimeMinutes: prepMin,
-        cookTimeMinutes: cookMin,
-        servings: parseInt(String(r.servings || '4'), 10) || 4,
+        prepTime: r.prep_time || '15',
+        cookTime: r.cook_time || '25',
+        prepTimeMinutes: Number(r.prep_time) || 15,
+        cookTimeMinutes: Number(r.cook_time) || 25,
+        servings: Number(r.servings) || 4,
         difficulty: r.difficulty || 'Medium',
         ingredients: Array.isArray(ingredients) ? ingredients : [],
         directions: Array.isArray(directions) ? directions : [],
         instructions: Array.isArray(directions) ? directions : [],
         steps: Array.isArray(directions) ? directions : [],
         nutrition: nutrition || {},
-        tags: Array.isArray(tags) ? tags : [cleanType],
-        imageUrl: cleanImg,
-        image: cleanImg,
-        image_url: cleanImg,
-        sourceUrl: r.source_url || r.sourceUrl || '',
-        source_url: r.source_url || r.sourceUrl || '',
-        isFavorite: Boolean(r.is_favorite || r.isFavorite),
-        isCooked: Boolean(r.is_cooked || r.isCooked),
+        tags: Array.isArray(tags) ? tags : [],
+        imageUrl: r.image_url || r.imageUrl || r.image || '',
+        image: r.image_url || r.imageUrl || r.image || '',
+        image_url: r.image_url || r.imageUrl || r.image || '',
+        isPublic: Boolean(r.is_public),
+        is_public: Boolean(r.is_public),
+        bookId: activeBookId,
+        book_id: activeBookId,
+        isFavorite: Boolean(r.is_favorite),
+        isCooked: Boolean(r.is_cooked),
         rating: Number(r.rating) || 0,
         note: r.note || '',
-        bookId: r.book_id || r.bookId || null,
-        book_id: r.book_id || r.bookId || null,
-        isPublic: Boolean(r.is_public || r.isPublic),
         createdAt: r.created_at || new Date().toISOString(),
         updatedAt: r.updated_at || new Date().toISOString()
       };
@@ -34256,31 +36776,26 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  await ensureColumns();
   try {
     const body = await req.json();
     const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
     for (const item of items) {
       if (!item) continue;
-      const rawTitle = item.title || item.name || 'Untitled Recipe';
-      const cleanTitle = String(rawTitle).trim().slice(0, 250);
-      const id = String(item.id || 'rec_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)).slice(0, 64);
+      const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
-      let targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
-
-      // Verify foreign key integrity against users table
-      let validUserId: string | null = null;
-      if (targetUserId) {
-        const u = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
-        if (u.length > 0) {
-          validUserId = u[0].id;
-        } else {
-          const adminUser = await query("SELECT id FROM users WHERE id = 'usr_admin_1' OR role = 'admin' LIMIT 1");
-          if (adminUser.length > 0) {
-            validUserId = adminUser[0].id;
-          }
+      try {
+        const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
+        if (userCheck.length === 0) {
+          await query(`
+            INSERT INTO users (id, name, email, role, subscription_plan)
+            VALUES ($1, 'User', $2, 'user', 'taster')
+            ON CONFLICT (id) DO NOTHING;
+          `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
         }
-      }
+      } catch (_) {}
 
       let ingredients = item.ingredients;
       if (typeof ingredients === 'string') {
@@ -34305,20 +36820,14 @@ export async function POST(req: NextRequest) {
         try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
       }
 
-      const recipeType = String(item.recipeType || item.category || item.recipe_type || 'Main Dish').slice(0, 64);
-      const cuisine = String(item.cuisine || '').slice(0, 64);
-      const prepTime = String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15').slice(0, 32);
-      const cookTime = String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25').slice(0, 32);
-      const servings = String(item.servings || '4').slice(0, 32);
-      const difficulty = String(item.difficulty || 'Medium').slice(0, 32);
-      const imageUrl = String(item.imageUrl || item.image || item.image_url || '');
-      const sourceUrl = String(item.sourceUrl || item.source_url || '');
+      const bookId = item.bookId !== undefined ? item.bookId : (item.book_id !== undefined ? item.book_id : null);
 
       await query(`
         INSERT INTO saved_recipes (
           id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, nutrition, tags, image_url, source_url, is_public, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, NOW())
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
+          book_id, is_favorite, is_cooked, rating, note, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19, $20, $21, NOW())
         ON CONFLICT (id) DO UPDATE SET
           user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
           title = EXCLUDED.title,
@@ -34334,33 +36843,40 @@ export async function POST(req: NextRequest) {
           nutrition = EXCLUDED.nutrition,
           tags = EXCLUDED.tags,
           image_url = EXCLUDED.image_url,
-          source_url = EXCLUDED.source_url,
           is_public = EXCLUDED.is_public,
+          book_id = EXCLUDED.book_id,
+          is_favorite = COALESCE(EXCLUDED.is_favorite, saved_recipes.is_favorite),
+          is_cooked = COALESCE(EXCLUDED.is_cooked, saved_recipes.is_cooked),
+          rating = COALESCE(EXCLUDED.rating, saved_recipes.rating),
+          note = COALESCE(EXCLUDED.note, saved_recipes.note),
           updated_at = NOW();
       `, [
         id,
-        validUserId,
-        cleanTitle,
+        targetUserId,
+        item.title || item.name || 'Untitled Recipe',
         item.description || '',
-        recipeType,
-        cuisine,
-        prepTime,
-        cookTime,
-        servings,
-        difficulty,
+        item.recipeType || item.category || item.recipe_type || 'Main Dish',
+        item.cuisine || '',
+        String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15'),
+        String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25'),
+        String(item.servings || '4'),
+        item.difficulty || 'Medium',
         JSON.stringify(ingredients),
         JSON.stringify(directions),
         JSON.stringify(nutrition),
         JSON.stringify(tags),
-        imageUrl,
-        sourceUrl,
-        Boolean(item.isPublic || item.is_public)
+        item.imageUrl || item.image || item.image_url || '',
+        Boolean(item.isPublic || item.is_public),
+        bookId,
+        Boolean(item.isFavorite || item.is_favorite),
+        Boolean(item.isCooked || item.is_cooked),
+        Number(item.rating) || 0,
+        item.note || ''
       ]);
     }
 
     return NextResponse.json({ success: true, message: 'Recipe(s) saved to PostgreSQL.' });
   } catch (err: any) {
-    console.error('[POST /api/recipes/saved] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -35692,13 +38208,27 @@ import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+async function ensureColumns() {
+  try {
+    await query(`
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(128);
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE;
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE;
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT 0;
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '';
+    `);
+  } catch (_) {}
+}
+
 export async function GET(req: NextRequest) {
+  await ensureColumns();
   try {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
     const category = searchParams.get('category');
+    const bookId = searchParams.get('bookId');
 
-    let sql = 'SELECT * FROM saved_recipes WHERE 1=1';
+    let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
     const params: any[] = [];
 
     if (userId) {
@@ -35708,7 +38238,12 @@ export async function GET(req: NextRequest) {
 
     if (category && category !== 'all' && category !== 'All Types') {
       params.push(category);
-      sql += ` AND (LOWER(recipe_type) = LOWER($${params.length}) OR LOWER(recipe_type) LIKE LOWER($${params.length}))`;
+      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
+    }
+
+    if (bookId) {
+      params.push(bookId);
+      sql += ` AND book_id = $${params.length}`;
     }
 
     sql += ' ORDER BY created_at DESC';
@@ -35736,48 +38271,43 @@ export async function GET(req: NextRequest) {
         try { tags = JSON.parse(tags); } catch (_) { tags = []; }
       }
 
-      const prepMin = parseInt(String(r.prep_time || '15'), 10) || 15;
-      const cookMin = parseInt(String(r.cook_time || '25'), 10) || 25;
-      const cleanImg = r.image_url || r.imageUrl || r.image || '/uploads/recipes/default.jpg';
-      const cleanTitle = r.title || r.name || 'Untitled Recipe';
-      const cleanType = r.recipe_type || r.recipeType || r.category || 'Main Dish';
+      const activeBookId = r.book_id || r.bookId || null;
 
       return {
         ...r,
         id: r.id,
         userId: r.user_id || r.userId || 'usr_admin_1',
         user_id: r.user_id || r.userId || 'usr_admin_1',
-        title: cleanTitle,
-        name: cleanTitle,
+        title: r.title || r.name || 'Untitled Recipe',
+        name: r.title || r.name || 'Untitled Recipe',
         description: r.description || '',
-        recipeType: cleanType,
-        category: cleanType,
-        recipe_type: cleanType,
+        recipeType: r.recipe_type || 'Main Dish',
+        category: r.recipe_type || 'Main Dish',
+        recipe_type: r.recipe_type || 'Main Dish',
         cuisine: r.cuisine || '',
-        prepTime: r.prep_time || `${prepMin} mins`,
-        cookTime: r.cook_time || `${cookMin} mins`,
-        prepTimeMinutes: prepMin,
-        cookTimeMinutes: cookMin,
-        servings: parseInt(String(r.servings || '4'), 10) || 4,
+        prepTime: r.prep_time || '15',
+        cookTime: r.cook_time || '25',
+        prepTimeMinutes: Number(r.prep_time) || 15,
+        cookTimeMinutes: Number(r.cook_time) || 25,
+        servings: Number(r.servings) || 4,
         difficulty: r.difficulty || 'Medium',
         ingredients: Array.isArray(ingredients) ? ingredients : [],
         directions: Array.isArray(directions) ? directions : [],
         instructions: Array.isArray(directions) ? directions : [],
         steps: Array.isArray(directions) ? directions : [],
         nutrition: nutrition || {},
-        tags: Array.isArray(tags) ? tags : [cleanType],
-        imageUrl: cleanImg,
-        image: cleanImg,
-        image_url: cleanImg,
-        sourceUrl: r.source_url || r.sourceUrl || '',
-        source_url: r.source_url || r.sourceUrl || '',
-        isFavorite: Boolean(r.is_favorite || r.isFavorite),
-        isCooked: Boolean(r.is_cooked || r.isCooked),
+        tags: Array.isArray(tags) ? tags : [],
+        imageUrl: r.image_url || r.imageUrl || r.image || '',
+        image: r.image_url || r.imageUrl || r.image || '',
+        image_url: r.image_url || r.imageUrl || r.image || '',
+        isPublic: Boolean(r.is_public),
+        is_public: Boolean(r.is_public),
+        bookId: activeBookId,
+        book_id: activeBookId,
+        isFavorite: Boolean(r.is_favorite),
+        isCooked: Boolean(r.is_cooked),
         rating: Number(r.rating) || 0,
         note: r.note || '',
-        bookId: r.book_id || r.bookId || null,
-        book_id: r.book_id || r.bookId || null,
-        isPublic: Boolean(r.is_public || r.isPublic),
         createdAt: r.created_at || new Date().toISOString(),
         updatedAt: r.updated_at || new Date().toISOString()
       };
@@ -35793,31 +38323,26 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  await ensureColumns();
   try {
     const body = await req.json();
     const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
     for (const item of items) {
       if (!item) continue;
-      const rawTitle = item.title || item.name || 'Untitled Recipe';
-      const cleanTitle = String(rawTitle).trim().slice(0, 250);
-      const id = String(item.id || 'rec_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)).slice(0, 64);
+      const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
-      let targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
-
-      // Verify foreign key integrity against users table
-      let validUserId: string | null = null;
-      if (targetUserId) {
-        const u = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
-        if (u.length > 0) {
-          validUserId = u[0].id;
-        } else {
-          const adminUser = await query("SELECT id FROM users WHERE id = 'usr_admin_1' OR role = 'admin' LIMIT 1");
-          if (adminUser.length > 0) {
-            validUserId = adminUser[0].id;
-          }
+      try {
+        const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
+        if (userCheck.length === 0) {
+          await query(`
+            INSERT INTO users (id, name, email, role, subscription_plan)
+            VALUES ($1, 'User', $2, 'user', 'taster')
+            ON CONFLICT (id) DO NOTHING;
+          `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
         }
-      }
+      } catch (_) {}
 
       let ingredients = item.ingredients;
       if (typeof ingredients === 'string') {
@@ -35842,20 +38367,14 @@ export async function POST(req: NextRequest) {
         try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
       }
 
-      const recipeType = String(item.recipeType || item.category || item.recipe_type || 'Main Dish').slice(0, 64);
-      const cuisine = String(item.cuisine || '').slice(0, 64);
-      const prepTime = String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15').slice(0, 32);
-      const cookTime = String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25').slice(0, 32);
-      const servings = String(item.servings || '4').slice(0, 32);
-      const difficulty = String(item.difficulty || 'Medium').slice(0, 32);
-      const imageUrl = String(item.imageUrl || item.image || item.image_url || '');
-      const sourceUrl = String(item.sourceUrl || item.source_url || '');
+      const bookId = item.bookId !== undefined ? item.bookId : (item.book_id !== undefined ? item.book_id : null);
 
       await query(`
         INSERT INTO saved_recipes (
           id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, nutrition, tags, image_url, source_url, is_public, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, NOW())
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
+          book_id, is_favorite, is_cooked, rating, note, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19, $20, $21, NOW())
         ON CONFLICT (id) DO UPDATE SET
           user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
           title = EXCLUDED.title,
@@ -35871,33 +38390,40 @@ export async function POST(req: NextRequest) {
           nutrition = EXCLUDED.nutrition,
           tags = EXCLUDED.tags,
           image_url = EXCLUDED.image_url,
-          source_url = EXCLUDED.source_url,
           is_public = EXCLUDED.is_public,
+          book_id = EXCLUDED.book_id,
+          is_favorite = COALESCE(EXCLUDED.is_favorite, saved_recipes.is_favorite),
+          is_cooked = COALESCE(EXCLUDED.is_cooked, saved_recipes.is_cooked),
+          rating = COALESCE(EXCLUDED.rating, saved_recipes.rating),
+          note = COALESCE(EXCLUDED.note, saved_recipes.note),
           updated_at = NOW();
       `, [
         id,
-        validUserId,
-        cleanTitle,
+        targetUserId,
+        item.title || item.name || 'Untitled Recipe',
         item.description || '',
-        recipeType,
-        cuisine,
-        prepTime,
-        cookTime,
-        servings,
-        difficulty,
+        item.recipeType || item.category || item.recipe_type || 'Main Dish',
+        item.cuisine || '',
+        String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15'),
+        String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25'),
+        String(item.servings || '4'),
+        item.difficulty || 'Medium',
         JSON.stringify(ingredients),
         JSON.stringify(directions),
         JSON.stringify(nutrition),
         JSON.stringify(tags),
-        imageUrl,
-        sourceUrl,
-        Boolean(item.isPublic || item.is_public)
+        item.imageUrl || item.image || item.image_url || '',
+        Boolean(item.isPublic || item.is_public),
+        bookId,
+        Boolean(item.isFavorite || item.is_favorite),
+        Boolean(item.isCooked || item.is_cooked),
+        Number(item.rating) || 0,
+        item.note || ''
       ]);
     }
 
     return NextResponse.json({ success: true, message: 'Recipe(s) saved to PostgreSQL.' });
   } catch (err: any) {
-    console.error('[POST /api/recipes/saved] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -35920,6 +38446,143 @@ export async function DELETE(req: NextRequest) {
 
     await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
     return NextResponse.json({ success: true, message: 'Recipe removed from PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/templates/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+async function ensureTemplatesTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS meal_plan_templates (
+        id VARCHAR(128) PRIMARY KEY,
+        user_id VARCHAR(64),
+        created_by VARCHAR(255),
+        title VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        days JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_meal_plan_templates_user_id ON meal_plan_templates(user_id);
+    `);
+  } catch (_) {}
+}
+
+export async function GET(req: NextRequest) {
+  await ensureTemplatesTable();
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+
+    let sql = 'SELECT * FROM meal_plan_templates';
+    const params: any[] = [];
+
+    if (userId) {
+      params.push(userId);
+      sql += ' WHERE user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
+    }
+
+    sql += ' ORDER BY created_at DESC';
+
+    const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => {
+      let days = r.days;
+      if (typeof days === 'string') {
+        try { days = JSON.parse(days); } catch (_) { days = []; }
+      }
+      return {
+        id: r.id,
+        userId: r.user_id || 'usr_admin_1',
+        createdBy: r.created_by || '',
+        title: r.title || 'Untitled Template',
+        description: r.description || '',
+        days: Array.isArray(days) ? days : [],
+        createdAt: r.created_at || new Date().toISOString(),
+        updatedAt: r.updated_at || new Date().toISOString()
+      };
+    });
+
+    return NextResponse.json(
+      { success: true, templates: formatted },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  await ensureTemplatesTable();
+  try {
+    const body = await req.json();
+    const items = Array.isArray(body) ? body : (body.templates || [body.template || body]);
+
+    for (const t of items) {
+      if (!t || !t.id || !t.title) continue;
+      const targetUserId = t.userId || t.user_id || 'usr_admin_1';
+
+      let days = t.days;
+      if (typeof days === 'string') {
+        try { days = JSON.parse(days); } catch (_) { days = []; }
+      }
+      if (!Array.isArray(days)) days = [];
+
+      await query(`
+        INSERT INTO meal_plan_templates (
+          id, user_id, created_by, title, description, days, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          days = EXCLUDED.days,
+          updated_at = NOW();
+      `, [
+        t.id,
+        targetUserId,
+        t.createdBy || '',
+        t.title.trim(),
+        t.description || '',
+        JSON.stringify(days)
+      ]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Template(s) saved in PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+
+    if (!id) {
+      try {
+        const body = await req.json();
+        id = body?.id || id;
+      } catch (_) {}
+    }
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Template ID is required' }, { status: 400 });
+    }
+
+    const cleanId = id.trim();
+    await query('DELETE FROM meal_plan_templates WHERE id = $1', [cleanId]);
+
+    return NextResponse.json({ success: true, message: 'Template deleted from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -36166,7 +38829,7 @@ export default function TemplatesPage() {
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [applyStartDate, setApplyStartDate] = useState<string>(() => formatDateKey(new Date()));
 
-  // Dynamic Theme Synchronization & Color Inversion
+  // Dynamic Theme Synchronization
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -36212,7 +38875,7 @@ export default function TemplatesPage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -36233,132 +38896,191 @@ export default function TemplatesPage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadSavedData = useCallback((user: User | null) => {
+  // Load saved recipes & books from PostgreSQL with localStorage fallback
+  const loadSavedData = useCallback(async (user: User | null) => {
     if (typeof window === 'undefined') return;
+    const activeUserId = user?.id || 'usr_admin_1';
+
+    let liveRecipes: any[] = [];
     try {
-      const raw = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const userSpecific = user 
-            ? parsed.filter((r: any) => !r.userId || r.userId === user.id || r.createdBy === user.email)
-            : parsed;
-
-          const uniqueRecipes: any[] = [];
-          const seenIds = new Set();
-
-          userSpecific.forEach((rec: any) => {
-            const id = rec.id || rec.title || rec.name;
-            if (id && !seenIds.has(id)) {
-              seenIds.add(id);
-              uniqueRecipes.push({
-                id: rec.id || id,
-                name: rec.title || rec.name || 'Untitled Recipe',
-                title: rec.title || rec.name || 'Untitled Recipe',
-                category: rec.tags?.[0] || rec.recipeType || rec.category || 'Main Dish',
-                isFavorite: Boolean(rec.isFavorite),
-                bookId: rec.bookId || null,
-                image: rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
-                imageUrl: rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
-              });
-            }
-          });
-
-          setSavedRecipes(uniqueRecipes);
-        }
+      const rRes = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      if (rRes.ok) {
+        const rData = await rRes.json();
+        if (Array.isArray(rData.recipes)) liveRecipes = rData.recipes;
       }
+    } catch (_) {}
 
-      const rawBooks = localStorage.getItem('zecratary_recipe_books');
-      if (rawBooks) {
-        const parsedBooks = JSON.parse(rawBooks);
-        if (Array.isArray(parsedBooks)) {
-          const userBooks = user
-            ? parsedBooks.filter((b: any) => !b.userId || b.userId === user.id || b.createdBy === user.email)
-            : parsedBooks;
-          setBooks(userBooks);
+    if (liveRecipes.length === 0) {
+      try {
+        const raw = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) liveRecipes = parsed;
         }
-      }
-    } catch (e) {
-      console.error('Failed to load saved data in templates', e);
+      } catch (_) {}
     }
+
+    const uniqueRecipes: any[] = [];
+    const seenIds = new Set();
+    liveRecipes.forEach((rec: any) => {
+      const id = rec.id || rec.title || rec.name;
+      if (id && !seenIds.has(id)) {
+        seenIds.add(id);
+        uniqueRecipes.push({
+          id: rec.id || id,
+          name: rec.title || rec.name || 'Untitled Recipe',
+          title: rec.title || rec.name || 'Untitled Recipe',
+          category: rec.tags?.[0] || rec.recipeType || rec.category || 'Main Dish',
+          isFavorite: Boolean(rec.isFavorite || rec.is_favorite),
+          bookId: rec.bookId || rec.book_id || null,
+          image: rec.imageUrl || rec.image || rec.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
+          imageUrl: rec.imageUrl || rec.image || rec.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
+        });
+      }
+    });
+    setSavedRecipes(uniqueRecipes);
+
+    let liveBooks: any[] = [];
+    try {
+      const bRes = await fetch(`/api/books?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      if (bRes.ok) {
+        const bData = await bRes.json();
+        if (Array.isArray(bData.books)) liveBooks = bData.books;
+      }
+    } catch (_) {}
+
+    if (liveBooks.length === 0) {
+      try {
+        const rawBooks = localStorage.getItem('zecratary_recipe_books');
+        if (rawBooks) {
+          const parsedBooks = JSON.parse(rawBooks);
+          if (Array.isArray(parsedBooks)) liveBooks = parsedBooks;
+        }
+      } catch (_) {}
+    }
+    setBooks(liveBooks);
   }, []);
 
-  const loadTemplates = useCallback((user: User | null) => {
-    if (typeof window === 'undefined') return;
-    try {
-      const local = localStorage.getItem('zecratary_meal_templates');
-      let allTemplates: MealPlanTemplate[] = local ? JSON.parse(local) : [];
+  // Load templates strictly from PostgreSQL without resurrection loop
+  const loadTemplates = useCallback(async (user: User | null) => {
+    if (!user) return;
+    const activeUserId = user.id || 'usr_admin_1';
 
-      if (!Array.isArray(allTemplates) || allTemplates.length === 0) {
-        allTemplates = [
+    let loadedTemplates: MealPlanTemplate[] = [];
+    let fetchSucceeded = false;
+
+    // 1. Fetch live from PostgreSQL
+    try {
+      const res = await fetch(`/api/templates?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.templates)) {
+          loadedTemplates = data.templates;
+          fetchSucceeded = true;
+        }
+      }
+    } catch (_) {}
+
+    const isInitialized = typeof window !== 'undefined' ? localStorage.getItem('zecratary_templates_initialized') === 'true' : false;
+
+    // 2. Local fallback if offline
+    if (!fetchSucceeded && typeof window !== 'undefined') {
+      try {
+        const local = localStorage.getItem('zecratary_meal_templates');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed)) loadedTemplates = parsed;
+        }
+      } catch (_) {}
+    }
+
+    // 3. First-time seed ONLY if never initialized and PostgreSQL returned 0 rows
+    if (!isInitialized && loadedTemplates.length === 0) {
+      const starterTemplate: MealPlanTemplate = {
+        id: 'tpl_1_' + (user ? user.id : 'default'),
+        userId: user?.id,
+        createdBy: user?.email,
+        title: 'Weekly Schedule',
+        description: 'Weekly schedule template with ready-to-plan recipes.',
+        createdAt: new Date().toISOString(),
+        days: [
           {
-            id: 'tpl_1_' + (user ? user.id : 'default'),
-            userId: user?.id,
-            createdBy: user?.email,
-            title: 'Template',
-            description: 'Weekly schedule template with ready-to-plan recipes.',
-            createdAt: new Date().toISOString(),
-            days: [
-              {
-                dayIndex: 0,
-                dayLabel: 'Monday',
-                meals: [
-                  { 
-                    id: 'tm_1', 
-                    mealType: 'Dinner', 
-                    recipeName: 'Caesar Salad Recipe', 
-                    time: '19:00',
-                    image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=800&q=80'
-                  }
-                ]
-              },
-              {
-                dayIndex: 2,
-                dayLabel: 'Wednesday',
-                meals: [
-                  { 
-                    id: 'tm_2', 
-                    mealType: 'Dinner', 
-                    recipeName: 'Authentic Pad Thai Recipe', 
-                    time: '19:30',
-                    image: 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'
-                  }
-                ]
-              },
-              {
-                dayIndex: 4,
-                dayLabel: 'Friday',
-                meals: [
-                  { 
-                    id: 'tm_3', 
-                    mealType: 'Dinner', 
-                    recipeName: 'Singapore Style Bak Kut Teh', 
-                    time: '20:00',
-                    image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
-                  }
-                ]
+            dayIndex: 0,
+            dayLabel: 'Monday',
+            meals: [
+              { 
+                id: 'tm_1', 
+                mealType: 'Dinner', 
+                recipeName: 'Caesar Salad Recipe', 
+                time: '19:00',
+                image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=800&q=80'
+              }
+            ]
+          },
+          {
+            dayIndex: 2,
+            dayLabel: 'Wednesday',
+            meals: [
+              { 
+                id: 'tm_2', 
+                mealType: 'Dinner', 
+                recipeName: 'Authentic Pad Thai Recipe', 
+                time: '19:30',
+                image: 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'
+              }
+            ]
+          },
+          {
+            dayIndex: 4,
+            dayLabel: 'Friday',
+            meals: [
+              { 
+                id: 'tm_3', 
+                mealType: 'Dinner', 
+                recipeName: 'Singapore Style Bak Kut Teh', 
+                time: '20:00',
+                image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
               }
             ]
           }
-        ];
-        localStorage.setItem('zecratary_meal_templates', JSON.stringify(allTemplates));
+        ]
+      };
+
+      loadedTemplates = [starterTemplate];
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_templates_initialized', 'true');
       }
 
-      const userTemplates = user
-        ? allTemplates.filter(t => !t.userId || t.userId === user.id || t.createdBy === user.email)
-        : allTemplates;
-
-      setTemplates(userTemplates);
-      if (userTemplates.length > 0 && !selectedTemplate) {
-        setSelectedTemplate(userTemplates[0]);
-      }
-    } catch (e) {
-      console.error('Failed to load templates', e);
+      fetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loadedTemplates)
+      }).catch(() => {});
+    } else if (typeof window !== 'undefined') {
+      localStorage.setItem('zecratary_templates_initialized', 'true');
     }
-  }, [selectedTemplate]);
+
+    const userTemplates = user
+      ? loadedTemplates.filter(t => !t.userId || t.userId === user.id || t.createdBy === user.email)
+      : loadedTemplates;
+
+    setTemplates(userTemplates);
+    setSelectedTemplate(prev => {
+      if (prev && userTemplates.some(t => t.id === prev.id)) {
+        return userTemplates.find(t => t.id === prev.id) || null;
+      }
+      return userTemplates.length > 0 ? userTemplates[0] : null;
+    });
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_meal_templates', JSON.stringify(loadedTemplates));
+      } catch (_) {}
+    }
+  }, []);
 
   useEffect(() => {
-    document.title = `${t('mealPlanTemplatesTitle')} - FoodiePrep`;
+    document.title = `${t('mealPlanTemplatesTitle') || 'Meal Plan Templates'} - FoodiePrep`;
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
@@ -36375,29 +39097,44 @@ export default function TemplatesPage() {
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_templates_updated', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_templates_updated', handleSync);
     };
   }, [loadTemplates, loadSavedData, t, version]);
 
-  const saveTemplatesList = (updatedUserTemplates: MealPlanTemplate[]) => {
+  const saveTemplatesList = async (updatedUserTemplates: MealPlanTemplate[]) => {
+    setTemplates(updatedUserTemplates);
+
     try {
-      const local = localStorage.getItem('zecratary_meal_templates');
-      const allTemplates: MealPlanTemplate[] = local ? JSON.parse(local) : [];
-
-      const otherUsersTemplates = currentUser
-        ? allTemplates.filter(t => t.userId && t.userId !== currentUser.id && t.createdBy !== currentUser.email)
-        : [];
-
-      const merged = [...updatedUserTemplates, ...otherUsersTemplates];
-      localStorage.setItem('zecratary_meal_templates', JSON.stringify(merged));
-      setTemplates(updatedUserTemplates);
-      window.dispatchEvent(new Event('storage'));
+      await fetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUserTemplates)
+      });
     } catch (e) {
-      console.error('Failed to save templates', e);
+      console.error('Failed to save templates to server', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        const local = localStorage.getItem('zecratary_meal_templates');
+        const allTemplates: MealPlanTemplate[] = local ? JSON.parse(local) : [];
+        const otherUsersTemplates = currentUser
+          ? allTemplates.filter(t => t.userId && t.userId !== currentUser.id && t.createdBy !== currentUser.email && !updatedUserTemplates.some(u => u.id === t.id))
+          : [];
+        const merged = [...updatedUserTemplates, ...otherUsersTemplates];
+        localStorage.setItem('zecratary_meal_templates', JSON.stringify(merged));
+        localStorage.setItem('zecratary_templates_initialized', 'true');
+      } catch (_) {}
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_templates_updated'));
     }
   };
 
@@ -36459,7 +39196,7 @@ export default function TemplatesPage() {
   const handleSaveMealSubModal = (e: React.FormEvent) => {
     e.preventDefault();
     if (targetDayIndex === null || !subSelectedRecipe) {
-      alert(t('selectRecipeAlert'));
+      alert(t('selectRecipeAlert') || 'Please select a recipe for this meal.');
       return;
     }
 
@@ -36500,10 +39237,10 @@ export default function TemplatesPage() {
     setEditingMealSubId(null);
   };
 
-  const handleSaveTemplate = (e: React.FormEvent) => {
+  const handleSaveTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!templateTitle.trim()) {
-      alert(t('enterTemplateTitleAlert'));
+      alert(t('enterTemplateTitleAlert') || 'Please enter a template title.');
       return;
     }
 
@@ -36521,7 +39258,7 @@ export default function TemplatesPage() {
         }
         return t;
       });
-      saveTemplatesList(updated);
+      await saveTemplatesList(updated);
       setSelectedTemplate(updated.find(t => t.id === editingTemplateId) || null);
     } else {
       const newTemplate: MealPlanTemplate = {
@@ -36534,19 +39271,49 @@ export default function TemplatesPage() {
         createdAt: new Date().toISOString()
       };
       const updated = [newTemplate, ...templates];
-      saveTemplatesList(updated);
+      await saveTemplatesList(updated);
       setSelectedTemplate(newTemplate);
     }
 
     setShowModal(false);
   };
 
-  const handleDeleteTemplate = (id: string) => {
-    if (!confirm(t('confirmDeleteTemplatePrompt'))) return;
+  // Permanent Delete Handler
+  const handleDeleteTemplate = async (id: string) => {
+    if (!confirm(t('confirmDeleteTemplatePrompt') || 'Are you sure you want to delete this template?')) return;
+
+    // 1. Optimistically update UI
     const updated = templates.filter(t => t.id !== id);
-    saveTemplatesList(updated);
+    setTemplates(updated);
+
     if (selectedTemplate?.id === id) {
       setSelectedTemplate(updated.length > 0 ? updated[0] : null);
+    }
+
+    // 2. Persist deletion in PostgreSQL
+    try {
+      await fetch(`/api/templates?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+    } catch (e) {
+      console.error('Failed to delete template from database', e);
+    }
+
+    // 3. Clean localStorage & ensure initialization flag is kept so default template does not return
+    if (typeof window !== 'undefined') {
+      try {
+        const local = localStorage.getItem('zecratary_meal_templates');
+        const allTemplates: MealPlanTemplate[] = local ? JSON.parse(local) : [];
+        const remaining = allTemplates.filter(t => t.id !== id);
+        localStorage.setItem('zecratary_meal_templates', JSON.stringify(remaining));
+        localStorage.setItem('zecratary_templates_initialized', 'true');
+      } catch (_) {}
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_templates_updated'));
     }
   };
 
@@ -36600,14 +39367,14 @@ export default function TemplatesPage() {
       window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
       setShowApplyModal(false);
 
-      const successMsg = t('applyTemplateSuccessAlert')
+      const successMsg = (t('applyTemplateSuccessAlert') || 'Applied "{title}" starting from {date} to your Meal Planner!')
         .replace('{title}', selectedTemplate.title)
         .replace('{date}', applyStartDate);
       alert(successMsg);
       router.push('/planner');
     } catch (e) {
       console.error('Failed to apply template', e);
-      alert(t('applyTemplateErrorAlert'));
+      alert(t('applyTemplateErrorAlert') || 'Failed to apply template. Please try again.');
     }
   };
 
@@ -36653,22 +39420,22 @@ export default function TemplatesPage() {
 
   const translateDayLabel = (label: string) => {
     const l = label.toLowerCase();
-    if (l === 'monday') return t('monday');
-    if (l === 'tuesday') return t('tuesday');
-    if (l === 'wednesday') return t('wednesday');
-    if (l === 'thursday') return t('thursday');
-    if (l === 'friday') return t('friday');
-    if (l === 'saturday') return t('saturday');
-    if (l === 'sunday') return t('sunday');
+    if (l === 'monday') return t('monday') || 'Monday';
+    if (l === 'tuesday') return t('tuesday') || 'Tuesday';
+    if (l === 'wednesday') return t('wednesday') || 'Wednesday';
+    if (l === 'thursday') return t('thursday') || 'Thursday';
+    if (l === 'friday') return t('friday') || 'Friday';
+    if (l === 'saturday') return t('saturday') || 'Saturday';
+    if (l === 'sunday') return t('sunday') || 'Sunday';
     return label;
   };
 
   const translateMealType = (mType: string) => {
     const mt = mType.toLowerCase();
-    if (mt === 'breakfast') return t('breakfast');
-    if (mt === 'lunch') return t('lunch');
-    if (mt === 'dinner') return t('dinner');
-    if (mt === 'snack') return t('snack');
+    if (mt === 'breakfast') return t('breakfast') || 'Breakfast';
+    if (mt === 'lunch') return t('lunch') || 'Lunch';
+    if (mt === 'dinner') return t('dinner') || 'Dinner';
+    if (mt === 'snack') return t('snack') || 'Snack';
     return mType;
   };
 
@@ -36681,10 +39448,10 @@ export default function TemplatesPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2">
         <div className="space-y-1">
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('mealPlanTemplatesTitle')}
+            {t('mealPlanTemplatesTitle') || 'Meal Plan Templates'}
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {currentUser ? `${currentUser.name}'s templates: ` : ''}{t('templatesSubtitle')}
+            {currentUser ? `${currentUser.name}'s templates: ` : ''}{t('templatesSubtitle') || 'Save reusable weekly meal blueprints and apply them to any calendar week in 1-click'}
           </p>
         </div>
 
@@ -36695,7 +39462,7 @@ export default function TemplatesPage() {
           onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
           onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
         >
-          <Plus className="h-4 w-4" /> {t('createTemplateBtn')}
+          <Plus className="h-4 w-4" /> {t('createTemplateBtn') || 'Create Template'}
         </button>
       </div>
 
@@ -36716,7 +39483,7 @@ export default function TemplatesPage() {
             />
             <input
               type="text"
-              placeholder={t('searchTemplatesPlaceholder')}
+              placeholder={t('searchTemplatesPlaceholder') || 'Search templates by title...'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition"
@@ -36733,7 +39500,7 @@ export default function TemplatesPage() {
           <div className="space-y-2.5 max-h-[600px] overflow-y-auto pr-1">
             {filteredTemplates.length === 0 ? (
               <div className="text-center py-12 text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('noTemplatesFound')}
+                {t('noTemplatesFound') || 'No templates found.'}
               </div>
             ) : (
               filteredTemplates.map((template) => {
@@ -36758,13 +39525,13 @@ export default function TemplatesPage() {
                         {template.title}
                       </h3>
                       <p className="text-[11px] line-clamp-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                        {template.description || t('noDescriptionProvided')}
+                        {template.description || (t('noDescriptionProvided') || 'No description')}
                       </p>
                       <span 
                         className="text-[10px] font-semibold block pt-0.5"
                         style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
                       >
-                        {template.days.length} {t('activeDaysSuffix')} • {totalMeals} {t('mealsSuffix')}
+                        {template.days.length} {t('activeDaysSuffix') || 'days'} • {totalMeals} {t('mealsSuffix') || 'meals'}
                       </span>
                     </div>
                     <LayoutTemplate 
@@ -36797,7 +39564,7 @@ export default function TemplatesPage() {
                     {selectedTemplate.title}
                   </h2>
                   <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {selectedTemplate.description || t('noDescriptionProvided')}
+                    {selectedTemplate.description || (t('noDescriptionProvided') || 'No description')}
                   </p>
                 </div>
 
@@ -36812,7 +39579,7 @@ export default function TemplatesPage() {
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                     onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                   >
-                    <CalendarIcon className="h-4 w-4" /> {t('applyToCalendarBtn')}
+                    <CalendarIcon className="h-4 w-4" /> {t('applyToCalendarBtn') || 'Apply to Calendar'}
                   </button>
                   <button
                     onClick={() => openEditModal(selectedTemplate)}
@@ -36822,7 +39589,7 @@ export default function TemplatesPage() {
                       borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#cbd5e1'
                     }}
-                    title={t('editTemplateTooltip')}
+                    title={t('editTemplateTooltip') || 'Edit Template'}
                   >
                     <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
                   </button>
@@ -36834,7 +39601,7 @@ export default function TemplatesPage() {
                       borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#64748b' : '#94a3b8'
                     }}
-                    title={t('deleteTemplateTooltip')}
+                    title={t('deleteTemplateTooltip') || 'Delete Template'}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -36844,11 +39611,11 @@ export default function TemplatesPage() {
               {/* Template Days List */}
               <div className="space-y-4">
                 <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('weeklyScheduleBlueprint')}
+                  {t('weeklyScheduleBlueprint') || 'Weekly Schedule Blueprint'}
                 </h3>
 
                 {selectedTemplate.days.length === 0 ? (
-                  <p className="text-xs italic" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('noMealsConfigured')}</p>
+                  <p className="text-xs italic" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('noMealsConfigured') || 'No meals scheduled in this template.'}</p>
                 ) : (
                   selectedTemplate.days.map((day) => (
                     <div 
@@ -36870,7 +39637,7 @@ export default function TemplatesPage() {
                           {translateDayLabel(day.dayLabel)}
                         </span>
                         <span className="text-[11px] font-semibold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                          {day.meals.length} {t('mealScheduledSuffix')}
+                          {day.meals.length} {t('mealScheduledSuffix') || 'meal(s)'}
                         </span>
                       </div>
 
@@ -36922,10 +39689,10 @@ export default function TemplatesPage() {
             <div className="py-24 text-center space-y-3">
               <ChefHat className="h-12 w-12 mx-auto" style={{ color: isDayMode ? '#94a3b8' : '#475569' }} />
               <h3 className="text-base font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                {t('noTemplateSelected')}
+                {t('noTemplateSelected') || 'No Template Selected'}
               </h3>
               <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('noTemplateSelectedDesc')}
+                {t('noTemplateSelectedDesc') || 'Select a meal plan template from the list on the left to view, edit, or apply it to your calendar.'}
               </p>
             </div>
           )}
@@ -36960,18 +39727,18 @@ export default function TemplatesPage() {
 
             <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
               <LayoutTemplate className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} /> 
-              {editingTemplateId ? t('editMealTemplateTitle') : t('createMealTemplateTitle')}
+              {editingTemplateId ? (t('editMealTemplateTitle') || 'Edit Meal Template') : (t('createMealTemplateTitle') || 'Create Meal Template')}
             </h2>
 
             <form onSubmit={handleSaveTemplate} className="space-y-4">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
-                  {t('templateTitleLabel')}
+                  {t('templateTitleLabel') || 'Template Title *'}
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder={t('templateTitlePlaceholder')}
+                  placeholder={t('templateTitlePlaceholder') || 'e.g. Clean Eating Week'}
                   value={templateTitle}
                   onChange={(e) => setTemplateTitle(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
@@ -36987,11 +39754,11 @@ export default function TemplatesPage() {
 
               <div>
                 <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
-                  {t('templateDescLabel')}
+                  {t('templateDescLabel') || 'Description'}
                 </label>
                 <input
                   type="text"
-                  placeholder={t('templateDescPlaceholder')}
+                  placeholder={t('templateDescPlaceholder') || 'e.g. Healthy macro-balanced meals for high energy'}
                   value={templateDescription}
                   onChange={(e) => setTemplateDescription(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
@@ -37011,7 +39778,7 @@ export default function TemplatesPage() {
                   className="block text-xs font-bold uppercase tracking-wider"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('configureDaysMeals')}
+                  {t('configureDaysMeals') || 'Configure Days & Scheduled Meals'}
                 </label>
 
                 {modalDays.map((d) => (
@@ -37033,13 +39800,13 @@ export default function TemplatesPage() {
                         className="font-bold text-xs flex items-center gap-1 cursor-pointer"
                         style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
                       >
-                        <Plus className="h-3.5 w-3.5" /> {t('addMealBtn')}
+                        <Plus className="h-3.5 w-3.5" /> {t('addMealBtn') || 'Add Meal'}
                       </button>
                     </div>
 
                     {d.meals.length === 0 ? (
                       <p className="text-[11px] italic" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                        {t('noMealsScheduled')}
+                        {t('noMealsScheduled') || 'No meals scheduled for this day'}
                       </p>
                     ) : (
                       <div className="space-y-1.5">
@@ -37122,7 +39889,7 @@ export default function TemplatesPage() {
                     color: isDayMode ? '#475569' : '#cbd5e1'
                   }}
                 >
-                  {t('cancel')}
+                  {t('cancel') || 'Cancel'}
                 </button>
                 <button
                   type="submit"
@@ -37131,7 +39898,7 @@ export default function TemplatesPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
-                  {t('saveTemplateBtn')}
+                  {t('saveTemplateBtn') || 'Save Template'}
                 </button>
               </div>
             </form>
@@ -37171,10 +39938,10 @@ export default function TemplatesPage() {
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
                 <Edit3 className="h-4 w-4" />
-                {editingMealSubId ? t('editMealTitle') : t('addMealTitle')} for {translateDayLabel(DEFAULT_DAYS[targetDayIndex])}
+                {editingMealSubId ? (t('editMealTitle') || 'Edit Meal') : (t('addMealTitle') || 'Add Meal')} for {translateDayLabel(DEFAULT_DAYS[targetDayIndex])}
               </h2>
               <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('selectRecipeModalSub')}
+                {t('selectRecipeModalSub') || 'Choose from your saved recipe library'}
               </p>
             </div>
 
@@ -37184,7 +39951,7 @@ export default function TemplatesPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('mealTypeLabel')}
+                  {t('mealTypeLabel') || 'Meal Type'}
                 </label>
                 <div className="relative">
                   <select
@@ -37197,10 +39964,10 @@ export default function TemplatesPage() {
                       color: isDayMode ? '#0f172a' : '#cbd5e1'
                     }}
                   >
-                    <option value="Breakfast" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('breakfast')}</option>
-                    <option value="Lunch" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('lunch')}</option>
-                    <option value="Dinner" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('dinner')}</option>
-                    <option value="Snack" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('snack')}</option>
+                    <option value="Breakfast" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('breakfast') || 'Breakfast'}</option>
+                    <option value="Lunch" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('lunch') || 'Lunch'}</option>
+                    <option value="Dinner" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('dinner') || 'Dinner'}</option>
+                    <option value="Snack" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('snack') || 'Snack'}</option>
                   </select>
                   <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
                 </div>
@@ -37211,7 +39978,7 @@ export default function TemplatesPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('timeLabel')}
+                  {t('timeLabel') || 'Time'}
                 </label>
                 <div className="relative flex items-center">
                   <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
@@ -37238,7 +40005,7 @@ export default function TemplatesPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('recipeLabel')}
+                  {t('recipeLabel') || 'Recipe'}
                 </label>
                 {subSelectedRecipe ? (
                   <div 
@@ -37265,7 +40032,7 @@ export default function TemplatesPage() {
                       className="text-[11px] hover:underline font-bold shrink-0 ml-2 cursor-pointer"
                       style={{ color: 'var(--color-primary, #E05638)' }}
                     >
-                      {t('changeBtn')}
+                      {t('changeBtn') || 'Change'}
                     </button>
                   </div>
                 ) : (
@@ -37279,7 +40046,7 @@ export default function TemplatesPage() {
                       color: 'var(--color-primary, #E05638)'
                     }}
                   >
-                    <Plus className="h-4 w-4" /> {t('selectRecipeBtn')}
+                    <Plus className="h-4 w-4" /> {t('selectRecipeBtn') || 'Select Recipe'}
                   </button>
                 )}
               </div>
@@ -37295,7 +40062,7 @@ export default function TemplatesPage() {
                     color: 'var(--color-primary, #E05638)'
                   }}
                 >
-                  {t('cancel')}
+                  {t('cancel') || 'Cancel'}
                 </button>
                 <button
                   type="submit"
@@ -37304,7 +40071,7 @@ export default function TemplatesPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
-                  {editingMealSubId ? t('saveChanges') : t('addMealBtn')}
+                  {editingMealSubId ? (t('saveChanges') || 'Save Changes') : (t('addMealBtn') || 'Add Meal')}
                 </button>
               </div>
             </form>
@@ -37344,10 +40111,10 @@ export default function TemplatesPage() {
                   className="text-lg font-black tracking-tight"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('selectRecipeModalTitle')}
+                  {t('selectRecipeModalTitle') || 'Select a Recipe'}
                 </h2>
                 <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('selectRecipeModalSub')}
+                  {t('selectRecipeModalSub') || 'Choose from your saved recipe library'}
                 </p>
               </div>
 
@@ -37357,7 +40124,7 @@ export default function TemplatesPage() {
                     <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
                     <input
                       type="text"
-                      placeholder={t('searchByNamePlaceholder')}
+                      placeholder={t('searchByNamePlaceholder') || 'Search recipes by name...'}
                       value={recipeSearch}
                       onChange={(e) => setRecipeSearch(e.target.value)}
                       className="w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none"
@@ -37380,7 +40147,7 @@ export default function TemplatesPage() {
                         color: 'var(--color-primary, #E05638)'
                       }}
                     >
-                      <option value="All Books" style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allBooksOption')}</option>
+                      <option value="All Books" style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allBooksOption') || 'All Books'}</option>
                       {userFilteredBooks.map((b) => (
                         <option key={b.id} value={b.id} style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{b.title}</option>
                       ))}
@@ -37398,7 +40165,7 @@ export default function TemplatesPage() {
                       color: 'var(--color-primary, #E05638)'
                     }}
                   >
-                    <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('filterBtn')}
+                    <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('filterBtn') || 'Filter'}
                   </button>
                 </div>
 
@@ -37406,9 +40173,9 @@ export default function TemplatesPage() {
                   <div className="flex flex-wrap gap-1.5 pt-1 animate-in fade-in">
                     {[
                       { key: 'All', label: 'All' },
-                      { key: 'Favorites', label: t('favoritesTag') },
-                      { key: 'Main Dish', label: t('mainDishTag') },
-                      { key: 'Imported', label: t('importedTag') }
+                      { key: 'Favorites', label: t('favoritesTag') || 'Favorites' },
+                      { key: 'Main Dish', label: t('mainDishTag') || 'Main Dish' },
+                      { key: 'Imported', label: t('importedTag') || 'Imported' }
                     ].map((tag) => (
                       <button
                         key={tag.key}
@@ -37435,7 +40202,7 @@ export default function TemplatesPage() {
               <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                 {filteredPickerRecipes.length === 0 ? (
                   <div className="py-12 text-center text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {t('noRecipesMatchCriteria')}
+                    {t('noRecipesMatchCriteria') || 'No recipes match your criteria.'}
                   </div>
                 ) : (
                   filteredPickerRecipes.map((rec) => {
@@ -37491,7 +40258,7 @@ export default function TemplatesPage() {
                             color: 'var(--color-primary, #E05638)'
                           }}
                         >
-                          {t('selectBtn')}
+                          {t('selectBtn') || 'Select'}
                         </button>
                       </div>
                     );
@@ -37504,7 +40271,7 @@ export default function TemplatesPage() {
               className="text-center py-2 text-xs font-semibold"
               style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }}
             >
-              {t('showing')} {filteredPickerRecipes.length} {t('of')} {savedRecipes.length} {t('resultsSuffix')}
+              {t('showing') || 'Showing'} {filteredPickerRecipes.length} {t('of') || 'of'} {savedRecipes.length} {t('resultsSuffix') || 'results'}
             </div>
           </div>
         </div>
@@ -37541,10 +40308,10 @@ export default function TemplatesPage() {
                 className="text-xl font-black tracking-tight"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                {t('applyTemplateModalTitle')}
+                {t('applyTemplateModalTitle') || 'Apply Template to Plan'}
               </h2>
               <p className="text-xs leading-snug" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('applyTemplateModalSub')}
+                {t('applyTemplateModalSub') || 'Choose a start date. The template meals will be scheduled into your Meal Planner starting on that date.'}
               </p>
             </div>
 
@@ -37566,7 +40333,7 @@ export default function TemplatesPage() {
                   className="block text-xs font-bold"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('startDateLabel')}
+                  {t('startDateLabel') || 'Start Date (Day 1)'}
                 </label>
                 <div className="relative flex items-center">
                   <input
@@ -37603,7 +40370,7 @@ export default function TemplatesPage() {
                     color: 'var(--color-primary, #E05638)'
                   }}
                 >
-                  {t('cancel')}
+                  {t('cancel') || 'Cancel'}
                 </button>
                 <button
                   type="submit"
@@ -37612,7 +40379,7 @@ export default function TemplatesPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
-                  {t('applyBtn')}
+                  {t('applyBtn') || 'Apply to Planner'}
                 </button>
               </div>
             </form>
@@ -40868,22 +43635,26 @@ export default function GlobalThemeSync() {
 
     const handleThemeUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      if (detail && !detail.mode) {
+      if (detail && typeof detail === 'object' && !('mode' in detail)) {
         applyThemeToDocument(detail);
       } else {
-        applyThemeToDocument();
+        fetchAndApplyServerTheme();
       }
     };
 
+    const handleModeUpdate = () => {
+      applyThemeToDocument();
+    };
+
     window.addEventListener('zecratary_theme_updated', handleThemeUpdate);
-    window.addEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
     window.addEventListener('zecratary_theme_changed', handleThemeUpdate);
+    window.addEventListener('zecratary_theme_mode_changed', handleModeUpdate);
     window.addEventListener('storage', handleThemeUpdate);
 
     return () => {
       window.removeEventListener('zecratary_theme_updated', handleThemeUpdate);
-      window.removeEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
       window.removeEventListener('zecratary_theme_changed', handleThemeUpdate);
+      window.removeEventListener('zecratary_theme_mode_changed', handleModeUpdate);
       window.removeEventListener('storage', handleThemeUpdate);
     };
   }, []);
@@ -40895,8 +43666,7 @@ export default function GlobalThemeSync() {
 
 ## File: `apps/web/src/lib/themeConfig.ts`
 ```typescript
-// Global Server-Backed Theme Engine & Mode Controller
-
+// Global Server-Backed Theme Engine & Memory Store
 export interface ThemeColors {
   primary?: string;
   primaryColor?: string;
@@ -40909,15 +43679,18 @@ export interface ThemeColors {
   backgroundColor?: string;
   backgroundDark?: string;
   cardBackground?: string;
+  cardDark?: string;
   cardBorder?: string;
+  borderColor?: string;
   textSecondary?: string;
+  textColor?: string;
 }
 
 let memoryThemeColors: ThemeColors | null = null;
 
 export function setMemoryThemeColors(colors: ThemeColors | null | undefined): void {
-  if (colors) {
-    memoryThemeColors = { ...colors };
+  if (colors && Object.keys(colors).length > 0) {
+    memoryThemeColors = { ...(memoryThemeColors || {}), ...colors };
   }
 }
 
@@ -40927,78 +43700,117 @@ export function getMemoryThemeColors(): ThemeColors | null {
 
 export function getEffectiveThemeMode(): 'light' | 'dark' {
   if (typeof window === 'undefined') return 'dark';
-  const saved = localStorage.getItem('zecratary_theme_mode');
-  return (saved === 'light' || saved === 'day') ? 'light' : 'dark';
+  try {
+    const mode = localStorage.getItem('zecratary_theme_mode');
+    if (mode === 'light' || mode === 'day') return 'light';
+    if (mode === 'dark') return 'dark';
+  } catch (_) {}
+  if (typeof document !== 'undefined') {
+    if (document.documentElement.classList.contains('light')) return 'light';
+    if (document.documentElement.classList.contains('dark')) return 'dark';
+  }
+  return 'dark';
 }
 
 export function applyThemeToDocument(colors?: ThemeColors | null): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const mode = getEffectiveThemeMode();
-  const isDayMode = mode === 'light';
+  const isDayMode = getEffectiveThemeMode() === 'light';
 
-  let activeColors = colors || memoryThemeColors;
+  let activeColors = (colors && Object.keys(colors).length > 0) ? colors : memoryThemeColors;
   if (!activeColors && typeof window !== 'undefined') {
     try {
-      const cached = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      if (cached) activeColors = JSON.parse(cached);
+      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      if (stored) activeColors = JSON.parse(stored);
     } catch (_) {}
   }
 
-  const p = activeColors?.primary || activeColors?.primaryColor || '#E05638';
-  const ph = activeColors?.primaryHover || '#c94529';
-  const ac = activeColors?.accentEmerald || activeColors?.accentColor || activeColors?.accent || '#10b981';
-  const sbi = activeColors?.sidebarIconColor || activeColors?.sidebarIcon || ac;
-  const bg = activeColors?.backgroundColor || activeColors?.backgroundDark || '#070b13';
-  const card = activeColors?.cardBackground || '#0b0f17';
-  const border = activeColors?.cardBorder || '#1e293b';
-  const textSec = activeColors?.textSecondary || '#94a3b8';
+  if (activeColors) {
+    setMemoryThemeColors(activeColors);
+    const p = activeColors.primary || activeColors.primaryColor || '#E05638';
+    const ph = activeColors.primaryHover || '#c94529';
+    const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
+    const sbi = activeColors.sidebarIconColor || activeColors.sidebarIcon || ac;
+    const bg = activeColors.backgroundColor || activeColors.backgroundDark || '#070b13';
+    const card = activeColors.cardBackground || activeColors.cardDark || '#0b0f17';
+    const border = activeColors.cardBorder || activeColors.borderColor || '#1e293b';
+    const textSec = activeColors.textSecondary || '#94a3b8';
+    const txt = activeColors.textColor || '#ffffff';
 
-  root.style.setProperty('--color-primary', p);
-  root.style.setProperty('--color-primary-hover', ph);
-  root.style.setProperty('--color-accent', ac);
-  root.style.setProperty('--color-emerald', ac);
-  root.style.setProperty('--color-sidebar-icon', sbi);
+    root.style.setProperty('--color-primary', p);
+    root.style.setProperty('--color-primary-hover', ph);
+    root.style.setProperty('--color-accent', ac);
+    root.style.setProperty('--color-emerald', ac);
+    root.style.setProperty('--color-sidebar-icon', sbi);
 
-  if (isDayMode) {
-    root.classList.remove('dark');
-    root.classList.add('light');
-    root.style.setProperty('--color-bg', '#f8fafc');
-    root.style.setProperty('--color-bg-dark', '#f8fafc');
-    root.style.setProperty('--color-card', '#ffffff');
-    root.style.setProperty('--color-card-dark', '#ffffff');
-    root.style.setProperty('--color-border', '#e2e8f0');
-    root.style.setProperty('--color-border-dark', '#e2e8f0');
-    root.style.setProperty('--color-text', '#0f172a');
-    root.style.setProperty('--color-text-secondary', '#64748b');
-    if (document.body) {
-      document.body.style.backgroundColor = '#f8fafc';
-      document.body.style.color = '#0f172a';
+    if (isDayMode) {
+      root.classList.remove('dark');
+      root.classList.add('light');
+      root.style.setProperty('--color-bg', '#f8fafc');
+      root.style.setProperty('--color-background', '#f8fafc');
+      root.style.setProperty('--color-bg-dark', '#f8fafc');
+      root.style.setProperty('--color-card', '#ffffff');
+      root.style.setProperty('--color-card-dark', '#ffffff');
+      root.style.setProperty('--color-inner-dark', '#f1f5f9');
+      root.style.setProperty('--color-border', '#e2e8f0');
+      root.style.setProperty('--color-border-dark', '#e2e8f0');
+      root.style.setProperty('--color-text', '#0f172a');
+      root.style.setProperty('--color-text-secondary', '#64748b');
+      if (document.body) {
+        document.body.style.backgroundColor = '#f8fafc';
+        document.body.style.color = '#0f172a';
+        document.body.style.transition = 'background-color 200ms ease, color 200ms ease';
+      }
+    } else {
+      root.classList.remove('light');
+      root.classList.add('dark');
+      root.style.setProperty('--color-bg', bg);
+      root.style.setProperty('--color-background', bg);
+      root.style.setProperty('--color-bg-dark', bg);
+      root.style.setProperty('--color-card', card);
+      root.style.setProperty('--color-card-dark', card);
+      root.style.setProperty('--color-inner-dark', '#070b13');
+      root.style.setProperty('--color-border', border);
+      root.style.setProperty('--color-border-dark', border);
+      root.style.setProperty('--color-text', txt);
+      root.style.setProperty('--color-text-secondary', textSec);
+      if (document.body) {
+        document.body.style.backgroundColor = bg;
+        document.body.style.color = txt;
+        document.body.style.transition = 'background-color 200ms ease, color 200ms ease';
+      }
     }
   } else {
-    root.classList.remove('light');
-    root.classList.add('dark');
-    root.style.setProperty('--color-bg', bg);
-    root.style.setProperty('--color-bg-dark', bg);
-    root.style.setProperty('--color-card', card);
-    root.style.setProperty('--color-card-dark', card);
-    root.style.setProperty('--color-border', border);
-    root.style.setProperty('--color-border-dark', border);
-    root.style.setProperty('--color-text', '#ffffff');
-    root.style.setProperty('--color-text-secondary', textSec);
-    if (document.body) {
-      document.body.style.backgroundColor = bg;
-      document.body.style.color = '#ffffff';
+    if (isDayMode) {
+      root.classList.remove('dark');
+      root.classList.add('light');
+      root.style.setProperty('--color-bg', '#f8fafc');
+      root.style.setProperty('--color-card', '#ffffff');
+      root.style.setProperty('--color-border', '#e2e8f0');
+      root.style.setProperty('--color-text', '#0f172a');
+      if (document.body) {
+        document.body.style.backgroundColor = '#f8fafc';
+        document.body.style.color = '#0f172a';
+      }
+    } else {
+      root.classList.remove('light');
+      root.classList.add('dark');
+      if (document.body) {
+        document.body.style.backgroundColor = '#070b13';
+        document.body.style.color = '#ffffff';
+      }
     }
   }
 }
 
 export function setThemeMode(mode: 'light' | 'dark'): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem('zecratary_theme_mode', mode);
+  try {
+    localStorage.setItem('zecratary_theme_mode', mode);
+  } catch (_) {}
   applyThemeToDocument();
   window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode } }));
-  window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: memoryThemeColors }));
+  window.dispatchEvent(new Event('zecratary_theme_changed'));
   window.dispatchEvent(new Event('storage'));
 }
 
@@ -41014,21 +43826,26 @@ export async function saveThemeColors(colors: ThemeColors): Promise<void> {
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
-      localStorage.setItem('zecratary_theme_config', JSON.stringify(colors));
     } catch (_) {}
-  }
-  applyThemeToDocument(colors);
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zecratary_theme_changed', { detail: colors }));
+    applyThemeToDocument(colors);
     window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
+    window.dispatchEvent(new Event('zecratary_theme_changed'));
     window.dispatchEvent(new Event('storage'));
   }
+
+  try {
+    await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeColors: colors })
+    });
+  } catch (_) {}
 
   try {
     await fetch('/api/user/theme', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ colors })
+      body: JSON.stringify({ themeColors: colors })
     });
   } catch (_) {}
 }
@@ -41036,24 +43853,25 @@ export async function saveThemeColors(colors: ThemeColors): Promise<void> {
 export async function fetchAndApplyServerTheme(): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
-    const res = await fetch('/api/user/theme', { cache: 'no-store' });
+    const res = await fetch('/api/admin/settings', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
-        setMemoryThemeColors(data.themeColors);
-        applyThemeToDocument(data.themeColors);
+      const theme = data?.themeColors || data?.settings?.themeColors;
+      if (theme && Object.keys(theme).length > 0) {
+        setMemoryThemeColors(theme);
+        applyThemeToDocument(theme);
         return;
       }
     }
   } catch (_) {}
 
   try {
-    const res2 = await fetch('/api/system-settings', { cache: 'no-store' });
-    if (res2.ok) {
-      const data2 = await res2.json();
-      if (data2?.themeColors) {
-        setMemoryThemeColors(data2.themeColors);
-        applyThemeToDocument(data2.themeColors);
+    const uRes = await fetch('/api/user/theme', { cache: 'no-store' });
+    if (uRes.ok) {
+      const uData = await uRes.json();
+      if (uData?.themeColors && Object.keys(uData.themeColors).length > 0) {
+        setMemoryThemeColors(uData.themeColors);
+        applyThemeToDocument(uData.themeColors);
       }
     }
   } catch (_) {}
