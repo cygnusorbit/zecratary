@@ -1,3 +1,4 @@
+import GlobalThemeSync from '@/components/GlobalThemeSync';
 import { LanguageProvider } from '@/components/LanguageProvider';
 import './globals.css';
 import { ThemeInitializer } from '@/lib/theme';
@@ -16,6 +17,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="min-h-screen flex flex-col md:flex-row bg-[var(--color-bg)] text-slate-100 font-sans antialiased">
+        <GlobalThemeSync />
         <LanguageProvider>
           <ThemeInitializer />
         <Sidebar />

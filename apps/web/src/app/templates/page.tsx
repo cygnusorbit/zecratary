@@ -86,7 +86,7 @@ export default function TemplatesPage() {
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [applyStartDate, setApplyStartDate] = useState<string>(() => formatDateKey(new Date()));
 
-  // Dynamic Theme Synchronization & Color Inversion
+  // Dynamic Theme Synchronization
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -132,7 +132,7 @@ export default function TemplatesPage() {
           document.body.style.backgroundColor = '';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -153,132 +153,191 @@ export default function TemplatesPage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadSavedData = useCallback((user: User | null) => {
+  // Load saved recipes & books from PostgreSQL with localStorage fallback
+  const loadSavedData = useCallback(async (user: User | null) => {
     if (typeof window === 'undefined') return;
+    const activeUserId = user?.id || 'usr_admin_1';
+
+    let liveRecipes: any[] = [];
     try {
-      const raw = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const userSpecific = user 
-            ? parsed.filter((r: any) => !r.userId || r.userId === user.id || r.createdBy === user.email)
-            : parsed;
-
-          const uniqueRecipes: any[] = [];
-          const seenIds = new Set();
-
-          userSpecific.forEach((rec: any) => {
-            const id = rec.id || rec.title || rec.name;
-            if (id && !seenIds.has(id)) {
-              seenIds.add(id);
-              uniqueRecipes.push({
-                id: rec.id || id,
-                name: rec.title || rec.name || 'Untitled Recipe',
-                title: rec.title || rec.name || 'Untitled Recipe',
-                category: rec.tags?.[0] || rec.recipeType || rec.category || 'Main Dish',
-                isFavorite: Boolean(rec.isFavorite),
-                bookId: rec.bookId || null,
-                image: rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
-                imageUrl: rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
-              });
-            }
-          });
-
-          setSavedRecipes(uniqueRecipes);
-        }
+      const rRes = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      if (rRes.ok) {
+        const rData = await rRes.json();
+        if (Array.isArray(rData.recipes)) liveRecipes = rData.recipes;
       }
+    } catch (_) {}
 
-      const rawBooks = localStorage.getItem('zecratary_recipe_books');
-      if (rawBooks) {
-        const parsedBooks = JSON.parse(rawBooks);
-        if (Array.isArray(parsedBooks)) {
-          const userBooks = user
-            ? parsedBooks.filter((b: any) => !b.userId || b.userId === user.id || b.createdBy === user.email)
-            : parsedBooks;
-          setBooks(userBooks);
+    if (liveRecipes.length === 0) {
+      try {
+        const raw = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) liveRecipes = parsed;
         }
-      }
-    } catch (e) {
-      console.error('Failed to load saved data in templates', e);
+      } catch (_) {}
     }
+
+    const uniqueRecipes: any[] = [];
+    const seenIds = new Set();
+    liveRecipes.forEach((rec: any) => {
+      const id = rec.id || rec.title || rec.name;
+      if (id && !seenIds.has(id)) {
+        seenIds.add(id);
+        uniqueRecipes.push({
+          id: rec.id || id,
+          name: rec.title || rec.name || 'Untitled Recipe',
+          title: rec.title || rec.name || 'Untitled Recipe',
+          category: rec.tags?.[0] || rec.recipeType || rec.category || 'Main Dish',
+          isFavorite: Boolean(rec.isFavorite || rec.is_favorite),
+          bookId: rec.bookId || rec.book_id || null,
+          image: rec.imageUrl || rec.image || rec.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
+          imageUrl: rec.imageUrl || rec.image || rec.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
+        });
+      }
+    });
+    setSavedRecipes(uniqueRecipes);
+
+    let liveBooks: any[] = [];
+    try {
+      const bRes = await fetch(`/api/books?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      if (bRes.ok) {
+        const bData = await bRes.json();
+        if (Array.isArray(bData.books)) liveBooks = bData.books;
+      }
+    } catch (_) {}
+
+    if (liveBooks.length === 0) {
+      try {
+        const rawBooks = localStorage.getItem('zecratary_recipe_books');
+        if (rawBooks) {
+          const parsedBooks = JSON.parse(rawBooks);
+          if (Array.isArray(parsedBooks)) liveBooks = parsedBooks;
+        }
+      } catch (_) {}
+    }
+    setBooks(liveBooks);
   }, []);
 
-  const loadTemplates = useCallback((user: User | null) => {
-    if (typeof window === 'undefined') return;
-    try {
-      const local = localStorage.getItem('zecratary_meal_templates');
-      let allTemplates: MealPlanTemplate[] = local ? JSON.parse(local) : [];
+  // Load templates strictly from PostgreSQL without resurrection loop
+  const loadTemplates = useCallback(async (user: User | null) => {
+    if (!user) return;
+    const activeUserId = user.id || 'usr_admin_1';
 
-      if (!Array.isArray(allTemplates) || allTemplates.length === 0) {
-        allTemplates = [
+    let loadedTemplates: MealPlanTemplate[] = [];
+    let fetchSucceeded = false;
+
+    // 1. Fetch live from PostgreSQL
+    try {
+      const res = await fetch(`/api/templates?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.templates)) {
+          loadedTemplates = data.templates;
+          fetchSucceeded = true;
+        }
+      }
+    } catch (_) {}
+
+    const isInitialized = typeof window !== 'undefined' ? localStorage.getItem('zecratary_templates_initialized') === 'true' : false;
+
+    // 2. Local fallback if offline
+    if (!fetchSucceeded && typeof window !== 'undefined') {
+      try {
+        const local = localStorage.getItem('zecratary_meal_templates');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed)) loadedTemplates = parsed;
+        }
+      } catch (_) {}
+    }
+
+    // 3. First-time seed ONLY if never initialized and PostgreSQL returned 0 rows
+    if (!isInitialized && loadedTemplates.length === 0) {
+      const starterTemplate: MealPlanTemplate = {
+        id: 'tpl_1_' + (user ? user.id : 'default'),
+        userId: user?.id,
+        createdBy: user?.email,
+        title: 'Weekly Schedule',
+        description: 'Weekly schedule template with ready-to-plan recipes.',
+        createdAt: new Date().toISOString(),
+        days: [
           {
-            id: 'tpl_1_' + (user ? user.id : 'default'),
-            userId: user?.id,
-            createdBy: user?.email,
-            title: 'Template',
-            description: 'Weekly schedule template with ready-to-plan recipes.',
-            createdAt: new Date().toISOString(),
-            days: [
-              {
-                dayIndex: 0,
-                dayLabel: 'Monday',
-                meals: [
-                  { 
-                    id: 'tm_1', 
-                    mealType: 'Dinner', 
-                    recipeName: 'Caesar Salad Recipe', 
-                    time: '19:00',
-                    image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=800&q=80'
-                  }
-                ]
-              },
-              {
-                dayIndex: 2,
-                dayLabel: 'Wednesday',
-                meals: [
-                  { 
-                    id: 'tm_2', 
-                    mealType: 'Dinner', 
-                    recipeName: 'Authentic Pad Thai Recipe', 
-                    time: '19:30',
-                    image: 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'
-                  }
-                ]
-              },
-              {
-                dayIndex: 4,
-                dayLabel: 'Friday',
-                meals: [
-                  { 
-                    id: 'tm_3', 
-                    mealType: 'Dinner', 
-                    recipeName: 'Singapore Style Bak Kut Teh', 
-                    time: '20:00',
-                    image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
-                  }
-                ]
+            dayIndex: 0,
+            dayLabel: 'Monday',
+            meals: [
+              { 
+                id: 'tm_1', 
+                mealType: 'Dinner', 
+                recipeName: 'Caesar Salad Recipe', 
+                time: '19:00',
+                image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=800&q=80'
+              }
+            ]
+          },
+          {
+            dayIndex: 2,
+            dayLabel: 'Wednesday',
+            meals: [
+              { 
+                id: 'tm_2', 
+                mealType: 'Dinner', 
+                recipeName: 'Authentic Pad Thai Recipe', 
+                time: '19:30',
+                image: 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'
+              }
+            ]
+          },
+          {
+            dayIndex: 4,
+            dayLabel: 'Friday',
+            meals: [
+              { 
+                id: 'tm_3', 
+                mealType: 'Dinner', 
+                recipeName: 'Singapore Style Bak Kut Teh', 
+                time: '20:00',
+                image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
               }
             ]
           }
-        ];
-        localStorage.setItem('zecratary_meal_templates', JSON.stringify(allTemplates));
+        ]
+      };
+
+      loadedTemplates = [starterTemplate];
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_templates_initialized', 'true');
       }
 
-      const userTemplates = user
-        ? allTemplates.filter(t => !t.userId || t.userId === user.id || t.createdBy === user.email)
-        : allTemplates;
-
-      setTemplates(userTemplates);
-      if (userTemplates.length > 0 && !selectedTemplate) {
-        setSelectedTemplate(userTemplates[0]);
-      }
-    } catch (e) {
-      console.error('Failed to load templates', e);
+      fetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loadedTemplates)
+      }).catch(() => {});
+    } else if (typeof window !== 'undefined') {
+      localStorage.setItem('zecratary_templates_initialized', 'true');
     }
-  }, [selectedTemplate]);
+
+    const userTemplates = user
+      ? loadedTemplates.filter(t => !t.userId || t.userId === user.id || t.createdBy === user.email)
+      : loadedTemplates;
+
+    setTemplates(userTemplates);
+    setSelectedTemplate(prev => {
+      if (prev && userTemplates.some(t => t.id === prev.id)) {
+        return userTemplates.find(t => t.id === prev.id) || null;
+      }
+      return userTemplates.length > 0 ? userTemplates[0] : null;
+    });
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_meal_templates', JSON.stringify(loadedTemplates));
+      } catch (_) {}
+    }
+  }, []);
 
   useEffect(() => {
-    document.title = `${t('mealPlanTemplatesTitle')} - FoodiePrep`;
+    document.title = `${t('mealPlanTemplatesTitle') || 'Meal Plan Templates'} - FoodiePrep`;
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
@@ -295,29 +354,44 @@ export default function TemplatesPage() {
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_templates_updated', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_templates_updated', handleSync);
     };
   }, [loadTemplates, loadSavedData, t, version]);
 
-  const saveTemplatesList = (updatedUserTemplates: MealPlanTemplate[]) => {
+  const saveTemplatesList = async (updatedUserTemplates: MealPlanTemplate[]) => {
+    setTemplates(updatedUserTemplates);
+
     try {
-      const local = localStorage.getItem('zecratary_meal_templates');
-      const allTemplates: MealPlanTemplate[] = local ? JSON.parse(local) : [];
-
-      const otherUsersTemplates = currentUser
-        ? allTemplates.filter(t => t.userId && t.userId !== currentUser.id && t.createdBy !== currentUser.email)
-        : [];
-
-      const merged = [...updatedUserTemplates, ...otherUsersTemplates];
-      localStorage.setItem('zecratary_meal_templates', JSON.stringify(merged));
-      setTemplates(updatedUserTemplates);
-      window.dispatchEvent(new Event('storage'));
+      await fetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUserTemplates)
+      });
     } catch (e) {
-      console.error('Failed to save templates', e);
+      console.error('Failed to save templates to server', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        const local = localStorage.getItem('zecratary_meal_templates');
+        const allTemplates: MealPlanTemplate[] = local ? JSON.parse(local) : [];
+        const otherUsersTemplates = currentUser
+          ? allTemplates.filter(t => t.userId && t.userId !== currentUser.id && t.createdBy !== currentUser.email && !updatedUserTemplates.some(u => u.id === t.id))
+          : [];
+        const merged = [...updatedUserTemplates, ...otherUsersTemplates];
+        localStorage.setItem('zecratary_meal_templates', JSON.stringify(merged));
+        localStorage.setItem('zecratary_templates_initialized', 'true');
+      } catch (_) {}
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_templates_updated'));
     }
   };
 
@@ -379,7 +453,7 @@ export default function TemplatesPage() {
   const handleSaveMealSubModal = (e: React.FormEvent) => {
     e.preventDefault();
     if (targetDayIndex === null || !subSelectedRecipe) {
-      alert(t('selectRecipeAlert'));
+      alert(t('selectRecipeAlert') || 'Please select a recipe for this meal.');
       return;
     }
 
@@ -420,10 +494,10 @@ export default function TemplatesPage() {
     setEditingMealSubId(null);
   };
 
-  const handleSaveTemplate = (e: React.FormEvent) => {
+  const handleSaveTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!templateTitle.trim()) {
-      alert(t('enterTemplateTitleAlert'));
+      alert(t('enterTemplateTitleAlert') || 'Please enter a template title.');
       return;
     }
 
@@ -441,7 +515,7 @@ export default function TemplatesPage() {
         }
         return t;
       });
-      saveTemplatesList(updated);
+      await saveTemplatesList(updated);
       setSelectedTemplate(updated.find(t => t.id === editingTemplateId) || null);
     } else {
       const newTemplate: MealPlanTemplate = {
@@ -454,19 +528,49 @@ export default function TemplatesPage() {
         createdAt: new Date().toISOString()
       };
       const updated = [newTemplate, ...templates];
-      saveTemplatesList(updated);
+      await saveTemplatesList(updated);
       setSelectedTemplate(newTemplate);
     }
 
     setShowModal(false);
   };
 
-  const handleDeleteTemplate = (id: string) => {
-    if (!confirm(t('confirmDeleteTemplatePrompt'))) return;
+  // Permanent Delete Handler
+  const handleDeleteTemplate = async (id: string) => {
+    if (!confirm(t('confirmDeleteTemplatePrompt') || 'Are you sure you want to delete this template?')) return;
+
+    // 1. Optimistically update UI
     const updated = templates.filter(t => t.id !== id);
-    saveTemplatesList(updated);
+    setTemplates(updated);
+
     if (selectedTemplate?.id === id) {
       setSelectedTemplate(updated.length > 0 ? updated[0] : null);
+    }
+
+    // 2. Persist deletion in PostgreSQL
+    try {
+      await fetch(`/api/templates?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+    } catch (e) {
+      console.error('Failed to delete template from database', e);
+    }
+
+    // 3. Clean localStorage & ensure initialization flag is kept so default template does not return
+    if (typeof window !== 'undefined') {
+      try {
+        const local = localStorage.getItem('zecratary_meal_templates');
+        const allTemplates: MealPlanTemplate[] = local ? JSON.parse(local) : [];
+        const remaining = allTemplates.filter(t => t.id !== id);
+        localStorage.setItem('zecratary_meal_templates', JSON.stringify(remaining));
+        localStorage.setItem('zecratary_templates_initialized', 'true');
+      } catch (_) {}
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_templates_updated'));
     }
   };
 
@@ -520,14 +624,14 @@ export default function TemplatesPage() {
       window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
       setShowApplyModal(false);
 
-      const successMsg = t('applyTemplateSuccessAlert')
+      const successMsg = (t('applyTemplateSuccessAlert') || 'Applied "{title}" starting from {date} to your Meal Planner!')
         .replace('{title}', selectedTemplate.title)
         .replace('{date}', applyStartDate);
       alert(successMsg);
       router.push('/planner');
     } catch (e) {
       console.error('Failed to apply template', e);
-      alert(t('applyTemplateErrorAlert'));
+      alert(t('applyTemplateErrorAlert') || 'Failed to apply template. Please try again.');
     }
   };
 
@@ -573,22 +677,22 @@ export default function TemplatesPage() {
 
   const translateDayLabel = (label: string) => {
     const l = label.toLowerCase();
-    if (l === 'monday') return t('monday');
-    if (l === 'tuesday') return t('tuesday');
-    if (l === 'wednesday') return t('wednesday');
-    if (l === 'thursday') return t('thursday');
-    if (l === 'friday') return t('friday');
-    if (l === 'saturday') return t('saturday');
-    if (l === 'sunday') return t('sunday');
+    if (l === 'monday') return t('monday') || 'Monday';
+    if (l === 'tuesday') return t('tuesday') || 'Tuesday';
+    if (l === 'wednesday') return t('wednesday') || 'Wednesday';
+    if (l === 'thursday') return t('thursday') || 'Thursday';
+    if (l === 'friday') return t('friday') || 'Friday';
+    if (l === 'saturday') return t('saturday') || 'Saturday';
+    if (l === 'sunday') return t('sunday') || 'Sunday';
     return label;
   };
 
   const translateMealType = (mType: string) => {
     const mt = mType.toLowerCase();
-    if (mt === 'breakfast') return t('breakfast');
-    if (mt === 'lunch') return t('lunch');
-    if (mt === 'dinner') return t('dinner');
-    if (mt === 'snack') return t('snack');
+    if (mt === 'breakfast') return t('breakfast') || 'Breakfast';
+    if (mt === 'lunch') return t('lunch') || 'Lunch';
+    if (mt === 'dinner') return t('dinner') || 'Dinner';
+    if (mt === 'snack') return t('snack') || 'Snack';
     return mType;
   };
 
@@ -601,10 +705,10 @@ export default function TemplatesPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2">
         <div className="space-y-1">
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('mealPlanTemplatesTitle')}
+            {t('mealPlanTemplatesTitle') || 'Meal Plan Templates'}
           </h1>
           <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {currentUser ? `${currentUser.name}'s templates: ` : ''}{t('templatesSubtitle')}
+            {currentUser ? `${currentUser.name}'s templates: ` : ''}{t('templatesSubtitle') || 'Save reusable weekly meal blueprints and apply them to any calendar week in 1-click'}
           </p>
         </div>
 
@@ -615,7 +719,7 @@ export default function TemplatesPage() {
           onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
           onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
         >
-          <Plus className="h-4 w-4" /> {t('createTemplateBtn')}
+          <Plus className="h-4 w-4" /> {t('createTemplateBtn') || 'Create Template'}
         </button>
       </div>
 
@@ -636,7 +740,7 @@ export default function TemplatesPage() {
             />
             <input
               type="text"
-              placeholder={t('searchTemplatesPlaceholder')}
+              placeholder={t('searchTemplatesPlaceholder') || 'Search templates by title...'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition"
@@ -653,7 +757,7 @@ export default function TemplatesPage() {
           <div className="space-y-2.5 max-h-[600px] overflow-y-auto pr-1">
             {filteredTemplates.length === 0 ? (
               <div className="text-center py-12 text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('noTemplatesFound')}
+                {t('noTemplatesFound') || 'No templates found.'}
               </div>
             ) : (
               filteredTemplates.map((template) => {
@@ -678,13 +782,13 @@ export default function TemplatesPage() {
                         {template.title}
                       </h3>
                       <p className="text-[11px] line-clamp-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                        {template.description || t('noDescriptionProvided')}
+                        {template.description || (t('noDescriptionProvided') || 'No description')}
                       </p>
                       <span 
                         className="text-[10px] font-semibold block pt-0.5"
                         style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
                       >
-                        {template.days.length} {t('activeDaysSuffix')} • {totalMeals} {t('mealsSuffix')}
+                        {template.days.length} {t('activeDaysSuffix') || 'days'} • {totalMeals} {t('mealsSuffix') || 'meals'}
                       </span>
                     </div>
                     <LayoutTemplate 
@@ -717,7 +821,7 @@ export default function TemplatesPage() {
                     {selectedTemplate.title}
                   </h2>
                   <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {selectedTemplate.description || t('noDescriptionProvided')}
+                    {selectedTemplate.description || (t('noDescriptionProvided') || 'No description')}
                   </p>
                 </div>
 
@@ -732,7 +836,7 @@ export default function TemplatesPage() {
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                     onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                   >
-                    <CalendarIcon className="h-4 w-4" /> {t('applyToCalendarBtn')}
+                    <CalendarIcon className="h-4 w-4" /> {t('applyToCalendarBtn') || 'Apply to Calendar'}
                   </button>
                   <button
                     onClick={() => openEditModal(selectedTemplate)}
@@ -742,7 +846,7 @@ export default function TemplatesPage() {
                       borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#cbd5e1'
                     }}
-                    title={t('editTemplateTooltip')}
+                    title={t('editTemplateTooltip') || 'Edit Template'}
                   >
                     <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
                   </button>
@@ -754,7 +858,7 @@ export default function TemplatesPage() {
                       borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#64748b' : '#94a3b8'
                     }}
-                    title={t('deleteTemplateTooltip')}
+                    title={t('deleteTemplateTooltip') || 'Delete Template'}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -764,11 +868,11 @@ export default function TemplatesPage() {
               {/* Template Days List */}
               <div className="space-y-4">
                 <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('weeklyScheduleBlueprint')}
+                  {t('weeklyScheduleBlueprint') || 'Weekly Schedule Blueprint'}
                 </h3>
 
                 {selectedTemplate.days.length === 0 ? (
-                  <p className="text-xs italic" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('noMealsConfigured')}</p>
+                  <p className="text-xs italic" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('noMealsConfigured') || 'No meals scheduled in this template.'}</p>
                 ) : (
                   selectedTemplate.days.map((day) => (
                     <div 
@@ -790,7 +894,7 @@ export default function TemplatesPage() {
                           {translateDayLabel(day.dayLabel)}
                         </span>
                         <span className="text-[11px] font-semibold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                          {day.meals.length} {t('mealScheduledSuffix')}
+                          {day.meals.length} {t('mealScheduledSuffix') || 'meal(s)'}
                         </span>
                       </div>
 
@@ -842,10 +946,10 @@ export default function TemplatesPage() {
             <div className="py-24 text-center space-y-3">
               <ChefHat className="h-12 w-12 mx-auto" style={{ color: isDayMode ? '#94a3b8' : '#475569' }} />
               <h3 className="text-base font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                {t('noTemplateSelected')}
+                {t('noTemplateSelected') || 'No Template Selected'}
               </h3>
               <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('noTemplateSelectedDesc')}
+                {t('noTemplateSelectedDesc') || 'Select a meal plan template from the list on the left to view, edit, or apply it to your calendar.'}
               </p>
             </div>
           )}
@@ -880,18 +984,18 @@ export default function TemplatesPage() {
 
             <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
               <LayoutTemplate className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} /> 
-              {editingTemplateId ? t('editMealTemplateTitle') : t('createMealTemplateTitle')}
+              {editingTemplateId ? (t('editMealTemplateTitle') || 'Edit Meal Template') : (t('createMealTemplateTitle') || 'Create Meal Template')}
             </h2>
 
             <form onSubmit={handleSaveTemplate} className="space-y-4">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
-                  {t('templateTitleLabel')}
+                  {t('templateTitleLabel') || 'Template Title *'}
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder={t('templateTitlePlaceholder')}
+                  placeholder={t('templateTitlePlaceholder') || 'e.g. Clean Eating Week'}
                   value={templateTitle}
                   onChange={(e) => setTemplateTitle(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
@@ -907,11 +1011,11 @@ export default function TemplatesPage() {
 
               <div>
                 <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
-                  {t('templateDescLabel')}
+                  {t('templateDescLabel') || 'Description'}
                 </label>
                 <input
                   type="text"
-                  placeholder={t('templateDescPlaceholder')}
+                  placeholder={t('templateDescPlaceholder') || 'e.g. Healthy macro-balanced meals for high energy'}
                   value={templateDescription}
                   onChange={(e) => setTemplateDescription(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
@@ -931,7 +1035,7 @@ export default function TemplatesPage() {
                   className="block text-xs font-bold uppercase tracking-wider"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('configureDaysMeals')}
+                  {t('configureDaysMeals') || 'Configure Days & Scheduled Meals'}
                 </label>
 
                 {modalDays.map((d) => (
@@ -953,13 +1057,13 @@ export default function TemplatesPage() {
                         className="font-bold text-xs flex items-center gap-1 cursor-pointer"
                         style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
                       >
-                        <Plus className="h-3.5 w-3.5" /> {t('addMealBtn')}
+                        <Plus className="h-3.5 w-3.5" /> {t('addMealBtn') || 'Add Meal'}
                       </button>
                     </div>
 
                     {d.meals.length === 0 ? (
                       <p className="text-[11px] italic" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                        {t('noMealsScheduled')}
+                        {t('noMealsScheduled') || 'No meals scheduled for this day'}
                       </p>
                     ) : (
                       <div className="space-y-1.5">
@@ -1042,7 +1146,7 @@ export default function TemplatesPage() {
                     color: isDayMode ? '#475569' : '#cbd5e1'
                   }}
                 >
-                  {t('cancel')}
+                  {t('cancel') || 'Cancel'}
                 </button>
                 <button
                   type="submit"
@@ -1051,7 +1155,7 @@ export default function TemplatesPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
-                  {t('saveTemplateBtn')}
+                  {t('saveTemplateBtn') || 'Save Template'}
                 </button>
               </div>
             </form>
@@ -1091,10 +1195,10 @@ export default function TemplatesPage() {
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
                 <Edit3 className="h-4 w-4" />
-                {editingMealSubId ? t('editMealTitle') : t('addMealTitle')} for {translateDayLabel(DEFAULT_DAYS[targetDayIndex])}
+                {editingMealSubId ? (t('editMealTitle') || 'Edit Meal') : (t('addMealTitle') || 'Add Meal')} for {translateDayLabel(DEFAULT_DAYS[targetDayIndex])}
               </h2>
               <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('selectRecipeModalSub')}
+                {t('selectRecipeModalSub') || 'Choose from your saved recipe library'}
               </p>
             </div>
 
@@ -1104,7 +1208,7 @@ export default function TemplatesPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('mealTypeLabel')}
+                  {t('mealTypeLabel') || 'Meal Type'}
                 </label>
                 <div className="relative">
                   <select
@@ -1117,10 +1221,10 @@ export default function TemplatesPage() {
                       color: isDayMode ? '#0f172a' : '#cbd5e1'
                     }}
                   >
-                    <option value="Breakfast" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('breakfast')}</option>
-                    <option value="Lunch" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('lunch')}</option>
-                    <option value="Dinner" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('dinner')}</option>
-                    <option value="Snack" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('snack')}</option>
+                    <option value="Breakfast" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('breakfast') || 'Breakfast'}</option>
+                    <option value="Lunch" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('lunch') || 'Lunch'}</option>
+                    <option value="Dinner" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('dinner') || 'Dinner'}</option>
+                    <option value="Snack" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('snack') || 'Snack'}</option>
                   </select>
                   <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
                 </div>
@@ -1131,7 +1235,7 @@ export default function TemplatesPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('timeLabel')}
+                  {t('timeLabel') || 'Time'}
                 </label>
                 <div className="relative flex items-center">
                   <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
@@ -1158,7 +1262,7 @@ export default function TemplatesPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('recipeLabel')}
+                  {t('recipeLabel') || 'Recipe'}
                 </label>
                 {subSelectedRecipe ? (
                   <div 
@@ -1185,7 +1289,7 @@ export default function TemplatesPage() {
                       className="text-[11px] hover:underline font-bold shrink-0 ml-2 cursor-pointer"
                       style={{ color: 'var(--color-primary, #E05638)' }}
                     >
-                      {t('changeBtn')}
+                      {t('changeBtn') || 'Change'}
                     </button>
                   </div>
                 ) : (
@@ -1199,7 +1303,7 @@ export default function TemplatesPage() {
                       color: 'var(--color-primary, #E05638)'
                     }}
                   >
-                    <Plus className="h-4 w-4" /> {t('selectRecipeBtn')}
+                    <Plus className="h-4 w-4" /> {t('selectRecipeBtn') || 'Select Recipe'}
                   </button>
                 )}
               </div>
@@ -1215,7 +1319,7 @@ export default function TemplatesPage() {
                     color: 'var(--color-primary, #E05638)'
                   }}
                 >
-                  {t('cancel')}
+                  {t('cancel') || 'Cancel'}
                 </button>
                 <button
                   type="submit"
@@ -1224,7 +1328,7 @@ export default function TemplatesPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
-                  {editingMealSubId ? t('saveChanges') : t('addMealBtn')}
+                  {editingMealSubId ? (t('saveChanges') || 'Save Changes') : (t('addMealBtn') || 'Add Meal')}
                 </button>
               </div>
             </form>
@@ -1264,10 +1368,10 @@ export default function TemplatesPage() {
                   className="text-lg font-black tracking-tight"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('selectRecipeModalTitle')}
+                  {t('selectRecipeModalTitle') || 'Select a Recipe'}
                 </h2>
                 <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {t('selectRecipeModalSub')}
+                  {t('selectRecipeModalSub') || 'Choose from your saved recipe library'}
                 </p>
               </div>
 
@@ -1277,7 +1381,7 @@ export default function TemplatesPage() {
                     <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
                     <input
                       type="text"
-                      placeholder={t('searchByNamePlaceholder')}
+                      placeholder={t('searchByNamePlaceholder') || 'Search recipes by name...'}
                       value={recipeSearch}
                       onChange={(e) => setRecipeSearch(e.target.value)}
                       className="w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none"
@@ -1300,7 +1404,7 @@ export default function TemplatesPage() {
                         color: 'var(--color-primary, #E05638)'
                       }}
                     >
-                      <option value="All Books" style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allBooksOption')}</option>
+                      <option value="All Books" style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allBooksOption') || 'All Books'}</option>
                       {userFilteredBooks.map((b) => (
                         <option key={b.id} value={b.id} style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{b.title}</option>
                       ))}
@@ -1318,7 +1422,7 @@ export default function TemplatesPage() {
                       color: 'var(--color-primary, #E05638)'
                     }}
                   >
-                    <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('filterBtn')}
+                    <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('filterBtn') || 'Filter'}
                   </button>
                 </div>
 
@@ -1326,9 +1430,9 @@ export default function TemplatesPage() {
                   <div className="flex flex-wrap gap-1.5 pt-1 animate-in fade-in">
                     {[
                       { key: 'All', label: 'All' },
-                      { key: 'Favorites', label: t('favoritesTag') },
-                      { key: 'Main Dish', label: t('mainDishTag') },
-                      { key: 'Imported', label: t('importedTag') }
+                      { key: 'Favorites', label: t('favoritesTag') || 'Favorites' },
+                      { key: 'Main Dish', label: t('mainDishTag') || 'Main Dish' },
+                      { key: 'Imported', label: t('importedTag') || 'Imported' }
                     ].map((tag) => (
                       <button
                         key={tag.key}
@@ -1355,7 +1459,7 @@ export default function TemplatesPage() {
               <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                 {filteredPickerRecipes.length === 0 ? (
                   <div className="py-12 text-center text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                    {t('noRecipesMatchCriteria')}
+                    {t('noRecipesMatchCriteria') || 'No recipes match your criteria.'}
                   </div>
                 ) : (
                   filteredPickerRecipes.map((rec) => {
@@ -1411,7 +1515,7 @@ export default function TemplatesPage() {
                             color: 'var(--color-primary, #E05638)'
                           }}
                         >
-                          {t('selectBtn')}
+                          {t('selectBtn') || 'Select'}
                         </button>
                       </div>
                     );
@@ -1424,7 +1528,7 @@ export default function TemplatesPage() {
               className="text-center py-2 text-xs font-semibold"
               style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }}
             >
-              {t('showing')} {filteredPickerRecipes.length} {t('of')} {savedRecipes.length} {t('resultsSuffix')}
+              {t('showing') || 'Showing'} {filteredPickerRecipes.length} {t('of') || 'of'} {savedRecipes.length} {t('resultsSuffix') || 'results'}
             </div>
           </div>
         </div>
@@ -1461,10 +1565,10 @@ export default function TemplatesPage() {
                 className="text-xl font-black tracking-tight"
                 style={{ color: 'var(--color-primary, #E05638)' }}
               >
-                {t('applyTemplateModalTitle')}
+                {t('applyTemplateModalTitle') || 'Apply Template to Plan'}
               </h2>
               <p className="text-xs leading-snug" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('applyTemplateModalSub')}
+                {t('applyTemplateModalSub') || 'Choose a start date. The template meals will be scheduled into your Meal Planner starting on that date.'}
               </p>
             </div>
 
@@ -1486,7 +1590,7 @@ export default function TemplatesPage() {
                   className="block text-xs font-bold"
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
-                  {t('startDateLabel')}
+                  {t('startDateLabel') || 'Start Date (Day 1)'}
                 </label>
                 <div className="relative flex items-center">
                   <input
@@ -1523,7 +1627,7 @@ export default function TemplatesPage() {
                     color: 'var(--color-primary, #E05638)'
                   }}
                 >
-                  {t('cancel')}
+                  {t('cancel') || 'Cancel'}
                 </button>
                 <button
                   type="submit"
@@ -1532,7 +1636,7 @@ export default function TemplatesPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
                 >
-                  {t('applyBtn')}
+                  {t('applyBtn') || 'Apply to Planner'}
                 </button>
               </div>
             </form>

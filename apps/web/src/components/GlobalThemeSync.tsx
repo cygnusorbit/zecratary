@@ -9,22 +9,26 @@ export default function GlobalThemeSync() {
 
     const handleThemeUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      if (detail && !detail.mode) {
+      if (detail && typeof detail === 'object' && !('mode' in detail)) {
         applyThemeToDocument(detail);
       } else {
-        applyThemeToDocument();
+        fetchAndApplyServerTheme();
       }
     };
 
+    const handleModeUpdate = () => {
+      applyThemeToDocument();
+    };
+
     window.addEventListener('zecratary_theme_updated', handleThemeUpdate);
-    window.addEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
     window.addEventListener('zecratary_theme_changed', handleThemeUpdate);
+    window.addEventListener('zecratary_theme_mode_changed', handleModeUpdate);
     window.addEventListener('storage', handleThemeUpdate);
 
     return () => {
       window.removeEventListener('zecratary_theme_updated', handleThemeUpdate);
-      window.removeEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
       window.removeEventListener('zecratary_theme_changed', handleThemeUpdate);
+      window.removeEventListener('zecratary_theme_mode_changed', handleModeUpdate);
       window.removeEventListener('storage', handleThemeUpdate);
     };
   }, []);

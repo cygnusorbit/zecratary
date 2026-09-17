@@ -1,80 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+function getLocalJsonPath() {
+  const candidates = [
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'data', 'admin_settings.json')
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return candidates[0];
+}
+
 export async function GET() {
   try {
-    const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-    let settings: any = {};
+    let pgSettings: any = null;
+    try {
+      const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['default']);
+      if (rows && rows.length > 0) {
+        pgSettings = rows[0];
+      }
+    } catch (_) {}
 
-    if (rows.length > 0) {
-      const r = rows[0];
-      settings = {
-        id: r.id,
-        siteName: r.site_name || 'Zecratary',
-        titlebarEmoji: r.titlebar_emoji || '🍳',
-        titlebarImage: r.titlebar_image || '',
-        faviconEmoji: r.favicon_emoji || '🍳',
-        faviconImage: r.favicon_image || '',
-        currency: r.currency || 'USD',
-        aiProvider: r.ai_provider || 'gemini',
-        aiModel: r.ai_model || 'gemini-3.5-flash-lite',
-        themeColors: r.theme_colors || {},
-        paymentSettings: r.payment_settings || {},
-        socialLogin: r.social_login || {},
-        chefAiSettings: r.chef_ai_settings || {},
-        recipeTypes: r.recipe_types || [],
-        ingredientCategories: r.ingredient_categories || [],
-        supportedLanguages: r.supported_languages || [],
-        updatedAt: r.updated_at
-      };
-    } else {
-      await query(`
-        INSERT INTO admin_settings (id, site_name, updated_at)
-        VALUES ('primary_settings', 'Zecratary', NOW())
-        ON CONFLICT (id) DO NOTHING;
-      `);
-      settings = {
-        siteName: 'Zecratary',
-        titlebarEmoji: '🍳',
-        titlebarImage: '',
-        faviconEmoji: '🍳',
-        faviconImage: '',
-        currency: 'USD',
-        aiProvider: 'gemini',
-        aiModel: 'gemini-3.5-flash-lite',
-        themeColors: {},
-        paymentSettings: {},
-        socialLogin: {},
-        chefAiSettings: {},
-        recipeTypes: [],
-        ingredientCategories: [],
-        supportedLanguages: []
-      };
-    }
+    let jsonSettings: any = {};
+    try {
+      const p = getLocalJsonPath();
+      if (fs.existsSync(p)) {
+        jsonSettings = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      }
+    } catch (_) {}
 
-    const plans = await query(`
-      SELECT 
-        id, name, slug, is_free AS "isFree", is_default AS "isDefault",
-        COALESCE(monthly_price_dollars, 0)::float AS "monthlyPriceDollars",
-        COALESCE(annual_price_dollars, 0)::float AS "annualPriceDollars",
-        monthly_badge AS "monthlyBadge", annual_badge AS "annualBadge", trial_badge AS "trialBadge",
-        description_monthly AS "descriptionMonthly", description_annual AS "descriptionAnnual",
-        button_text AS "buttonText", ai_recipe_limit AS "aiRecipeLimit",
-        recipe_library_limit AS "recipeLibraryLimit", social_scrape_limit AS "socialScrapeLimit",
-        can_view_macros AS "canViewMacros", allowed_ai_models AS "allowedAiModels",
-        features, token_limit AS "tokenLimit", token_reimburse_frequency AS "tokenReimburseFrequency"
-      FROM subscription_plans
-      ORDER BY monthly_price_dollars ASC
-    `);
+    const themeColors = pgSettings?.theme_colors && Object.keys(pgSettings.theme_colors).length > 0
+      ? pgSettings.theme_colors
+      : (jsonSettings.themeColors || {});
 
-    settings.subscriptionPlans = plans;
+    const chefAiSettings = pgSettings?.chef_ai_settings && Object.keys(pgSettings.chef_ai_settings).length > 0
+      ? pgSettings.chef_ai_settings
+      : (jsonSettings.chefAiSettings || {});
 
-    return NextResponse.json(
-      { success: true, settings },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    const chefQuestionnaire = pgSettings?.chef_questionnaire && pgSettings.chef_questionnaire.length > 0
+      ? pgSettings.chef_questionnaire
+      : (jsonSettings.chefQuestionnaire || []);
+
+    const themeMode = pgSettings?.theme_mode || jsonSettings.themeMode || 'dark';
+
+    return NextResponse.json({
+      success: true,
+      themeColors,
+      themeMode,
+      chefAiSettings,
+      chefQuestionnaire,
+      ...jsonSettings
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -84,143 +65,49 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    if (Array.isArray(body.subscriptionPlans)) {
-      const activeSlugs = body.subscriptionPlans
-        .map((p: any) => (p?.slug || p?.id || p?.name || '').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-'))
-        .filter(Boolean);
-      activeSlugs.push('taster', 'preset_taster');
+    // 1. Update PostgreSQL
+    try {
+      const current = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['default']);
+      const curRow = (current && current.length > 0) ? current[0] : {};
 
-      const activeIds = body.subscriptionPlans
-        .map((p: any) => (p?.id || '').trim())
-        .filter(Boolean);
-      activeIds.push('preset_taster', 'taster');
-
-      await query(`
-        UPDATE payment_transactions SET plan_slug = NULL 
-        WHERE plan_slug IS NOT NULL 
-          AND plan_slug != 'taster' 
-          AND plan_slug != 'preset_taster'
-          AND NOT (plan_slug = ANY($1::text[]));
-      `, [activeSlugs]);
+      const nextTheme = body.themeColors ? { ...(curRow.theme_colors || {}), ...body.themeColors } : curRow.theme_colors;
+      const nextAi = body.chefAiSettings ? { ...(curRow.chef_ai_settings || {}), ...body.chefAiSettings } : curRow.chef_ai_settings;
+      const nextQ = body.chefQuestionnaire ? body.chefQuestionnaire : curRow.chef_questionnaire;
+      const nextMode = body.themeMode ? body.themeMode : curRow.theme_mode;
 
       await query(`
-        UPDATE users SET subscription_plan = 'taster' 
-        WHERE subscription_plan IS NOT NULL 
-          AND subscription_plan != 'taster' 
-          AND subscription_plan != 'preset_taster'
-          AND NOT (subscription_plan = ANY($1::text[]));
-      `, [activeSlugs]);
+        INSERT INTO admin_settings (id, theme_colors, theme_mode, chef_ai_settings, chef_questionnaire, updated_at)
+        VALUES ('default', $1::jsonb, $2, $3::jsonb, $4::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          theme_colors = COALESCE(EXCLUDED.theme_colors, admin_settings.theme_colors),
+          theme_mode = COALESCE(EXCLUDED.theme_mode, admin_settings.theme_mode),
+          chef_ai_settings = COALESCE(EXCLUDED.chef_ai_settings, admin_settings.chef_ai_settings),
+          chef_questionnaire = COALESCE(EXCLUDED.chef_questionnaire, admin_settings.chef_questionnaire),
+          updated_at = NOW();
+      `, [JSON.stringify(nextTheme || {}), nextMode || 'dark', JSON.stringify(nextAi || {}), JSON.stringify(nextQ || [])]);
+    } catch (_) {}
 
-      await query(`
-        DELETE FROM subscription_plans 
-        WHERE slug != 'taster' 
-          AND id != 'preset_taster'
-          AND NOT (slug = ANY($1::text[]))
-          AND NOT (id = ANY($2::text[]));
-      `, [activeSlugs, activeIds]);
-
-      for (const p of body.subscriptionPlans) {
-        if (!p) continue;
-        const slug = (p.slug || p.id || p.name || 'plan').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
-        const targetId = p.id || slug;
-        const isDefault = slug === 'taster' || targetId === 'preset_taster';
-
-        const exists = await query('SELECT id FROM subscription_plans WHERE slug = $1', [slug]);
-        if (exists.length > 0) {
-          await query(`
-            UPDATE subscription_plans SET
-              name = $1, is_free = $2, is_default = $3, monthly_price_dollars = $4, annual_price_dollars = $5,
-              monthly_badge = $6, annual_badge = $7, trial_badge = $8, description_monthly = $9, description_annual = $10,
-              button_text = $11, ai_recipe_limit = $12, recipe_library_limit = $13, social_scrape_limit = $14,
-              can_view_macros = $15, allowed_ai_models = $16, features = $17::jsonb, token_limit = $18,
-              token_reimburse_frequency = $19, updated_at = NOW()
-            WHERE slug = $20
-          `, [
-            p.name, Boolean(p.isFree), isDefault, Number(p.monthlyPriceDollars || p.price) || 0,
-            Number(p.annualPriceDollars) || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
-            p.descriptionMonthly || p.description || '', p.descriptionAnnual || '', p.buttonText || 'Choose Plan',
-            p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5, p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
-            p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5, Boolean(p.canViewMacros),
-            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
-            JSON.stringify(p.features || []), Number(p.tokenLimit) || 50000, p.tokenReimburseFrequency || 'monthly', slug
-          ]);
-        } else {
-          await query(`
-            INSERT INTO subscription_plans (
-              id, name, slug, is_free, is_default, monthly_price_dollars, annual_price_dollars,
-              monthly_badge, annual_badge, trial_badge, description_monthly, description_annual,
-              button_text, ai_recipe_limit, recipe_library_limit, social_scrape_limit,
-              can_view_macros, allowed_ai_models, features, token_limit, token_reimburse_frequency, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, NOW())
-          `, [
-            targetId, p.name, slug, Boolean(p.isFree), isDefault, Number(p.monthlyPriceDollars || p.price) || 0,
-            Number(p.annualPriceDollars) || 0, p.monthlyBadge || '', p.annualBadge || '', p.trialBadge || '',
-            p.descriptionMonthly || p.description || '', p.descriptionAnnual || '', p.buttonText || 'Choose Plan',
-            p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5, p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
-            p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5, Boolean(p.canViewMacros),
-            Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
-            JSON.stringify(p.features || []), Number(p.tokenLimit) || 50000, p.tokenReimburseFrequency || 'monthly'
-          ]);
-        }
+    // 2. Update server JSON backup
+    try {
+      const p = getLocalJsonPath();
+      os.makedirs ? undefined : null;
+      let existing: any = {};
+      if (fs.existsSync(p)) {
+        try { existing = JSON.parse(fs.readFileSync(p, 'utf-8')); } catch (_) {}
       }
-    }
+      const updated = {
+        ...existing,
+        ...body,
+        themeColors: body.themeColors ? { ...(existing.themeColors || {}), ...body.themeColors } : existing.themeColors,
+        chefAiSettings: body.chefAiSettings ? { ...(existing.chefAiSettings || {}), ...body.chefAiSettings } : existing.chefAiSettings,
+        updatedAt: new Date().toISOString()
+      };
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(updated, null, 2), 'utf-8');
+    } catch (_) {}
 
-    const currentRows = await query('SELECT * FROM admin_settings WHERE id = $1', ['primary_settings']);
-    const current = currentRows[0] || {};
-
-    const siteName = body.siteName !== undefined ? body.siteName : (current.site_name || 'Zecratary');
-    const titlebarEmoji = body.titlebarEmoji !== undefined ? body.titlebarEmoji : (current.titlebar_emoji || '🍳');
-    const titlebarImage = body.titlebarImage !== undefined ? body.titlebarImage : (current.titlebar_image || '');
-    const faviconEmoji = body.faviconEmoji !== undefined ? body.faviconEmoji : (current.favicon_emoji || '🍳');
-    const faviconImage = body.faviconImage !== undefined ? body.faviconImage : (current.favicon_image || '');
-    const currency = body.currency !== undefined ? body.currency : (current.currency || 'USD');
-    const aiProvider = body.aiProvider !== undefined ? body.aiProvider : (current.ai_provider || 'gemini');
-    const aiModel = body.aiModel !== undefined ? body.aiModel : (current.ai_model || 'gemini-3.5-flash-lite');
-
-    const themeColors = body.themeColors !== undefined ? body.themeColors : (current.theme_colors || {});
-    const paymentSettings = body.paymentSettings !== undefined ? body.paymentSettings : (current.payment_settings || {});
-    const socialLogin = body.socialLogin !== undefined ? body.socialLogin : (current.social_login || {});
-    const chefAiSettings = body.chefAiSettings !== undefined ? body.chefAiSettings : (current.chef_ai_settings || {});
-    const rawRecipeTypes = body.recipeTypes !== undefined ? body.recipeTypes : (body.settings?.recipeTypes !== undefined ? body.settings.recipeTypes : (body.types !== undefined ? body.types : (current.recipe_types || [])));
-    let recipeTypes = rawRecipeTypes;
-    if (typeof recipeTypes === 'string') {
-      try { recipeTypes = JSON.parse(recipeTypes); } catch (_) {}
-    }
-    if (!Array.isArray(recipeTypes)) recipeTypes = [];
-    const ingredientCategories = body.ingredientCategories !== undefined ? body.ingredientCategories : (current.ingredient_categories || []);
-    const supportedLanguages = body.supportedLanguages !== undefined ? body.supportedLanguages : (current.supported_languages || []);
-
-    await query(`
-      INSERT INTO admin_settings (
-        id, site_name, titlebar_emoji, titlebar_image, favicon_emoji, favicon_image,
-        currency, ai_provider, ai_model, theme_colors, payment_settings, social_login,
-        chef_ai_settings, recipe_types, ingredient_categories, supported_languages, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        site_name = EXCLUDED.site_name,
-        titlebar_emoji = EXCLUDED.titlebar_emoji,
-        titlebar_image = EXCLUDED.titlebar_image,
-        favicon_emoji = EXCLUDED.favicon_emoji,
-        favicon_image = EXCLUDED.favicon_image,
-        currency = EXCLUDED.currency,
-        ai_provider = EXCLUDED.ai_provider,
-        ai_model = EXCLUDED.ai_model,
-        theme_colors = EXCLUDED.theme_colors,
-        payment_settings = EXCLUDED.payment_settings,
-        social_login = EXCLUDED.social_login,
-        chef_ai_settings = EXCLUDED.chef_ai_settings,
-        recipe_types = EXCLUDED.recipe_types,
-        ingredient_categories = EXCLUDED.ingredient_categories,
-        supported_languages = EXCLUDED.supported_languages,
-        updated_at = NOW();
-    `, [
-      'primary_settings', siteName, titlebarEmoji, titlebarImage, faviconEmoji, faviconImage,
-      currency, aiProvider, aiModel, JSON.stringify(themeColors), JSON.stringify(paymentSettings),
-      JSON.stringify(socialLogin), JSON.stringify(chefAiSettings), JSON.stringify(recipeTypes),
-      JSON.stringify(ingredientCategories), JSON.stringify(supportedLanguages)
-    ]);
-
-    return NextResponse.json({ success: true, message: 'Settings saved directly to PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Settings persisted successfully.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

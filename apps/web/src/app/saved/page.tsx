@@ -82,9 +82,9 @@ export default function SavedRecipesPage() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // Add to Plan / Calendar Modal State
+  // Add to Plan / Calendar Modal State (Dynamic Current Date)
   const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
-  const [planDate, setPlanDate] = useState('2026-08-28');
+  const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [planMealType, setPlanMealType] = useState('Dinner');
   const [planTime, setPlanTime] = useState('');
   const [planNotes, setPlanNotes] = useState('');
@@ -134,7 +134,7 @@ export default function SavedRecipesPage() {
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
       const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
@@ -211,7 +211,6 @@ export default function SavedRecipesPage() {
 
     try {
       setLoading(true);
-      // Fetches unified server data merged with any new imports
       const rawRecipes = await syncUserSavedRecipes(targetUserId);
 
       const userRecipes = rawRecipes.map((r: any) => {
@@ -221,6 +220,11 @@ export default function SavedRecipesPage() {
           userId: targetUserId,
           recipeType: cleanType,
           category: cleanType,
+          bookId: r.book_id || r.bookId || null,
+          isFavorite: Boolean(r.is_favorite || r.isFavorite),
+          isCooked: Boolean(r.is_cooked || r.isCooked),
+          rating: Number(r.rating) || 0,
+          note: r.note || '',
           tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
         };
       });
@@ -228,7 +232,15 @@ export default function SavedRecipesPage() {
       setRecipes(userRecipes);
 
       let parsedBooks = defaultBooks;
-      const localBooks = localStorage.getItem('zecratary_recipe_books');
+      try {
+        const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (bRes.ok) {
+          const bData = await bRes.json();
+          if (Array.isArray(bData.books) && bData.books.length > 0) parsedBooks = bData.books;
+        }
+      } catch (_) {}
+
+      const localBooks = localStorage.getItem('zecratary_recipe_books') || localStorage.getItem('zecratary_cookbooks');
       if (localBooks) {
         try {
           const parsed = JSON.parse(localBooks);
@@ -244,7 +256,7 @@ export default function SavedRecipesPage() {
 
       setBooks(userBooks.map((b: any) => ({
         ...b,
-        recipeCount: userRecipes.filter((r: any) => r.bookId === b.id).length
+        recipeCount: userRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
       })));
     } catch (e) {
       console.error('[SavedRecipesPage] Load error:', e);
@@ -289,6 +301,7 @@ export default function SavedRecipesPage() {
 
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipe_books_updated', handleSync);
     window.addEventListener('zecratary_categories_changed', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('storage', handleSync);
@@ -296,6 +309,7 @@ export default function SavedRecipesPage() {
     return () => {
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
       window.removeEventListener('zecratary_categories_changed', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('storage', handleSync);
@@ -308,7 +322,8 @@ export default function SavedRecipesPage() {
 
     const updatedWithId = updatedUserList.map(r => ({
       ...r,
-      userId: targetUserId
+      userId: targetUserId,
+      bookId: r.bookId || r.book_id || null
     }));
 
     setRecipes(updatedWithId);
@@ -323,7 +338,7 @@ export default function SavedRecipesPage() {
 
     const updatedBooks = books.map((b: any) => ({
       ...b,
-      recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id).length
+      recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
     }));
     setBooks(updatedBooks);
   };
@@ -346,64 +361,120 @@ export default function SavedRecipesPage() {
     }
   };
 
-  const handleAssignToBook = (bookId: string) => {
+  // 1. FIX "ADD TO COOKBOOK"
+  const handleAssignToBook = async (bookId: string) => {
     if (!selectedRecipe) return;
-    const isRemoving = selectedRecipe.bookId === bookId;
+    const isRemoving = selectedRecipe.bookId === bookId || selectedRecipe.book_id === bookId;
     const targetBookId = isRemoving ? null : bookId;
-    const updatedRecipe = { ...selectedRecipe, bookId: targetBookId };
+    
+    const updatedRecipe = {
+      ...selectedRecipe,
+      bookId: targetBookId,
+      book_id: targetBookId
+    };
     setSelectedRecipe(updatedRecipe);
 
-    const updatedList = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
-    saveAllRecipes(updatedList);
+    const updatedRecipes = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
+    setRecipes(updatedRecipes);
 
-    const bookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
-    const recName = selectedRecipe.title || selectedRecipe.name;
-    if (isRemoving) {
-      const msg = (t('removedFromBookAlert') || 'Removed "{title}" from "{book}"')
-        .replace('{title}', recName)
-        .replace('{book}', bookTitle);
-      alert(msg);
-    } else {
-      const msg = (t('assignedToBookAlert') || 'Added "{title}" to "{book}"!')
-        .replace('{title}', recName)
-        .replace('{book}', bookTitle);
-      alert(msg);
+    try {
+      // 1. Persist to PostgreSQL
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedRecipe)
+      });
+      // 2. Dispatch cross-view sync
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+    } catch (err) {
+      console.error('Error assigning recipe to book:', err);
     }
   };
 
+  // 2. FIX "ADD TO PLAN"
   const openAddToPlanModal = () => {
-    setPlanDate('2026-08-28');
+    const todayStr = new Date().toISOString().split('T')[0];
+    setPlanDate(todayStr);
     setPlanMealType('Dinner');
-    setPlanTime('');
+    setPlanTime('19:00');
     setPlanNotes('');
     setShowAddToPlanModal(true);
   };
 
-  const handleSaveToCalendar = (e: React.FormEvent) => {
+  const handleSaveToCalendar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRecipe || !currentUser) return;
 
-    const localPlan = localStorage.getItem('zecratary_meal_plan');
-    const currentPlan = localPlan ? JSON.parse(localPlan) : [];
+    const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
+    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80';
+    const targetUserId = currentUser.id || 'usr_admin_1';
 
-    const recName = selectedRecipe.title || selectedRecipe.name;
     const newPlanItem = {
-      id: 'plan_' + Date.now(),
-      userId: currentUser.id || 'usr_admin_1',
-      createdBy: currentUser.email,
-      creatorName: currentUser.name,
+      id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: currentUser.email || 'user@zecratary.local',
+      creatorName: currentUser.name || 'User',
       date: planDate,
       recipeId: selectedRecipe.id,
+      recipe_id: selectedRecipe.id,
       recipeName: recName,
-      image: selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80',
+      title: recName,
+      image: recImage,
+      imageUrl: recImage,
+      image_url: recImage,
       mealType: planMealType,
-      time: planTime,
-      notes: planNotes,
-      isLeftover: false
+      time: planTime || '',
+      notes: planNotes || '',
+      servings: currentTotalServings || selectedRecipe.servings || 4,
+      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 15,
+      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 25,
+      recipe: selectedRecipe,
+      isLeftover: false,
+      createdAt: new Date().toISOString()
     };
 
-    localStorage.setItem('zecratary_meal_plan', JSON.stringify([...currentPlan, newPlanItem]));
-    window.dispatchEvent(new Event('zecratary_planner_updated'));
+    // Save across meal plan storage slots
+    try {
+      const planKeys = ['zecratary_meal_plan', 'zecratary_meal_plans'];
+      for (const k of planKeys) {
+        const raw = localStorage.getItem(k);
+        const currentPlan = raw ? JSON.parse(raw) : [];
+        const updated = Array.isArray(currentPlan) ? [...currentPlan, newPlanItem] : [newPlanItem];
+        localStorage.setItem(k, JSON.stringify(updated));
+      }
+    } catch (_) {}
+
+    // Post to API endpoints if available
+    try {
+      await Promise.allSettled([
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        }),
+        fetch('/api/meal-plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        }),
+        fetch('/api/meal-plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        })
+      ]);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_planner_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plans_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
     setShowAddToPlanModal(false);
     const alertMsg = (t('scheduledMealAlert') || 'Successfully scheduled "{title}" in your meal plan!')
       .replace('{title}', recName);
@@ -422,7 +493,6 @@ export default function SavedRecipesPage() {
     if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
     
     try {
-      // 1. Direct DELETE requests to PostgreSQL API endpoints
       await Promise.allSettled([
         fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
           method: 'DELETE',
@@ -441,25 +511,21 @@ export default function SavedRecipesPage() {
         })
       ]);
 
-      // 2. Call deleteSavedRecipe helper
       if (typeof deleteSavedRecipe === 'function') {
         await deleteSavedRecipe(currentUser?.id || 'usr_admin_1', id).catch(() => {});
       }
 
-      // 3. Update component state
       const updated = recipes.filter(r => r.id !== id);
       setRecipes(updated);
       setSelectedRecipe(null);
       setIsEditing(false);
 
-      // 4. Update books count
       const updatedBooks = books.map((b: any) => ({
         ...b,
-        recipeCount: updated.filter((r: any) => r.bookId === b.id).length
+        recipeCount: updated.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
       }));
       setBooks(updatedBooks);
 
-      // 5. Clean residual local storage to prevent zombie resurrection
       try {
         const localKeys = ['zecratary_saved_recipes', 'zecratary_recipes', 'zecratary_user_recipes', 'saved_recipes', 'zecratary_imported_recipes'];
         for (const k of localKeys) {
@@ -474,7 +540,6 @@ export default function SavedRecipesPage() {
         }
       } catch (_) {}
 
-      // 6. Broadcast event
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
         window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
@@ -530,6 +595,12 @@ export default function SavedRecipesPage() {
     const defaultCat = categories[0] || 'Produce';
     const cleanType = getCleanRecipeType(selectedRecipe);
 
+    let rawIngredients = selectedRecipe.ingredients;
+    if (typeof rawIngredients === 'string') {
+      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+    }
+    if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
     setEditForm({
       title: selectedRecipe.title || selectedRecipe.name || '',
       description: selectedRecipe.description || '',
@@ -539,8 +610,8 @@ export default function SavedRecipesPage() {
       prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
       cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
       imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '',
-      ingredients: selectedRecipe.ingredients
-        ? selectedRecipe.ingredients.map((ing: any) => ({
+      ingredients: rawIngredients.length > 0
+        ? rawIngredients.map((ing: any) => ({
             amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
             unit: typeof ing === 'string' ? '' : ing.unit || '',
             item: typeof ing === 'string' ? ing : ing.item || ing.name || '',
@@ -608,50 +679,139 @@ export default function SavedRecipesPage() {
     return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
   };
 
+  // 3. FIX "SHOPPING LIST"
+  const parseIngredientString = (rawStr: string, defaultCat: string) => {
+    const trimmed = String(rawStr || '').trim();
+    if (!trimmed) return { amount: '1', unit: 'unit', item: '', category: defaultCat };
+
+    const regex = /^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)\s*([a-zA-Z]+)?\s+(?:of\s+)?(.*)$/i;
+    const match = trimmed.match(regex);
+
+    if (match) {
+      const amount = match[1].trim();
+      const possibleUnit = (match[2] || '').trim().toLowerCase();
+      const rest = match[3].trim();
+
+      const knownUnits = [
+        'cup', 'cups', 'tbsp', 'tbs', 'tablespoon', 'tablespoons', 'tsp', 'teaspoon', 'teaspoons',
+        'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'g', 'gram', 'grams', 'kg',
+        'ml', 'l', 'liter', 'liters', 'clove', 'cloves', 'can', 'cans', 'slice', 'slices',
+        'pinch', 'pinches', 'bunch', 'bunches', 'stalk', 'stalks', 'piece', 'pieces', 'dash'
+      ];
+
+      if (knownUnits.includes(possibleUnit)) {
+        return { amount, unit: possibleUnit, item: rest || trimmed, category: defaultCat };
+      } else if (possibleUnit) {
+        return { amount, unit: '', item: `${possibleUnit} ${rest}`.trim(), category: defaultCat };
+      }
+    }
+
+    return { amount: '1', unit: '', item: trimmed, category: defaultCat };
+  };
+
   const handleOpenShoppingModal = () => {
     if (!selectedRecipe) return;
     const defaultCat = categories[0] || 'Produce';
     const baseServings = selectedRecipe.servings || 4;
     const totalServings = baseServings * servingsMultiplier;
 
-    const items = (selectedRecipe.ingredients || []).map((ing: any, idx: number) => {
-      const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
-      const scaledAmt = calculateScaledAmount(rawAmt, baseServings, totalServings);
+    let rawIngredients = selectedRecipe.ingredients;
+    if (typeof rawIngredients === 'string') {
+      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+    }
+    if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
+    const items = rawIngredients.map((ing: any, idx: number) => {
+      let parsed = { amount: '', unit: '', item: '', category: defaultCat };
+
+      if (typeof ing === 'string') {
+        parsed = parseIngredientString(ing, defaultCat);
+      } else if (ing && typeof ing === 'object') {
+        parsed = {
+          amount: String(ing.amount || ing.quantity || '').trim(),
+          unit: String(ing.unit || '').trim(),
+          item: String(ing.item || ing.name || '').trim(),
+          category: String(ing.category || defaultCat).trim()
+        };
+      }
+
+      const scaledAmt = calculateScaledAmount(parsed.amount, baseServings, totalServings);
+
       return {
-        id: 'shop_item_' + idx,
+        id: 'shop_item_' + idx + '_' + Math.random().toString(36).substring(2, 6),
         selected: true,
-        amount: scaledAmt,
-        unit: typeof ing === 'string' ? '' : ing.unit || '',
-        name: typeof ing === 'string' ? ing : ing.item || ing.name || '',
-        category: typeof ing === 'string' ? defaultCat : ing.category || defaultCat
+        amount: scaledAmt !== '' ? scaledAmt : (parsed.amount || '1'),
+        unit: parsed.unit || '',
+        name: parsed.item || 'Ingredient',
+        category: parsed.category || defaultCat
       };
     });
+
     setShoppingModalIngredients(items);
     setIsShoppingModalOpen(true);
   };
 
-  const handleConfirmAddToShoppingList = () => {
+  const handleConfirmAddToShoppingList = async () => {
     const selectedItems = shoppingModalIngredients.filter(i => i.selected);
     if (selectedItems.length === 0) {
       alert(t('noIngredientsSelectedAlert') || 'No ingredients selected.');
       return;
     }
-    const local = localStorage.getItem('zecratary_shopping') || localStorage.getItem('zecratary_shopping_list');
-    const current = local ? JSON.parse(local) : [];
+
+    const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Recipe';
+    const recId = selectedRecipe?.id;
+    const targetUserId = currentUser?.id || 'usr_admin_1';
+
     const formatted = selectedItems.map(i => ({
-      id: 's_' + Date.now() + Math.random(),
-      userId: currentUser?.id || 'usr_admin_1',
-      createdBy: currentUser?.email,
-      creatorName: currentUser?.name,
+      id: 'shop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: currentUser?.email || 'user@zecratary.local',
+      creatorName: currentUser?.name || 'User',
       name: i.name,
-      amount: i.amount || '1',
+      item: i.name,
+      amount: String(i.amount || '1'),
+      quantity: String(i.amount || '1'),
       unit: i.unit || 'unit',
-      category: i.category,
-      checked: false
+      category: i.category || (categories[0] || 'Produce'),
+      checked: false,
+      completed: false,
+      recipeId: recId,
+      recipeTitle: recTitle,
+      createdAt: new Date().toISOString()
     }));
-    const updated = [...formatted, ...current];
-    localStorage.setItem('zecratary_shopping', JSON.stringify(updated));
-    localStorage.setItem('zecratary_shopping_list', JSON.stringify(updated));
+
+    try {
+      const keys = ['zecratary_shopping_list', 'zecratary_shopping'];
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        const currentList = raw ? JSON.parse(raw) : [];
+        const updated = Array.isArray(currentList) ? [...formatted, ...currentList] : formatted;
+        localStorage.setItem(k, JSON.stringify(updated));
+      }
+    } catch (_) {}
+
+    try {
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formatted)
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formatted)
+        })
+      ]);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_shopping_updated'));
+      window.dispatchEvent(new Event('zecratary_shopping_list_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
     setIsShoppingModalOpen(false);
     const alertMsg = (t('addedItemsShoppingAlert') || 'Added {count} items to your Shopping List!')
       .replace('{count}', String(selectedItems.length));
@@ -687,8 +847,12 @@ export default function SavedRecipesPage() {
       }
 
       if (selectedIngredientsList.length > 0) {
-        const recipeIngNames = Array.isArray(r.ingredients) 
-          ? r.ingredients.map((ing: any) => (typeof ing === 'string' ? ing : ing.item || ing.name || '').toLowerCase())
+        let rIng = r.ingredients;
+        if (typeof rIng === 'string') {
+          try { rIng = JSON.parse(rIng); } catch (_) { rIng = []; }
+        }
+        const recipeIngNames = Array.isArray(rIng) 
+          ? rIng.map((ing: any) => (typeof ing === 'string' ? ing : ing.item || ing.name || '').toLowerCase())
           : [];
         
         const hasAll = selectedIngredientsList.every(targetIng => 
@@ -730,7 +894,7 @@ export default function SavedRecipesPage() {
   const startIndex = (safeCurrentPage - 1) * itemsPerPage;
   const paginatedRecipes = filtered.slice(startIndex, startIndex + itemsPerPage);
 
-  const assignedBook = books.find(b => b.id === selectedRecipe?.bookId);
+  const assignedBook = books.find(b => b.id === (selectedRecipe?.bookId || selectedRecipe?.book_id));
   const baseServings = selectedRecipe?.servings || 4;
   const currentTotalServings = baseServings * servingsMultiplier;
   const recipeCategoryBadge = selectedRecipe ? getCleanRecipeType(selectedRecipe) : 'Main Dish';
@@ -1176,7 +1340,7 @@ export default function SavedRecipesPage() {
       ) : (
         <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-4 sm:gap-5`}>
           {paginatedRecipes.map((r) => {
-            const cardBook = books.find(b => b.id === r.bookId);
+            const cardBook = books.find(b => b.id === (r.bookId || r.book_id));
             const cardTypeBadge = getCleanRecipeType(r);
             const cfg = GRID_CONFIG[gridMode];
 
@@ -1200,7 +1364,7 @@ export default function SavedRecipesPage() {
                 <div>
                   <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: isDayMode ? '#f1f5f9' : '#1e293b' }}>
                     <img
-                      src={r.imageUrl || r.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'}
+                      src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'}
                       alt={r.title || r.name}
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
@@ -1387,7 +1551,7 @@ export default function SavedRecipesPage() {
                 <div className="space-y-5 pb-6">
                   <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
                     <img
-                      src={selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80'}
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || '/uploads/recipes/default.jpg'}
                       alt={selectedRecipe.title || selectedRecipe.name}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
@@ -1420,7 +1584,9 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
+                  {/* 3 CORE ACTION BUTTONS */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
+                    {/* 1. ADD TO COOKBOOK BUTTON & DROPDOWN */}
                     <div className="relative">
                       <button
                         type="button"
@@ -1437,7 +1603,7 @@ export default function SavedRecipesPage() {
                       >
                         <BookmarkPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary, #E05638)' }}/>
                         <span className="truncate">
-                          {assignedBook ? assignedBook.title : (t('addToBook') || 'Add to Book')}
+                          {assignedBook ? assignedBook.title : (t('addToCookbook') || t('addToBook') || 'Add to Cookbook')}
                         </span>
                         <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5"/>
                       </button>
@@ -1456,7 +1622,7 @@ export default function SavedRecipesPage() {
                             <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
                               <span>{t('selectCookbook') || 'Select Cookbook'}</span>
                               <Link 
-                                className="hover:underline" 
+                                className="hover:underline font-bold" 
                                 href="/books"
                                 style={{ color: 'var(--color-emerald, #10b981)' }}
                               >
@@ -1469,7 +1635,7 @@ export default function SavedRecipesPage() {
                                 <div className="text-xs px-2.5 py-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
                               ) : (
                                 books.map((b) => {
-                                  const isAssigned = selectedRecipe.bookId === b.id;
+                                  const isAssigned = (selectedRecipe.bookId || selectedRecipe.book_id) === b.id;
                                   return (
                                     <button
                                       key={b.id}
@@ -1499,10 +1665,11 @@ export default function SavedRecipesPage() {
                       )}
                     </div>
 
+                    {/* 2. ADD TO PLAN BUTTON */}
                     <button
                       type="button"
                       onClick={openAddToPlanModal}
-                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
                       style={{
                         borderColor: 'var(--color-primary, #E05638)',
                         color: 'var(--color-primary, #E05638)'
@@ -1511,9 +1678,11 @@ export default function SavedRecipesPage() {
                       <CalendarPlus className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }}/> {t('addToPlan') || 'Add to Plan'}
                     </button>
 
+                    {/* 3. SHOPPING LIST BUTTON */}
                     <button
+                      type="button"
                       onClick={handleOpenShoppingModal}
-                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
                       style={{
                         borderColor: 'var(--color-primary, #E05638)',
                         color: 'var(--color-primary, #E05638)'
@@ -1721,14 +1890,6 @@ export default function SavedRecipesPage() {
                         <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('createdManually') || 'Created manually'}</span>
                       )}
                     </div>
-                    {selectedRecipe.sourceUrl && (
-                      <p 
-                        className="italic text-[11px] font-medium"
-                        style={{ color: 'var(--color-emerald, #10b981)' }}
-                      >
-                        {t('recipeImportedExternal') || 'Recipe imported from external source'}
-                      </p>
-                    )}
                   </div>
 
                   <div className="border-t mx-5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }} />
@@ -2071,75 +2232,6 @@ export default function SavedRecipesPage() {
                         </div>
                       </div>
 
-                      <div>
-                        <label 
-                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
-                        >
-                          {t('sourceUrlOptional') || 'Source URL (Optional)'}
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="https://..."
-                          value={editForm.sourceUrl || ''}
-                          onChange={(e) => setEditForm({ ...editForm, sourceUrl: e.target.value })}
-                          className="w-full border rounded-xl p-3 text-xs outline-none"
-                          style={{
-                            backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#0f172a' : '#ffffff'
-                          }}
-                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                          onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label 
-                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary, #E05638)' }}
-                          >
-                            {t('prepTimeMins') || 'Preparation Time (mins)'}
-                          </label>
-                          <input
-                            type="number"
-                            value={editForm.prepTimeMinutes}
-                            onChange={(e) => setEditForm({ ...editForm, prepTimeMinutes: parseInt(e.target.value) || 0 })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none"
-                            style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              color: isDayMode ? '#0f172a' : '#ffffff'
-                            }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                          />
-                        </div>
-
-                        <div>
-                          <label 
-                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary, #E05638)' }}
-                          >
-                            {t('cookTimeMins') || 'Cooking Time (mins)'}
-                          </label>
-                          <input
-                            type="number"
-                            value={editForm.cookTimeMinutes}
-                            onChange={(e) => setEditForm({ ...editForm, cookTimeMinutes: parseInt(e.target.value) || 0 })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none"
-                            style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              color: isDayMode ? '#0f172a' : '#ffffff'
-                            }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                          />
-                        </div>
-                      </div>
-
                       <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                         <button
                           type="button"
@@ -2203,7 +2295,7 @@ export default function SavedRecipesPage() {
                             type="button"
                             onClick={() => setEditForm({
                               ...editForm,
-                              ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Pantry Staples' }]
+                              ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Produce' }]
                             })}
                             className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
                             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
@@ -2594,7 +2686,6 @@ export default function SavedRecipesPage() {
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
-                    placeholder="--:-- --"
                   />
                   <Clock className="h-4 w-4 absolute right-3.5 pointer-events-none" style={{ color: 'var(--color-primary, #E05638)' }}/>
                 </div>
@@ -2698,7 +2789,7 @@ export default function SavedRecipesPage() {
                       updated[idx].selected = !updated[idx].selected;
                       setShoppingModalIngredients(updated);
                     }}
-                    className="w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition"
+                    className="w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition shrink-0"
                     style={ing.selected ? {
                       backgroundColor: 'var(--color-primary, #E05638)',
                       borderColor: 'var(--color-primary, #E05638)',
@@ -2779,6 +2870,7 @@ export default function SavedRecipesPage() {
 
             <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
               <button
+                type="button"
                 onClick={() => setIsShoppingModalOpen(false)}
                 className="px-4 py-2 rounded-xl font-bold text-xs cursor-pointer"
                 style={{
@@ -2789,6 +2881,7 @@ export default function SavedRecipesPage() {
                 {t('cancel') || 'Cancel'}
               </button>
               <button
+                type="button"
                 onClick={handleConfirmAddToShoppingList}
                 className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary, #E05638)' }}

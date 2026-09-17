@@ -116,7 +116,6 @@ export async function POST(req: NextRequest) {
 
       let targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
-      // Verify foreign key integrity against users table
       let validUserId: string | null = null;
       if (targetUserId) {
         const u = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
@@ -124,9 +123,7 @@ export async function POST(req: NextRequest) {
           validUserId = u[0].id;
         } else {
           const adminUser = await query("SELECT id FROM users WHERE id = 'usr_admin_1' OR role = 'admin' LIMIT 1");
-          if (adminUser.length > 0) {
-            validUserId = adminUser[0].id;
-          }
+          if (adminUser.length > 0) validUserId = adminUser[0].id;
         }
       }
 
@@ -161,12 +158,18 @@ export async function POST(req: NextRequest) {
       const difficulty = String(item.difficulty || 'Medium').slice(0, 32);
       const imageUrl = String(item.imageUrl || item.image || item.image_url || '');
       const sourceUrl = String(item.sourceUrl || item.source_url || '');
+      const bookId = item.bookId || item.book_id ? String(item.bookId || item.book_id).slice(0, 64) : null;
+      const isFavorite = Boolean(item.isFavorite || item.is_favorite);
+      const isCooked = Boolean(item.isCooked || item.is_cooked);
+      const rating = Number(item.rating) || 0;
+      const note = String(item.note || '');
 
       await query(`
         INSERT INTO saved_recipes (
           id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, nutrition, tags, image_url, source_url, is_public, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, NOW())
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, source_url,
+          book_id, is_favorite, is_cooked, rating, note, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19, $20, $21, $22, NOW())
         ON CONFLICT (id) DO UPDATE SET
           user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
           title = EXCLUDED.title,
@@ -183,6 +186,11 @@ export async function POST(req: NextRequest) {
           tags = EXCLUDED.tags,
           image_url = EXCLUDED.image_url,
           source_url = EXCLUDED.source_url,
+          book_id = EXCLUDED.book_id,
+          is_favorite = EXCLUDED.is_favorite,
+          is_cooked = EXCLUDED.is_cooked,
+          rating = EXCLUDED.rating,
+          note = EXCLUDED.note,
           is_public = EXCLUDED.is_public,
           updated_at = NOW();
       `, [
@@ -202,6 +210,11 @@ export async function POST(req: NextRequest) {
         JSON.stringify(tags),
         imageUrl,
         sourceUrl,
+        bookId,
+        isFavorite,
+        isCooked,
+        rating,
+        note,
         Boolean(item.isPublic || item.is_public)
       ]);
     }

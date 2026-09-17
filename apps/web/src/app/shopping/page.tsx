@@ -1,3 +1,4 @@
+// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -19,24 +20,39 @@ export default function ShoppingListPage() {
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
+  // Dynamic Categories from Settings
+  const availableCategories = (Array.isArray(CATEGORIES) && CATEGORIES.length > 0) ? CATEGORIES : [
+    'Produce', 'Dairy', 'Meat and Poultry', 'Seafood', 'Grains and Pasta',
+    'Pantry Staples', 'Condiments and Sauces', 'Spices and Seasonings',
+    'Beverages', 'Frozen Foods', 'Snacks', 'Bakery', 'Canned Goods', 'Other'
+  ];
+
   // Form states matching ingredient fields
   const [itemName, setItemName] = useState('');
   const [itemAmount, setItemAmount] = useState('1');
   const [itemUnit, setItemUnit] = useState('Unit');
-  const [itemCategory, setItemCategory] = useState<string>(CATEGORIES[0] || 'Produce');
+  const [itemCategory, setItemCategory] = useState<string>(availableCategories[0] || 'Produce');
 
   // Dynamic Theme Synchronization & Day Mode Inversion
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
+      let c: any = {};
+      const stored = typeof window !== 'undefined' 
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
+      if (stored) {
+        try { c = JSON.parse(stored); } catch (_) {}
+      }
+
       const root = document.documentElement;
 
       if (isDay) {
+        root.classList.remove('dark');
+        root.classList.add('light');
         root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
         root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
         root.style.setProperty('--color-bg-dark', '#f8fafc');
@@ -52,30 +68,60 @@ export default function ShoppingListPage() {
         root.style.setProperty('--color-text-secondary', '#64748b');
         if (typeof document !== 'undefined' && document.body) {
           document.body.style.backgroundColor = '#f8fafc';
+          document.body.style.color = '#0f172a';
         }
       } else {
+        const bg = c.backgroundColor || c.backgroundDark || '#070b13';
+        const card = c.cardBackground || c.cardDark || '#0b0f17';
+        const border = c.cardBorder || c.borderColor || '#1e293b';
+        const textSec = c.textSecondary || '#94a3b8';
+
+        root.classList.remove('light');
+        root.classList.add('dark');
         root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
         root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
+        root.style.setProperty('--color-bg-dark', bg);
+        root.style.setProperty('--color-background', bg);
+        root.style.setProperty('--color-bg', bg);
+        root.style.setProperty('--color-card-dark', card);
+        root.style.setProperty('--color-card', card);
+        root.style.setProperty('--color-inner-dark', c.innerDark || '#070b13');
+        root.style.setProperty('--color-border', border);
         root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
         root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
         root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
+        root.style.setProperty('--color-text-secondary', textSec);
         if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
+          document.body.style.backgroundColor = bg;
+          document.body.style.color = c.textColor || '#ffffff';
         }
       }
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
     applyGlobalTheme();
+
+    fetch('/api/user/theme', { cache: 'no-store' })
+      .then(res => res.json())
+      .then(data => {
+        if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
+          localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
+          applyGlobalTheme();
+        }
+      })
+      .catch(() => {
+        fetch('/api/admin/settings', { cache: 'no-store' })
+          .then(res => res.json())
+          .then(data => {
+            if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
+              localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
+              applyGlobalTheme();
+            }
+          })
+          .catch(() => {});
+      });
+
     window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
     window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
     window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
@@ -86,21 +132,36 @@ export default function ShoppingListPage() {
       window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
       window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
       window.removeEventListener('storage', applyGlobalTheme);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
-      }
     };
   }, [applyGlobalTheme]);
 
-  // Load shopping list without purging checked items on load
-  const loadShoppingData = useCallback((user: User | null) => {
-    if (!user || typeof window === 'undefined') return;
+  // Load shopping list directly from PostgreSQL with safe fallback
+  const loadShoppingData = useCallback(async (user: User | null) => {
+    if (!user) return;
+    const targetUserId = user.id || 'usr_admin_1';
+
+    try {
+      const res = await fetch(`/api/shopping?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.items)) {
+          setItems(data.items);
+          localStorage.setItem('zecratary_shopping_list', JSON.stringify(data.items));
+          localStorage.setItem('zecratary_shopping', JSON.stringify(data.items));
+          localStorage.setItem('zecratary_shopping_seeded', 'true');
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[ShoppingListPage] Server fetch note:', err);
+    }
 
     try {
       const local = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
       let allItems: any[] = local ? JSON.parse(local) : [];
 
-      if (!Array.isArray(allItems) || allItems.length === 0) {
+      const hasSeeded = localStorage.getItem('zecratary_shopping_seeded');
+      if (!hasSeeded && (!Array.isArray(allItems) || allItems.length === 0)) {
         allItems = [
           { 
             id: 's_1_' + user.id, 
@@ -123,23 +184,30 @@ export default function ShoppingListPage() {
             name: 'roasted peanuts', 
             amount: '¼', 
             unit: 'cup', 
-            category: 'Snacks and Sweets', 
+            category: 'Snacks', 
             staple: false, 
             checked: false,
             createdAt: new Date().toISOString()
           }
         ];
+        localStorage.setItem('zecratary_shopping_seeded', 'true');
         localStorage.setItem('zecratary_shopping_list', JSON.stringify(allItems));
         localStorage.setItem('zecratary_shopping', JSON.stringify(allItems));
+        
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(allItems)
+        }).catch(() => {});
       }
 
-      const userItems = allItems.filter((i: any) => {
+      const userItems = Array.isArray(allItems) ? allItems.filter((i: any) => {
         return !i.userId || i.userId === user.id || i.createdBy === user.email;
-      });
+      }) : [];
 
       setItems(userItems);
     } catch (e) {
-      console.error('Failed to load shopping list', e);
+      console.error('Failed to load shopping list from cache', e);
     }
   }, []);
 
@@ -166,11 +234,13 @@ export default function ShoppingListPage() {
 
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_shopping_updated', handleSync);
+    window.addEventListener('zecratary_shopping_list_updated', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_shopping_updated', handleSync);
+      window.removeEventListener('zecratary_shopping_list_updated', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
     };
   }, [loadShoppingData, router, t]);
@@ -189,6 +259,7 @@ export default function ShoppingListPage() {
       const merged = [...updatedUserItems, ...otherUsersItems];
       localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
       localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
+      localStorage.setItem('zecratary_shopping_seeded', 'true');
 
       setItems(updatedUserItems);
 
@@ -199,7 +270,7 @@ export default function ShoppingListPage() {
     }
   };
 
-  const handleAddItem = (e: React.FormEvent) => {
+  const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!itemName.trim() || !currentUser) return;
 
@@ -210,48 +281,90 @@ export default function ShoppingListPage() {
       creatorName: currentUser.name,
       name: itemName.trim(),
       amount: itemAmount || '1',
-      unit: itemUnit || '',
-      category: itemCategory || 'Produce',
+      unit: itemUnit === 'Unit' ? '' : itemUnit || '',
+      category: itemCategory || availableCategories[0] || 'Produce',
       staple: false,
       checked: false,
       createdAt: new Date().toISOString()
     };
 
-    saveList([...items, newItem]);
+    const updated = [...items, newItem];
+    saveList(updated);
+
+    try {
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([newItem])
+      });
+    } catch (err) {
+      console.error('Failed to persist item to PostgreSQL:', err);
+    }
+
     setItemName('');
     setItemAmount('1');
     setItemUnit('Unit');
-    setItemCategory(CATEGORIES[0] || 'Produce');
+    setItemCategory(availableCategories[0] || 'Produce');
     setShowAddModal(false);
   };
 
-  const handleUpdateItem = (e: React.FormEvent) => {
+  const handleUpdateItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingItem || !editingItem.name.trim() || !currentUser) return;
 
-    const updated = items.map((i) =>
-      i.id === editingItem.id
-        ? {
-            ...editingItem,
-            userId: currentUser.id,
-            createdBy: currentUser.email,
-            creatorName: currentUser.name,
-          }
-        : i
-    );
+    const updatedItem = {
+      ...editingItem,
+      userId: currentUser.id,
+      createdBy: currentUser.email,
+      creatorName: currentUser.name,
+    };
 
+    const updated = items.map((i) => (i.id === editingItem.id ? updatedItem : i));
     saveList(updated);
+
+    try {
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([updatedItem])
+      });
+    } catch (err) {
+      console.error('Failed to update item in PostgreSQL:', err);
+    }
+
     setEditingItem(null);
   };
 
-  const toggleCheck = (id: string) => {
-    const updated = items.map((i) => (i.id === id ? { ...i, checked: !i.checked } : i));
+  const toggleCheck = async (id: string) => {
+    const target = items.find((i) => i.id === id);
+    if (!target) return;
+    const nextVal = !target.checked;
+    const updated = items.map((i) => (i.id === id ? { ...i, checked: nextVal } : i));
     saveList(updated);
+
+    try {
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ ...target, checked: nextVal }])
+      });
+    } catch (_) {}
   };
 
-  const toggleStaple = (id: string) => {
-    const updated = items.map((i) => (i.id === id ? { ...i, staple: !i.staple } : i));
+  const toggleStaple = async (id: string) => {
+    const target = items.find((i) => i.id === id);
+    if (!target) return;
+    const nextVal = !target.staple;
+    const updated = items.map((i) => (i.id === id ? { ...i, staple: nextVal } : i));
     saveList(updated);
+
+    try {
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ ...target, staple: nextVal }])
+      });
+    } catch (_) {}
   };
 
   const handleCopySingleItem = (item: any) => {
@@ -270,23 +383,73 @@ export default function ShoppingListPage() {
     alert(template.replace('{name}', item.name));
   };
 
-  const handleDeleteItem = (id: string) => {
+  const handleDeleteItem = async (id: string) => {
     const updated = items.filter((i) => i.id !== id);
     saveList(updated);
+
+    if (editingItem && editingItem.id === id) {
+      setEditingItem(null);
+    }
+
+    try {
+      await Promise.allSettled([
+        fetch(`/api/shopping?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        }),
+        fetch(`/api/shopping-list?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        })
+      ]);
+    } catch (err) {
+      console.error('Failed to delete item from PostgreSQL:', err);
+    }
   };
 
   const allCompleted = items.length > 0 && items.every((i) => i.checked);
 
-  const toggleAllComplete = () => {
+  const toggleAllComplete = async () => {
     if (items.length === 0) return;
     const targetState = !allCompleted;
     const updated = items.map((i) => ({ ...i, checked: targetState }));
     saveList(updated);
+
+    try {
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+    } catch (_) {}
   };
 
-  const handleRemoveCompleted = () => {
+  const handleRemoveCompleted = async () => {
+    const completedList = items.filter((i) => i.checked);
+    if (completedList.length === 0) return;
+
+    const completedIds = completedList.map((i) => i.id);
     const activeOnly = items.filter((i) => !i.checked);
     saveList(activeOnly);
+
+    try {
+      await Promise.allSettled([
+        fetch(`/api/shopping?action=remove_completed&userId=${encodeURIComponent(currentUser?.id || '')}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: completedIds, action: 'remove_completed', userId: currentUser?.id })
+        }),
+        fetch(`/api/shopping-list?action=remove_completed&userId=${encodeURIComponent(currentUser?.id || '')}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: completedIds, action: 'remove_completed', userId: currentUser?.id })
+        })
+      ]);
+    } catch (err) {
+      console.error('Failed to remove completed items from PostgreSQL:', err);
+    }
   };
 
   const handleCopyList = () => {
@@ -380,8 +543,8 @@ export default function ShoppingListPage() {
             disabled={items.length === 0}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
-              backgroundColor: isDayMode ? '#ecfdf5' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#a7f3d0' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
+              borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.35)',
               color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
             }}
             title={allCompleted ? (t('deselectAllItemsTooltip') || 'Deselect all items') : (t('selectAllItemsTooltip') || 'Select all items')}
@@ -397,8 +560,8 @@ export default function ShoppingListPage() {
             disabled={completedItems.length === 0}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
-              backgroundColor: isDayMode ? '#fef2f2' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#fecaca' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.12)',
+              borderColor: isDayMode ? '#fecaca' : 'rgba(239, 68, 68, 0.35)',
               color: isDayMode ? '#b91c1c' : '#f87171'
             }}
             title={t('removeCompletedTooltip') || 'Remove completed items'}
@@ -415,7 +578,7 @@ export default function ShoppingListPage() {
         <div className="relative flex-1 w-full">
           <Search 
             className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" 
-            style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+            style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
           />
           <input
             type="text"
@@ -424,12 +587,12 @@ export default function ShoppingListPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full border rounded-xl pl-11 pr-4 py-2.5 text-sm outline-none shadow-xs transition"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#0f172a' : '#ffffff'
             }}
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
           />
         </div>
 
@@ -440,29 +603,32 @@ export default function ShoppingListPage() {
             onClick={handleCopyList}
             className="flex-1 sm:flex-initial border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#0f172a' : '#ffffff'
             }}
           >
-            <Copy className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('copyList') || 'Copy List'}
+            <Copy className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} /> {t('copyList') || 'Copy List'}
           </button>
           
           <button
             type="button"
             onClick={() => setShowStaplesOnly(!showStaplesOnly)}
             className="flex-1 sm:flex-initial border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-            style={{
-              backgroundColor: showStaplesOnly 
-                ? (isDayMode ? '#fff7ed' : 'rgba(234, 88, 12, 0.15)') 
-                : (isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)'),
-              borderColor: showStaplesOnly
-                ? (isDayMode ? '#fdba74' : 'var(--color-border, #064e3b)')
-                : (isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)'),
-              color: showStaplesOnly && isDayMode ? '#c2410c' : (isDayMode ? '#0f172a' : '#ffffff')
+            style={showStaplesOnly ? {
+              backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.1)' : 'rgba(224, 86, 56, 0.18)',
+              borderColor: 'var(--color-primary, #E05638)',
+              color: 'var(--color-primary, #E05638)'
+            } : {
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#0f172a' : '#ffffff'
             }}
           >
-            <Star className="h-4 w-4 fill-[#E05638] text-[#E05638]" /> 
+            <Star 
+              className={`h-4 w-4 ${showStaplesOnly ? 'fill-current' : ''}`}
+              style={{ color: 'var(--color-primary, #E05638)' }} 
+            /> 
             {t('myStaples') || 'My Staples'}
           </button>
 
@@ -490,8 +656,8 @@ export default function ShoppingListPage() {
               key={cat} 
               className="border rounded-2xl p-5 space-y-3 shadow-sm transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #064e3b)'
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
               }}
             >
               <h2 
@@ -522,7 +688,7 @@ export default function ShoppingListPage() {
                           {item.name}
                         </h4>
                         {(item.amount || item.unit) && (
-                          <span className="text-xs font-medium block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                          <span className="text-xs font-medium block" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
                             {item.amount} {item.unit}
                           </span>
                         )}
@@ -534,7 +700,7 @@ export default function ShoppingListPage() {
                         type="button"
                         onClick={() => toggleStaple(item.id)}
                         className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+                        style={{ color: item.staple ? 'var(--color-primary, #E05638)' : (isDayMode ? '#94a3b8' : '#64748b') }}
                         title={t('markAsStapleTooltip') || 'Mark as Staple'}
                       >
                         <Star className={`h-4 w-4 ${item.staple ? 'fill-current' : ''}`} />
@@ -543,7 +709,7 @@ export default function ShoppingListPage() {
                         type="button"
                         onClick={() => handleCopySingleItem(item)}
                         className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+                        style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
                         title={t('copyItemTooltip') || 'Copy item'}
                       >
                         <Copy className="h-4 w-4" />
@@ -552,10 +718,19 @@ export default function ShoppingListPage() {
                         type="button"
                         onClick={() => setEditingItem(item)}
                         className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+                        style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
                         title={t('editItemTooltip') || 'Edit item'}
                       >
                         <Edit3 className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteItem(item.id)}
+                        className="transition hover:text-red-500 cursor-pointer"
+                        style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
+                        title={t('deleteBtn') || 'Delete'}
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
@@ -572,21 +747,21 @@ export default function ShoppingListPage() {
           <div className="flex items-center gap-3">
             <h2 
               className="text-base font-extrabold whitespace-nowrap"
-              style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+              style={{ color: 'var(--color-emerald, #10b981)' }}
             >
               {t('completedItemsHeading') || 'Completed Items'}
             </h2>
             <div 
               className="h-px flex-1"
-              style={{ backgroundColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #064e3b)' }}
+              style={{ backgroundColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
             />
           </div>
 
           <div 
             className="border rounded-2xl p-5 space-y-3 shadow-sm transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #064e3b)'
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
             }}
           >
             {completedItems.map((item) => (
@@ -616,7 +791,7 @@ export default function ShoppingListPage() {
                     type="button"
                     onClick={() => toggleStaple(item.id)}
                     className="transition hover:opacity-80 cursor-pointer"
-                    style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+                    style={{ color: item.staple ? 'var(--color-primary, #E05638)' : (isDayMode ? '#94a3b8' : '#64748b') }}
                     title={t('markAsStapleTooltip') || 'Mark as Staple'}
                   >
                     <Star className={`h-4 w-4 ${item.staple ? 'fill-current' : ''}`} />
@@ -625,10 +800,19 @@ export default function ShoppingListPage() {
                     type="button"
                     onClick={() => setEditingItem(item)}
                     className="transition hover:opacity-80 cursor-pointer"
-                    style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+                    style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
                     title={t('editItemTooltip') || 'Edit item'}
                   >
                     <Edit3 className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteItem(item.id)}
+                    className="transition hover:text-red-500 cursor-pointer"
+                    style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
+                    title={t('deleteBtn') || 'Delete'}
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -647,8 +831,8 @@ export default function ShoppingListPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative text-xs cursor-default animate-in fade-in transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#0f172a' : '#ffffff'
             }}
           >
@@ -657,7 +841,7 @@ export default function ShoppingListPage() {
               onClick={() => setShowAddModal(false)}
               className="absolute top-4 right-4 p-2 rounded-full transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
                 color: isDayMode ? '#0f172a' : '#cbd5e1'
               }}
             >
@@ -670,7 +854,7 @@ export default function ShoppingListPage() {
 
             <form onSubmit={handleAddItem} className="space-y-4 text-xs">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('itemNameLabel') || 'Item Name *'}
                 </label>
                 <input
@@ -681,18 +865,18 @@ export default function ShoppingListPage() {
                   onChange={(e) => setItemName(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('amountQtyLabel') || 'Amount / Qty'}
                   </label>
                   <input
@@ -702,16 +886,16 @@ export default function ShoppingListPage() {
                     onChange={(e) => setItemAmount(e.target.value)}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('unitLabel') || 'Unit'}
                   </label>
                   <input
@@ -721,18 +905,18 @@ export default function ShoppingListPage() {
                     onChange={(e) => setItemUnit(e.target.value)}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('categoryLabel') || 'Category'}
                 </label>
                 <select
@@ -740,28 +924,28 @@ export default function ShoppingListPage() {
                   onChange={(e) => setItemCategory(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 >
-                  {CATEGORIES.map((cat: string) => (
-                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {availableCategories.map((cat: string) => (
+                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {cat}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #064e3b)' }}>
+              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
                   className="px-5 py-2.5 rounded-xl font-bold transition cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
                     color: isDayMode ? '#475569' : '#cbd5e1'
                   }}
                 >
@@ -792,8 +976,8 @@ export default function ShoppingListPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative text-xs cursor-default animate-in fade-in transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a101d)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#0f172a' : '#ffffff'
             }}
           >
@@ -802,7 +986,7 @@ export default function ShoppingListPage() {
               onClick={() => setEditingItem(null)}
               className="absolute top-4 right-4 p-2 rounded-full transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
                 color: isDayMode ? '#0f172a' : '#cbd5e1'
               }}
             >
@@ -815,7 +999,7 @@ export default function ShoppingListPage() {
 
             <form onSubmit={handleUpdateItem} className="space-y-4 text-xs">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('itemNameLabel') || 'Item Name *'}
                 </label>
                 <input
@@ -825,18 +1009,18 @@ export default function ShoppingListPage() {
                   onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('amountLabel') || 'Amount'}
                   </label>
                   <input
@@ -846,16 +1030,16 @@ export default function ShoppingListPage() {
                     onChange={(e) => setEditingItem({ ...editingItem, amount: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('unitLabel') || 'Unit'}
                   </label>
                   <input
@@ -865,18 +1049,18 @@ export default function ShoppingListPage() {
                     onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                       color: isDayMode ? '#0f172a' : '#ffffff'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
                   {t('categoryLabel') || 'Category'}
                 </label>
                 <select
@@ -884,28 +1068,29 @@ export default function ShoppingListPage() {
                   onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
                   className="w-full border rounded-xl p-3 text-sm outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)',
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #064e3b)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 >
-                  {CATEGORIES.map((cat: string) => (
-                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {availableCategories.map((cat: string) => (
+                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {cat}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #064e3b)' }}>
+              <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
                 <button
                   type="button"
                   onClick={() => handleDeleteItem(editingItem.id)}
-                  className="px-4 py-2.5 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  className="px-4 py-2.5 rounded-xl font-bold border transition flex items-center gap-1.5 cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#fef2f2' : 'transparent',
+                    backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
+                    borderColor: isDayMode ? '#fca5a5' : 'rgba(239, 68, 68, 0.3)',
                     color: isDayMode ? '#b91c1c' : '#f87171'
                   }}
                 >
@@ -917,7 +1102,7 @@ export default function ShoppingListPage() {
                     onClick={() => setEditingItem(null)}
                     className="px-5 py-2.5 rounded-xl font-bold transition cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
+                      backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
                       color: isDayMode ? '#475569' : '#cbd5e1'
                     }}
                   >

@@ -65,6 +65,11 @@ const getCoverBgStyle = (color?: string) => {
   return { backgroundColor: color };
 };
 
+export const isRecipeInBook = (rec: any, bookId: string): boolean => {
+  if (!rec || !bookId) return false;
+  return rec.bookId === bookId || rec.book_id === bookId;
+};
+
 export default function BooksPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -102,7 +107,7 @@ export default function BooksPage() {
   const [noteText, setNoteText] = useState('');
   const [isNoteOpen, setIsNoteOpen] = useState(false);
 
-  // Recipe Editing State (Inside Recipe Popup)
+  // Recipe Editing State
   const [isEditingRecipe, setIsEditingRecipe] = useState(false);
   const [editRecipeTab, setEditRecipeTab] = useState<'info' | 'ingredients' | 'steps'>('info');
   const [editRecipeForm, setEditRecipeForm] = useState<any>({
@@ -126,11 +131,11 @@ export default function BooksPage() {
 
   // Add to Plan Modal State
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
-  const [planDate, setPlanDate] = useState('2026-08-28');
+  const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [planMealType, setPlanMealType] = useState('Dinner');
   const [planMealTime, setPlanMealTime] = useState('19:00');
 
-  // Dynamic Theme Synchronization & Color Inversion
+  // Dynamic Theme Synchronization
   const applyGlobalTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -197,31 +202,80 @@ export default function BooksPage() {
     };
   }, [applyGlobalTheme]);
 
-  // Load books & recipes strictly isolated to the current user
-  const loadData = useCallback((user: User | null) => {
-    if (!user || typeof window === 'undefined') return;
+  // Load books & recipes directly from PostgreSQL with localStorage caching
+  const loadData = useCallback(async (user: User | null) => {
+    if (!user) return;
+    const activeUserId = user.id || 'usr_admin_1';
 
+    // 1. Fetch live recipes from PostgreSQL
+    let loadedRecipes: any[] = [];
     try {
-      const localBooks = localStorage.getItem('zecratary_recipe_books');
-      const localRecipes = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
-      
-      const allRecipes: any[] = localRecipes ? JSON.parse(localRecipes) : [];
-      const userRecipes = allRecipes.filter((r: any) => r.userId === user.id || r.createdBy === user.email);
-      setRecipes(userRecipes);
+      const rRes = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      if (rRes.ok) {
+        const rData = await rRes.json();
+        if (Array.isArray(rData.recipes)) {
+          loadedRecipes = rData.recipes;
+        }
+      }
+    } catch (_) {}
 
-      let allBooks: any[] = localBooks ? JSON.parse(localBooks) : [];
-      if (!Array.isArray(allBooks)) allBooks = [];
+    // Fallback/merge with local storage if offline
+    if (loadedRecipes.length === 0 && typeof window !== 'undefined') {
+      try {
+        const local = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
+        if (local) {
+          const arr = JSON.parse(local);
+          if (Array.isArray(arr)) loadedRecipes = arr;
+        }
+      } catch (_) {}
+    }
+    setRecipes(loadedRecipes);
 
-      const userBooks = allBooks
-        .filter((b: any) => b.userId === user.id || b.createdBy === user.email)
-        .map((b: any) => ({
-          ...b,
-          recipeCount: userRecipes.filter((r: any) => r.bookId === b.id).length
-        }));
+    // 2. Fetch live books from PostgreSQL
+    let loadedBooks: any[] = [];
+    try {
+      const bRes = await fetch(`/api/books?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      if (bRes.ok) {
+        const bData = await bRes.json();
+        if (Array.isArray(bData.books)) {
+          loadedBooks = bData.books;
+        }
+      }
+    } catch (_) {}
 
-      setBooks(userBooks);
-    } catch (e) {
-      console.error('Failed to load user books', e);
+    // Fallback/merge with local storage if PostgreSQL books not populated
+    if (loadedBooks.length === 0 && typeof window !== 'undefined') {
+      try {
+        const localB = localStorage.getItem('zecratary_recipe_books');
+        if (localB) {
+          const arrB = JSON.parse(localB);
+          if (Array.isArray(arrB) && arrB.length > 0) {
+            loadedBooks = arrB;
+            // Bridge existing local books into PostgreSQL
+            fetch('/api/books', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(arrB)
+            }).catch(() => {});
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Recalculate recipe counts dynamically based on loadedRecipes
+    const syncdBooks = loadedBooks.map((b: any) => ({
+      ...b,
+      recipeCount: loadedRecipes.filter((r: any) => isRecipeInBook(r, b.id)).length
+    }));
+
+    setBooks(syncdBooks);
+
+    // Mirror to local storage
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_recipe_books', JSON.stringify(syncdBooks));
+        localStorage.setItem('zecratary_saved_recipes', JSON.stringify(loadedRecipes));
+      } catch (_) {}
     }
   }, []);
 
@@ -248,67 +302,80 @@ export default function BooksPage() {
 
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipe_books_updated', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
     };
   }, [loadData, router, t]);
 
-  const saveBooks = (updatedUserBooks: any[]) => {
+  const saveBooks = async (updatedUserBooks: any[]) => {
     if (!currentUser) return;
+    setBooks(updatedUserBooks);
 
     try {
-      const raw = localStorage.getItem('zecratary_recipe_books');
-      const allBooks: any[] = raw ? JSON.parse(raw) : [];
-
-      const otherUsersBooks = allBooks.filter((b: any) => {
-        return b.userId !== currentUser.id && b.createdBy !== currentUser.email;
+      // 1. Direct PostgreSQL commit
+      await fetch('/api/books', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUserBooks)
       });
 
-      const merged = [...updatedUserBooks, ...otherUsersBooks];
-      setBooks(updatedUserBooks);
-      localStorage.setItem('zecratary_recipe_books', JSON.stringify(merged));
+      // 2. Mirror local cache
+      const raw = localStorage.getItem('zecratary_recipe_books');
+      const allBooks: any[] = raw ? JSON.parse(raw) : [];
+      const others = allBooks.filter((b: any) => b.userId !== currentUser.id && b.createdBy !== currentUser.email);
+      localStorage.setItem('zecratary_recipe_books', JSON.stringify([...updatedUserBooks, ...others]));
+
+      // 3. Emit sync events
+      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (e) {
-      console.error('Failed to save books', e);
+      console.error('Failed to save books to PostgreSQL', e);
     }
   };
 
-  const saveAllRecipes = (updatedUserList: any[]) => {
+  const saveAllRecipes = async (updatedUserList: any[]) => {
     if (!currentUser) return;
+    setRecipes(updatedUserList);
 
     try {
-      const raw = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      const allRecipes: any[] = raw ? JSON.parse(raw) : [];
-
-      const otherUsersRecipes = allRecipes.filter((r: any) => {
-        return r.userId !== currentUser.id && r.createdBy !== currentUser.email;
+      // 1. Direct PostgreSQL commit
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUserList)
       });
 
-      const merged = [...updatedUserList, ...otherUsersRecipes];
-      setRecipes(updatedUserList);
-      localStorage.setItem('zecratary_recipes', JSON.stringify(merged));
-      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(merged));
+      // 2. Mirror local storage
+      localStorage.setItem('zecratary_recipes', JSON.stringify(updatedUserList));
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updatedUserList));
 
+      // 3. Sync book counts
       const updatedBooks = books.map((b: any) => ({
         ...b,
-        recipeCount: updatedUserList.filter((r: any) => r.bookId === b.id).length
+        recipeCount: updatedUserList.filter((r: any) => isRecipeInBook(r, b.id)).length
       }));
-      saveBooks(updatedBooks);
+      await saveBooks(updatedBooks);
 
+      // 4. Dispatch events
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
         window.dispatchEvent(new Event('storage'));
       }
     } catch (e) {
-      console.error('Failed to save recipes', e);
+      console.error('Failed to save recipes to PostgreSQL', e);
     }
   };
 
-  const handleCreateBook = (e: React.FormEvent) => {
+  const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !currentUser) return;
 
@@ -325,7 +392,7 @@ export default function BooksPage() {
     };
 
     const updated = [...books, newBook];
-    saveBooks(updated);
+    await saveBooks(updated);
     setNewTitle('');
     setNewDesc('');
     setNewCoverColor(COVER_GRADIENTS[0].value);
@@ -340,7 +407,7 @@ export default function BooksPage() {
     setEditCoverColor(book.coverColor || COVER_GRADIENTS[0].value);
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingBook || !editTitle.trim() || !currentUser) return;
 
@@ -358,7 +425,7 @@ export default function BooksPage() {
         : b
     );
 
-    saveBooks(updated);
+    await saveBooks(updated);
 
     if (selectedBook?.id === editingBook.id) {
       setSelectedBook({
@@ -375,12 +442,25 @@ export default function BooksPage() {
     setEditingBook(null);
   };
 
-  const handleDeleteBook = (e: React.MouseEvent, id: string) => {
+  const handleDeleteBook = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (!confirm(t('confirmDeleteBook') || 'Are you sure you want to delete this recipe book?')) return;
-    const updated = books.filter((b) => b.id !== id);
-    saveBooks(updated);
-    if (selectedBook?.id === id) setSelectedBook(null);
+    
+    try {
+      await fetch(`/api/books?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const updated = books.filter((b) => b.id !== id);
+      setBooks(updated);
+      
+      // Update local recipes state removing book assignment
+      const cleanedRecipes = recipes.map(r => (isRecipeInBook(r, id) ? { ...r, bookId: null, book_id: null } : r));
+      setRecipes(cleanedRecipes);
+
+      if (selectedBook?.id === id) setSelectedBook(null);
+      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+    } catch (err) {
+      console.error('Error deleting book:', err);
+    }
   };
 
   const handleOpenRecipePopup = (rec: any) => {
@@ -394,23 +474,27 @@ export default function BooksPage() {
     setIsEditingRecipe(false);
   };
 
-  const updateViewingRecipeState = (key: string, val: any) => {
+  const updateViewingRecipeState = async (key: string, val: any) => {
     if (!viewingRecipe) return;
     const updatedRec = { ...viewingRecipe, [key]: val };
     setViewingRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
-    saveAllRecipes(updatedList);
+    await saveAllRecipes(updatedList);
   };
 
-  const handleAssignToBook = (bookId: string) => {
+  const handleAssignToBook = async (bookId: string) => {
     if (!viewingRecipe) return;
-    const isRemoving = viewingRecipe.bookId === bookId;
+    const isRemoving = isRecipeInBook(viewingRecipe, bookId);
     const targetBookId = isRemoving ? null : bookId;
-    const updatedRecipe = { ...viewingRecipe, bookId: targetBookId };
+    const updatedRecipe = { 
+      ...viewingRecipe, 
+      bookId: targetBookId,
+      book_id: targetBookId 
+    };
     setViewingRecipe(updatedRecipe);
 
     const updatedList = recipes.map(r => r.id === viewingRecipe.id ? updatedRecipe : r);
-    saveAllRecipes(updatedList);
+    await saveAllRecipes(updatedList);
 
     const targetBookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
     const recName = viewingRecipe.title || viewingRecipe.name;
@@ -427,12 +511,17 @@ export default function BooksPage() {
     }
   };
 
-  const handleDeleteRecipe = (id: string) => {
+  const handleDeleteRecipe = async (id: string) => {
     if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
-    const updated = recipes.filter(r => r.id !== id);
-    saveAllRecipes(updated);
-    setViewingRecipe(null);
-    setIsEditingRecipe(false);
+    try {
+      await fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const updated = recipes.filter(r => r.id !== id);
+      await saveAllRecipes(updated);
+      setViewingRecipe(null);
+      setIsEditingRecipe(false);
+    } catch (err) {
+      console.error('Error deleting recipe:', err);
+    }
   };
 
   const toggleStepComplete = (idx: number) => {
@@ -478,7 +567,7 @@ export default function BooksPage() {
     setIsEditingRecipe(true);
   };
 
-  const handleSaveRecipeEdit = () => {
+  const handleSaveRecipeEdit = async () => {
     if (!editRecipeForm.title.trim() || !currentUser) {
       alert(t('enterRecipeTitleAlert') || 'Please enter a recipe title.');
       setEditRecipeTab('info');
@@ -496,7 +585,7 @@ export default function BooksPage() {
 
     setViewingRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
-    saveAllRecipes(updatedList);
+    await saveAllRecipes(updatedList);
     setIsEditingRecipe(false);
   };
 
@@ -605,7 +694,6 @@ export default function BooksPage() {
     alert(alertMsg);
   };
 
-  // Filtered Books based on search query
   const filteredBooks = useMemo(() => {
     const q = search.toLowerCase().trim();
     if (!q) return books;
@@ -615,12 +703,10 @@ export default function BooksPage() {
     );
   }, [books, search]);
 
-  // Reset pagination on search or gridMode toggle
   useEffect(() => {
     setCurrentPage(1);
   }, [search, gridMode]);
 
-  // Pagination calculations
   const itemsPerPage = GRID_CONFIG[gridMode].perPage;
   const totalPages = Math.max(1, Math.ceil(filteredBooks.length / itemsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -629,7 +715,7 @@ export default function BooksPage() {
 
   const baseServings = viewingRecipe?.servings || 4;
   const currentTotalServings = baseServings * servingsMultiplier;
-  const assignedBook = books.find(b => b.id === viewingRecipe?.bookId);
+  const assignedBook = books.find(b => isRecipeInBook(viewingRecipe, b.id));
 
   return (
     <div 
@@ -652,7 +738,7 @@ export default function BooksPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* 3x3, 4x4, 5x5 Toggle Controls */}
+          {/* Density Selector */}
           <div 
             className="flex items-center p-1 rounded-xl border shadow-sm"
             style={{
@@ -752,7 +838,7 @@ export default function BooksPage() {
       ) : (
         <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-6`}>
           {paginatedBooks.map((book) => {
-            const count = recipes.filter((r: any) => r.bookId === book.id).length || book.recipeCount || 0;
+            const count = recipes.filter((r: any) => isRecipeInBook(r, book.id)).length;
             const cfg = GRID_CONFIG[gridMode];
             return (
               <div
@@ -998,7 +1084,6 @@ export default function BooksPage() {
                   })}
                 </div>
 
-                {/* Edit Modal Custom Color Picker */}
                 <div 
                   className="mt-3 p-3 rounded-2xl border flex items-center justify-between transition"
                   style={{
@@ -1165,7 +1250,6 @@ export default function BooksPage() {
                   <Palette className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('backgroundColorLabel') || 'Background Color'}
                 </label>
                 
-                {/* 6 Preset Gradients */}
                 <div className="grid grid-cols-3 gap-2.5">
                   {COVER_GRADIENTS.map((g) => {
                     const isSelected = newCoverColor === g.value;
@@ -1185,7 +1269,6 @@ export default function BooksPage() {
                   })}
                 </div>
 
-                {/* Custom Color Selector Section */}
                 <div 
                   className="mt-3 p-3 rounded-2xl border flex items-center justify-between transition"
                   style={{
@@ -1324,7 +1407,7 @@ export default function BooksPage() {
                   style={{ color: 'var(--color-primary, #E05638)' }}
                 >
                   {(t('recipesInThisBook') || 'Recipes in this Book ({count})')
-                    .replace('{count}', String(recipes.filter((r: any) => r.bookId === selectedBook.id).length))}
+                    .replace('{count}', String(recipes.filter((r: any) => isRecipeInBook(r, selectedBook.id)).length))}
                 </h3>
                 <Link
                   href="/saved"
@@ -1335,7 +1418,7 @@ export default function BooksPage() {
                 </Link>
               </div>
 
-              {recipes.filter((r: any) => r.bookId === selectedBook.id).length === 0 ? (
+              {recipes.filter((r: any) => isRecipeInBook(r, selectedBook.id)).length === 0 ? (
                 <div 
                   className="p-8 rounded-2xl text-center space-y-2 border"
                   style={{
@@ -1350,7 +1433,7 @@ export default function BooksPage() {
               ) : (
                 <div className="space-y-2.5">
                   {recipes
-                    .filter((r: any) => r.bookId === selectedBook.id)
+                    .filter((r: any) => isRecipeInBook(r, selectedBook.id))
                     .map((rec: any) => (
                       <div 
                         key={rec.id} 
@@ -1505,13 +1588,11 @@ export default function BooksPage() {
                             </div>
 
                             <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
-                              {books.filter((b) => !currentUser || b.userId === currentUser.id || b.createdBy === currentUser.email).length === 0 ? (
+                              {books.length === 0 ? (
                                 <div className="text-xs px-2.5 py-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
                               ) : (
-                                books
-                                  .filter((b) => !currentUser || b.userId === currentUser.id || b.createdBy === currentUser.email)
-                                  .map((b) => {
-                                  const isAssigned = viewingRecipe.bookId === b.id;
+                                books.map((b) => {
+                                  const isAssigned = isRecipeInBook(viewingRecipe, b.id);
                                   return (
                                     <button
                                       key={b.id}
@@ -1834,7 +1915,16 @@ export default function BooksPage() {
 
                     <button
                       onClick={() => handleDeleteRecipe(viewingRecipe.id)}
-                      className="bg-red-950/60 border border-red-500/40 text-red-400 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 hover:bg-red-900/50 transition cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                      style={isDayMode ? {
+                        backgroundColor: '#fef2f2',
+                        borderColor: '#fca5a5',
+                        color: '#dc2626'
+                      } : {
+                        backgroundColor: 'rgba(127, 29, 29, 0.4)',
+                        borderColor: 'rgba(239, 68, 68, 0.4)',
+                        color: '#f87171'
+                      }}
                     >
                       <Trash2 className="h-3.5 w-3.5" /> {t('deleteRecipeBtn') || 'Delete Recipe'}
                     </button>
