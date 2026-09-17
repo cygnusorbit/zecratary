@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.3.2",
+  "version": "7.3.3",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.3.2",
+  "version": "7.3.3",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -18841,7 +18841,7 @@ import {
   Check, Eye, EyeOff, Globe, Zap, History, Sliders, Filter,
   PlusCircle, X, User as UserIcon, Activity, Calendar,
   Pencil, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  ShieldAlert, Ban, ArrowUpRight, AlertTriangle, Repeat
+  ShieldAlert, Ban, ArrowUpRight, AlertTriangle, Repeat, RotateCcw
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -18987,6 +18987,16 @@ const calculateDefaultExpiry = (startDateStr: string, interval?: string): string
 };
 
 const normalizeTransaction = (raw: any, defaultCurrency: string): PaymentTransaction => {
+  const rawRecurring = raw.isRecurring !== undefined ? raw.isRecurring : raw.is_recurring;
+  const isRecurring = rawRecurring !== undefined 
+    ? (rawRecurring === true || rawRecurring === 'true' || rawRecurring === 't' || rawRecurring === 1 || rawRecurring === '1')
+    : true;
+
+  const rawAutoRenew = raw.autoRenew !== undefined ? raw.autoRenew : raw.auto_renew;
+  const autoRenew = rawAutoRenew !== undefined 
+    ? (rawAutoRenew === true || rawAutoRenew === 'true' || rawAutoRenew === 't' || rawAutoRenew === 1 || rawAutoRenew === '1')
+    : isRecurring;
+
   return {
     id: String(raw.id || 'tx_' + Math.random().toString(36).substring(2, 8)),
     customerName: String(raw.customerName || raw.customer_name || 'Customer'),
@@ -19001,9 +19011,9 @@ const normalizeTransaction = (raw: any, defaultCurrency: string): PaymentTransac
     testMode: Boolean(raw.testMode !== undefined ? raw.testMode : raw.test_mode),
     createdAt: raw.createdAt || raw.created_at || new Date().toISOString(),
     expiryDate: raw.expiryDate || raw.expiry_date || undefined,
-    isRecurring: raw.isRecurring !== undefined ? Boolean(raw.isRecurring) : true,
+    isRecurring,
     recurringInterval: raw.recurringInterval || raw.recurring_interval || (String(raw.planSlug || raw.plan_slug || '').includes('annual') ? 'YEAR' : 'MONTH'),
-    autoRenew: raw.autoRenew !== undefined ? Boolean(raw.autoRenew) : true,
+    autoRenew,
   };
 };
 
@@ -19022,6 +19032,7 @@ export default function AdminPaymentPage() {
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [togglingTxId, setTogglingTxId] = useState<string | null>(null);
+  const [refundingTxId, setRefundingTxId] = useState<string | null>(null);
 
   // Selection state
   const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
@@ -19056,7 +19067,6 @@ export default function AdminPaymentPage() {
     },
   });
 
-  // Mutable refs
   const transactionsRef = useRef<PaymentTransaction[]>([]);
   const configRef = useRef<GatewayConfig>(config);
   const isFetchingRef = useRef<boolean>(false);
@@ -19100,12 +19110,11 @@ export default function AdminPaymentPage() {
 
   useEffect(() => {
     if (feedback) {
-      const timer = setTimeout(() => setFeedback(null), 4000);
+      const timer = setTimeout(() => setFeedback(null), 4500);
       return () => clearTimeout(timer);
     }
   }, [feedback]);
 
-  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -19199,13 +19208,11 @@ export default function AdminPaymentPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
-  // Load Plans from PostgreSQL /api/admin/plans and Server Settings
   const loadPlans = useCallback(async (currencyOverride?: string) => {
     let parsedPlans: PlanOption[] = [];
     const symbol = getCurrencySymbol(currencyOverride || configRef.current.currency);
     let rawPlansList: any[] = [];
 
-    // 1. Direct fetch from PostgreSQL /api/admin/plans route with cache-busting
     try {
       const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
@@ -19219,7 +19226,6 @@ export default function AdminPaymentPage() {
       }
     } catch (_) {}
 
-    // 2. Also check /api/plans if rawPlansList is still empty
     if (rawPlansList.length === 0) {
       try {
         const res = await fetch('/api/plans?t=' + Date.now(), { cache: 'no-store' });
@@ -19235,7 +19241,6 @@ export default function AdminPaymentPage() {
       } catch (_) {}
     }
 
-    // 3. Merge with centralized server admin settings
     try {
       const serverData = await fetchServerAdminSettings();
       const settingsPlans = serverData?.subscriptionPlans || serverData?.settings?.subscriptionPlans;
@@ -19358,7 +19363,6 @@ export default function AdminPaymentPage() {
     setAvailablePlans(fallbackList);
   }, [getCurrencySymbol]);
 
-  // Validate user subscription against payment transactions: Succeeded & Canceled preserve features until expiryDate
   const validateAndSyncUserPlans = useCallback((usersList: AppUser[], txList: PaymentTransaction[]): AppUser[] => {
     const now = new Date();
     return usersList.map((u) => {
@@ -19415,7 +19419,6 @@ export default function AdminPaymentPage() {
     }
   }, [validateAndSyncUserPlans]);
 
-  // Hydrate Payments & Gateways Exclusively from Server
   const fetchData = useCallback(async () => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
@@ -19559,16 +19562,9 @@ export default function AdminPaymentPage() {
 
   // TOGGLE RECURRING HANDLER
   const handleToggleRecurring = async (tx: PaymentTransaction) => {
-    const nextState = !tx.isRecurring;
+    const isCurrentlyActive = tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : (tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true);
+    const nextState = !isCurrentlyActive;
     setTogglingTxId(tx.id);
-
-    setTransactions((prev) =>
-      prev.map((tItem) =>
-        tItem.id === tx.id
-          ? { ...tItem, isRecurring: nextState, autoRenew: nextState }
-          : tItem
-      )
-    );
 
     const updatedTx: PaymentTransaction = {
       ...tx,
@@ -19576,11 +19572,26 @@ export default function AdminPaymentPage() {
       autoRenew: nextState,
     };
 
+    setTransactions((prev) =>
+      prev.map((tItem) => (tItem.id === tx.id ? updatedTx : tItem))
+    );
+    transactionsRef.current = transactionsRef.current.map((tItem) =>
+      tItem.id === tx.id ? updatedTx : tItem
+    );
+
     try {
       const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_transaction', transaction: updatedTx }),
+        body: JSON.stringify({ 
+          action: 'update_transaction',
+          id: tx.id,
+          transaction: {
+            ...updatedTx,
+            is_recurring: nextState,
+            auto_renew: nextState,
+          }
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -19598,12 +19609,16 @@ export default function AdminPaymentPage() {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
       }
     } catch (err: any) {
+      const revertedTx: PaymentTransaction = {
+        ...tx,
+        isRecurring: isCurrentlyActive,
+        autoRenew: isCurrentlyActive,
+      };
       setTransactions((prev) =>
-        prev.map((tItem) =>
-          tItem.id === tx.id
-            ? { ...tItem, isRecurring: tx.isRecurring, autoRenew: tx.autoRenew }
-            : tItem
-        )
+        prev.map((tItem) => (tItem.id === tx.id ? revertedTx : tItem))
+      );
+      transactionsRef.current = transactionsRef.current.map((tItem) =>
+        tItem.id === tx.id ? revertedTx : tItem
       );
       setFeedback({
         type: 'error',
@@ -19611,6 +19626,63 @@ export default function AdminPaymentPage() {
       });
     } finally {
       setTogglingTxId(null);
+    }
+  };
+
+  // TRIGGER GATEWAY REFUND HANDLER
+  const handleRefundTransaction = async (tx: PaymentTransaction) => {
+    const symbol = getCurrencySymbol(tx.currency || config.currency);
+    const amountStr = `${symbol}${parseAmount(tx.amount).toFixed(2)}`;
+    const confirmMsg = t('confirmRefundPayment', 'Are you sure you want to process a gateway refund for');
+    
+    if (!window.confirm(`${confirmMsg} ${tx.customerName} (${amountStr})?\n\nThis will trigger an automatic refund via ${tx.gateway.toUpperCase()}, turn off recurring, and immediately revoke active subscription privileges.`)) {
+      return;
+    }
+
+    setRefundingTxId(tx.id);
+    setFeedback(null);
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'refund_transaction',
+          id: tx.id,
+          transaction: {
+            ...tx,
+            status: 'refunded',
+            isRecurring: false,
+            autoRenew: false,
+            expiryDate: new Date().toISOString()
+          }
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to trigger gateway refund.');
+      }
+
+      await fetchData();
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+
+      setFeedback({
+        type: 'success',
+        msg: data.message || `Payment of ${amountStr} refunded successfully via ${tx.gateway.toUpperCase()} for ${tx.customerName}.`
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || 'Payment gateway refund failed. Please verify gateway keys.'
+      });
+    } finally {
+      setRefundingTxId(null);
     }
   };
 
@@ -20893,6 +20965,7 @@ export default function AdminPaymentPage() {
                       const txSymbol = getCurrencySymbol(tx.currency || config.currency);
                       const isRowSelected = selectedTxIds.includes(tx.id);
                       const isTxToggling = togglingTxId === tx.id;
+                      const isTxRefunding = refundingTxId === tx.id;
                       const isRecurringActive = Boolean(tx.isRecurring ?? true);
                       const isTxCanceled = isCanceled(tx.status);
                       const isTxRefunded = isRefunded(tx.status);
@@ -20996,11 +21069,11 @@ export default function AdminPaymentPage() {
                                 type="button"
                                 role="switch"
                                 aria-checked={isRecurringActive}
-                                disabled={isTxToggling || isTxCanceled || isTxRefunded}
+                                disabled={isTxToggling || isTxRefunded}
                                 onClick={() => handleToggleRecurring(tx)}
                                 title={
-                                  (isTxCanceled || isTxRefunded) 
-                                    ? t('cancelledNoRecurring', 'Plan is canceled/refunded') 
+                                  isTxRefunded 
+                                    ? t('refundedNoRecurring', 'Plan is refunded/voided') 
                                     : isRecurringActive 
                                     ? t('clickTurnRecurringOff', 'Click to turn recurring OFF') 
                                     : t('clickTurnRecurringOn', 'Click to turn recurring ON')
@@ -21086,6 +21159,7 @@ export default function AdminPaymentPage() {
                           {/* ACTIONS */}
                           <td className="px-5 py-3.5 text-right whitespace-nowrap">
                             <div className="flex items-center justify-end gap-1.5">
+                              {/* 1. EDIT BUTTON */}
                               <button
                                 type="button"
                                 disabled={isTxRefunded}
@@ -21107,6 +21181,35 @@ export default function AdminPaymentPage() {
                                   style={{ color: isTxRefunded ? (isDayMode ? '#94a3b8' : '#64748b') : 'var(--color-primary, #E05638)' }} 
                                 />
                               </button>
+
+                              {/* 2. GATEWAY REFUND BUTTON */}
+                              <button
+                                type="button"
+                                disabled={isTxRefunded || isTxRefunding || isFailed(tx.status)}
+                                onClick={() => handleRefundTransaction(tx)}
+                                className={`p-1.5 rounded-lg border transition shadow-xs ${
+                                  isTxRefunded || isFailed(tx.status)
+                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                    : 'text-amber-600 hover:text-amber-700 cursor-pointer hover:border-amber-400'
+                                }`}
+                                style={{
+                                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                                }}
+                                title={
+                                  isTxRefunded
+                                    ? t('alreadyRefundedTooltip', 'Payment already refunded')
+                                    : t('refundPaymentTooltip', 'Trigger payment gateway refund')
+                                }
+                              >
+                                {isTxRefunding ? (
+                                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-500" />
+                                ) : (
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+
+                              {/* 3. CANCEL RENEWAL BUTTON */}
                               <button
                                 type="button"
                                 disabled={isTxCanceled || isTxRefunded}
@@ -21114,16 +21217,18 @@ export default function AdminPaymentPage() {
                                 className={`p-1.5 rounded-lg border transition shadow-xs ${
                                   isTxCanceled || isTxRefunded
                                     ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                    : 'text-amber-500 hover:text-amber-600 cursor-pointer'
+                                    : 'text-orange-500 hover:text-orange-600 cursor-pointer'
                                 }`}
                                 style={{
                                   backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
                                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
                                 }}
-                                title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan & turn recurring off')}
+                                title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan renewal & keep active until expiry')}
                               >
                                 <XCircle className="h-3.5 w-3.5" />
                               </button>
+
+                              {/* 4. DELETE BUTTON */}
                               <button
                                 type="button"
                                 onClick={() => handleDeleteTransaction(tx.id, tx.customerName)}
