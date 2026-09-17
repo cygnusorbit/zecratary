@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   PlusCircle, PackageCheck, Zap, Trash2, Sparkles, AlertCircle, 
-  Check, Shield, CheckCircle2, Eye, RefreshCw, Edit3, DollarSign, Copy, Plus, Calendar, Tag, Star, Cpu, Bot, X
+  Check, Shield, CheckCircle2, Eye, RefreshCw, Edit3, DollarSign, Copy, Plus, Calendar, Tag, Star, Cpu, Bot, X, Layers, Hash
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -16,6 +16,9 @@ import {
 
 interface SubscriptionPackageConfig {
   id: string;
+  planGroupId?: string;
+  monthlyPlanId?: string;
+  annualPlanId?: string;
   name: string;
   slug: string;
   isFree: boolean;
@@ -40,6 +43,9 @@ interface SubscriptionPackageConfig {
 
 const BLANK_NEW_PLAN: SubscriptionPackageConfig = {
   id: '',
+  planGroupId: '',
+  monthlyPlanId: '',
+  annualPlanId: '',
   name: '',
   slug: '',
   isFree: false,
@@ -64,6 +70,9 @@ const BLANK_NEW_PLAN: SubscriptionPackageConfig = {
 
 const DEFAULT_PRESET_TASTER: SubscriptionPackageConfig = {
   id: 'preset_taster',
+  planGroupId: 'group_taster',
+  monthlyPlanId: 'preset_taster_monthly',
+  annualPlanId: 'preset_taster_annual',
   name: 'Taster',
   slug: 'taster',
   isFree: true,
@@ -88,6 +97,9 @@ const DEFAULT_PRESET_TASTER: SubscriptionPackageConfig = {
 
 const DEFAULT_PRESET_NUTRITION_PRO: SubscriptionPackageConfig = {
   id: 'preset_nutrition_pro',
+  planGroupId: 'group_nutrition_pro',
+  monthlyPlanId: 'plan_nutrition_pro_monthly',
+  annualPlanId: 'plan_nutrition_pro_annual',
   name: 'Nutrition Pro',
   slug: 'nutrition-pro',
   isFree: false,
@@ -150,7 +162,6 @@ export default function AdminSubscriptionPlans() {
     setMounted(true);
   }, []);
 
-  // Synchronize Active AI model directly from server store (Zero LocalStorage)
   const syncWithAiSettings = useCallback(async () => {
     try {
       const serverData = await fetchServerAdminSettings();
@@ -183,7 +194,6 @@ export default function AdminSubscriptionPlans() {
     };
   }, [syncWithAiSettings]);
 
-  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -252,7 +262,6 @@ export default function AdminSubscriptionPlans() {
     };
   }, [applySavedTheme]);
 
-  // Hydrate packages directly from server API (Zero LocalStorage)
   const fetchPackages = useCallback(async () => {
     purgeLegacyBrowserAdminStorage();
     try {
@@ -264,18 +273,24 @@ export default function AdminSubscriptionPlans() {
           const hasTaster = serverConfigs.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster');
           let list = hasTaster ? serverConfigs : [{ ...DEFAULT_PRESET_TASTER }, ...serverConfigs];
 
-          list = list.map((p: any) => ({
-            ...p,
-            featuresText: typeof p.featuresText === 'string' && p.featuresText
-              ? p.featuresText
-              : (Array.isArray(p.features) ? p.features.join('\n') : (p.descriptionMonthly || '')),
-            allowedAiModels: Array.isArray(p.allowedAiModels)
-              ? p.allowedAiModels.join(',')
-              : (p.allowedAiModels || 'gemini-3.6-flash'),
-            tokenLimit: p.tokenLimit !== undefined ? p.tokenLimit : (p.slug === 'taster' ? 50000 : 500000),
-            tokenReimburseFrequency: p.tokenReimburseFrequency || 'monthly',
-            isDefault: p.slug === 'taster' || p.id === 'preset_taster',
-          }));
+          list = list.map((p: any) => {
+            const cleanSlug = (p.slug || p.id || 'plan').replace(/-(monthly|annual)$/, '');
+            return {
+              ...p,
+              planGroupId: p.planGroupId || ('group_' + cleanSlug),
+              monthlyPlanId: p.monthlyPlanId || (p.isFree ? p.id : `${p.id || cleanSlug}_monthly`),
+              annualPlanId: p.annualPlanId || (p.isFree ? p.id : `${p.id || cleanSlug}_annual`),
+              featuresText: typeof p.featuresText === 'string' && p.featuresText
+                ? p.featuresText
+                : (Array.isArray(p.features) ? p.features.join('\n') : (p.descriptionMonthly || '')),
+              allowedAiModels: Array.isArray(p.allowedAiModels)
+                ? p.allowedAiModels.join(',')
+                : (p.allowedAiModels || 'gemini-3.6-flash'),
+              tokenLimit: p.tokenLimit !== undefined ? p.tokenLimit : (p.slug === 'taster' ? 50000 : 500000),
+              tokenReimburseFrequency: p.tokenReimburseFrequency || 'monthly',
+              isDefault: p.slug === 'taster' || p.id === 'preset_taster',
+            };
+          });
 
           setPackages(list);
           return;
@@ -309,7 +324,6 @@ export default function AdminSubscriptionPlans() {
 
     setPackages(updated);
 
-    // Save default plan directly to server store
     await persistServerAdminSettings({
       defaultPlanSlug: 'taster',
       subscriptionPlans: updated
@@ -327,11 +341,15 @@ export default function AdminSubscriptionPlans() {
   };
 
   const handleStartNewPlan = () => {
+    const timestamp = Date.now();
     setEditingId(null);
     setIsFree(false);
     setForm({
       ...BLANK_NEW_PLAN,
-      id: 'plan_' + Date.now(),
+      id: 'plan_' + timestamp,
+      planGroupId: 'group_' + timestamp,
+      monthlyPlanId: 'plan_' + timestamp + '_monthly',
+      annualPlanId: 'plan_' + timestamp + '_annual',
       slug: '',
       allowedAiModels: activeSettingsModel || 'gemini-3.6-flash',
       featuresText: BLANK_NEW_PLAN.featuresText
@@ -339,12 +357,17 @@ export default function AdminSubscriptionPlans() {
   };
 
   const handleApplyPreset = (preset: SubscriptionPackageConfig) => {
+    const timestamp = Date.now();
     setEditingId(null);
     setIsFree(preset.isFree);
+    const cleanSlug = preset.slug || preset.name.toLowerCase().replace(/\s+/g, '-');
     setForm({ 
       ...preset, 
-      id: 'plan_' + Date.now(),
-      slug: preset.slug || preset.name.toLowerCase().replace(/\s+/g, '-'),
+      id: 'plan_' + timestamp,
+      planGroupId: 'group_' + cleanSlug,
+      monthlyPlanId: preset.monthlyPlanId || ('plan_' + cleanSlug + '_monthly'),
+      annualPlanId: preset.annualPlanId || ('plan_' + cleanSlug + '_annual'),
+      slug: cleanSlug,
       featuresText: preset.featuresText || (Array.isArray((preset as any).features) ? (preset as any).features.join('\n') : '')
     });
   };
@@ -363,10 +386,15 @@ export default function AdminSubscriptionPlans() {
           ? pkg.allowedAiModels
           : (activeSettingsModel || 'gemini-3.6-flash'));
 
+    const baseSlug = (pkg.slug || pkg.id || 'plan').replace(/-(monthly|annual)$/, '');
+
     setEditingId(targetIdentifier);
     setIsFree(planIsFree);
     setForm({ 
       ...pkg, 
+      planGroupId: pkg.planGroupId || ('group_' + baseSlug),
+      monthlyPlanId: pkg.monthlyPlanId || (planIsFree ? pkg.id : `${pkg.id || baseSlug}_monthly`),
+      annualPlanId: pkg.annualPlanId || (planIsFree ? pkg.id : `${pkg.id || baseSlug}_annual`),
       featuresText: safeFeatures,
       allowedAiModels: safeAiModels,
       isFree: planIsFree,
@@ -412,8 +440,12 @@ export default function AdminSubscriptionPlans() {
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
 
-    const generatedSlug = (form.slug || form.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/^-|-$/g, '');
-    const planId = form.id || 'plan_' + Date.now();
+    const cleanSlug = (form.slug || form.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/^-|-$/g, '').replace(/-(monthly|annual)$/, '');
+    const planId = editingId ? (form.id || editingId) : (form.id || 'plan_' + Date.now());
+
+    const planGroupId = form.planGroupId?.trim() || ('group_' + (cleanSlug || planId));
+    const monthlyPlanId = form.monthlyPlanId?.trim() || (isFree ? planId : `${planId}_monthly`);
+    const annualPlanId = form.annualPlanId?.trim() || (isFree ? planId : `${planId}_annual`);
 
     const rawAllowedModels = Array.isArray(form.allowedAiModels)
       ? form.allowedAiModels
@@ -421,12 +453,15 @@ export default function AdminSubscriptionPlans() {
           ? form.allowedAiModels.split(',').map((m) => m.trim()).filter(Boolean)
           : [activeSettingsModel || 'gemini-3.6-flash']);
 
-    const isTaster = planId === 'preset_taster' || generatedSlug === 'taster';
+    const isTaster = planId === 'preset_taster' || cleanSlug === 'taster';
 
     const payload = {
       ...form,
       id: planId,
-      slug: generatedSlug,
+      planGroupId,
+      monthlyPlanId,
+      annualPlanId,
+      slug: cleanSlug,
       isFree,
       isDefault: isTaster,
       monthlyPriceDollars: isFree ? 0 : Number(form.monthlyPriceDollars) || 0,
@@ -446,40 +481,26 @@ export default function AdminSubscriptionPlans() {
       });
 
       const updatedPlanItem: SubscriptionPackageConfig = {
-        ...form,
-        id: planId,
-        slug: generatedSlug,
-        isFree,
-        isDefault: isTaster,
-        monthlyPriceDollars: isFree ? 0 : Number(form.monthlyPriceDollars) || 0,
-        annualPriceDollars: isFree ? 0 : Number(form.annualPriceDollars) || 0,
-        tokenLimit: Number(form.tokenLimit) || 100000,
-        tokenReimburseFrequency: form.tokenReimburseFrequency || 'monthly',
-        featuresText: parsedFeatures.join('\n'),
+        ...payload,
         allowedAiModels: Array.isArray(rawAllowedModels) ? rawAllowedModels.join(',') : rawAllowedModels,
       };
 
       let updatedList = [...packages];
-      if (editingId) {
-        const index = updatedList.findIndex((p) => p.id === editingId || p.slug === editingId);
-        if (index >= 0) {
-          updatedList[index] = updatedPlanItem;
-        } else {
-          updatedList.push(updatedPlanItem);
-        }
+      const matchIndex = updatedList.findIndex((p) => 
+        (editingId && (p.id === editingId || p.slug === editingId)) ||
+        (p.id && p.id === planId) ||
+        (p.slug && p.slug === cleanSlug)
+      );
+
+      if (matchIndex >= 0) {
+        updatedList[matchIndex] = updatedPlanItem;
       } else {
-        const existingIndex = updatedList.findIndex((p) => p.slug === generatedSlug || (p.id && p.id === planId));
-        if (existingIndex >= 0) {
-          updatedList[existingIndex] = updatedPlanItem;
-        } else {
-          updatedList.push(updatedPlanItem);
-        }
+        updatedList.push(updatedPlanItem);
       }
 
       updatedList = updatedList.map((p) => ({ ...p, isDefault: p.id === 'preset_taster' || p.slug === 'taster' }));
       setPackages(updatedList);
 
-      // Save directly to server settings (Zero LocalStorage)
       await persistServerAdminSettings({ subscriptionPlans: updatedList });
 
       if (typeof window !== 'undefined') {
@@ -500,7 +521,7 @@ export default function AdminSubscriptionPlans() {
     }
   };
 
-    const handleDeletePackage = async (pkg: SubscriptionPackageConfig) => {
+  const handleDeletePackage = async (pkg: SubscriptionPackageConfig) => {
     if (pkg.slug === 'taster' || pkg.id === 'preset_taster') {
       alert(t('tasterCannotDeleteAlert', 'The Taster plan is required as the default free fallback and cannot be deleted.'));
       return;
@@ -528,7 +549,6 @@ export default function AdminSubscriptionPlans() {
         handleStartNewPlan();
       }
 
-      // 1. Issue DELETE request directly to server API
       const queryParams = new URLSearchParams();
       if (pkg.id) queryParams.set('id', pkg.id);
       if (pkg.slug) queryParams.set('slug', pkg.slug);
@@ -544,7 +564,6 @@ export default function AdminSubscriptionPlans() {
         throw new Error(errData?.error || 'Failed to delete plan from database.');
       }
 
-      // 2. Synchronize deletion with server settings
       await persistServerAdminSettings({ subscriptionPlans: updated });
 
       if (typeof window !== 'undefined') {
@@ -725,9 +744,11 @@ export default function AdminSubscriptionPlans() {
                 <h2 className="text-base font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
                   {editingId ? `${t('editPlanPrefix', 'Edit Plan:')} ${form.name || t('planNameLabel', 'Plan')}` : t('addNewPlanTitle', 'Add New Subscription Plan')}
                 </h2>
-                <span className="text-[10px] block font-mono" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                  {editingId ? `${t('idPrefix', 'ID:')} ${editingId}` : t('creatingNewTier', 'Creating new plan')}
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-mono text-orange-500 font-bold">
+                    Group: {form.planGroupId || form.id || 'new'}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -771,11 +792,7 @@ export default function AdminSubscriptionPlans() {
                   type="button"
                   onClick={() => {
                     setIsFree(false);
-                    if (form.monthlyPriceDollars === 0 && form.annualPriceDollars === 0) {
-                      setForm({ ...form, isFree: false, monthlyPriceDollars: 0, annualPriceDollars: 0 });
-                    } else {
-                      setForm({ ...form, isFree: false });
-                    }
+                    setForm({ ...form, isFree: false });
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                     !isFree 
@@ -789,7 +806,7 @@ export default function AdminSubscriptionPlans() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
                 {t('planNameLabel', 'Plan Name')}
@@ -798,13 +815,18 @@ export default function AdminSubscriptionPlans() {
                 type="text"
                 required
                 value={form.name}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    name: e.target.value,
-                    slug: form.slug && editingId ? form.slug : e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                  })
-                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const autoSlug = val.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                  setForm(prev => ({
+                    ...prev,
+                    name: val,
+                    slug: form.slug && editingId ? form.slug : autoSlug,
+                    planGroupId: editingId ? prev.planGroupId : (prev.planGroupId || `group_${autoSlug}`),
+                    monthlyPlanId: editingId ? prev.monthlyPlanId : (prev.monthlyPlanId || `plan_${autoSlug}_monthly`),
+                    annualPlanId: editingId ? prev.annualPlanId : (prev.annualPlanId || `plan_${autoSlug}_annual`),
+                  }));
+                }}
                 placeholder={t('planNamePlaceholder', 'e.g. Starter, Family Pro, Unlimited')}
                 className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
                 style={{
@@ -823,9 +845,40 @@ export default function AdminSubscriptionPlans() {
                 type="text"
                 required
                 value={form.slug}
-                onChange={(e) => setForm({ ...form, slug: e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-') })}
+                onChange={(e) => {
+                  const s = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                  setForm(prev => ({
+                    ...prev,
+                    slug: s,
+                    ...(!editingId ? {
+                      planGroupId: `group_${s}`,
+                      monthlyPlanId: `plan_${s}_monthly`,
+                      annualPlanId: `plan_${s}_annual`
+                    } : {})
+                  }));
+                }}
                 placeholder={t('slugPlaceholder', 'e.g. starter-plan')}
-                className="w-full border rounded-xl p-2.5 text-xs text-mono outline-none transition"
+                className="w-full border rounded-xl p-2.5 text-xs font-mono outline-none transition"
+                style={{
+                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                  color: isDayMode ? '#0f172a' : '#cbd5e1'
+                }}
+              />
+            </div>
+
+            <div>
+              <label className="text-xs uppercase font-bold block mb-1 flex items-center justify-between" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+                <span>{t('planGroupIdLabel', 'Plan Group ID')}</span>
+                <Layers className="h-3.5 w-3.5 text-orange-500" />
+              </label>
+              <input
+                type="text"
+                required
+                value={form.planGroupId || ''}
+                onChange={(e) => setForm({ ...form, planGroupId: e.target.value.trim() })}
+                placeholder="e.g. group_nutrition_pro"
+                className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
                 style={{
                   backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
@@ -1074,6 +1127,7 @@ export default function AdminSubscriptionPlans() {
                 </div>
               </div>
 
+              {/* MONTHLY SETTINGS BLOCK WITH SEPARATE MONTHLY PLAN ID */}
               {(settingsFilter === 'both' || settingsFilter === 'monthly') && (
                 <div 
                   className="p-4 rounded-2xl border space-y-3 relative transition shadow-xs"
@@ -1094,7 +1148,26 @@ export default function AdminSubscriptionPlans() {
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                    <div>
+                      <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                        {t('monthlyPlanIdLabel', 'Monthly Plan ID')}
+                      </label>
+                      <input
+                        type="text"
+                        required={!isFree}
+                        value={form.monthlyPlanId || ''}
+                        onChange={(e) => setForm({ ...form, monthlyPlanId: e.target.value.trim() })}
+                        placeholder="plan_xxx_monthly"
+                        className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
+                        style={{
+                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
+                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                          color: isDayMode ? '#0f172a' : '#ffffff'
+                        }}
+                      />
+                    </div>
+
                     <div>
                       <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                         {t('monthlyPriceLabel', 'Monthly Price ($)')}
@@ -1122,7 +1195,7 @@ export default function AdminSubscriptionPlans() {
                         type="text"
                         value={form.monthlyBadge}
                         onChange={(e) => setForm({ ...form, monthlyBadge: e.target.value })}
-                        placeholder="e.g. Billed Immediately, Most Flexible"
+                        placeholder="e.g. Billed Immediately"
                         className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
                         style={{
                           backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
@@ -1153,6 +1226,7 @@ export default function AdminSubscriptionPlans() {
                 </div>
               )}
 
+              {/* ANNUAL SETTINGS BLOCK WITH SEPARATE ANNUAL PLAN ID */}
               {(settingsFilter === 'both' || settingsFilter === 'annual') && (
                 <div 
                   className="p-4 rounded-2xl border space-y-3 relative transition shadow-xs"
@@ -1188,7 +1262,26 @@ export default function AdminSubscriptionPlans() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
+                    <div>
+                      <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                        {t('annualPlanIdLabel', 'Annual Plan ID')}
+                      </label>
+                      <input
+                        type="text"
+                        required={!isFree}
+                        value={form.annualPlanId || ''}
+                        onChange={(e) => setForm({ ...form, annualPlanId: e.target.value.trim() })}
+                        placeholder="plan_xxx_annual"
+                        className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
+                        style={{
+                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
+                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                          color: isDayMode ? '#0f172a' : '#ffffff'
+                        }}
+                      />
+                    </div>
+
                     <div>
                       <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
                         {t('annualPriceLabel', 'Annual Price ($)')}
@@ -1210,13 +1303,13 @@ export default function AdminSubscriptionPlans() {
 
                     <div>
                       <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                        {t('discountBadge', 'Discount Badge (e.g. Save 44%)')}
+                        {t('discountBadge', 'Discount Badge')}
                       </label>
                       <input
                         type="text"
                         value={form.annualBadge}
                         onChange={(e) => setForm({ ...form, annualBadge: e.target.value })}
-                        placeholder="e.g. Save 44%, Best Value"
+                        placeholder="e.g. Save 44%"
                         className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
                         style={{
                           backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
@@ -1228,7 +1321,7 @@ export default function AdminSubscriptionPlans() {
 
                     <div>
                       <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                        {t('trialBadgeLabel', 'Trial Badge (e.g. 7-Day Free Trial)')}
+                        {t('trialBadgeLabel', 'Trial Badge')}
                       </label>
                       <input
                         type="text"
@@ -1411,6 +1504,7 @@ export default function AdminSubscriptionPlans() {
         </form>
 
         <div className="lg:col-span-6 space-y-6">
+          {/* SYSTEM PACKAGES LIST */}
           <div 
             className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
             style={{
@@ -1464,6 +1558,10 @@ export default function AdminSubscriptionPlans() {
                         ? pkg.allowedAiModels.split(',').map((m: string) => m.trim()).filter(Boolean)
                         : []);
 
+                  const effectiveGroupId = pkg.planGroupId || ('group_' + (pkg.slug || pkg.id));
+                  const effectiveMonthlyId = pkg.monthlyPlanId || (pkg.isFree ? pkg.id : `${pkg.id || pkg.slug}_monthly`);
+                  const effectiveAnnualId = pkg.annualPlanId || (pkg.isFree ? pkg.id : `${pkg.id || pkg.slug}_annual`);
+
                   return (
                     <div
                       key={cardIdentifier}
@@ -1479,6 +1577,8 @@ export default function AdminSubscriptionPlans() {
                       <div className="space-y-1.5 min-w-0 flex-1 pr-3">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{pkg.name}</span>
+                          
+                          {/* PLAN GROUP ID BADGE */}
                           <span 
                             className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
                             style={{
@@ -1486,10 +1586,39 @@ export default function AdminSubscriptionPlans() {
                               borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                               color: isDayMode ? '#475569' : '#94a3b8'
                             }}
-                            title={`Plan ID: ${pkg.id || pkg.slug}`}
+                            title={`Plan Group: ${effectiveGroupId}`}
                           >
-                            ID: {pkg.id || pkg.slug}
+                            Group: {effectiveGroupId}
                           </span>
+
+                          {/* SEPARATE MONTHLY & ANNUAL PLAN ID BADGES */}
+                          {!pkg.isFree && (
+                            <>
+                              <span 
+                                className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
+                                style={{
+                                  backgroundColor: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.15)',
+                                  borderColor: 'var(--color-primary, #E05638)',
+                                  color: isDayMode ? '#c2410c' : 'var(--color-primary, #E05638)'
+                                }}
+                                title={`Monthly Plan ID: ${effectiveMonthlyId}`}
+                              >
+                                Monthly: {effectiveMonthlyId}
+                              </span>
+
+                              <span 
+                                className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
+                                style={{
+                                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+                                  borderColor: '#10b981',
+                                  color: isDayMode ? '#047857' : '#10b981'
+                                }}
+                                title={`Annual Plan ID: ${effectiveAnnualId}`}
+                              >
+                                Annual: {effectiveAnnualId}
+                              </span>
+                            </>
+                          )}
                           
                           {pkg.isDefault ? (
                             <span 
@@ -1647,6 +1776,7 @@ export default function AdminSubscriptionPlans() {
             </div>
           </div>
 
+          {/* LIVE CARD MOCKUP PREVIEW */}
           <div 
             className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200"
             style={{
@@ -1707,11 +1837,21 @@ export default function AdminSubscriptionPlans() {
                     <h3 className="text-2xl font-black text-[#589c3a]">
                       {form.name || t('planNameLabel', 'Plan Name')}
                     </h3>
-                    {(form.id || form.slug) && (
-                      <span className="text-[10px] font-mono text-slate-400 block mt-0.5 font-bold">
-                        ID: {form.id || form.slug}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="text-[10px] font-mono text-slate-500 font-bold bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                        Group: {form.planGroupId || form.id || form.slug}
                       </span>
-                    )}
+                      {!isFree && previewTab === 'monthly' && (
+                        <span className="text-[10px] font-mono text-orange-700 font-bold bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">
+                          Monthly Plan ID: {form.monthlyPlanId || `${form.id || form.slug}_monthly`}
+                        </span>
+                      )}
+                      {!isFree && previewTab === 'annual' && (
+                        <span className="text-[10px] font-mono text-emerald-800 font-bold bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                          Annual Plan ID: {form.annualPlanId || `${form.id || form.slug}_annual`}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <span className="text-[10px] bg-orange-100 text-orange-800 font-bold px-2.5 py-1 rounded-full border border-orange-300 font-mono">
                     {form.tokenLimit === -1 ? 'Unlimited Tokens' : `${(form.tokenLimit || 0).toLocaleString()} tokens`} ({getReimburseLabel(form.tokenReimburseFrequency)})

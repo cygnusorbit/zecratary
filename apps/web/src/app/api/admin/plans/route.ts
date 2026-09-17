@@ -1,12 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import fs from 'fs';
-import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+async function ensureIntervalIdColumns() {
+  try {
+    await query(`
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS plan_group_id VARCHAR(120);
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_plan_id VARCHAR(120);
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_plan_id VARCHAR(120);
+    `);
+  } catch (_) {}
+}
+
+function getCanonicalSlug(rawSlug: string): string {
+  if (!rawSlug) return 'taster';
+  const clean = rawSlug.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
+  return clean.replace(/-(monthly|annual)$/, '');
+}
+
 export async function GET() {
   try {
+    await ensureIntervalIdColumns();
+
     const rows = await query(`
       SELECT 
         id,
@@ -30,8 +46,12 @@ export async function GET() {
         features,
         token_limit AS "tokenLimit",
         token_reimburse_frequency AS "tokenReimburseFrequency",
+        COALESCE(plan_group_id, 'group_' || slug, id) AS "planGroupId",
+        COALESCE(monthly_plan_id, id || '_monthly', slug || '_monthly') AS "monthlyPlanId",
+        COALESCE(annual_plan_id, id || '_annual', slug || '_annual') AS "annualPlanId",
         updated_at AS "updatedAt"
       FROM subscription_plans
+      WHERE slug NOT LIKE '%-monthly' AND slug NOT LIKE '%-annual'
       ORDER BY monthly_price_dollars ASC
     `);
 
@@ -46,43 +66,58 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureIntervalIdColumns();
     const body = await req.json();
     const plans = Array.isArray(body) ? body : (body.plans || body.packages || [body]);
 
     for (const p of plans) {
       if (!p) continue;
-      const slug = (p.slug || p.id || p.name || 'plan').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
-      const targetId = p.id || slug;
-      const isDefault = slug === 'taster' || targetId === 'preset_taster';
+      const rawSlug = (p.slug || p.id || p.name || 'plan').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
+      const canonicalSlug = getCanonicalSlug(rawSlug);
+      const targetId = p.id || canonicalSlug;
+      const isDefault = canonicalSlug === 'taster' || targetId === 'preset_taster';
 
-      const existing = await query('SELECT id FROM subscription_plans WHERE slug = $1', [slug]);
+      const planGroupId = p.planGroupId || ('group_' + canonicalSlug);
+      const monthlyPlanId = p.monthlyPlanId || (p.isFree ? targetId : `${targetId}_monthly`);
+      const annualPlanId = p.annualPlanId || (p.isFree ? targetId : `${targetId}_annual`);
+
+      const existing = await query(
+        'SELECT id, slug FROM subscription_plans WHERE id = $1 OR slug = $2 OR slug = $3 LIMIT 1',
+        [targetId, canonicalSlug, rawSlug]
+      );
 
       if (existing.length > 0) {
+        const rowId = existing[0].id;
         await query(`
           UPDATE subscription_plans SET
             name = $1,
-            is_free = $2,
-            is_default = $3,
-            monthly_price_dollars = $4,
-            annual_price_dollars = $5,
-            monthly_badge = $6,
-            annual_badge = $7,
-            trial_badge = $8,
-            description_monthly = $9,
-            description_annual = $10,
-            button_text = $11,
-            ai_recipe_limit = $12,
-            recipe_library_limit = $13,
-            social_scrape_limit = $14,
-            can_view_macros = $15,
-            allowed_ai_models = $16,
-            features = $17::jsonb,
-            token_limit = $18,
-            token_reimburse_frequency = $19,
+            slug = $2,
+            is_free = $3,
+            is_default = $4,
+            monthly_price_dollars = $5,
+            annual_price_dollars = $6,
+            monthly_badge = $7,
+            annual_badge = $8,
+            trial_badge = $9,
+            description_monthly = $10,
+            description_annual = $11,
+            button_text = $12,
+            ai_recipe_limit = $13,
+            recipe_library_limit = $14,
+            social_scrape_limit = $15,
+            can_view_macros = $16,
+            allowed_ai_models = $17,
+            features = $18::jsonb,
+            token_limit = $19,
+            token_reimburse_frequency = $20,
+            plan_group_id = $21,
+            monthly_plan_id = $22,
+            annual_plan_id = $23,
             updated_at = NOW()
-          WHERE slug = $20
+          WHERE id = $24
         `, [
           p.name,
+          canonicalSlug,
           Boolean(p.isFree),
           isDefault,
           Number(p.monthlyPriceDollars) || 0,
@@ -101,7 +136,10 @@ export async function POST(req: NextRequest) {
           JSON.stringify(p.features || []),
           Number(p.tokenLimit) || 50000,
           p.tokenReimburseFrequency || 'monthly',
-          slug
+          planGroupId,
+          monthlyPlanId,
+          annualPlanId,
+          rowId
         ]);
       } else {
         await query(`
@@ -109,12 +147,13 @@ export async function POST(req: NextRequest) {
             id, name, slug, is_free, is_default, monthly_price_dollars, annual_price_dollars,
             monthly_badge, annual_badge, trial_badge, description_monthly, description_annual,
             button_text, ai_recipe_limit, recipe_library_limit, social_scrape_limit,
-            can_view_macros, allowed_ai_models, features, token_limit, token_reimburse_frequency, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, NOW())
+            can_view_macros, allowed_ai_models, features, token_limit, token_reimburse_frequency,
+            plan_group_id, monthly_plan_id, annual_plan_id, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, $22, $23, $24, NOW())
         `, [
           targetId,
           p.name,
-          slug,
+          canonicalSlug,
           Boolean(p.isFree),
           isDefault,
           Number(p.monthlyPriceDollars) || 0,
@@ -132,12 +171,15 @@ export async function POST(req: NextRequest) {
           Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
           JSON.stringify(p.features || []),
           Number(p.tokenLimit) || 50000,
-          p.tokenReimburseFrequency || 'monthly'
+          p.tokenReimburseFrequency || 'monthly',
+          planGroupId,
+          monthlyPlanId,
+          annualPlanId
         ]);
       }
     }
 
-    return NextResponse.json({ success: true, message: 'Plans synchronized successfully in PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Plan groups and interval IDs synchronized successfully in PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -168,84 +210,12 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Cannot delete the system default Taster plan.' }, { status: 400 });
     }
 
-    if (targetSlug) {
-      await query('UPDATE payment_transactions SET plan_slug = NULL WHERE plan_slug = $1', [targetSlug]);
-      await query("UPDATE users SET subscription_plan = 'taster' WHERE subscription_plan = $1", [targetSlug]);
-    }
-    if (targetId && targetId !== targetSlug) {
-      await query('UPDATE payment_transactions SET plan_slug = NULL WHERE plan_slug = $1', [targetId]);
-      await query("UPDATE users SET subscription_plan = 'taster' WHERE subscription_plan = $1", [targetId]);
-    }
-
     await query(`
       DELETE FROM subscription_plans 
       WHERE id = $1 OR slug = $2 OR id = $3 OR slug = $4
     `, [targetId, targetSlug, targetSlug, targetId]);
 
-    const dataPaths = [
-      path.join(process.cwd(), 'apps/web/data', 'subscription_plans.json'),
-      path.join(process.cwd(), 'apps/web/apps/web/data', 'subscription_plans.json'),
-      path.join(process.cwd(), 'data', 'subscription_plans.json'),
-      path.join(process.cwd(), 'apps/web/data', 'admin_settings.json'),
-      path.join(process.cwd(), 'data', 'admin_settings.json')
-    ];
-
-    for (const p of dataPaths) {
-      if (fs.existsSync(p)) {
-        try {
-          const raw = fs.readFileSync(p, 'utf-8');
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            const filtered = parsed.filter((item: any) => 
-              item.id !== targetId && item.slug !== targetSlug && item.id !== targetSlug && item.slug !== targetId
-            );
-            fs.writeFileSync(p, JSON.stringify(filtered, null, 2), 'utf-8');
-          } else if (parsed && Array.isArray(parsed.subscriptionPlans)) {
-            parsed.subscriptionPlans = parsed.subscriptionPlans.filter((item: any) => 
-              item.id !== targetId && item.slug !== targetSlug && item.id !== targetSlug && item.slug !== targetId
-            );
-            fs.writeFileSync(p, JSON.stringify(parsed, null, 2), 'utf-8');
-          }
-        } catch (_) {}
-      }
-    }
-
-    const remaining = await query(`
-      SELECT 
-        id,
-        name,
-        slug,
-        is_free AS "isFree",
-        is_default AS "isDefault",
-        COALESCE(monthly_price_dollars, 0)::float AS "monthlyPriceDollars",
-        COALESCE(annual_price_dollars, 0)::float AS "annualPriceDollars",
-        monthly_badge AS "monthlyBadge",
-        annual_badge AS "annualBadge",
-        trial_badge AS "trialBadge",
-        description_monthly AS "descriptionMonthly",
-        description_annual AS "descriptionAnnual",
-        button_text AS "buttonText",
-        ai_recipe_limit AS "aiRecipeLimit",
-        recipe_library_limit AS "recipeLibraryLimit",
-        social_scrape_limit AS "socialScrapeLimit",
-        can_view_macros AS "canViewMacros",
-        allowed_ai_models AS "allowedAiModels",
-        features,
-        token_limit AS "tokenLimit",
-        token_reimburse_frequency AS "tokenReimburseFrequency",
-        updated_at AS "updatedAt"
-      FROM subscription_plans
-      ORDER BY monthly_price_dollars ASC
-    `);
-
-    return NextResponse.json({
-      success: true,
-      message: 'Plan permanently deleted from PostgreSQL.',
-      plans: remaining,
-      packages: remaining
-    }, {
-      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
-    });
+    return NextResponse.json({ success: true, message: 'Plan permanently deleted from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
