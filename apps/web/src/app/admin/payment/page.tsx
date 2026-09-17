@@ -31,6 +31,9 @@ interface PaymentTransaction {
   testMode?: boolean;
   createdAt: string;
   expiryDate?: string;
+  isRecurring?: boolean;
+  recurringInterval?: 'MONTH' | 'YEAR';
+  autoRenew?: boolean;
 }
 
 interface GatewayConfig {
@@ -159,6 +162,9 @@ const normalizeTransaction = (raw: any, defaultCurrency: string): PaymentTransac
     testMode: Boolean(raw.testMode !== undefined ? raw.testMode : raw.test_mode),
     createdAt: raw.createdAt || raw.created_at || new Date().toISOString(),
     expiryDate: raw.expiryDate || raw.expiry_date || undefined,
+    isRecurring: raw.isRecurring !== undefined ? Boolean(raw.isRecurring) : true,
+    recurringInterval: raw.recurringInterval || raw.recurring_interval || (String(raw.planSlug || raw.plan_slug || '').includes('annual') ? 'YEAR' : 'MONTH'),
+    autoRenew: raw.autoRenew !== undefined ? Boolean(raw.autoRenew) : true,
   };
 };
 
@@ -351,120 +357,125 @@ export default function AdminPaymentPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
-  // Load Plans from Server Settings API
+  // Load Plans from Server Settings API with snake_case and camelCase compatibility
   const loadPlans = useCallback(async (currencyOverride?: string) => {
     let parsedPlans: PlanOption[] = [];
     const symbol = getCurrencySymbol(currencyOverride || configRef.current.currency);
+    let rawPlansList: any[] = [];
+
     try {
       const serverData = await fetchServerAdminSettings();
       if (serverData && Array.isArray(serverData.subscriptionPlans) && serverData.subscriptionPlans.length > 0) {
-        serverData.subscriptionPlans.forEach((cfg: any) => {
-          const isZeroCost = cfg.price === 0 || cfg.isFree || (cfg.monthlyPriceDollars === 0 && cfg.annualPriceDollars === 0);
-          const baseSlug = cfg.slug || cfg.id || 'plan';
-          const baseName = cfg.name || 'Plan';
-
-          if (isZeroCost) {
-            parsedPlans.push({
-              id: cfg.id || baseSlug,
-              name: baseName + ' (Free)',
-              slug: baseSlug,
-              priceFormatted: 'Free',
-              priceDollars: 0,
-              interval: 'MONTH',
-              isFree: true,
-            });
-          } else {
-            const monthlyPrice = Number(cfg.monthlyPriceDollars ?? cfg.price ?? 0);
-            if (monthlyPrice > 0 || (!cfg.annualPriceDollars && monthlyPrice === 0)) {
-              const mSlug = baseSlug.endsWith('-monthly') ? baseSlug : `${baseSlug.replace(/-annual$/, '')}-monthly`;
-              parsedPlans.push({
-                id: `${cfg.id || baseSlug}-monthly`,
-                name: `${baseName} (Monthly)`,
-                slug: mSlug,
-                priceFormatted: `${symbol}${monthlyPrice.toFixed(2)}/mo`,
-                priceDollars: monthlyPrice,
-                interval: 'MONTH',
-                isFree: false,
-              });
-            }
-
-            const annualPrice = Number(cfg.annualPriceDollars ?? 0);
-            if (annualPrice > 0) {
-              const aSlug = baseSlug.endsWith('-annual') ? baseSlug : `${baseSlug.replace(/-monthly$/, '')}-annual`;
-              parsedPlans.push({
-                id: `${cfg.id || baseSlug}-annual`,
-                name: `${baseName} (Annual)`,
-                slug: aSlug,
-                priceFormatted: `${symbol}${annualPrice.toFixed(2)}/yr`,
-                priceDollars: annualPrice,
-                interval: 'YEAR',
-                isFree: false,
-              });
-            }
-          }
-        });
+        rawPlansList = serverData.subscriptionPlans;
       }
     } catch (_) {}
 
-    if (parsedPlans.length === 0) {
+    if (rawPlansList.length === 0) {
       try {
         const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
-          const list = Array.isArray(data) ? data : (data.plans || data.packages || data.configs);
+          const list = Array.isArray(data) 
+            ? data 
+            : (data.plans || data.packages || data.configs || data.subscriptionPlans || data.data);
           if (Array.isArray(list) && list.length > 0) {
-            list.forEach((p: any) => {
-              const isZeroCost = p.priceCents === 0 || p.monthlyPriceDollars === 0 || p.isFree || (p.price === 0 && !p.annualPriceDollars);
-              const baseSlug = p.slug || p.id || 'plan';
-              const baseName = p.name || 'Plan';
-
-              if (isZeroCost) {
-                parsedPlans.push({
-                  id: p.id || baseSlug,
-                  name: baseName + ' (Free)',
-                  slug: baseSlug,
-                  priceFormatted: 'Free',
-                  priceDollars: 0,
-                  interval: 'MONTH',
-                  isFree: true,
-                });
-              } else {
-                const monthlyPrice = p.priceCents ? p.priceCents / 100 : Number(p.monthlyPriceDollars || p.price || 0);
-                if (monthlyPrice > 0) {
-                  const mSlug = baseSlug.endsWith('-monthly') ? baseSlug : `${baseSlug.replace(/-annual$/, '')}-monthly`;
-                  parsedPlans.push({
-                    id: `${p.id || baseSlug}-monthly`,
-                    name: `${baseName} (Monthly)`,
-                    slug: mSlug,
-                    priceFormatted: `${symbol}${monthlyPrice.toFixed(2)}/mo`,
-                    priceDollars: monthlyPrice,
-                    interval: 'MONTH',
-                    isFree: false,
-                  });
-                }
-
-                const annualPrice = Number(p.annualPriceDollars || 0);
-                if (annualPrice > 0) {
-                  const aSlug = baseSlug.endsWith('-annual') ? baseSlug : `${baseSlug.replace(/-monthly$/, '')}-annual`;
-                  parsedPlans.push({
-                    id: `${p.id || baseSlug}-annual`,
-                    name: `${baseName} (Annual)`,
-                    slug: aSlug,
-                    priceFormatted: `${symbol}${annualPrice.toFixed(2)}/yr`,
-                    priceDollars: annualPrice,
-                    interval: 'YEAR',
-                    isFree: false,
-                  });
-                }
-              }
-            });
+            rawPlansList = list;
           }
         }
       } catch (_) {}
     }
 
-    if (parsedPlans.length > 0) {
-      setAvailablePlans(parsedPlans);
+    if (rawPlansList.length > 0) {
+      rawPlansList.forEach((cfg: any) => {
+        const isZeroCost = Boolean(
+          cfg.isFree || 
+          cfg.is_free || 
+          cfg.price === 0 || 
+          cfg.priceCents === 0 || 
+          (cfg.monthlyPriceDollars === 0 && cfg.annualPriceDollars === 0) ||
+          (cfg.monthly_price_dollars === 0 && cfg.annual_price_dollars === 0)
+        );
+
+        const rawSlug = String(cfg.slug || cfg.id || 'plan').toLowerCase().trim();
+        const baseSlug = rawSlug.replace(/-(monthly|annual)$/, '');
+        const rawName = String(cfg.name || baseSlug || 'Plan').trim();
+        const baseName = rawName.replace(/\s*\((Monthly|Annual|Free)\)/i, '').trim();
+
+        if (isZeroCost) {
+          parsedPlans.push({
+            id: cfg.id || baseSlug,
+            name: `${baseName} (Free)`,
+            slug: baseSlug,
+            priceFormatted: 'Free',
+            priceDollars: 0,
+            interval: 'MONTH',
+            isFree: true,
+          });
+        } else {
+          let monthlyPrice = Number(
+            cfg.monthlyPriceDollars ?? 
+            cfg.monthly_price_dollars ?? 
+            (cfg.priceCents ? cfg.priceCents / 100 : undefined) ?? 
+            (String(cfg.interval || '').toLowerCase().includes('year') ? undefined : cfg.price) ?? 
+            0
+          );
+
+          let annualPrice = Number(
+            cfg.annualPriceDollars ?? 
+            cfg.annual_price_dollars ?? 
+            (String(cfg.interval || '').toLowerCase().includes('year') ? cfg.price : undefined) ?? 
+            0
+          );
+
+          if (monthlyPrice > 0 && annualPrice === 0) {
+            annualPrice = Number((monthlyPrice * 10).toFixed(2));
+          }
+          if (annualPrice > 0 && monthlyPrice === 0) {
+            monthlyPrice = Number((annualPrice / 10).toFixed(2));
+          }
+          if (monthlyPrice === 0 && annualPrice === 0) {
+            monthlyPrice = 8.99;
+            annualPrice = 59.99;
+          }
+
+          // 1. Monthly Tier
+          const mSlug = `${baseSlug}-monthly`;
+          parsedPlans.push({
+            id: `${cfg.id || baseSlug}-monthly`,
+            name: `${baseName} (Monthly)`,
+            slug: mSlug,
+            priceFormatted: `${symbol}${monthlyPrice.toFixed(2)}/mo`,
+            priceDollars: monthlyPrice,
+            interval: 'MONTH',
+            isFree: false,
+          });
+
+          // 2. Annual Tier
+          const aSlug = `${baseSlug}-annual`;
+          parsedPlans.push({
+            id: `${cfg.id || baseSlug}-annual`,
+            name: `${baseName} (Annual)`,
+            slug: aSlug,
+            priceFormatted: `${symbol}${annualPrice.toFixed(2)}/yr`,
+            priceDollars: annualPrice,
+            interval: 'YEAR',
+            isFree: false,
+          });
+        }
+      });
+    }
+
+    const uniquePlans: PlanOption[] = [];
+    const seenSlugs = new Set<string>();
+    for (const p of parsedPlans) {
+      if (!seenSlugs.has(p.slug)) {
+        seenSlugs.add(p.slug);
+        uniquePlans.push(p);
+      }
+    }
+
+    if (uniquePlans.length > 0) {
+      setAvailablePlans(uniquePlans);
     } else {
       setAvailablePlans([
         { id: 'taster', name: 'Taster (Free)', slug: 'taster', priceFormatted: 'Free', priceDollars: 0, isFree: true },
@@ -528,7 +539,7 @@ export default function AdminPaymentPage() {
     }
   }, [validateAndSyncUserPlans]);
 
-  // Hydrate Payments & Gateways Exclusively from Server (Zero LocalStorage, Stable Callback)
+  // Hydrate Payments & Gateways Exclusively from Server
   const fetchData = useCallback(async () => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
@@ -632,6 +643,13 @@ export default function AdminPaymentPage() {
     return null;
   }, [showAddModal, selectedUserId, currentSelectedUser, selectedPlanSlug]);
 
+  // HOISTED: Defined before any handler or effect that accesses it (prevents TDZ ReferenceError)
+  const paidSubscriptionPlans = useMemo(() => {
+    return availablePlans.filter(
+      (p) => !p.isFree && p.slug !== 'taster' && (p.priceDollars > 0 || !p.priceFormatted?.toLowerCase().includes('free'))
+    );
+  }, [availablePlans]);
+
   const handleCurrencyChange = async (newCurrency: string) => {
     const updatedConfig: GatewayConfig = {
       ...config,
@@ -666,6 +684,32 @@ export default function AdminPaymentPage() {
     }
   };
 
+  const handleUserSelectChange = (userId: string) => {
+    setSelectedUserId(userId);
+    setModalError('');
+    const target = registeredUsers.find((u) => u.id === userId);
+    if (target) {
+      const userPlan = sanitizeSinglePlan(target.subscriptionPlan);
+      if (selectedPlanSlug === userPlan && userPlan !== 'taster') {
+        let alternativeSlug = '';
+        if (userPlan.endsWith('-monthly')) {
+          alternativeSlug = userPlan.replace(/-monthly$/, '-annual');
+        } else if (userPlan.endsWith('-annual')) {
+          alternativeSlug = userPlan.replace(/-annual$/, '-monthly');
+        } else {
+          alternativeSlug = `${userPlan}-annual`;
+        }
+        const matched = paidSubscriptionPlans.find((p) => p.slug === alternativeSlug) ||
+                        paidSubscriptionPlans.find((p) => p.slug !== userPlan);
+        if (matched) {
+          setSelectedPlanSlug(matched.slug);
+          setPaymentAmount(matched.priceDollars);
+          setPaymentExpiryDate(calculateDefaultExpiry(paymentDate, matched.interval));
+        }
+      }
+    }
+  };
+
   const handlePlanSelectChange = (slug: string) => {
     const singleSlug = sanitizeSinglePlan(slug);
     setSelectedPlanSlug(singleSlug);
@@ -685,26 +729,46 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const paidSubscriptionPlans = useMemo(() => {
-    return availablePlans.filter(
-      (p) => !p.isFree && p.slug !== 'taster' && (p.priceDollars > 0 || !p.priceFormatted?.toLowerCase().includes('free'))
-    );
-  }, [availablePlans]);
+  // Safe reactive plan synchronization
+  useEffect(() => {
+    if (paidSubscriptionPlans.length > 0) {
+      const exists = paidSubscriptionPlans.some((p) => p.slug === selectedPlanSlug);
+      if (!exists) {
+        const first = paidSubscriptionPlans[0];
+        setSelectedPlanSlug(first.slug);
+        setPaymentAmount(first.priceDollars);
+        setPaymentExpiryDate(calculateDefaultExpiry(paymentDate, first.interval));
+      }
+    }
+  }, [paidSubscriptionPlans]);
 
   const handleOpenAddModal = () => {
     setModalError('');
     const today = new Date().toISOString().slice(0, 10);
     setPaymentDate(today);
 
-    const initialPlan = paidSubscriptionPlans[0] || availablePlans.find((p) => !p.isFree) || availablePlans[0];
+    const targetUser = registeredUsers[0] || null;
+    if (targetUser) {
+      setSelectedUserId(targetUser.id);
+    }
+
+    const userCurrentPlan = targetUser ? sanitizeSinglePlan(targetUser.subscriptionPlan) : 'taster';
+    
+    let initialPlan = paidSubscriptionPlans.find((p) => p.slug !== userCurrentPlan) || paidSubscriptionPlans[0];
+    if (userCurrentPlan.endsWith('-monthly')) {
+      const annualSlug = userCurrentPlan.replace(/-monthly$/, '-annual');
+      const foundAnnual = paidSubscriptionPlans.find((p) => p.slug === annualSlug);
+      if (foundAnnual) initialPlan = foundAnnual;
+    } else if (userCurrentPlan.endsWith('-annual')) {
+      const monthlySlug = userCurrentPlan.replace(/-annual$/, '-monthly');
+      const foundMonthly = paidSubscriptionPlans.find((p) => p.slug === monthlySlug);
+      if (foundMonthly) initialPlan = foundMonthly;
+    }
+
     const initialSlug = sanitizeSinglePlan(initialPlan?.slug || 'nutrition-pro-monthly');
     setSelectedPlanSlug(initialSlug);
     setPaymentAmount(initialPlan?.priceDollars || 8.99);
     setPaymentExpiryDate(calculateDefaultExpiry(today, initialPlan?.interval || 'MONTH'));
-
-    if (registeredUsers.length > 0) {
-      setSelectedUserId(registeredUsers[0].id);
-    }
 
     if (config.activeGateway === 'paypal' && (config.paypal.enabled || config.activeGateway === 'paypal')) {
       setPaymentGateway('paypal');
@@ -755,33 +819,45 @@ export default function AdminPaymentPage() {
 
     const updatedTx: PaymentTransaction = { ...tx, status: 'refunded', expiryDate: new Date().toISOString() };
 
-    await fetch('/api/admin/payment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'update_transaction', transaction: updatedTx }),
-    });
-
-    const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === (tx.customerEmail || '').toLowerCase().trim());
-    if (targetUser) {
-      await fetch('/api/admin/users', {
+    try {
+      const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...targetUser, subscriptionPlan: 'taster' }),
-      }).catch(() => {});
+        body: JSON.stringify({ action: 'cancel_transaction', transaction: updatedTx, id: tx.id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to cancel plan');
+      }
+
+      const cleanEmail = (tx.customerEmail || '').toLowerCase().trim();
+      const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
+      if (targetUser) {
+        await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...targetUser, subscriptionPlan: 'taster', planExpiryDate: null, expiryDate: null }),
+        }).catch(() => {});
+      }
+
+      await fetchData();
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+
+      setFeedback({
+        type: 'success',
+        msg: `Plan cancelled and user subscription reverted to default Free (Taster) for ${tx.customerName}.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || 'Failed to cancel plan',
+      });
     }
-
-    setTransactions((prev) => prev.map((item) => (item.id === tx.id ? updatedTx : item)));
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_users_updated'));
-      window.dispatchEvent(new Event('zecratary_payment_updated'));
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-    }
-
-    setFeedback({
-      type: 'success',
-      msg: `Plan cancelled and user subscription reset to Free (Taster) for ${tx.customerName}.`,
-    });
   };
 
   const handleUpdatePaymentSubmit = async (e: React.FormEvent) => {
@@ -865,19 +941,24 @@ export default function AdminPaymentPage() {
     }
 
     try {
-      await fetch(`/api/admin/payment?id=${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/admin/payment?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete transaction');
+      }
 
-      setTransactions((prev) => prev.filter((tItem) => tItem.id !== id));
+      await fetchData();
       setSelectedTxIds((prev) => prev.filter((item) => item !== id));
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
 
       setFeedback({
         type: 'success',
-        msg: `Payment record deleted successfully.`,
+        msg: `Payment record deleted successfully and user plans re-verified in PostgreSQL.`,
       });
     } catch (err: any) {
       setFeedback({
@@ -895,22 +976,29 @@ export default function AdminPaymentPage() {
     }
 
     try {
-      await Promise.allSettled(
-        selectedTxIds.map((id) => fetch(`/api/admin/payment?id=${id}`, { method: 'DELETE' }))
-      );
+      const res = await fetch('/api/admin/payment', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedTxIds })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to remove selected records.');
+      }
 
       const count = selectedTxIds.length;
-      setTransactions((prev) => prev.filter((tItem) => !selectedTxIds.includes(tItem.id)));
       setSelectedTxIds([]);
+      await fetchData();
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
 
       setFeedback({
         type: 'success',
-        msg: `Successfully removed ${count} selected user record(s).`,
+        msg: `Successfully removed ${count} selected payment record(s) and re-verified user plans.`,
       });
     } catch (err: any) {
       setFeedback({
@@ -2479,7 +2567,7 @@ export default function AdminPaymentPage() {
                 {registeredUsers.length > 0 ? (
                   <select
                     value={selectedUserId}
-                    onChange={(e) => setSelectedUserId(e.target.value)}
+                    onChange={(e) => handleUserSelectChange(e.target.value)}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold transition cursor-pointer"
                     style={{
                       backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
