@@ -1,6 +1,6 @@
 // Generated / Updated by AI Collaborator
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
   PlusCircle, PackageCheck, Zap, Trash2, Sparkles, AlertCircle, 
@@ -144,6 +144,7 @@ export default function AdminSubscriptionPlans() {
   const [mounted, setMounted] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [packages, setPackages] = useState<SubscriptionPackageConfig[]>([]);
+  const isFetchingPackagesRef = useRef(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isFree, setIsFree] = useState(false);
   const [form, setForm] = useState<SubscriptionPackageConfig>({ ...DEFAULT_PRESET_NUTRITION_PRO });
@@ -263,9 +264,12 @@ export default function AdminSubscriptionPlans() {
   }, [applySavedTheme]);
 
   const fetchPackages = useCallback(async () => {
+    if (isFetchingPackagesRef.current) return;
+    isFetchingPackagesRef.current = true;
+    try {
     purgeLegacyBrowserAdminStorage();
     try {
-      const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json().catch(() => null);
         const serverConfigs = Array.isArray(data) ? data : (data?.packages || data?.plans || data?.configs);
@@ -292,7 +296,7 @@ export default function AdminSubscriptionPlans() {
             };
           });
 
-          setPackages(list);
+          setPackages(prev => JSON.stringify(prev) === JSON.stringify(list) ? prev : list);
           return;
         }
       }
@@ -300,15 +304,42 @@ export default function AdminSubscriptionPlans() {
       console.error('Failed to fetch packages from server:', e);
     }
     setPackages([{ ...DEFAULT_PRESET_TASTER }]);
+    } finally {
+      isFetchingPackagesRef.current = false;
+    }
   }, []);
 
+    // Decoupled document title
   useEffect(() => {
     if (!mounted) return;
     document.title = `${t('subscriptionPlansTitle', 'Subscription Plans')} - FoodiePrep Admin`;
+  }, [mounted, t]);
+
+  // Mount-only fetch with debounced event listener
+  useEffect(() => {
+    if (!mounted) return;
     initAuthStorage();
-    setCurrentUser(getCurrentUser());
+    const u = getCurrentUser();
+    setCurrentUser(u);
     fetchPackages();
-  }, [fetchPackages, mounted, t]);
+
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const handleSync = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchPackages();
+      }, 300);
+    };
+
+    window.addEventListener('zecratary_plans_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener('zecratary_plans_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+    };
+  }, [mounted]);
 
   const handleSetDefaultPlan = async (targetPkg: SubscriptionPackageConfig) => {
     const isTaster = targetPkg.id === 'preset_taster' || targetPkg.slug === 'taster';

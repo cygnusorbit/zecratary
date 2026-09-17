@@ -101,7 +101,7 @@ const SYSTEM_DEFAULT_FREE_PLAN: SubscriptionPlanItem = {
 };
 
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
-  if (!planInput) return '';
+  if (!planInput) return 'taster';
   let raw = '';
   if (Array.isArray(planInput)) {
     raw = planInput[0] ? String(planInput[0]).trim() : '';
@@ -144,11 +144,11 @@ export default function ProfilePage() {
 
   const [processingSocial, setProcessingSocial] = useState<SocialProvider | null>(null);
 
-  // Dynamic Plans state with default free tier preserved
   const [plans, setPlans] = useState<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
   const plansRef = useRef<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
   plansRef.current = plans;
   const isFetchingPlansRef = useRef(false);
+  const isFetchingProfileRef = useRef(false);
 
   const [selectedInterval, setSelectedInterval] = useState<'ALL' | 'MONTH' | 'YEAR'>('ALL');
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
@@ -187,7 +187,7 @@ export default function ProfilePage() {
       } catch (_) {}
 
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
       const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
@@ -236,16 +236,18 @@ export default function ProfilePage() {
     };
   }, [applySavedTheme]);
 
+  // Synchronized plan matcher aligning with /admin/users logic
   const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem): boolean => {
     if (!user) return false;
 
     const rawUser = user as any;
-    const userPlanRaw = rawUser.planId || rawUser.subscriptionPlan || rawUser.subscriptionTier || rawUser.planSlug || '';
+    const userPlanRaw = rawUser.subscriptionPlan || rawUser.planSlug || rawUser.planId || rawUser.subscriptionTier || '';
     const cleanUserPlan = sanitizeSinglePlan(userPlanRaw);
     const planSlug = sanitizeSinglePlan(plan.slug);
     const planId = sanitizeSinglePlan(plan.id);
 
-    if (rawUser.planId && (rawUser.planId === plan.id || rawUser.planId === plan.slug)) {
+    const isUserFree = !cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || cleanUserPlan.includes('free');
+    if (isUserFree && (plan.isFree || planSlug === 'taster' || planSlug === 'free')) {
       return true;
     }
 
@@ -253,24 +255,15 @@ export default function ProfilePage() {
       return true;
     }
 
-    const isUserFree = !cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || cleanUserPlan.includes('free');
-    if (isUserFree && plan.isFree) {
-      const defaultSlug = typeof window !== 'undefined' ? localStorage.getItem('zecratary_default_plan_slug') || 'taster' : 'taster';
-      if (!cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || planSlug === defaultSlug || planId === defaultSlug || cleanUserPlan === planSlug) {
-        return true;
-      }
-    }
-
-    const userInterval = (rawUser.planInterval || (cleanUserPlan.includes('annual') || cleanUserPlan.includes('year') ? 'YEAR' : cleanUserPlan.includes('monthly') || cleanUserPlan.includes('month') ? 'MONTH' : '')).toUpperCase();
-    const planInterval = (plan.interval || '').toUpperCase();
+    const userInterval = (rawUser.planInterval || (cleanUserPlan.includes('annual') || cleanUserPlan.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
+    const planInterval = (plan.interval || (planSlug.includes('annual') || planSlug.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
 
     const cleanUserBase = cleanUserPlan.replace(/-(monthly|annual|free)$/i, '');
     const cleanPlanBase = planSlug.replace(/-(monthly|annual|free)$/i, '');
 
     if (cleanUserBase && cleanPlanBase && cleanUserBase === cleanPlanBase) {
       if (plan.isFree) return true;
-      if (userInterval && planInterval) return userInterval === planInterval;
-      return true;
+      return userInterval === planInterval;
     }
 
     return false;
@@ -297,7 +290,7 @@ export default function ProfilePage() {
     }
 
     try {
-      const storedTokens = localStorage.getItem('zecratary_token_usage');
+      const storedTokens = typeof window !== 'undefined' ? localStorage.getItem('zecratary_token_usage') : null;
       const parsed = storedTokens ? JSON.parse(storedTokens) : {};
       const updated = {
         promptTokens: parsed.promptTokens || 1420,
@@ -308,22 +301,28 @@ export default function ProfilePage() {
         reimburseFrequency: assignedFrequency
       };
       setTokenUsage(updated);
-      localStorage.setItem('zecratary_token_usage', JSON.stringify(updated));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_token_usage', JSON.stringify(updated));
+      }
     } catch (_) {}
   }, []);
 
-  // Synchronize available subscription plans dynamically from /admin/plans & PostgreSQL
+  // Synchronize available subscription plans dynamically from /api/admin/plans with /admin/users interval naming
   const syncPlansFromAdmin = useCallback(async () => {
     if (isFetchingPlansRef.current) return;
     isFetchingPlansRef.current = true;
 
+    let serverConfigs: any[] = [];
     try {
       const res = await fetch('/api/admin/plans', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        const serverConfigs = Array.isArray(data) ? data : (data.configs || data.plans || data.packages);
-        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
-          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
+        const list = Array.isArray(data) ? data : (data.configs || data.plans || data.packages || data.subscriptionPlans);
+        if (Array.isArray(list) && list.length > 0) {
+          serverConfigs = list;
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
+          }
         }
       }
     } catch (_) {}
@@ -331,89 +330,118 @@ export default function ProfilePage() {
       isFetchingPlansRef.current = false;
     }
 
-    const plansMap = new Map<string, SubscriptionPlanItem>();
+    if (serverConfigs.length === 0 && typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('zecratary_subscription_configs');
+        if (raw) serverConfigs = JSON.parse(raw);
+      } catch (_) {}
+    }
 
-    try {
-      const rawConfigs = typeof window !== 'undefined' ? localStorage.getItem('zecratary_subscription_configs') : null;
-      let configs: any[] = [];
-      if (rawConfigs) {
-        const parsed = JSON.parse(rawConfigs);
-        if (Array.isArray(parsed)) configs = parsed;
+    const plansMap = new Map<string, SubscriptionPlanItem>();
+    const configs: any[] = [...serverConfigs];
+
+    const hasFree = configs.some((cfg: any) => 
+      cfg && (
+        cfg.isFree === true || 
+        cfg.slug === 'taster' || 
+        cfg.id === 'preset_taster' || 
+        (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0)
+      )
+    );
+
+    if (!hasFree) {
+      configs.unshift({
+        id: SYSTEM_DEFAULT_FREE_PLAN.id,
+        name: SYSTEM_DEFAULT_FREE_PLAN.name,
+        slug: SYSTEM_DEFAULT_FREE_PLAN.slug,
+        isFree: true,
+        isDefault: true,
+        monthlyPriceDollars: 0,
+        annualPriceDollars: 0,
+        monthlyBadge: '',
+        annualBadge: '',
+        trialBadge: '',
+        descriptionMonthly: SYSTEM_DEFAULT_FREE_PLAN.description,
+        descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
+        buttonText: t('switchToFreeBtn') || 'Switch to Free',
+        features: SYSTEM_DEFAULT_FREE_PLAN.features,
+        tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
+        tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
+        aiRecipeLimit: SYSTEM_DEFAULT_FREE_PLAN.aiRecipeLimit,
+        recipeLibraryLimit: SYSTEM_DEFAULT_FREE_PLAN.recipeLibraryLimit,
+        socialScrapeLimit: SYSTEM_DEFAULT_FREE_PLAN.socialScrapeLimit,
+        canViewMacros: SYSTEM_DEFAULT_FREE_PLAN.canViewMacros,
+        allowedAiModels: SYSTEM_DEFAULT_FREE_PLAN.allowedAiModels
+      });
+    }
+
+    configs.forEach((cfg: any) => {
+      if (!cfg || !cfg.name) return;
+
+      let planFeatures: string[] = [];
+      if (Array.isArray(cfg.features) && cfg.features.length > 0) {
+        planFeatures = cfg.features.map((f: any) => String(f).trim()).filter(Boolean);
+      } else if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim()) {
+        planFeatures = cfg.featuresText.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
+      } else if (typeof cfg.descriptionMonthly === 'string' && cfg.descriptionMonthly.trim()) {
+        planFeatures = [cfg.descriptionMonthly.trim()];
       }
 
-      const hasFree = configs.some((cfg: any) => 
-        cfg && (
-          cfg.isFree === true || 
-          cfg.slug === 'taster' || 
-          cfg.id === 'preset_taster' || 
-          (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0)
-        )
+      const isFree = Boolean(
+        cfg.isFree || 
+        ((Number(cfg.monthlyPriceDollars) === 0 || cfg.monthlyPriceDollars === undefined) && 
+         (Number(cfg.annualPriceDollars) === 0 || cfg.annualPriceDollars === undefined))
       );
 
-      if (!hasFree) {
-        configs.unshift({
-          id: SYSTEM_DEFAULT_FREE_PLAN.id,
-          name: SYSTEM_DEFAULT_FREE_PLAN.name,
-          slug: SYSTEM_DEFAULT_FREE_PLAN.slug,
+      const rawSlug = (cfg.slug || cfg.id || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
+      const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
+      const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
+      const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
+
+      if (isFree) {
+        const freeSlug = cleanBaseSlug || 'taster';
+        plansMap.set(freeSlug, {
+          id: cfg.id || freeSlug,
+          name: cfg.name,
+          slug: freeSlug,
+          description: cfg.descriptionMonthly || cfg.descriptionAnnual || cfg.description || 'Free tier with standard features',
+          priceCents: 0,
+          priceFormatted: 'Free',
+          interval: 'MONTH',
           isFree: true,
-          isDefault: true,
-          monthlyPriceDollars: 0,
-          annualPriceDollars: 0,
-          monthlyBadge: '',
-          annualBadge: '',
-          trialBadge: '',
-          descriptionMonthly: SYSTEM_DEFAULT_FREE_PLAN.description,
-          descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
-          buttonText: t('switchToFreeBtn') || 'Switch to Free',
-          features: SYSTEM_DEFAULT_FREE_PLAN.features,
-          tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
-          tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
-          aiRecipeLimit: SYSTEM_DEFAULT_FREE_PLAN.aiRecipeLimit,
-          recipeLibraryLimit: SYSTEM_DEFAULT_FREE_PLAN.recipeLibraryLimit,
-          socialScrapeLimit: SYSTEM_DEFAULT_FREE_PLAN.socialScrapeLimit,
-          canViewMacros: SYSTEM_DEFAULT_FREE_PLAN.canViewMacros,
-          allowedAiModels: SYSTEM_DEFAULT_FREE_PLAN.allowedAiModels
+          badge: cfg.badge || cfg.monthlyBadge || '',
+          saveBadge: '',
+          buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
+          buttonTheme: 'orange',
+          features: planFeatures,
+          aiRecipeLimit: cfg.aiRecipeLimit,
+          recipeLibraryLimit: cfg.recipeLibraryLimit,
+          socialScrapeLimit: cfg.socialScrapeLimit,
+          canViewMacros: Boolean(cfg.canViewMacros),
+          allowedAiModels: cfg.allowedAiModels,
+          tokenLimit,
+          tokenReimburseFrequency,
         });
-      }
+      } else {
+        const hasMonthly = cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0;
+        const hasAnnual = cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0;
 
-      configs.forEach((cfg: any) => {
-        if (!cfg || !cfg.name) return;
-
-        let planFeatures: string[] = [];
-        if (Array.isArray(cfg.features) && cfg.features.length > 0) {
-          planFeatures = cfg.features.map((f: any) => String(f).trim()).filter(Boolean);
-        } else if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim()) {
-          planFeatures = cfg.featuresText.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
-        } else if (typeof cfg.descriptionMonthly === 'string' && cfg.descriptionMonthly.trim()) {
-          planFeatures = [cfg.descriptionMonthly.trim()];
-        }
-
-        const isFree = Boolean(
-          cfg.isFree || 
-          ((Number(cfg.monthlyPriceDollars) === 0 || cfg.monthlyPriceDollars === undefined) && 
-           (Number(cfg.annualPriceDollars) === 0 || cfg.annualPriceDollars === undefined))
-        );
-
-        const rawSlug = (cfg.slug || cfg.id || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
-        const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
-        const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
-        const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
-
-        if (isFree) {
-          const freeSlug = cleanBaseSlug || 'free';
-          plansMap.set(freeSlug, {
-            id: cfg.id || freeSlug,
+        if (hasMonthly || !hasAnnual) {
+          const mPrice = Number(cfg.monthlyPriceDollars || 0);
+          const monthlySlug = `${cleanBaseSlug}-monthly`;
+          plansMap.set(monthlySlug, {
+            id: `${cfg.id || cleanBaseSlug}-monthly`,
             name: cfg.name,
-            slug: freeSlug,
-            description: cfg.descriptionMonthly || cfg.descriptionAnnual || cfg.description || 'Free tier with standard features',
-            priceCents: 0,
-            priceFormatted: 'Free',
+            slug: monthlySlug,
+            description: cfg.descriptionMonthly || cfg.description || `Full access to ${cfg.name}, billed monthly`,
+            priceCents: Math.round(mPrice * 100),
+            priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
             interval: 'MONTH',
-            isFree: true,
-            badge: cfg.badge || cfg.monthlyBadge || '',
+            isFree: false,
+            badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
             saveBadge: '',
-            buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
-            buttonTheme: 'orange',
+            buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+            buttonTheme: 'green',
             features: planFeatures,
             aiRecipeLimit: cfg.aiRecipeLimit,
             recipeLibraryLimit: cfg.recipeLibraryLimit,
@@ -423,73 +451,43 @@ export default function ProfilePage() {
             tokenLimit,
             tokenReimburseFrequency,
           });
-        } else {
-          const hasMonthly = cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0;
-          const hasAnnual = cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0;
-
-          if (hasMonthly || !hasAnnual) {
-            const mPrice = Number(cfg.monthlyPriceDollars || 0);
-            const monthlySlug = `${cleanBaseSlug}-monthly`;
-            plansMap.set(monthlySlug, {
-              id: `${cfg.id || cleanBaseSlug}-monthly`,
-              name: cfg.name,
-              slug: monthlySlug,
-              description: cfg.descriptionMonthly || cfg.description || `Full access to ${cfg.name}, billed monthly`,
-              priceCents: Math.round(mPrice * 100),
-              priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
-              interval: 'MONTH',
-              isFree: false,
-              badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
-              saveBadge: '',
-              buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-              buttonTheme: 'green',
-              features: planFeatures,
-              aiRecipeLimit: cfg.aiRecipeLimit,
-              recipeLibraryLimit: cfg.recipeLibraryLimit,
-              socialScrapeLimit: cfg.socialScrapeLimit,
-              canViewMacros: Boolean(cfg.canViewMacros),
-              allowedAiModels: cfg.allowedAiModels,
-              tokenLimit,
-              tokenReimburseFrequency,
-            });
-          }
-
-          if (hasAnnual) {
-            const aPrice = Number(cfg.annualPriceDollars || 0);
-            const annualSlug = `${cleanBaseSlug}-annual`;
-            const mEquivalent = (aPrice / 12).toFixed(2);
-            plansMap.set(annualSlug, {
-              id: `${cfg.id || cleanBaseSlug}-annual`,
-              name: cfg.name,
-              slug: annualSlug,
-              description: cfg.descriptionAnnual || cfg.description || `Best value - all ${cfg.name} features, billed annually`,
-              priceCents: Math.round(aPrice * 100),
-              priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
-              interval: 'YEAR',
-              isFree: false,
-              badge: cfg.trialBadge || cfg.annualBadge || 'Best Value',
-              saveBadge: cfg.annualBadge || '',
-              subPrice: `${currencySymbol}${mEquivalent}/month`,
-              strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
-              buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-              buttonTheme: 'green',
-              features: planFeatures,
-              aiRecipeLimit: cfg.aiRecipeLimit,
-              recipeLibraryLimit: cfg.recipeLibraryLimit,
-              socialScrapeLimit: cfg.socialScrapeLimit,
-              canViewMacros: Boolean(cfg.canViewMacros),
-              allowedAiModels: cfg.allowedAiModels,
-              tokenLimit,
-              tokenReimburseFrequency,
-            });
-          }
         }
-      });
-    } catch (e) {}
+
+        if (hasAnnual) {
+          const aPrice = Number(cfg.annualPriceDollars || 0);
+          const annualSlug = `${cleanBaseSlug}-annual`;
+          const mEquivalent = (aPrice / 12).toFixed(2);
+          plansMap.set(annualSlug, {
+            id: `${cfg.id || cleanBaseSlug}-annual`,
+            name: cfg.name,
+            slug: annualSlug,
+            description: cfg.descriptionAnnual || cfg.description || `Best value - all ${cfg.name} features, billed annually`,
+            priceCents: Math.round(aPrice * 100),
+            priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
+            interval: 'YEAR',
+            isFree: false,
+            badge: cfg.trialBadge || cfg.annualBadge || 'Best Value',
+            saveBadge: cfg.annualBadge || '',
+            subPrice: `${currencySymbol}${mEquivalent}/month`,
+            strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
+            buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+            buttonTheme: 'green',
+            features: planFeatures,
+            aiRecipeLimit: cfg.aiRecipeLimit,
+            recipeLibraryLimit: cfg.recipeLibraryLimit,
+            socialScrapeLimit: cfg.socialScrapeLimit,
+            canViewMacros: Boolean(cfg.canViewMacros),
+            allowedAiModels: cfg.allowedAiModels,
+            tokenLimit,
+            tokenReimburseFrequency,
+          });
+        }
+      }
+    });
 
     const dynamicPlans = Array.from(plansMap.values());
     plansRef.current = dynamicPlans;
-    setPlans(dynamicPlans);
+    setPlans(prev => JSON.stringify(prev) === JSON.stringify(dynamicPlans) ? prev : dynamicPlans);
 
     const rawUser = typeof window !== 'undefined' ? localStorage.getItem('zecratary_current_user') : null;
     if (rawUser) {
@@ -501,7 +499,11 @@ export default function ProfilePage() {
     }
   }, [currencySymbol, syncActivePlanTokens, t]);
 
+  // Authoritative PostgreSQL hydration synchronized with /admin/users
   const reloadActiveUser = useCallback(async () => {
+    if (isFetchingProfileRef.current) return;
+    isFetchingProfileRef.current = true;
+    try {
     initAuthStorage();
     let active = getCurrentUser() as ExtendedUser | null;
 
@@ -518,7 +520,9 @@ export default function ProfilePage() {
               role: cookieData.role || 'user',
               subscriptionPlan: 'taster'
             };
-            localStorage.setItem('zecratary_current_user', JSON.stringify(active));
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('zecratary_current_user', JSON.stringify(active));
+            }
           }
         } catch (_) {}
       }
@@ -531,37 +535,28 @@ export default function ProfilePage() {
 
     let matchedUser: ExtendedUser = { ...active };
 
-    // 1. Fetch live user data from PostgreSQL users API
+    // 1. Fetch authoritative user record from PostgreSQL API (/api/admin/users)
     try {
       const uRes = await fetch('/api/admin/users', { cache: 'no-store' });
       if (uRes.ok) {
         const uData = await uRes.json();
         const usersList: any[] = Array.isArray(uData.users) ? uData.users : Array.isArray(uData) ? uData : [];
-        const fresh = usersList.find((u: any) => u.id === active?.id || u.email?.toLowerCase() === active?.email?.toLowerCase());
+        const fresh = usersList.find((u: any) => 
+          (active?.id && u.id === active.id) || 
+          (active?.email && u.email?.toLowerCase().trim() === active.email.toLowerCase().trim())
+        );
+
         if (fresh) {
+          const authoritativePlan = sanitizeSinglePlan(fresh.subscriptionPlan || fresh.subscription_plan || 'taster');
           matchedUser = {
             ...active,
             ...fresh,
-            subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || fresh.planSlug || fresh.planId || 'taster')
+            subscriptionPlan: authoritativePlan,
+            planSlug: authoritativePlan
           };
         }
       }
-    } catch (_) {
-      const rawUsers = localStorage.getItem('zecratary_users');
-      if (rawUsers) {
-        try {
-          const usersList = JSON.parse(rawUsers);
-          const fresh = usersList.find((u: any) => u.id === active?.id || u.email?.toLowerCase() === active?.email?.toLowerCase());
-          if (fresh) {
-            matchedUser = { 
-              ...active, 
-              ...fresh,
-              subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || fresh.planSlug || fresh.planId || 'taster')
-            };
-          }
-        } catch (_) {}
-      }
-    }
+    } catch (_) {}
 
     if (!matchedUser.linkedProviders) {
       const initialLinked: SocialProvider[] = [];
@@ -571,7 +566,7 @@ export default function ProfilePage() {
       matchedUser.linkedProviders = initialLinked;
     }
 
-    // 2. Fetch live transactions from PostgreSQL payment API
+    // 2. Fetch payment transactions for renewal/expiry date alignment without reverting user plan
     try {
       const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
       if (txRes.ok) {
@@ -588,20 +583,21 @@ export default function ProfilePage() {
           (!t.expiryDate || new Date(t.expiryDate).getTime() > now.getTime())
         );
 
-        if (latestActiveTx) {
-          matchedUser.subscriptionPlan = sanitizeSinglePlan(latestActiveTx.planSlug || matchedUser.subscriptionPlan);
+        if (latestActiveTx && latestActiveTx.expiryDate) {
           (matchedUser as any).expiryDate = latestActiveTx.expiryDate;
           (matchedUser as any).planExpiryDate = latestActiveTx.expiryDate;
-        } else {
-          // Revert to taster if no active unexpired transaction exists
-          matchedUser.subscriptionPlan = 'taster';
-          (matchedUser as any).expiryDate = '';
-          (matchedUser as any).planExpiryDate = '';
+        } else if (matchedUser.subscriptionPlan && matchedUser.subscriptionPlan !== 'taster' && !matchedUser.subscriptionPlan.includes('free')) {
+          const fallbackExpiry = (matchedUser as any).planExpiryDate || (matchedUser as any).expiryDate;
+          if (!fallbackExpiry) {
+            const calculatedExpiry = calculateRenewalExpiry(new Date(), matchedUser.subscriptionPlan.includes('annual') ? 'YEAR' : 'MONTH');
+            (matchedUser as any).expiryDate = calculatedExpiry;
+            (matchedUser as any).planExpiryDate = calculatedExpiry;
+          }
         }
       }
     } catch (_) {}
 
-    setUserState(matchedUser);
+    setUserState(prev => JSON.stringify(prev) === JSON.stringify(matchedUser) ? prev : matchedUser);
     setName(matchedUser.name || '');
     setEmail(matchedUser.email || '');
 
@@ -610,44 +606,41 @@ export default function ProfilePage() {
       localStorage.setItem('zecratary_user', JSON.stringify(matchedUser));
     } catch (_) {}
 
-    const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).subscriptionTier || (matchedUser as any).planSlug || '');
+    const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).planSlug || 'taster');
     syncActivePlanTokens(userPlan, plansRef.current);
+    } finally {
+      isFetchingProfileRef.current = false;
+    }
   }, [router, syncActivePlanTokens]);
 
+    // Decoupled document title
   useEffect(() => {
     document.title = `${t('accountProfileTitle') || 'Account Profile'} - Zecratary`;
+  }, [t]);
+
+  // Mount-only data initialization with debounced event listener
+  useEffect(() => {
     syncPlansFromAdmin();
     reloadActiveUser();
 
-    const handleBfCache = (e: PageTransitionEvent) => {
-      if (e.persisted) {
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const handleSyncEvent = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
         syncPlansFromAdmin();
         reloadActiveUser();
-      }
-    };
-    window.addEventListener('pageshow', handleBfCache);
-
-    const handleSyncEvent = () => {
-      syncPlansFromAdmin();
-      reloadActiveUser();
+      }, 300);
     };
 
     window.addEventListener('zecratary_plans_updated', handleSyncEvent);
-    window.addEventListener('zecratary_users_updated', handleSyncEvent);
     window.addEventListener('zecratary_payment_updated', handleSyncEvent);
-    window.addEventListener('storage', (e) => {
-      if (!e.key || e.key === 'zecratary_subscription_configs' || e.key === 'zecratary_users' || e.key === 'zecratary_payment_transactions') {
-        handleSyncEvent();
-      }
-    });
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener('zecratary_plans_updated', handleSyncEvent);
-      window.removeEventListener('zecratary_users_updated', handleSyncEvent);
       window.removeEventListener('zecratary_payment_updated', handleSyncEvent);
-      window.removeEventListener('pageshow', handleBfCache);
     };
-  }, [reloadActiveUser, syncPlansFromAdmin, t]);
+  }, []);
 
   const handleToggleSocialLink = async (provider: SocialProvider) => {
     if (!user) return;
@@ -685,17 +678,6 @@ export default function ProfilePage() {
     } catch (_) {}
 
     try {
-      const rawUsers = localStorage.getItem('zecratary_users');
-      const users: ExtendedUser[] = rawUsers ? JSON.parse(rawUsers) : [];
-      const userIndex = users.findIndex(u => u.id === updatedUser.id || u.email.toLowerCase() === updatedUser.email.toLowerCase());
-
-      if (userIndex !== -1) {
-        users[userIndex] = updatedUser;
-      } else {
-        users.unshift(updatedUser);
-      }
-
-      localStorage.setItem('zecratary_users', JSON.stringify(users));
       localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUser));
       localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
     } catch (_) {}
@@ -712,47 +694,35 @@ export default function ProfilePage() {
 
     const matched = plans.find(p => checkIsCurrentPlan(p));
     if (matched) {
-      const isAnnual = matched.interval === 'YEAR';
+      const isAnnual = matched.interval === 'YEAR' || matched.slug.includes('annual');
       return {
         label: `${matched.name}${matched.isFree ? ' (Free)' : isAnnual ? ' (Annual)' : ' (Monthly)'}`,
         bg: matched.isFree 
-          ? 'rgba(16, 185, 129, 0.15)' 
+          ? (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)') 
           : isAnnual 
-          ? 'rgba(59, 130, 246, 0.15)' 
-          : 'rgba(224, 86, 56, 0.15)',
+          ? (isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)') 
+          : (isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.15)'),
         border: matched.isFree 
-          ? 'var(--color-emerald, #10b981)' 
+          ? (isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)') 
           : isAnnual 
-          ? '#3b82f6' 
-          : 'var(--color-primary, #E05638)',
+          ? (isDayMode ? '#bfdbfe' : '#3b82f6') 
+          : (isDayMode ? '#fdba74' : 'var(--color-primary, #E05638)'),
         color: matched.isFree 
-          ? 'var(--color-emerald, #10b981)' 
+          ? (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)') 
           : isAnnual 
-          ? '#60a5fa' 
-          : 'var(--color-primary, #E05638)',
+          ? (isDayMode ? '#1d4ed8' : '#60a5fa') 
+          : (isDayMode ? '#c2410c' : 'var(--color-primary, #E05638)'),
         icon: matched.isFree ? Sparkles : Zap,
         matchedPlan: matched
       };
     }
 
-    const userPlanName = (user as any)?.planName;
-    if (userPlanName) {
-      return {
-        label: userPlanName,
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
-        icon: Sparkles,
-        matchedPlan: null
-      };
-    }
-
     if (!planKey || planKey === 'free' || planKey.includes('free') || planKey === 'taster') {
       return {
-        label: t('freeTierNoExpiry') || 'Free Tier',
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
+        label: t('freeTierNoExpiry') || 'Taster (Free)',
+        bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+        border: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+        color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
         icon: Sparkles,
         matchedPlan: null
       };
@@ -765,13 +735,13 @@ export default function ProfilePage() {
 
     return {
       label: formatted,
-      bg: 'rgba(224, 86, 56, 0.15)',
-      border: 'var(--color-primary, #E05638)',
-      color: 'var(--color-primary, #E05638)',
+      bg: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.15)',
+      border: isDayMode ? '#fdba74' : 'var(--color-primary, #E05638)',
+      color: isDayMode ? '#c2410c' : 'var(--color-primary, #E05638)',
       icon: Zap,
       matchedPlan: null
     };
-  }, [user, plans, checkIsCurrentPlan, t]);
+  }, [user, plans, checkIsCurrentPlan, isDayMode, t]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -806,7 +776,6 @@ export default function ProfilePage() {
       password: password ? password : user.password,
     };
 
-    // 1. Update PostgreSQL users table
     try {
       await fetch('/api/admin/users', {
         method: 'POST',
@@ -815,12 +784,7 @@ export default function ProfilePage() {
       });
     } catch (_) {}
 
-    // 2. Update local state & storage
     try {
-      const rawUsers = localStorage.getItem('zecratary_users');
-      const users: ExtendedUser[] = rawUsers ? JSON.parse(rawUsers) : [];
-      const updatedList = users.map(u => u.id === user.id ? updatedUser : u);
-      localStorage.setItem('zecratary_users', JSON.stringify(updatedList));
       localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUser));
       localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
     } catch (_) {}
@@ -850,13 +814,6 @@ export default function ProfilePage() {
         body: JSON.stringify({ id: userId, email: cleanEmail }),
       }).catch(() => {});
 
-      try {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        const users: any[] = rawUsers ? JSON.parse(rawUsers) : [];
-        const updatedUsers = users.filter(u => u.id !== userId && (!u.email || u.email.toLowerCase() !== cleanEmail));
-        localStorage.setItem('zecratary_users', JSON.stringify(updatedUsers));
-      } catch (_) {}
-
       logoutUser();
       router.replace('/login');
     } catch (err: any) {
@@ -864,11 +821,7 @@ export default function ProfilePage() {
     }
   };
 
-  // CHANGE PLAN LOGIC: Fully synchronized with /admin/payment and PostgreSQL
-  // 1. Strictly 1 plan per user
-  // 2. Upgrades/downgrades supported seamlessly
-  // 3. Cancels (refunds) prior active transaction in PostgreSQL via /api/admin/payment
-  // 4. Records new payment transaction in PostgreSQL for paid tiers
+  // CHANGE PLAN LOGIC: Fully synchronized with /admin/users & PostgreSQL
   const handleSelectPlan = async (plan: SubscriptionPlanItem) => {
     if (!user) return;
     setPaymentLoading(plan.id);
@@ -915,7 +868,7 @@ export default function ProfilePage() {
         }
       } catch (_) {}
 
-      // 2. Record new transaction in PostgreSQL /api/admin/payment if not free
+      // 2. Record new transaction in PostgreSQL /api/admin/payment if paid plan
       if (!isFree) {
         const newTx: PaymentTransaction = {
           id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
@@ -964,10 +917,6 @@ export default function ProfilePage() {
 
       // 4. Update local state & storage
       try {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        const users: ExtendedUser[] = rawUsers ? JSON.parse(rawUsers) : [];
-        const updatedList = users.map(u => u.id === user.id ? updatedUserPayload : u);
-        localStorage.setItem('zecratary_users', JSON.stringify(updatedList));
         localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUserPayload));
         localStorage.setItem('zecratary_user', JSON.stringify(updatedUserPayload));
       } catch (_) {}
@@ -1712,7 +1661,7 @@ export default function ProfilePage() {
                 ? `Renewal / Expiry: ${new Date(activeExpiryDate).toLocaleDateString()}` 
                 : 'Free Tier (No Expiration)'}
             </span>
-            <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
+            <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
               {tokenUsage.monthlyLimit === -1 ? 'Unlimited AI Tokens' : `${tokenUsage.monthlyLimit.toLocaleString()} Monthly Tokens`}
             </span>
           </div>

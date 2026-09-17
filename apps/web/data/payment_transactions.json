@@ -1,7 +1,7 @@
 [
   {
-    "id": "tx_mu588unam40",
-    "customerName": "Admin User",
+    "id": "tx_mu5lw9ftq89",
+    "customerName": "System Administrator",
     "customerEmail": "admin@zecratary.com",
     "planName": "Nutrition Pro (Monthly)",
     "planSlug": "nutrition-pro-monthly",
@@ -10,8 +10,66 @@
     "gateway": "stripe",
     "status": "succeeded",
     "testMode": true,
+    "createdAt": "2026-09-17T14:09:48.233Z",
+    "expiryDate": "2026-10-17T14:09:48.185Z"
+  },
+  {
+    "id": "tx_mu5lmxtifmo",
+    "customerName": "System Administrator",
+    "customerEmail": "admin@zecratary.com",
+    "planName": "Nutrition Pro (Annual)",
+    "planSlug": "nutrition-pro-annual",
+    "amount": 59.99,
+    "currency": "USD",
+    "gateway": "stripe",
+    "status": "refunded",
+    "failureReason": null,
+    "testMode": true,
+    "expiryDate": "2026-09-17T14:09:48.203Z",
+    "createdAt": "2026-09-17T14:02:33.270Z"
+  },
+  {
+    "id": "tx_mu5l5esfxch",
+    "customerName": "System Administrator",
+    "customerEmail": "admin@zecratary.com",
+    "planName": "Nutrition Pro (Monthly)",
+    "planSlug": "nutrition-pro-monthly",
+    "amount": 8.99,
+    "currency": "USD",
+    "gateway": "stripe",
+    "status": "refunded",
+    "failureReason": null,
+    "testMode": true,
+    "expiryDate": "2026-09-17T14:02:33.242Z",
+    "createdAt": "2026-09-17T13:48:55.455Z"
+  },
+  {
+    "id": "tx_mu5ig10ydr6",
+    "customerName": "System Administrator",
+    "customerEmail": "admin@zecratary.com",
+    "planName": "Nutrition Pro (Monthly)",
+    "planSlug": "nutrition-pro-monthly",
+    "amount": 8.99,
+    "currency": "USD",
+    "gateway": "stripe",
+    "status": "refunded",
+    "testMode": true,
+    "createdAt": "2026-09-17T12:33:11.986Z",
+    "expiryDate": "2026-09-17T13:48:46.897Z"
+  },
+  {
+    "id": "tx_mu588unam40",
+    "customerName": "Admin User",
+    "customerEmail": "admin@zecratary.com",
+    "planName": "Nutrition Pro (Monthly)",
+    "planSlug": "nutrition-pro-monthly",
+    "amount": 8.99,
+    "currency": "USD",
+    "gateway": "stripe",
+    "status": "refunded",
+    "testMode": true,
     "createdAt": "2026-09-17T07:47:40.967Z",
-    "expiryDate": "2026-10-17T07:47:40.946Z"
+    "expiryDate": "2026-09-17T11:48:28.556Z"
   },
   {
     "id": "tx_mu57ec2olly",

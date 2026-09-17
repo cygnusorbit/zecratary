@@ -372,7 +372,7 @@ export default function AdminPaymentPage() {
 
     if (rawPlansList.length === 0) {
       try {
-        const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+        const res = await fetch('/api/admin/plans', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           const list = Array.isArray(data) 
@@ -515,7 +515,7 @@ export default function AdminPaymentPage() {
 
   const loadUsers = useCallback(async (currentTxs?: PaymentTransaction[]) => {
     try {
-      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
+      const res = await fetch('/api/admin/users', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
@@ -546,7 +546,7 @@ export default function AdminPaymentPage() {
     setLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
-      const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
+      const res = await fetch('/api/admin/payment', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -555,7 +555,8 @@ export default function AdminPaymentPage() {
           if (Array.isArray(data.transactions)) {
             normalizedList = data.transactions.map((tItem: any) => normalizeTransaction(tItem, curr));
             transactionsRef.current = normalizedList;
-            setTransactions(normalizedList);
+            const freshTxs = normalizedList;
+        setTransactions(prev => JSON.stringify(prev) === JSON.stringify(freshTxs) ? prev : freshTxs);
           }
           if (data.settings) {
             configRef.current = { ...configRef.current, ...data.settings };
@@ -594,7 +595,7 @@ export default function AdminPaymentPage() {
       window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [t, version, fetchData, loadPlans]);
+  }, []);
 
   const currentSelectedUser = useMemo(() => {
     return registeredUsers.find((u) => u.id === selectedUserId) || null;

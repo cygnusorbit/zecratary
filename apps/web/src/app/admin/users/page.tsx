@@ -1,7 +1,7 @@
 // Generated / Updated by AI Collaborator
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
@@ -79,6 +79,8 @@ export default function AdminUserManagementPage() {
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const isFetchingUsersRef = useRef(false);
+  const isFetchingPlansRef = useRef(false);
 
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [adminSortField, setAdminSortField] = useState<SortField>('createdAt');
@@ -141,6 +143,8 @@ export default function AdminUserManagementPage() {
 
   // Dynamically sync plans from /admin/plans
   const loadPlans = useCallback(async () => {
+    if (isFetchingPlansRef.current) return;
+    isFetchingPlansRef.current = true;
     let parsedPlans: PlanOption[] = [];
     try {
       const serverSettings = await fetchServerAdminSettings();
@@ -191,7 +195,7 @@ export default function AdminUserManagementPage() {
 
     if (parsedPlans.length === 0) {
       try {
-        const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+        const res = await fetch('/api/admin/plans', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           const list = Array.isArray(data) ? data : (data?.plans || data?.packages || data?.configs);
@@ -223,14 +227,17 @@ export default function AdminUserManagementPage() {
       ];
     }
 
-    setAvailablePlans(parsedPlans);
+    const freshPlans = parsedPlans;
+      setAvailablePlans(prev => JSON.stringify(prev) === JSON.stringify(freshPlans) ? prev : freshPlans);
   }, []);
 
   const loadUsers = useCallback(async () => {
+    if (isFetchingUsersRef.current) return;
+    isFetchingUsersRef.current = true;
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
-      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
+      const res = await fetch('/api/admin/users', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
@@ -248,7 +255,8 @@ export default function AdminUserManagementPage() {
             list.unshift(rootAdmin);
             await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rootAdmin) }).catch(() => {});
           }
-          setUsers(list);
+          const freshList = list;
+          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
           return;
         }
       }
@@ -256,26 +264,43 @@ export default function AdminUserManagementPage() {
       console.error('Failed to load users:', err);
     } finally {
       setIsLoading(false);
+      isFetchingUsersRef.current = false;
     }
   }, []);
 
+    // Decoupled document title
   useEffect(() => {
     document.title = tr('admin.users.docTitle', 'User Management - Admin Console');
+  }, [tr]);
+
+  // Mount-only data initialization with debounced event listener
+  useEffect(() => {
     initAuthStorage();
-    setCurrentUser(getCurrentUser());
+    const u = getCurrentUser();
+    setCurrentUser(u);
     loadUsers();
     loadPlans();
 
-    const handleSync = () => { loadUsers(); loadPlans(); };
-    window.addEventListener('zecratary_users_updated', handleSync);
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const handleSync = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadUsers();
+        loadPlans();
+      }, 300);
+    };
+
     window.addEventListener('zecratary_plans_updated', handleSync);
+    window.addEventListener('zecratary_payment_updated', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
+
     return () => {
-      window.removeEventListener('zecratary_users_updated', handleSync);
+      if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener('zecratary_plans_updated', handleSync);
+      window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [loadUsers, loadPlans, tr]);
+  }, []);
 
   const showToast = (msg: string) => {
     setFeedbackMsg(msg);
@@ -521,7 +546,8 @@ export default function AdminUserManagementPage() {
 
       const data = await res.json();
       if (data.users && Array.isArray(data.users)) {
-        setUsers(data.users);
+        const freshList = data.users;
+          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
       } else {
         setUsers(prev => [newUser, ...prev.filter(u => u.email.toLowerCase() !== cleanEmail)]);
       }
@@ -604,7 +630,8 @@ export default function AdminUserManagementPage() {
 
       const data = await res.json();
       if (data.users && Array.isArray(data.users)) {
-        setUsers(data.users);
+        const freshList = data.users;
+          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
       } else {
         setUsers(prev => prev.map(u => u.id === editingUserId ? updatedUser : u));
       }
