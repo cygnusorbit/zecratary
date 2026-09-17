@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.2.8",
+  "version": "7.2.9",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.2.8",
+  "version": "7.2.9",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -16197,7 +16197,7 @@ export default function ChefAISettingsPage() {
 ```typescript
 // Generated / Updated by AI Collaborator
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
   PlusCircle, PackageCheck, Zap, Trash2, Sparkles, AlertCircle, 
@@ -16341,6 +16341,7 @@ export default function AdminSubscriptionPlans() {
   const [mounted, setMounted] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [packages, setPackages] = useState<SubscriptionPackageConfig[]>([]);
+  const isFetchingPackagesRef = useRef(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isFree, setIsFree] = useState(false);
   const [form, setForm] = useState<SubscriptionPackageConfig>({ ...DEFAULT_PRESET_NUTRITION_PRO });
@@ -16460,9 +16461,12 @@ export default function AdminSubscriptionPlans() {
   }, [applySavedTheme]);
 
   const fetchPackages = useCallback(async () => {
+    if (isFetchingPackagesRef.current) return;
+    isFetchingPackagesRef.current = true;
+    try {
     purgeLegacyBrowserAdminStorage();
     try {
-      const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json().catch(() => null);
         const serverConfigs = Array.isArray(data) ? data : (data?.packages || data?.plans || data?.configs);
@@ -16489,7 +16493,7 @@ export default function AdminSubscriptionPlans() {
             };
           });
 
-          setPackages(list);
+          setPackages(prev => JSON.stringify(prev) === JSON.stringify(list) ? prev : list);
           return;
         }
       }
@@ -16497,15 +16501,42 @@ export default function AdminSubscriptionPlans() {
       console.error('Failed to fetch packages from server:', e);
     }
     setPackages([{ ...DEFAULT_PRESET_TASTER }]);
+    } finally {
+      isFetchingPackagesRef.current = false;
+    }
   }, []);
 
+    // Decoupled document title
   useEffect(() => {
     if (!mounted) return;
     document.title = `${t('subscriptionPlansTitle', 'Subscription Plans')} - FoodiePrep Admin`;
+  }, [mounted, t]);
+
+  // Mount-only fetch with debounced event listener
+  useEffect(() => {
+    if (!mounted) return;
     initAuthStorage();
-    setCurrentUser(getCurrentUser());
+    const u = getCurrentUser();
+    setCurrentUser(u);
     fetchPackages();
-  }, [fetchPackages, mounted, t]);
+
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const handleSync = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchPackages();
+      }, 300);
+    };
+
+    window.addEventListener('zecratary_plans_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener('zecratary_plans_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+    };
+  }, [mounted]);
 
   const handleSetDefaultPlan = async (targetPkg: SubscriptionPackageConfig) => {
     const isTaster = targetPkg.id === 'preset_taster' || targetPkg.slug === 'taster';
@@ -19173,7 +19204,7 @@ export default function AdminPaymentPage() {
 
     if (rawPlansList.length === 0) {
       try {
-        const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+        const res = await fetch('/api/admin/plans', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           const list = Array.isArray(data) 
@@ -19316,7 +19347,7 @@ export default function AdminPaymentPage() {
 
   const loadUsers = useCallback(async (currentTxs?: PaymentTransaction[]) => {
     try {
-      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
+      const res = await fetch('/api/admin/users', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
@@ -19347,7 +19378,7 @@ export default function AdminPaymentPage() {
     setLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
-      const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
+      const res = await fetch('/api/admin/payment', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -19356,7 +19387,8 @@ export default function AdminPaymentPage() {
           if (Array.isArray(data.transactions)) {
             normalizedList = data.transactions.map((tItem: any) => normalizeTransaction(tItem, curr));
             transactionsRef.current = normalizedList;
-            setTransactions(normalizedList);
+            const freshTxs = normalizedList;
+        setTransactions(prev => JSON.stringify(prev) === JSON.stringify(freshTxs) ? prev : freshTxs);
           }
           if (data.settings) {
             configRef.current = { ...configRef.current, ...data.settings };
@@ -19395,7 +19427,7 @@ export default function AdminPaymentPage() {
       window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [t, version, fetchData, loadPlans]);
+  }, []);
 
   const currentSelectedUser = useMemo(() => {
     return registeredUsers.find((u) => u.id === selectedUserId) || null;
@@ -23352,7 +23384,7 @@ export default function AdminLanguagePage() {
 // Generated / Updated by AI Collaborator
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
@@ -23430,6 +23462,8 @@ export default function AdminUserManagementPage() {
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const isFetchingUsersRef = useRef(false);
+  const isFetchingPlansRef = useRef(false);
 
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [adminSortField, setAdminSortField] = useState<SortField>('createdAt');
@@ -23492,6 +23526,8 @@ export default function AdminUserManagementPage() {
 
   // Dynamically sync plans from /admin/plans
   const loadPlans = useCallback(async () => {
+    if (isFetchingPlansRef.current) return;
+    isFetchingPlansRef.current = true;
     let parsedPlans: PlanOption[] = [];
     try {
       const serverSettings = await fetchServerAdminSettings();
@@ -23542,7 +23578,7 @@ export default function AdminUserManagementPage() {
 
     if (parsedPlans.length === 0) {
       try {
-        const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+        const res = await fetch('/api/admin/plans', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           const list = Array.isArray(data) ? data : (data?.plans || data?.packages || data?.configs);
@@ -23574,14 +23610,17 @@ export default function AdminUserManagementPage() {
       ];
     }
 
-    setAvailablePlans(parsedPlans);
+    const freshPlans = parsedPlans;
+      setAvailablePlans(prev => JSON.stringify(prev) === JSON.stringify(freshPlans) ? prev : freshPlans);
   }, []);
 
   const loadUsers = useCallback(async () => {
+    if (isFetchingUsersRef.current) return;
+    isFetchingUsersRef.current = true;
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
-      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
+      const res = await fetch('/api/admin/users', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
@@ -23599,7 +23638,8 @@ export default function AdminUserManagementPage() {
             list.unshift(rootAdmin);
             await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rootAdmin) }).catch(() => {});
           }
-          setUsers(list);
+          const freshList = list;
+          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
           return;
         }
       }
@@ -23607,26 +23647,43 @@ export default function AdminUserManagementPage() {
       console.error('Failed to load users:', err);
     } finally {
       setIsLoading(false);
+      isFetchingUsersRef.current = false;
     }
   }, []);
 
+    // Decoupled document title
   useEffect(() => {
     document.title = tr('admin.users.docTitle', 'User Management - Admin Console');
+  }, [tr]);
+
+  // Mount-only data initialization with debounced event listener
+  useEffect(() => {
     initAuthStorage();
-    setCurrentUser(getCurrentUser());
+    const u = getCurrentUser();
+    setCurrentUser(u);
     loadUsers();
     loadPlans();
 
-    const handleSync = () => { loadUsers(); loadPlans(); };
-    window.addEventListener('zecratary_users_updated', handleSync);
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const handleSync = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadUsers();
+        loadPlans();
+      }, 300);
+    };
+
     window.addEventListener('zecratary_plans_updated', handleSync);
+    window.addEventListener('zecratary_payment_updated', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
+
     return () => {
-      window.removeEventListener('zecratary_users_updated', handleSync);
+      if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener('zecratary_plans_updated', handleSync);
+      window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [loadUsers, loadPlans, tr]);
+  }, []);
 
   const showToast = (msg: string) => {
     setFeedbackMsg(msg);
@@ -23872,7 +23929,8 @@ export default function AdminUserManagementPage() {
 
       const data = await res.json();
       if (data.users && Array.isArray(data.users)) {
-        setUsers(data.users);
+        const freshList = data.users;
+          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
       } else {
         setUsers(prev => [newUser, ...prev.filter(u => u.email.toLowerCase() !== cleanEmail)]);
       }
@@ -23955,7 +24013,8 @@ export default function AdminUserManagementPage() {
 
       const data = await res.json();
       if (data.users && Array.isArray(data.users)) {
-        setUsers(data.users);
+        const freshList = data.users;
+          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
       } else {
         setUsers(prev => prev.map(u => u.id === editingUserId ? updatedUser : u));
       }
@@ -30530,7 +30589,7 @@ const SYSTEM_DEFAULT_FREE_PLAN: SubscriptionPlanItem = {
 };
 
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
-  if (!planInput) return '';
+  if (!planInput) return 'taster';
   let raw = '';
   if (Array.isArray(planInput)) {
     raw = planInput[0] ? String(planInput[0]).trim() : '';
@@ -30573,11 +30632,11 @@ export default function ProfilePage() {
 
   const [processingSocial, setProcessingSocial] = useState<SocialProvider | null>(null);
 
-  // Dynamic Plans state with default free tier preserved
   const [plans, setPlans] = useState<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
   const plansRef = useRef<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
   plansRef.current = plans;
   const isFetchingPlansRef = useRef(false);
+  const isFetchingProfileRef = useRef(false);
 
   const [selectedInterval, setSelectedInterval] = useState<'ALL' | 'MONTH' | 'YEAR'>('ALL');
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
@@ -30616,7 +30675,7 @@ export default function ProfilePage() {
       } catch (_) {}
 
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
       const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
@@ -30665,16 +30724,18 @@ export default function ProfilePage() {
     };
   }, [applySavedTheme]);
 
+  // Synchronized plan matcher aligning with /admin/users logic
   const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem): boolean => {
     if (!user) return false;
 
     const rawUser = user as any;
-    const userPlanRaw = rawUser.planId || rawUser.subscriptionPlan || rawUser.subscriptionTier || rawUser.planSlug || '';
+    const userPlanRaw = rawUser.subscriptionPlan || rawUser.planSlug || rawUser.planId || rawUser.subscriptionTier || '';
     const cleanUserPlan = sanitizeSinglePlan(userPlanRaw);
     const planSlug = sanitizeSinglePlan(plan.slug);
     const planId = sanitizeSinglePlan(plan.id);
 
-    if (rawUser.planId && (rawUser.planId === plan.id || rawUser.planId === plan.slug)) {
+    const isUserFree = !cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || cleanUserPlan.includes('free');
+    if (isUserFree && (plan.isFree || planSlug === 'taster' || planSlug === 'free')) {
       return true;
     }
 
@@ -30682,24 +30743,15 @@ export default function ProfilePage() {
       return true;
     }
 
-    const isUserFree = !cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || cleanUserPlan.includes('free');
-    if (isUserFree && plan.isFree) {
-      const defaultSlug = typeof window !== 'undefined' ? localStorage.getItem('zecratary_default_plan_slug') || 'taster' : 'taster';
-      if (!cleanUserPlan || cleanUserPlan === 'taster' || cleanUserPlan === 'free' || planSlug === defaultSlug || planId === defaultSlug || cleanUserPlan === planSlug) {
-        return true;
-      }
-    }
-
-    const userInterval = (rawUser.planInterval || (cleanUserPlan.includes('annual') || cleanUserPlan.includes('year') ? 'YEAR' : cleanUserPlan.includes('monthly') || cleanUserPlan.includes('month') ? 'MONTH' : '')).toUpperCase();
-    const planInterval = (plan.interval || '').toUpperCase();
+    const userInterval = (rawUser.planInterval || (cleanUserPlan.includes('annual') || cleanUserPlan.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
+    const planInterval = (plan.interval || (planSlug.includes('annual') || planSlug.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
 
     const cleanUserBase = cleanUserPlan.replace(/-(monthly|annual|free)$/i, '');
     const cleanPlanBase = planSlug.replace(/-(monthly|annual|free)$/i, '');
 
     if (cleanUserBase && cleanPlanBase && cleanUserBase === cleanPlanBase) {
       if (plan.isFree) return true;
-      if (userInterval && planInterval) return userInterval === planInterval;
-      return true;
+      return userInterval === planInterval;
     }
 
     return false;
@@ -30726,7 +30778,7 @@ export default function ProfilePage() {
     }
 
     try {
-      const storedTokens = localStorage.getItem('zecratary_token_usage');
+      const storedTokens = typeof window !== 'undefined' ? localStorage.getItem('zecratary_token_usage') : null;
       const parsed = storedTokens ? JSON.parse(storedTokens) : {};
       const updated = {
         promptTokens: parsed.promptTokens || 1420,
@@ -30737,22 +30789,28 @@ export default function ProfilePage() {
         reimburseFrequency: assignedFrequency
       };
       setTokenUsage(updated);
-      localStorage.setItem('zecratary_token_usage', JSON.stringify(updated));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_token_usage', JSON.stringify(updated));
+      }
     } catch (_) {}
   }, []);
 
-  // Synchronize available subscription plans dynamically from /admin/plans & PostgreSQL
+  // Synchronize available subscription plans dynamically from /api/admin/plans with /admin/users interval naming
   const syncPlansFromAdmin = useCallback(async () => {
     if (isFetchingPlansRef.current) return;
     isFetchingPlansRef.current = true;
 
+    let serverConfigs: any[] = [];
     try {
       const res = await fetch('/api/admin/plans', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        const serverConfigs = Array.isArray(data) ? data : (data.configs || data.plans || data.packages);
-        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
-          localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
+        const list = Array.isArray(data) ? data : (data.configs || data.plans || data.packages || data.subscriptionPlans);
+        if (Array.isArray(list) && list.length > 0) {
+          serverConfigs = list;
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
+          }
         }
       }
     } catch (_) {}
@@ -30760,89 +30818,118 @@ export default function ProfilePage() {
       isFetchingPlansRef.current = false;
     }
 
-    const plansMap = new Map<string, SubscriptionPlanItem>();
+    if (serverConfigs.length === 0 && typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('zecratary_subscription_configs');
+        if (raw) serverConfigs = JSON.parse(raw);
+      } catch (_) {}
+    }
 
-    try {
-      const rawConfigs = typeof window !== 'undefined' ? localStorage.getItem('zecratary_subscription_configs') : null;
-      let configs: any[] = [];
-      if (rawConfigs) {
-        const parsed = JSON.parse(rawConfigs);
-        if (Array.isArray(parsed)) configs = parsed;
+    const plansMap = new Map<string, SubscriptionPlanItem>();
+    const configs: any[] = [...serverConfigs];
+
+    const hasFree = configs.some((cfg: any) => 
+      cfg && (
+        cfg.isFree === true || 
+        cfg.slug === 'taster' || 
+        cfg.id === 'preset_taster' || 
+        (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0)
+      )
+    );
+
+    if (!hasFree) {
+      configs.unshift({
+        id: SYSTEM_DEFAULT_FREE_PLAN.id,
+        name: SYSTEM_DEFAULT_FREE_PLAN.name,
+        slug: SYSTEM_DEFAULT_FREE_PLAN.slug,
+        isFree: true,
+        isDefault: true,
+        monthlyPriceDollars: 0,
+        annualPriceDollars: 0,
+        monthlyBadge: '',
+        annualBadge: '',
+        trialBadge: '',
+        descriptionMonthly: SYSTEM_DEFAULT_FREE_PLAN.description,
+        descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
+        buttonText: t('switchToFreeBtn') || 'Switch to Free',
+        features: SYSTEM_DEFAULT_FREE_PLAN.features,
+        tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
+        tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
+        aiRecipeLimit: SYSTEM_DEFAULT_FREE_PLAN.aiRecipeLimit,
+        recipeLibraryLimit: SYSTEM_DEFAULT_FREE_PLAN.recipeLibraryLimit,
+        socialScrapeLimit: SYSTEM_DEFAULT_FREE_PLAN.socialScrapeLimit,
+        canViewMacros: SYSTEM_DEFAULT_FREE_PLAN.canViewMacros,
+        allowedAiModels: SYSTEM_DEFAULT_FREE_PLAN.allowedAiModels
+      });
+    }
+
+    configs.forEach((cfg: any) => {
+      if (!cfg || !cfg.name) return;
+
+      let planFeatures: string[] = [];
+      if (Array.isArray(cfg.features) && cfg.features.length > 0) {
+        planFeatures = cfg.features.map((f: any) => String(f).trim()).filter(Boolean);
+      } else if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim()) {
+        planFeatures = cfg.featuresText.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
+      } else if (typeof cfg.descriptionMonthly === 'string' && cfg.descriptionMonthly.trim()) {
+        planFeatures = [cfg.descriptionMonthly.trim()];
       }
 
-      const hasFree = configs.some((cfg: any) => 
-        cfg && (
-          cfg.isFree === true || 
-          cfg.slug === 'taster' || 
-          cfg.id === 'preset_taster' || 
-          (Number(cfg.monthlyPriceDollars || 0) === 0 && Number(cfg.annualPriceDollars || 0) === 0)
-        )
+      const isFree = Boolean(
+        cfg.isFree || 
+        ((Number(cfg.monthlyPriceDollars) === 0 || cfg.monthlyPriceDollars === undefined) && 
+         (Number(cfg.annualPriceDollars) === 0 || cfg.annualPriceDollars === undefined))
       );
 
-      if (!hasFree) {
-        configs.unshift({
-          id: SYSTEM_DEFAULT_FREE_PLAN.id,
-          name: SYSTEM_DEFAULT_FREE_PLAN.name,
-          slug: SYSTEM_DEFAULT_FREE_PLAN.slug,
+      const rawSlug = (cfg.slug || cfg.id || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
+      const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
+      const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
+      const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
+
+      if (isFree) {
+        const freeSlug = cleanBaseSlug || 'taster';
+        plansMap.set(freeSlug, {
+          id: cfg.id || freeSlug,
+          name: cfg.name,
+          slug: freeSlug,
+          description: cfg.descriptionMonthly || cfg.descriptionAnnual || cfg.description || 'Free tier with standard features',
+          priceCents: 0,
+          priceFormatted: 'Free',
+          interval: 'MONTH',
           isFree: true,
-          isDefault: true,
-          monthlyPriceDollars: 0,
-          annualPriceDollars: 0,
-          monthlyBadge: '',
-          annualBadge: '',
-          trialBadge: '',
-          descriptionMonthly: SYSTEM_DEFAULT_FREE_PLAN.description,
-          descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
-          buttonText: t('switchToFreeBtn') || 'Switch to Free',
-          features: SYSTEM_DEFAULT_FREE_PLAN.features,
-          tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
-          tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
-          aiRecipeLimit: SYSTEM_DEFAULT_FREE_PLAN.aiRecipeLimit,
-          recipeLibraryLimit: SYSTEM_DEFAULT_FREE_PLAN.recipeLibraryLimit,
-          socialScrapeLimit: SYSTEM_DEFAULT_FREE_PLAN.socialScrapeLimit,
-          canViewMacros: SYSTEM_DEFAULT_FREE_PLAN.canViewMacros,
-          allowedAiModels: SYSTEM_DEFAULT_FREE_PLAN.allowedAiModels
+          badge: cfg.badge || cfg.monthlyBadge || '',
+          saveBadge: '',
+          buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
+          buttonTheme: 'orange',
+          features: planFeatures,
+          aiRecipeLimit: cfg.aiRecipeLimit,
+          recipeLibraryLimit: cfg.recipeLibraryLimit,
+          socialScrapeLimit: cfg.socialScrapeLimit,
+          canViewMacros: Boolean(cfg.canViewMacros),
+          allowedAiModels: cfg.allowedAiModels,
+          tokenLimit,
+          tokenReimburseFrequency,
         });
-      }
+      } else {
+        const hasMonthly = cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0;
+        const hasAnnual = cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0;
 
-      configs.forEach((cfg: any) => {
-        if (!cfg || !cfg.name) return;
-
-        let planFeatures: string[] = [];
-        if (Array.isArray(cfg.features) && cfg.features.length > 0) {
-          planFeatures = cfg.features.map((f: any) => String(f).trim()).filter(Boolean);
-        } else if (typeof cfg.featuresText === 'string' && cfg.featuresText.trim()) {
-          planFeatures = cfg.featuresText.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
-        } else if (typeof cfg.descriptionMonthly === 'string' && cfg.descriptionMonthly.trim()) {
-          planFeatures = [cfg.descriptionMonthly.trim()];
-        }
-
-        const isFree = Boolean(
-          cfg.isFree || 
-          ((Number(cfg.monthlyPriceDollars) === 0 || cfg.monthlyPriceDollars === undefined) && 
-           (Number(cfg.annualPriceDollars) === 0 || cfg.annualPriceDollars === undefined))
-        );
-
-        const rawSlug = (cfg.slug || cfg.id || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
-        const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
-        const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
-        const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
-
-        if (isFree) {
-          const freeSlug = cleanBaseSlug || 'free';
-          plansMap.set(freeSlug, {
-            id: cfg.id || freeSlug,
+        if (hasMonthly || !hasAnnual) {
+          const mPrice = Number(cfg.monthlyPriceDollars || 0);
+          const monthlySlug = `${cleanBaseSlug}-monthly`;
+          plansMap.set(monthlySlug, {
+            id: `${cfg.id || cleanBaseSlug}-monthly`,
             name: cfg.name,
-            slug: freeSlug,
-            description: cfg.descriptionMonthly || cfg.descriptionAnnual || cfg.description || 'Free tier with standard features',
-            priceCents: 0,
-            priceFormatted: 'Free',
+            slug: monthlySlug,
+            description: cfg.descriptionMonthly || cfg.description || `Full access to ${cfg.name}, billed monthly`,
+            priceCents: Math.round(mPrice * 100),
+            priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
             interval: 'MONTH',
-            isFree: true,
-            badge: cfg.badge || cfg.monthlyBadge || '',
+            isFree: false,
+            badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
             saveBadge: '',
-            buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
-            buttonTheme: 'orange',
+            buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+            buttonTheme: 'green',
             features: planFeatures,
             aiRecipeLimit: cfg.aiRecipeLimit,
             recipeLibraryLimit: cfg.recipeLibraryLimit,
@@ -30852,73 +30939,43 @@ export default function ProfilePage() {
             tokenLimit,
             tokenReimburseFrequency,
           });
-        } else {
-          const hasMonthly = cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0;
-          const hasAnnual = cfg.annualPriceDollars !== undefined && cfg.annualPriceDollars !== null && Number(cfg.annualPriceDollars) > 0;
-
-          if (hasMonthly || !hasAnnual) {
-            const mPrice = Number(cfg.monthlyPriceDollars || 0);
-            const monthlySlug = `${cleanBaseSlug}-monthly`;
-            plansMap.set(monthlySlug, {
-              id: `${cfg.id || cleanBaseSlug}-monthly`,
-              name: cfg.name,
-              slug: monthlySlug,
-              description: cfg.descriptionMonthly || cfg.description || `Full access to ${cfg.name}, billed monthly`,
-              priceCents: Math.round(mPrice * 100),
-              priceFormatted: `${currencySymbol}${mPrice.toFixed(2)}/mo`,
-              interval: 'MONTH',
-              isFree: false,
-              badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
-              saveBadge: '',
-              buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-              buttonTheme: 'green',
-              features: planFeatures,
-              aiRecipeLimit: cfg.aiRecipeLimit,
-              recipeLibraryLimit: cfg.recipeLibraryLimit,
-              socialScrapeLimit: cfg.socialScrapeLimit,
-              canViewMacros: Boolean(cfg.canViewMacros),
-              allowedAiModels: cfg.allowedAiModels,
-              tokenLimit,
-              tokenReimburseFrequency,
-            });
-          }
-
-          if (hasAnnual) {
-            const aPrice = Number(cfg.annualPriceDollars || 0);
-            const annualSlug = `${cleanBaseSlug}-annual`;
-            const mEquivalent = (aPrice / 12).toFixed(2);
-            plansMap.set(annualSlug, {
-              id: `${cfg.id || cleanBaseSlug}-annual`,
-              name: cfg.name,
-              slug: annualSlug,
-              description: cfg.descriptionAnnual || cfg.description || `Best value - all ${cfg.name} features, billed annually`,
-              priceCents: Math.round(aPrice * 100),
-              priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
-              interval: 'YEAR',
-              isFree: false,
-              badge: cfg.trialBadge || cfg.annualBadge || 'Best Value',
-              saveBadge: cfg.annualBadge || '',
-              subPrice: `${currencySymbol}${mEquivalent}/month`,
-              strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
-              buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-              buttonTheme: 'green',
-              features: planFeatures,
-              aiRecipeLimit: cfg.aiRecipeLimit,
-              recipeLibraryLimit: cfg.recipeLibraryLimit,
-              socialScrapeLimit: cfg.socialScrapeLimit,
-              canViewMacros: Boolean(cfg.canViewMacros),
-              allowedAiModels: cfg.allowedAiModels,
-              tokenLimit,
-              tokenReimburseFrequency,
-            });
-          }
         }
-      });
-    } catch (e) {}
+
+        if (hasAnnual) {
+          const aPrice = Number(cfg.annualPriceDollars || 0);
+          const annualSlug = `${cleanBaseSlug}-annual`;
+          const mEquivalent = (aPrice / 12).toFixed(2);
+          plansMap.set(annualSlug, {
+            id: `${cfg.id || cleanBaseSlug}-annual`,
+            name: cfg.name,
+            slug: annualSlug,
+            description: cfg.descriptionAnnual || cfg.description || `Best value - all ${cfg.name} features, billed annually`,
+            priceCents: Math.round(aPrice * 100),
+            priceFormatted: `${currencySymbol}${aPrice.toFixed(2)}/yr`,
+            interval: 'YEAR',
+            isFree: false,
+            badge: cfg.trialBadge || cfg.annualBadge || 'Best Value',
+            saveBadge: cfg.annualBadge || '',
+            subPrice: `${currencySymbol}${mEquivalent}/month`,
+            strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
+            buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
+            buttonTheme: 'green',
+            features: planFeatures,
+            aiRecipeLimit: cfg.aiRecipeLimit,
+            recipeLibraryLimit: cfg.recipeLibraryLimit,
+            socialScrapeLimit: cfg.socialScrapeLimit,
+            canViewMacros: Boolean(cfg.canViewMacros),
+            allowedAiModels: cfg.allowedAiModels,
+            tokenLimit,
+            tokenReimburseFrequency,
+          });
+        }
+      }
+    });
 
     const dynamicPlans = Array.from(plansMap.values());
     plansRef.current = dynamicPlans;
-    setPlans(dynamicPlans);
+    setPlans(prev => JSON.stringify(prev) === JSON.stringify(dynamicPlans) ? prev : dynamicPlans);
 
     const rawUser = typeof window !== 'undefined' ? localStorage.getItem('zecratary_current_user') : null;
     if (rawUser) {
@@ -30930,7 +30987,11 @@ export default function ProfilePage() {
     }
   }, [currencySymbol, syncActivePlanTokens, t]);
 
+  // Authoritative PostgreSQL hydration synchronized with /admin/users
   const reloadActiveUser = useCallback(async () => {
+    if (isFetchingProfileRef.current) return;
+    isFetchingProfileRef.current = true;
+    try {
     initAuthStorage();
     let active = getCurrentUser() as ExtendedUser | null;
 
@@ -30947,7 +31008,9 @@ export default function ProfilePage() {
               role: cookieData.role || 'user',
               subscriptionPlan: 'taster'
             };
-            localStorage.setItem('zecratary_current_user', JSON.stringify(active));
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('zecratary_current_user', JSON.stringify(active));
+            }
           }
         } catch (_) {}
       }
@@ -30960,37 +31023,28 @@ export default function ProfilePage() {
 
     let matchedUser: ExtendedUser = { ...active };
 
-    // 1. Fetch live user data from PostgreSQL users API
+    // 1. Fetch authoritative user record from PostgreSQL API (/api/admin/users)
     try {
       const uRes = await fetch('/api/admin/users', { cache: 'no-store' });
       if (uRes.ok) {
         const uData = await uRes.json();
         const usersList: any[] = Array.isArray(uData.users) ? uData.users : Array.isArray(uData) ? uData : [];
-        const fresh = usersList.find((u: any) => u.id === active?.id || u.email?.toLowerCase() === active?.email?.toLowerCase());
+        const fresh = usersList.find((u: any) => 
+          (active?.id && u.id === active.id) || 
+          (active?.email && u.email?.toLowerCase().trim() === active.email.toLowerCase().trim())
+        );
+
         if (fresh) {
+          const authoritativePlan = sanitizeSinglePlan(fresh.subscriptionPlan || fresh.subscription_plan || 'taster');
           matchedUser = {
             ...active,
             ...fresh,
-            subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || fresh.planSlug || fresh.planId || 'taster')
+            subscriptionPlan: authoritativePlan,
+            planSlug: authoritativePlan
           };
         }
       }
-    } catch (_) {
-      const rawUsers = localStorage.getItem('zecratary_users');
-      if (rawUsers) {
-        try {
-          const usersList = JSON.parse(rawUsers);
-          const fresh = usersList.find((u: any) => u.id === active?.id || u.email?.toLowerCase() === active?.email?.toLowerCase());
-          if (fresh) {
-            matchedUser = { 
-              ...active, 
-              ...fresh,
-              subscriptionPlan: sanitizeSinglePlan(fresh.subscriptionPlan || fresh.planSlug || fresh.planId || 'taster')
-            };
-          }
-        } catch (_) {}
-      }
-    }
+    } catch (_) {}
 
     if (!matchedUser.linkedProviders) {
       const initialLinked: SocialProvider[] = [];
@@ -31000,7 +31054,7 @@ export default function ProfilePage() {
       matchedUser.linkedProviders = initialLinked;
     }
 
-    // 2. Fetch live transactions from PostgreSQL payment API
+    // 2. Fetch payment transactions for renewal/expiry date alignment without reverting user plan
     try {
       const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
       if (txRes.ok) {
@@ -31017,20 +31071,21 @@ export default function ProfilePage() {
           (!t.expiryDate || new Date(t.expiryDate).getTime() > now.getTime())
         );
 
-        if (latestActiveTx) {
-          matchedUser.subscriptionPlan = sanitizeSinglePlan(latestActiveTx.planSlug || matchedUser.subscriptionPlan);
+        if (latestActiveTx && latestActiveTx.expiryDate) {
           (matchedUser as any).expiryDate = latestActiveTx.expiryDate;
           (matchedUser as any).planExpiryDate = latestActiveTx.expiryDate;
-        } else {
-          // Revert to taster if no active unexpired transaction exists
-          matchedUser.subscriptionPlan = 'taster';
-          (matchedUser as any).expiryDate = '';
-          (matchedUser as any).planExpiryDate = '';
+        } else if (matchedUser.subscriptionPlan && matchedUser.subscriptionPlan !== 'taster' && !matchedUser.subscriptionPlan.includes('free')) {
+          const fallbackExpiry = (matchedUser as any).planExpiryDate || (matchedUser as any).expiryDate;
+          if (!fallbackExpiry) {
+            const calculatedExpiry = calculateRenewalExpiry(new Date(), matchedUser.subscriptionPlan.includes('annual') ? 'YEAR' : 'MONTH');
+            (matchedUser as any).expiryDate = calculatedExpiry;
+            (matchedUser as any).planExpiryDate = calculatedExpiry;
+          }
         }
       }
     } catch (_) {}
 
-    setUserState(matchedUser);
+    setUserState(prev => JSON.stringify(prev) === JSON.stringify(matchedUser) ? prev : matchedUser);
     setName(matchedUser.name || '');
     setEmail(matchedUser.email || '');
 
@@ -31039,44 +31094,41 @@ export default function ProfilePage() {
       localStorage.setItem('zecratary_user', JSON.stringify(matchedUser));
     } catch (_) {}
 
-    const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).subscriptionTier || (matchedUser as any).planSlug || '');
+    const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).planSlug || 'taster');
     syncActivePlanTokens(userPlan, plansRef.current);
+    } finally {
+      isFetchingProfileRef.current = false;
+    }
   }, [router, syncActivePlanTokens]);
 
+    // Decoupled document title
   useEffect(() => {
     document.title = `${t('accountProfileTitle') || 'Account Profile'} - Zecratary`;
+  }, [t]);
+
+  // Mount-only data initialization with debounced event listener
+  useEffect(() => {
     syncPlansFromAdmin();
     reloadActiveUser();
 
-    const handleBfCache = (e: PageTransitionEvent) => {
-      if (e.persisted) {
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const handleSyncEvent = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
         syncPlansFromAdmin();
         reloadActiveUser();
-      }
-    };
-    window.addEventListener('pageshow', handleBfCache);
-
-    const handleSyncEvent = () => {
-      syncPlansFromAdmin();
-      reloadActiveUser();
+      }, 300);
     };
 
     window.addEventListener('zecratary_plans_updated', handleSyncEvent);
-    window.addEventListener('zecratary_users_updated', handleSyncEvent);
     window.addEventListener('zecratary_payment_updated', handleSyncEvent);
-    window.addEventListener('storage', (e) => {
-      if (!e.key || e.key === 'zecratary_subscription_configs' || e.key === 'zecratary_users' || e.key === 'zecratary_payment_transactions') {
-        handleSyncEvent();
-      }
-    });
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener('zecratary_plans_updated', handleSyncEvent);
-      window.removeEventListener('zecratary_users_updated', handleSyncEvent);
       window.removeEventListener('zecratary_payment_updated', handleSyncEvent);
-      window.removeEventListener('pageshow', handleBfCache);
     };
-  }, [reloadActiveUser, syncPlansFromAdmin, t]);
+  }, []);
 
   const handleToggleSocialLink = async (provider: SocialProvider) => {
     if (!user) return;
@@ -31114,17 +31166,6 @@ export default function ProfilePage() {
     } catch (_) {}
 
     try {
-      const rawUsers = localStorage.getItem('zecratary_users');
-      const users: ExtendedUser[] = rawUsers ? JSON.parse(rawUsers) : [];
-      const userIndex = users.findIndex(u => u.id === updatedUser.id || u.email.toLowerCase() === updatedUser.email.toLowerCase());
-
-      if (userIndex !== -1) {
-        users[userIndex] = updatedUser;
-      } else {
-        users.unshift(updatedUser);
-      }
-
-      localStorage.setItem('zecratary_users', JSON.stringify(users));
       localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUser));
       localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
     } catch (_) {}
@@ -31141,47 +31182,35 @@ export default function ProfilePage() {
 
     const matched = plans.find(p => checkIsCurrentPlan(p));
     if (matched) {
-      const isAnnual = matched.interval === 'YEAR';
+      const isAnnual = matched.interval === 'YEAR' || matched.slug.includes('annual');
       return {
         label: `${matched.name}${matched.isFree ? ' (Free)' : isAnnual ? ' (Annual)' : ' (Monthly)'}`,
         bg: matched.isFree 
-          ? 'rgba(16, 185, 129, 0.15)' 
+          ? (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)') 
           : isAnnual 
-          ? 'rgba(59, 130, 246, 0.15)' 
-          : 'rgba(224, 86, 56, 0.15)',
+          ? (isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)') 
+          : (isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.15)'),
         border: matched.isFree 
-          ? 'var(--color-emerald, #10b981)' 
+          ? (isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)') 
           : isAnnual 
-          ? '#3b82f6' 
-          : 'var(--color-primary, #E05638)',
+          ? (isDayMode ? '#bfdbfe' : '#3b82f6') 
+          : (isDayMode ? '#fdba74' : 'var(--color-primary, #E05638)'),
         color: matched.isFree 
-          ? 'var(--color-emerald, #10b981)' 
+          ? (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)') 
           : isAnnual 
-          ? '#60a5fa' 
-          : 'var(--color-primary, #E05638)',
+          ? (isDayMode ? '#1d4ed8' : '#60a5fa') 
+          : (isDayMode ? '#c2410c' : 'var(--color-primary, #E05638)'),
         icon: matched.isFree ? Sparkles : Zap,
         matchedPlan: matched
       };
     }
 
-    const userPlanName = (user as any)?.planName;
-    if (userPlanName) {
-      return {
-        label: userPlanName,
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
-        icon: Sparkles,
-        matchedPlan: null
-      };
-    }
-
     if (!planKey || planKey === 'free' || planKey.includes('free') || planKey === 'taster') {
       return {
-        label: t('freeTierNoExpiry') || 'Free Tier',
-        bg: 'rgba(16, 185, 129, 0.15)',
-        border: 'var(--color-emerald, #10b981)',
-        color: 'var(--color-emerald, #10b981)',
+        label: t('freeTierNoExpiry') || 'Taster (Free)',
+        bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+        border: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
+        color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
         icon: Sparkles,
         matchedPlan: null
       };
@@ -31194,13 +31223,13 @@ export default function ProfilePage() {
 
     return {
       label: formatted,
-      bg: 'rgba(224, 86, 56, 0.15)',
-      border: 'var(--color-primary, #E05638)',
-      color: 'var(--color-primary, #E05638)',
+      bg: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.15)',
+      border: isDayMode ? '#fdba74' : 'var(--color-primary, #E05638)',
+      color: isDayMode ? '#c2410c' : 'var(--color-primary, #E05638)',
       icon: Zap,
       matchedPlan: null
     };
-  }, [user, plans, checkIsCurrentPlan, t]);
+  }, [user, plans, checkIsCurrentPlan, isDayMode, t]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31235,7 +31264,6 @@ export default function ProfilePage() {
       password: password ? password : user.password,
     };
 
-    // 1. Update PostgreSQL users table
     try {
       await fetch('/api/admin/users', {
         method: 'POST',
@@ -31244,12 +31272,7 @@ export default function ProfilePage() {
       });
     } catch (_) {}
 
-    // 2. Update local state & storage
     try {
-      const rawUsers = localStorage.getItem('zecratary_users');
-      const users: ExtendedUser[] = rawUsers ? JSON.parse(rawUsers) : [];
-      const updatedList = users.map(u => u.id === user.id ? updatedUser : u);
-      localStorage.setItem('zecratary_users', JSON.stringify(updatedList));
       localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUser));
       localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
     } catch (_) {}
@@ -31279,13 +31302,6 @@ export default function ProfilePage() {
         body: JSON.stringify({ id: userId, email: cleanEmail }),
       }).catch(() => {});
 
-      try {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        const users: any[] = rawUsers ? JSON.parse(rawUsers) : [];
-        const updatedUsers = users.filter(u => u.id !== userId && (!u.email || u.email.toLowerCase() !== cleanEmail));
-        localStorage.setItem('zecratary_users', JSON.stringify(updatedUsers));
-      } catch (_) {}
-
       logoutUser();
       router.replace('/login');
     } catch (err: any) {
@@ -31293,11 +31309,7 @@ export default function ProfilePage() {
     }
   };
 
-  // CHANGE PLAN LOGIC: Fully synchronized with /admin/payment and PostgreSQL
-  // 1. Strictly 1 plan per user
-  // 2. Upgrades/downgrades supported seamlessly
-  // 3. Cancels (refunds) prior active transaction in PostgreSQL via /api/admin/payment
-  // 4. Records new payment transaction in PostgreSQL for paid tiers
+  // CHANGE PLAN LOGIC: Fully synchronized with /admin/users & PostgreSQL
   const handleSelectPlan = async (plan: SubscriptionPlanItem) => {
     if (!user) return;
     setPaymentLoading(plan.id);
@@ -31344,7 +31356,7 @@ export default function ProfilePage() {
         }
       } catch (_) {}
 
-      // 2. Record new transaction in PostgreSQL /api/admin/payment if not free
+      // 2. Record new transaction in PostgreSQL /api/admin/payment if paid plan
       if (!isFree) {
         const newTx: PaymentTransaction = {
           id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
@@ -31393,10 +31405,6 @@ export default function ProfilePage() {
 
       // 4. Update local state & storage
       try {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        const users: ExtendedUser[] = rawUsers ? JSON.parse(rawUsers) : [];
-        const updatedList = users.map(u => u.id === user.id ? updatedUserPayload : u);
-        localStorage.setItem('zecratary_users', JSON.stringify(updatedList));
         localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUserPayload));
         localStorage.setItem('zecratary_user', JSON.stringify(updatedUserPayload));
       } catch (_) {}
@@ -32141,7 +32149,7 @@ export default function ProfilePage() {
                 ? `Renewal / Expiry: ${new Date(activeExpiryDate).toLocaleDateString()}` 
                 : 'Free Tier (No Expiration)'}
             </span>
-            <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
+            <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
               {tokenUsage.monthlyLimit === -1 ? 'Unlimited AI Tokens' : `${tokenUsage.monthlyLimit.toLocaleString()} Monthly Tokens`}
             </span>
           </div>
@@ -34588,6 +34596,237 @@ export async function POST(req: NextRequest) {
     `, [JSON.stringify(languages)]);
 
     return NextResponse.json({ success: true, message: 'Languages updated in PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/scan/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  try {
+    // 1. Users with paid plan but NO valid unexpired transaction
+    const unpaidUsers = await query(`
+      SELECT u.id, u.name, u.email, u.subscription_plan AS "subscriptionPlan"
+      FROM users u
+      WHERE u.subscription_plan NOT IN ('taster', 'free')
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_transactions pt
+          WHERE LOWER(pt.customer_email) = LOWER(u.email)
+            AND pt.status IN ('succeeded', 'paid', 'canceled')
+            AND (pt.expiry_date IS NULL OR pt.expiry_date > NOW())
+        )
+    `);
+
+    // 2. Users with expired transactions still on paid tier
+    const expiredUsers = await query(`
+      SELECT u.id, u.name, u.email, u.subscription_plan AS "subscriptionPlan", pt.id AS "txId", pt.expiry_date AS "expiryDate"
+      FROM users u
+      JOIN payment_transactions pt ON LOWER(pt.customer_email) = LOWER(u.email)
+      WHERE u.subscription_plan NOT IN ('taster', 'free')
+        AND pt.status IN ('succeeded', 'paid', 'canceled')
+        AND pt.expiry_date <= NOW()
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_transactions active_pt
+          WHERE LOWER(active_pt.customer_email) = LOWER(u.email)
+            AND active_pt.status IN ('succeeded', 'paid')
+            AND (active_pt.expiry_date IS NULL OR active_pt.expiry_date > NOW())
+        )
+    `);
+
+    // 3. Multiple active transactions for 1 user
+    const duplicateTxs = await query(`
+      SELECT LOWER(customer_email) AS "customerEmail", COUNT(*)::int AS "activeCount", ARRAY_AGG(id) AS "txIds"
+      FROM payment_transactions
+      WHERE status IN ('succeeded', 'paid')
+        AND (expiry_date IS NULL OR expiry_date > NOW())
+      GROUP BY LOWER(customer_email)
+      HAVING COUNT(*) > 1
+    `);
+
+    // 4. Plan slug mismatch between user and active transaction
+    const mismatchedPlans = await query(`
+      SELECT u.id AS "userId", u.email, u.subscription_plan AS "userPlan", pt.plan_slug AS "txPlan", pt.status, pt.expiry_date AS "expiryDate"
+      FROM users u
+      JOIN payment_transactions pt ON LOWER(pt.customer_email) = LOWER(u.email)
+      WHERE pt.status IN ('succeeded', 'paid', 'canceled')
+        AND (pt.expiry_date IS NULL OR pt.expiry_date > NOW())
+        AND LOWER(REPLACE(u.subscription_plan, '_', '-')) != LOWER(REPLACE(pt.plan_slug, '_', '-'))
+    `);
+
+    // 5. Missing plan definitions in subscription_plans catalog
+    const missingPlans = await query(`
+      SELECT DISTINCT u.subscription_plan AS "missingSlug", 'users' AS "sourceTable"
+      FROM users u
+      WHERE u.subscription_plan NOT IN ('taster', 'free')
+        AND NOT EXISTS (
+          SELECT 1 FROM subscription_plans sp 
+          WHERE sp.slug = u.subscription_plan OR sp.id = u.subscription_plan
+             OR sp.monthly_plan_id = u.subscription_plan OR sp.annual_plan_id = u.subscription_plan
+        )
+      UNION
+      SELECT DISTINCT pt.plan_slug AS "missingSlug", 'payment_transactions' AS "sourceTable"
+      FROM payment_transactions pt
+      WHERE pt.plan_slug NOT IN ('taster', 'free')
+        AND NOT EXISTS (
+          SELECT 1 FROM subscription_plans sp 
+          WHERE sp.slug = pt.plan_slug OR sp.id = pt.plan_slug
+             OR sp.monthly_plan_id = pt.plan_slug OR sp.annual_plan_id = pt.plan_slug
+        )
+    `);
+
+    // 6. Tombstone collisions
+    const tombstoneCollisions = await query(`
+      SELECT u.id, u.email, u.role, d.deleted_at AS "deletedAt"
+      FROM users u
+      JOIN deleted_users d ON LOWER(u.email) = LOWER(d.email)
+    `);
+
+    const totalIssues = unpaidUsers.length + expiredUsers.length + duplicateTxs.length +
+                        mismatchedPlans.length + missingPlans.length + tombstoneCollisions.length;
+
+    return NextResponse.json({
+      success: true,
+      healthy: totalIssues === 0,
+      totalIssues,
+      report: {
+        unpaidUsers: { count: unpaidUsers.length, items: unpaidUsers, fixAction: "Revert user subscription_plan to 'taster'" },
+        expiredUsers: { count: expiredUsers.length, items: expiredUsers, fixAction: "Revert user subscription_plan to 'taster'" },
+        duplicateTxs: { count: duplicateTxs.length, items: duplicateTxs, fixAction: "Keep latest transaction; mark older ones 'refunded'" },
+        mismatchedPlans: { count: mismatchedPlans.length, items: mismatchedPlans, fixAction: "Synchronize user plan with active transaction plan_slug" },
+        missingPlans: { count: missingPlans.length, items: missingPlans, fixAction: "Create missing package entries in subscription_plans" },
+        tombstoneCollisions: { count: tombstoneCollisions.length, items: tombstoneCollisions, fixAction: "Remove resurrected users from deleted_users table" }
+      }
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const shouldFix = searchParams.get('fix') === 'true' || (await req.json().catch(() => ({})))?.fix;
+
+    if (!shouldFix) {
+      return NextResponse.json({ success: false, error: 'Pass ?fix=true or body { fix: true } to apply automated repair.' }, { status: 400 });
+    }
+
+    const repairsApplied: string[] = [];
+
+    // 1. Auto-revert unpaid users to taster
+    const unpaidFix = await query(`
+      UPDATE users SET subscription_plan = 'taster', updated_at = NOW()
+      WHERE subscription_plan NOT IN ('taster', 'free')
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_transactions pt
+          WHERE LOWER(pt.customer_email) = LOWER(users.email)
+            AND pt.status IN ('succeeded', 'paid', 'canceled')
+            AND (pt.expiry_date IS NULL OR pt.expiry_date > NOW())
+        )
+      RETURNING email, subscription_plan;
+    `);
+    if (unpaidFix.length > 0) {
+      repairsApplied.push(`Reverted ${unpaidFix.length} unpaid user(s) to 'taster': ${unpaidFix.map((r: any) => r.email).join(', ')}`);
+    }
+
+    // 2. Auto-revert expired users to taster
+    const expiredFix = await query(`
+      UPDATE users SET subscription_plan = 'taster', updated_at = NOW()
+      WHERE subscription_plan NOT IN ('taster', 'free')
+        AND EXISTS (
+          SELECT 1 FROM payment_transactions pt
+          WHERE LOWER(pt.customer_email) = LOWER(users.email)
+            AND pt.status IN ('succeeded', 'paid', 'canceled')
+            AND pt.expiry_date <= NOW()
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_transactions active_pt
+          WHERE LOWER(active_pt.customer_email) = LOWER(users.email)
+            AND active_pt.status IN ('succeeded', 'paid')
+            AND (active_pt.expiry_date IS NULL OR active_pt.expiry_date > NOW())
+        )
+      RETURNING email;
+    `);
+    if (expiredFix.length > 0) {
+      repairsApplied.push(`Demoted ${expiredFix.length} expired user(s) to 'taster': ${expiredFix.map((r: any) => r.email).join(', ')}`);
+    }
+
+    // 3. Resolve duplicate active transactions (keep newest, refund older)
+    const dupes = await query(`
+      SELECT LOWER(customer_email) AS "customerEmail"
+      FROM payment_transactions
+      WHERE status IN ('succeeded', 'paid')
+        AND (expiry_date IS NULL OR expiry_date > NOW())
+      GROUP BY LOWER(customer_email)
+      HAVING COUNT(*) > 1
+    `);
+
+    for (const d of dupes) {
+      const email = d.customerEmail;
+      await query(`
+        UPDATE payment_transactions
+        SET status = 'refunded'
+        WHERE LOWER(customer_email) = $1
+          AND status IN ('succeeded', 'paid')
+          AND id NOT IN (
+            SELECT id FROM payment_transactions
+            WHERE LOWER(customer_email) = $1
+              AND status IN ('succeeded', 'paid')
+              AND (expiry_date IS NULL OR expiry_date > NOW())
+            ORDER BY created_at DESC
+            LIMIT 1
+          )
+      `, [email]);
+      repairsApplied.push(`Resolved duplicate active transactions for ${email}: preserved newest, refunded older.`);
+    }
+
+    // 4. Synchronize mismatched plan slugs
+    const syncFix = await query(`
+      UPDATE users u
+      SET subscription_plan = pt.plan_slug, updated_at = NOW()
+      FROM (
+        SELECT DISTINCT ON (LOWER(customer_email)) LOWER(customer_email) AS c_email, plan_slug
+        FROM payment_transactions
+        WHERE status IN ('succeeded', 'paid', 'canceled')
+          AND (expiry_date IS NULL OR expiry_date > NOW())
+        ORDER BY LOWER(customer_email), created_at DESC
+      ) pt
+      WHERE LOWER(u.email) = pt.c_email
+        AND LOWER(REPLACE(u.subscription_plan, '_', '-')) != LOWER(REPLACE(pt.plan_slug, '_', '-'))
+      RETURNING u.email, u.subscription_plan;
+    `);
+    if (syncFix.length > 0) {
+      repairsApplied.push(`Synchronized plan slugs for ${syncFix.length} user(s) with their active transactions.`);
+    }
+
+    // 5. Clean tombstone collisions
+    const tombstoneFix = await query(`
+      DELETE FROM deleted_users d
+      WHERE EXISTS (
+        SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(d.email)
+      )
+      RETURNING email;
+    `);
+    if (tombstoneFix.length > 0) {
+      repairsApplied.push(`Purged ${tombstoneFix.length} active user email(s) from deleted_users tombstone.`);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Automated database synchronization and healing complete.',
+      repairsCount: repairsApplied.length,
+      repairsApplied
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
