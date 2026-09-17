@@ -1,5 +1,41 @@
 [
   {
+    "id": "tx_mu5p5nnhg0q",
+    "customerName": "cygnusorbit",
+    "customerEmail": "ed1226@gmail.com",
+    "planName": "Nutrition Pro (Monthly)",
+    "planSlug": "nutrition-pro-monthly",
+    "amount": 8.99,
+    "currency": "USD",
+    "gateway": "stripe",
+    "status": "canceled",
+    "testMode": true,
+    "isRecurring": false,
+    "recurringInterval": "MONTH",
+    "autoRenew": false,
+    "createdAt": "2026-09-17T12:00:00.000Z",
+    "expiryDate": "2026-10-17T23:59:59.000Z"
+  },
+  {
+    "id": "tx_mu5p3ngnzub",
+    "customerName": "System Administrator",
+    "customerEmail": "admin@zecratary.com",
+    "planName": "Nutrition Pro (Monthly)",
+    "planSlug": "nutrition-pro-monthly",
+    "amount": 8.99,
+    "currency": "USD",
+    "gateway": "stripe",
+    "status": "succeeded",
+    "testMode": true,
+    "createdAt": "2026-09-17T15:39:31.847Z",
+    "expiryDate": "2026-10-17T15:39:31.772Z",
+    "isRecurring": false,
+    "recurringInterval": "MONTH",
+    "autoRenew": false,
+    "is_recurring": false,
+    "auto_renew": false
+  },
+  {
     "id": "tx_mu5oj8s6f9x",
     "customerName": "System Administrator",
     "customerEmail": "admin@zecratary.com",
@@ -57,7 +93,9 @@
     "expiryDate": "2026-10-17T23:59:59.000Z",
     "isRecurring": false,
     "recurringInterval": "MONTH",
-    "autoRenew": false
+    "autoRenew": false,
+    "is_recurring": false,
+    "auto_renew": false
   },
   {
     "id": "tx_mu588unam40",
