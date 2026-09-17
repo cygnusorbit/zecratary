@@ -1,5 +1,34 @@
 [
   {
+    "id": "tx_mu5oj8s6f9x",
+    "customerName": "System Administrator",
+    "customerEmail": "admin@zecratary.com",
+    "planName": "Nutrition Pro (Monthly)",
+    "planSlug": "nutrition-pro-monthly",
+    "amount": 8.99,
+    "currency": "USD",
+    "gateway": "stripe",
+    "status": "refunded",
+    "testMode": true,
+    "createdAt": "2026-09-17T15:23:39.702Z",
+    "expiryDate": "2026-09-17T15:23:44.812Z"
+  },
+  {
+    "id": "tx_mu5oi74mvv8",
+    "customerName": "System Administrator",
+    "customerEmail": "admin@zecratary.com",
+    "planName": "Nutrition Pro (Monthly)",
+    "planSlug": "nutrition-pro-monthly",
+    "amount": 8.99,
+    "currency": "USD",
+    "gateway": "stripe",
+    "status": "refunded",
+    "failureReason": null,
+    "testMode": true,
+    "expiryDate": "2026-09-17T15:23:01.925Z",
+    "createdAt": "2026-09-17T15:22:50.902Z"
+  },
+  {
     "id": "tx_mu5o2bnvtxi",
     "customerName": "System Administrator",
     "customerEmail": "admin@zecratary.com",

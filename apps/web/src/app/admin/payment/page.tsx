@@ -237,13 +237,13 @@ export default function AdminPaymentPage() {
     configRef.current = config;
   }, [config]);
 
-  // Add Payment Modal States (Default isRecurring: ON)
+  // Add Payment Modal States
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [selectedPlanSlug, setSelectedPlanSlug] = useState('nutrition-pro-monthly');
   const [paymentAmount, setPaymentAmount] = useState<number>(8.99);
   const [paymentGateway, setPaymentGateway] = useState<'stripe' | 'paypal' | 'manual'>('stripe');
-  const [paymentStatus, setPaymentStatus] = useState<'succeeded' | 'failed' | 'refunded' | 'pending'>('succeeded');
+  const [paymentStatus, setPaymentStatus] = useState<'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled'>('succeeded');
   const [paymentDate, setPaymentDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [paymentExpiryDate, setPaymentExpiryDate] = useState<string>('');
   const [isPaymentRecurring, setIsPaymentRecurring] = useState<boolean>(true);
@@ -367,7 +367,6 @@ export default function AdminPaymentPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
-  // Load Plans from Server Settings API
   // Load Plans from PostgreSQL /api/admin/plans and Server Settings
   const loadPlans = useCallback(async (currencyOverride?: string) => {
     let parsedPlans: PlanOption[] = [];
@@ -448,7 +447,6 @@ export default function AdminPaymentPage() {
             isFree: true,
           });
         } else {
-          // Resolve monthly price across schema variants
           let monthlyPrice = Number(
             cfg.monthlyPriceDollars ??
             cfg.monthly_price_dollars ??
@@ -458,7 +456,6 @@ export default function AdminPaymentPage() {
             0
           );
 
-          // Resolve annual price across schema variants
           let annualPrice = Number(
             cfg.annualPriceDollars ??
             cfg.annual_price_dollars ??
@@ -466,7 +463,6 @@ export default function AdminPaymentPage() {
             0
           );
 
-          // If flat price was provided on cfg.price
           const flatPrice = Number(cfg.price ?? (cfg.priceCents ? cfg.priceCents / 100 : (cfg.price_cents ? cfg.price_cents / 100 : 0)));
           if (monthlyPrice === 0 && annualPrice === 0 && flatPrice > 0) {
             if (String(cfg.interval || '').toLowerCase().includes('year') || rawSlug.includes('annual')) {
@@ -489,7 +485,6 @@ export default function AdminPaymentPage() {
             annualPrice = 59.99;
           }
 
-          // 1. Monthly Tier Option
           parsedPlans.push({
             id: `${cfg.id || baseSlug}-monthly`,
             name: `${baseName} (Monthly)`,
@@ -500,7 +495,6 @@ export default function AdminPaymentPage() {
             isFree: false,
           });
 
-          // 2. Annual Tier Option
           parsedPlans.push({
             id: `${cfg.id || baseSlug}-annual`,
             name: `${baseName} (Annual)`,
@@ -514,7 +508,6 @@ export default function AdminPaymentPage() {
       });
     }
 
-    // Deduplicate unique plans by slug
     const uniquePlans: PlanOption[] = [];
     const seenSlugs = new Set<string>();
     for (const p of parsedPlans) {
@@ -533,8 +526,8 @@ export default function AdminPaymentPage() {
     setAvailablePlans(fallbackList);
   }, [getCurrencySymbol]);
 
-  // Validate user subscription against payment transactions
-    const validateAndSyncUserPlans = useCallback((usersList: AppUser[], txList: PaymentTransaction[]): AppUser[] => {
+  // Validate user subscription against payment transactions: Succeeded & Canceled preserve features until expiryDate
+  const validateAndSyncUserPlans = useCallback((usersList: AppUser[], txList: PaymentTransaction[]): AppUser[] => {
     const now = new Date();
     return usersList.map((u) => {
       const currentPlan = sanitizeSinglePlan(u.subscriptionPlan);
@@ -548,8 +541,6 @@ export default function AdminPaymentPage() {
         const matchesEmail = txEmail === uEmail && txEmail !== '';
         
         const statusLower = String(tx.status || '').toLowerCase().trim();
-        // Cancelled & Succeeded keep the plan active until expiryDate is reached!
-        // Refunded does NOT keep the plan active (refunded = immediate revocation)
         const isValidStatus = isSucceeded(statusLower) || isCanceled(statusLower);
         const notExpired = !tx.expiryDate || new Date(tx.expiryDate).getTime() > now.getTime();
         
@@ -568,7 +559,7 @@ export default function AdminPaymentPage() {
 
   const loadUsers = useCallback(async (currentTxs?: PaymentTransaction[]) => {
     try {
-      const res = await fetch('/api/admin/users', { cache: 'no-store' });
+      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
@@ -578,10 +569,7 @@ export default function AdminPaymentPage() {
           }));
           const targetTxList = currentTxs || transactionsRef.current;
           const validated = validateAndSyncUserPlans(normalized, targetTxList);
-          setRegisteredUsers((prev) => {
-            if (JSON.stringify(prev) === JSON.stringify(validated)) return prev;
-            return validated;
-          });
+          setRegisteredUsers(validated);
           setSelectedUserId((prev) => {
             if (!prev && validated.length > 0) {
               return validated[0].id;
@@ -601,7 +589,7 @@ export default function AdminPaymentPage() {
     isFetchingRef.current = true;
     purgeLegacyBrowserAdminStorage();
     try {
-      const res = await fetch('/api/admin/payment', { cache: 'no-store' });
+      const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -637,13 +625,8 @@ export default function AdminPaymentPage() {
   const loadPlansRef = useRef(loadPlans);
   loadPlansRef.current = loadPlans;
 
-  // Title localization effect
   useEffect(() => {
     document.title = `${t('paymentManagerTitle', 'Payment Manager')} - Admin`;
-  }, [t, version]);
-
-  // Data initialization
-  useEffect(() => {
     fetchDataRef.current();
     loadPlansRef.current();
 
@@ -666,13 +649,13 @@ export default function AdminPaymentPage() {
       window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
     };
-  }, []);
+  }, [t, version]);
 
   const currentSelectedUser = useMemo(() => {
     return registeredUsers.find((u) => u.id === selectedUserId) || null;
   }, [registeredUsers, selectedUserId]);
 
-    const planTransitionInfo = useMemo(() => {
+  const planTransitionInfo = useMemo(() => {
     if (!showAddModal || !selectedUserId || !currentSelectedUser) return null;
 
     const currentPlan = sanitizeSinglePlan(currentSelectedUser.subscriptionPlan);
@@ -747,7 +730,6 @@ export default function AdminPaymentPage() {
     const nextState = !tx.isRecurring;
     setTogglingTxId(tx.id);
 
-    // Optimistic UI Update
     setTransactions((prev) =>
       prev.map((tItem) =>
         tItem.id === tx.id
@@ -784,7 +766,6 @@ export default function AdminPaymentPage() {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
       }
     } catch (err: any) {
-      // Revert on failure
       setTransactions((prev) =>
         prev.map((tItem) =>
           tItem.id === tx.id
@@ -861,7 +842,7 @@ export default function AdminPaymentPage() {
     }
   };
 
-    const handlePlanSelectChange = (slug: string) => {
+  const handlePlanSelectChange = (slug: string) => {
     const singleSlug = sanitizeSinglePlan(slug);
     setSelectedPlanSlug(singleSlug);
     const matched = availablePlans.find((p) => p.slug === singleSlug);
@@ -934,8 +915,6 @@ export default function AdminPaymentPage() {
     setSelectedPlanSlug(initialSlug);
     setPaymentAmount(initialPlan?.priceDollars || 8.99);
     setPaymentExpiryDate(calculateDefaultExpiry(today, initialPlan?.interval || 'MONTH'));
-
-    // Default Recurring: ON
     setIsPaymentRecurring(true);
 
     if (config.activeGateway === 'paypal' && (config.paypal.enabled || config.activeGateway === 'paypal')) {
@@ -981,7 +960,7 @@ export default function AdminPaymentPage() {
     }
   };
 
-    const handleCancelPlan = async (tx: PaymentTransaction) => {
+  const handleCancelPlan = async (tx: PaymentTransaction) => {
     const confirmMsg = t('confirmCancelPlanFor', 'Are you sure you want to cancel plan');
     if (!window.confirm(`${confirmMsg} "${tx.planName}" for ${tx.customerName}? Recurring will be turned OFF and status set to "cancelled", keeping the current plan active until expiration.`)) {
       return;
@@ -990,7 +969,6 @@ export default function AdminPaymentPage() {
     const now = new Date();
     const hasUnreachedExpiry = Boolean(tx.expiryDate && new Date(tx.expiryDate).getTime() > now.getTime());
 
-    // 1. Recurring turned OFF, status to 'canceled', expiryDate preserved
     const updatedTx: PaymentTransaction = { 
       ...tx, 
       status: 'canceled', 
@@ -1014,7 +992,6 @@ export default function AdminPaymentPage() {
       const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
       if (targetUser) {
         if (hasUnreachedExpiry) {
-          // Current plan remains ACTIVE until expired!
           await fetch('/api/admin/users', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1026,7 +1003,6 @@ export default function AdminPaymentPage() {
             }),
           }).catch(() => {});
         } else {
-          // Already expired, revert to taster immediately
           await fetch('/api/admin/users', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1081,6 +1057,8 @@ export default function AdminPaymentPage() {
       : undefined;
 
     const detectedInterval = (singlePlanSlug.includes('annual') || editPlanName.toLowerCase().includes('annual')) ? 'YEAR' : 'MONTH';
+    const isStatusCanceled = isCanceled(normalizedStatus);
+    const finalRecurring = isStatusCanceled ? false : editIsRecurring;
 
     const updatedTx: PaymentTransaction = {
       ...editingTx,
@@ -1093,9 +1071,9 @@ export default function AdminPaymentPage() {
       gateway: editGateway,
       status: normalizedStatus as any,
       failureReason: normalizedStatus === 'failed' ? editFailureReason || 'Declined by issuer' : undefined,
-      isRecurring: editIsRecurring,
+      isRecurring: finalRecurring,
       recurringInterval: detectedInterval as any,
-      autoRenew: editIsRecurring,
+      autoRenew: finalRecurring,
       createdAt: formattedCreatedAt,
       expiryDate: formattedExpiryDate,
     };
@@ -1107,13 +1085,47 @@ export default function AdminPaymentPage() {
         body: JSON.stringify({ action: 'update_transaction', transaction: updatedTx }),
       });
 
-      if (editSyncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) {
+      if (isStatusCanceled) {
+        const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
+        if (targetUser) {
+          const now = new Date();
+          const hasUnreachedExpiry = Boolean(formattedExpiryDate && new Date(formattedExpiryDate).getTime() > now.getTime());
+          if (hasUnreachedExpiry) {
+            await fetch('/api/admin/users', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                ...targetUser, 
+                subscriptionPlan: singlePlanSlug || targetUser.subscriptionPlan,
+                planExpiryDate: formattedExpiryDate,
+                expiryDate: formattedExpiryDate
+              }),
+            }).catch(() => {});
+          } else {
+            await fetch('/api/admin/users', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                ...targetUser, 
+                subscriptionPlan: 'taster',
+                planExpiryDate: null,
+                expiryDate: null
+              }),
+            }).catch(() => {});
+          }
+        }
+      } else if (editSyncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) {
         const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
         if (targetUser) {
           await fetch('/api/admin/users', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...targetUser, subscriptionPlan: singlePlanSlug }),
+            body: JSON.stringify({ 
+              ...targetUser, 
+              subscriptionPlan: singlePlanSlug,
+              planExpiryDate: formattedExpiryDate,
+              expiryDate: formattedExpiryDate
+            }),
           }).catch(() => {});
         }
       }
@@ -1129,7 +1141,7 @@ export default function AdminPaymentPage() {
       setEditingTx(null);
       setFeedback({
         type: 'success',
-        msg: `Transaction updated! Recurring status: ${editIsRecurring ? 'ON' : 'OFF'}.`,
+        msg: `Transaction updated! Status: ${normalizedStatus.toUpperCase()}, Recurring: ${finalRecurring ? 'ON' : 'OFF'}.`,
       });
     } catch (err: any) {
       setModalError(err.message || 'Failed to update transaction');
@@ -1210,7 +1222,7 @@ export default function AdminPaymentPage() {
     }
   };
 
-    const handleAddPaymentSubmit = async (e: React.FormEvent) => {
+  const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError('');
 
@@ -1248,8 +1260,6 @@ export default function AdminPaymentPage() {
     const detectedInterval = (matchedPlan?.interval || (singlePlanSlug.includes('annual') ? 'YEAR' : 'MONTH')) as any;
 
     if (isDowngradingToFree) {
-      // Downgrading to Free Plan:
-      // Turn OFF recurring, set prior active transactions to 'canceled', and keep current plan active until expiry date
       const activeUserTxs = transactionsRef.current.filter(
         (tItem) => (tItem.customerEmail || '').toLowerCase().trim() === customerEmail && (isSucceeded(tItem.status) || isCanceled(tItem.status))
       );
@@ -1274,7 +1284,6 @@ export default function AdminPaymentPage() {
       }
 
       if (preservedExpiry) {
-        // Current plan remains ACTIVE until expired!
         await fetch('/api/admin/users', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1316,7 +1325,6 @@ export default function AdminPaymentPage() {
       return;
     }
 
-    // Standard Upgrade/Downgrade between paid plans
     if (isSucceeded(normalizedStatus)) {
       const existingUserTxs = transactionsRef.current.filter(
         (tItem) => (tItem.customerEmail || '').toLowerCase().trim() === customerEmail && isSucceeded(tItem.status)
@@ -1454,7 +1462,7 @@ export default function AdminPaymentPage() {
     );
   };
 
-    const metrics = useMemo(() => {
+  const metrics = useMemo(() => {
     const succeeded = transactions.filter((t) => isSucceeded(t.status));
     const failed = transactions.filter((t) => isFailed(t.status));
     const canceled = transactions.filter((t) => isCanceled(t.status));
@@ -1919,8 +1927,8 @@ export default function AdminPaymentPage() {
                 >
                   <option value="all">{t('allStatuses', 'All Statuses')}</option>
                   <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
+                  <option value="canceled">{t('statusCanceled', 'Cancelled')}</option>
                   <option value="failed">{t('statusFailed', 'Failed')}</option>
-                  <option value="canceled">{t('statusCanceled', 'Canceled')}</option>
                   <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
                   <option value="pending">{t('statusPending', 'Pending')}</option>
                 </select>
@@ -2052,9 +2060,10 @@ export default function AdminPaymentPage() {
                     paginatedTransactions.map((tx) => {
                       const txSymbol = getCurrencySymbol(tx.currency || config.currency);
                       const isRowSelected = selectedTxIds.includes(tx.id);
-                      const isTxCancelled = isRefunded(tx.status) || isCanceled(tx.status);
                       const isTxToggling = togglingTxId === tx.id;
                       const isRecurringActive = Boolean(tx.isRecurring ?? true);
+                      const isTxCanceled = isCanceled(tx.status);
+                      const isTxRefunded = isRefunded(tx.status);
 
                       return (
                         <tr 
@@ -2097,6 +2106,18 @@ export default function AdminPaymentPage() {
                                 <CheckCircle2 className="h-3 w-3" /> {t('statusSucceeded', 'Succeeded')}
                               </span>
                             )}
+                            {isCanceled(tx.status) && (
+                              <span 
+                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                style={{
+                                  backgroundColor: isDayMode ? '#fff7ed' : 'rgba(249, 115, 22, 0.15)',
+                                  borderColor: '#f97316',
+                                  color: isDayMode ? '#c2410c' : '#fb923c'
+                                }}
+                              >
+                                <Ban className="h-3 w-3" /> {t('statusCanceled', 'Cancelled')}
+                              </span>
+                            )}
                             {isFailed(tx.status) && (
                               <span 
                                 className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs cursor-help"
@@ -2108,18 +2129,6 @@ export default function AdminPaymentPage() {
                                 title={tx.failureReason || 'Declined by payment processor'}
                               >
                                 <XCircle className="h-3 w-3" /> {t('statusFailed', 'Failed')}
-                              </span>
-                            )}
-                            {isCanceled(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
-                                  borderColor: '#f59e0b',
-                                  color: isDayMode ? '#b45309' : '#fbbf24'
-                                }}
-                              >
-                                <XCircle className="h-3 w-3" /> Canceled
                               </span>
                             )}
                             {isRefunded(tx.status) && (
@@ -2155,10 +2164,10 @@ export default function AdminPaymentPage() {
                                 type="button"
                                 role="switch"
                                 aria-checked={isRecurringActive}
-                                disabled={isTxToggling || isTxCancelled}
+                                disabled={isTxToggling || isTxCanceled || isTxRefunded}
                                 onClick={() => handleToggleRecurring(tx)}
                                 title={
-                                  isTxCancelled 
+                                  (isTxCanceled || isTxRefunded) 
                                     ? t('cancelledNoRecurring', 'Plan is canceled/refunded') 
                                     : isRecurringActive 
                                     ? t('clickTurnRecurringOff', 'Click to turn recurring OFF') 
@@ -2247,10 +2256,10 @@ export default function AdminPaymentPage() {
                             <div className="flex items-center justify-end gap-1.5">
                               <button
                                 type="button"
-                                disabled={isTxCancelled}
+                                disabled={isTxRefunded}
                                 onClick={() => handleOpenEditModal(tx)}
                                 className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxCancelled
+                                  isTxRefunded
                                     ? 'opacity-30 cursor-not-allowed text-slate-400'
                                     : 'cursor-pointer'
                                 }`}
@@ -2259,19 +2268,19 @@ export default function AdminPaymentPage() {
                                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
                                   color: isDayMode ? '#0f172a' : '#cbd5e1'
                                 }}
-                                title={isTxCancelled ? t('cannotModifyCancelledTooltip', 'Cannot modify cancelled or refunded plan') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
+                                title={isTxRefunded ? t('cannotModifyRefundedTooltip', 'Cannot modify refunded payment') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
                               >
                                 <Pencil 
                                   className="h-3.5 w-3.5" 
-                                  style={{ color: isTxCancelled ? (isDayMode ? '#94a3b8' : '#64748b') : 'var(--color-primary, #E05638)' }} 
+                                  style={{ color: isTxRefunded ? (isDayMode ? '#94a3b8' : '#64748b') : 'var(--color-primary, #E05638)' }} 
                                 />
                               </button>
                               <button
                                 type="button"
-                                disabled={isTxCancelled}
+                                disabled={isTxCanceled || isTxRefunded}
                                 onClick={() => handleCancelPlan(tx)}
                                 className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxCancelled
+                                  isTxCanceled || isTxRefunded
                                     ? 'opacity-30 cursor-not-allowed text-slate-400'
                                     : 'text-amber-500 hover:text-amber-600 cursor-pointer'
                                 }`}
@@ -2279,7 +2288,7 @@ export default function AdminPaymentPage() {
                                   backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
                                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
                                 }}
-                                title={isTxCancelled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled or refunded') : t('cancelPlanTooltip', 'Cancel plan & reset user to Free')}
+                                title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan & turn recurring off')}
                               >
                                 <XCircle className="h-3.5 w-3.5" />
                               </button>
@@ -2426,7 +2435,7 @@ export default function AdminPaymentPage() {
                   onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
                 >
                   {SUPPORTED_CURRENCIES.map((curr) => (
-                    <option key={curr.code} value={curr.code}>
+                    <option key={curr.code} value={curr.code} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {curr.label}
                     </option>
                   ))}
@@ -2939,7 +2948,7 @@ export default function AdminPaymentPage() {
                     }}
                   >
                     {registeredUsers.map((user) => (
-                      <option key={user.id} value={user.id}>
+                      <option key={user.id} value={user.id} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                         {user.name} — {user.email} ({user.role}) [Active: {user.subscriptionPlan || 'taster'}]
                       </option>
                     ))}
@@ -2972,7 +2981,7 @@ export default function AdminPaymentPage() {
                   }}
                 >
                   {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug}>
+                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {plan.name} — {plan.priceFormatted}
                     </option>
                   ))}
@@ -3099,7 +3108,7 @@ export default function AdminPaymentPage() {
                     }}
                   >
                     {allowedGateways.map((g) => (
-                      <option key={g.id} value={g.id}>
+                      <option key={g.id} value={g.id} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                         {g.label}
                       </option>
                     ))}
@@ -3112,7 +3121,13 @@ export default function AdminPaymentPage() {
                   <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentStatusLabel', 'Status')}</label>
                   <select
                     value={paymentStatus}
-                    onChange={(e) => setPaymentStatus(e.target.value as any)}
+                    onChange={(e) => {
+                      const val = e.target.value as any;
+                      setPaymentStatus(val);
+                      if (val === 'canceled') {
+                        setIsPaymentRecurring(false);
+                      }
+                    }}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer transition"
                     style={{
                       backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
@@ -3121,6 +3136,7 @@ export default function AdminPaymentPage() {
                     }}
                   >
                     <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
+                    <option value="canceled">{t('statusCanceled', 'Cancelled')}</option>
                     <option value="failed">{t('statusFailed', 'Failed')}</option>
                     <option value="pending">{t('statusPending', 'Pending')}</option>
                     <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
@@ -3295,7 +3311,7 @@ export default function AdminPaymentPage() {
                 >
                   <option value="">Custom: {editPlanName}</option>
                   {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug}>
+                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
                       {plan.name} — {plan.priceFormatted}
                     </option>
                   ))}
@@ -3429,7 +3445,13 @@ export default function AdminPaymentPage() {
                   <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentStatusLabel', 'Status')}</label>
                   <select
                     value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value as any)}
+                    onChange={(e) => {
+                      const val = e.target.value as any;
+                      setEditStatus(val);
+                      if (val === 'canceled') {
+                        setEditIsRecurring(false);
+                      }
+                    }}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer transition"
                     style={{
                       backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
@@ -3438,8 +3460,8 @@ export default function AdminPaymentPage() {
                     }}
                   >
                     <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
+                    <option value="canceled">{t('statusCanceled', 'Cancelled')}</option>
                     <option value="failed">{t('statusFailed', 'Failed')}</option>
-                    <option value="canceled">{t('statusCanceled', 'Canceled')}</option>
                     <option value="pending">{t('statusPending', 'Pending')}</option>
                     <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
                   </select>
