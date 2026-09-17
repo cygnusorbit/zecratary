@@ -1,5 +1,22 @@
 [
   {
+    "id": "tx_mu5nbk6xs66",
+    "customerName": "Yaayaa Papaya",
+    "customerEmail": "yaayaapapayaa@gmail.com",
+    "planName": "Nutrition Pro (Monthly)",
+    "planSlug": "nutrition-pro-monthly",
+    "amount": 8.99,
+    "currency": "USD",
+    "gateway": "stripe",
+    "status": "succeeded",
+    "testMode": true,
+    "createdAt": "2026-09-17T12:00:00.000Z",
+    "expiryDate": "2026-10-17T23:59:59.000Z",
+    "isRecurring": false,
+    "recurringInterval": "MONTH",
+    "autoRenew": false
+  },
+  {
     "id": "tx_mu5lw9ftq89",
     "customerName": "System Administrator",
     "customerEmail": "admin@zecratary.com",
@@ -11,7 +28,10 @@
     "status": "succeeded",
     "testMode": true,
     "createdAt": "2026-09-17T14:09:48.233Z",
-    "expiryDate": "2026-10-17T14:09:48.185Z"
+    "expiryDate": "2026-10-17T14:09:48.185Z",
+    "isRecurring": false,
+    "recurringInterval": "MONTH",
+    "autoRenew": false
   },
   {
     "id": "tx_mu5lmxtifmo",
