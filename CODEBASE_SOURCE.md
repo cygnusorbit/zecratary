@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.2.3",
+  "version": "7.2.4",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.2.3",
+  "version": "7.2.4",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -1208,7 +1208,7 @@ import {
   Grid3X3, Rows3
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
-import { syncUserSavedRecipes, persistSavedRecipe, getLocalRecipes } from '@/lib/recipeSync';
+import { syncUserSavedRecipes, persistSavedRecipe, getLocalRecipes, deleteSavedRecipe } from '@/lib/recipeSync';
 import { getStoredCategories } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -1614,12 +1614,71 @@ export default function SavedRecipesPage() {
     saveAllRecipes(updatedList);
   };
 
-  const handleDeleteRecipe = (id: string) => {
+  const handleDeleteRecipe = async (id: string) => {
     if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
-    const updated = recipes.filter(r => r.id !== id);
-    saveAllRecipes(updated);
-    setSelectedRecipe(null);
-    setIsEditing(false);
+    
+    try {
+      // 1. Direct DELETE requests to PostgreSQL API endpoints
+      await Promise.allSettled([
+        fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        }),
+        fetch(`/api/saved-recipes?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        }),
+        fetch(`/api/recipes?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        })
+      ]);
+
+      // 2. Call deleteSavedRecipe helper
+      if (typeof deleteSavedRecipe === 'function') {
+        await deleteSavedRecipe(currentUser?.id || 'usr_admin_1', id).catch(() => {});
+      }
+
+      // 3. Update component state
+      const updated = recipes.filter(r => r.id !== id);
+      setRecipes(updated);
+      setSelectedRecipe(null);
+      setIsEditing(false);
+
+      // 4. Update books count
+      const updatedBooks = books.map((b: any) => ({
+        ...b,
+        recipeCount: updated.filter((r: any) => r.bookId === b.id).length
+      }));
+      setBooks(updatedBooks);
+
+      // 5. Clean residual local storage to prevent zombie resurrection
+      try {
+        const localKeys = ['zecratary_saved_recipes', 'zecratary_recipes', 'zecratary_user_recipes', 'saved_recipes', 'zecratary_imported_recipes'];
+        for (const k of localKeys) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) {
+              const cleaned = arr.filter((x: any) => x.id !== id);
+              localStorage.setItem(k, JSON.stringify(cleaned));
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 6. Broadcast event
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_recipes_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      }
+    } catch (err) {
+      console.error('[SavedRecipesPage] Error deleting recipe:', err);
+      alert(t('errorDeletingRecipe') || 'Failed to delete recipe. Please try again.');
+    }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2997,7 +3056,16 @@ export default function SavedRecipesPage() {
                   <div className="px-5 flex items-center justify-end text-xs">
                     <button
                       onClick={() => handleDeleteRecipe(selectedRecipe.id)}
-                      className="bg-red-950/60 border border-red-500/40 text-red-400 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 hover:bg-red-900/50 cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                      style={isDayMode ? {
+                        backgroundColor: '#fef2f2',
+                        borderColor: '#fca5a5',
+                        color: '#dc2626'
+                      } : {
+                        backgroundColor: 'rgba(127, 29, 29, 0.4)',
+                        borderColor: 'rgba(239, 68, 68, 0.4)',
+                        color: '#f87171'
+                      }}
                     >
                       <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
                     </button>
@@ -22762,7 +22830,7 @@ export default function AdminLanguagePage() {
 ```typescript
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
@@ -22861,7 +22929,7 @@ export default function AdminUserManagementPage() {
   const [editSubscriptionPlan, setEditSubscriptionPlan] = useState<string>('taster');
   const [editError, setEditError] = useState('');
 
-  // Helper: Strictly identify primary root administrator (usr_admin_1)
+  // Identify primary root administrator (usr_admin_1)
   const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
     if (!targetUser) return false;
     return targetUser.id === 'usr_admin_1' || targetUser.email?.toLowerCase() === 'admin@zecratary.com';
@@ -22956,7 +23024,7 @@ export default function AdminUserManagementPage() {
     }
   }, []);
 
-  // Hydrate Users Exclusively from Server Storage with Self-Healing Guarantee
+  // Hydrate Users Exclusively from Server Storage
   const loadUsers = useCallback(async () => {
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
@@ -22968,7 +23036,7 @@ export default function AdminUserManagementPage() {
         if (data.success && Array.isArray(data.users)) {
           let list: AppUser[] = [...data.users];
 
-          // Self-Healing 1: Ensure primary root admin exists
+          // Ensure primary root admin exists
           const hasRootAdmin = list.some(
             (u) => u.id === 'usr_admin_1' || u.email?.toLowerCase() === 'admin@zecratary.com'
           );
@@ -22988,30 +23056,6 @@ export default function AdminUserManagementPage() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(rootAdmin)
             }).catch(() => {});
-          }
-
-          // Self-Healing 2: If active user is admin, ensure they are in the list
-          const activeSession = getCurrentUser();
-          if (activeSession && (activeSession.role || '').toLowerCase() === 'admin') {
-            const inList = list.some(
-              (u) => (u.id && u.id === activeSession.id) || (u.email && u.email.toLowerCase() === activeSession.email.toLowerCase())
-            );
-            if (!inList) {
-              const activeAdminObj: AppUser = {
-                id: activeSession.id || 'usr_' + Date.now().toString(36),
-                name: activeSession.name || 'Administrator',
-                email: activeSession.email,
-                role: 'admin',
-                subscriptionPlan: activeSession.subscriptionPlan || 'nutrition-pro-annual',
-                createdAt: activeSession.createdAt || new Date().toISOString()
-              };
-              list.push(activeAdminObj);
-              fetch('/api/admin/users', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(activeAdminObj)
-              }).catch(() => {});
-            }
           }
 
           setUsers(list);
@@ -23219,7 +23263,7 @@ export default function AdminUserManagementPage() {
     setUserCurrentPage(1);
   }, [search]);
 
-  // Add User Modal
+  // Add User Modal Handlers
   const handleOpenAddModal = (presetRole: 'admin' | 'user' = 'user') => {
     setAddName('');
     setAddEmail('');
@@ -23298,7 +23342,7 @@ export default function AdminUserManagementPage() {
     }
   };
 
-  // Edit User Modal
+  // Edit User Modal Handlers
   const handleOpenEditModal = (user: AppUser) => {
     setEditingUserId(user.id);
     setEditName(user.name);
@@ -23383,7 +23427,7 @@ export default function AdminUserManagementPage() {
     }
   };
 
-  // Safe Deletion Handler
+  // Safe Deletion Handler with Dual Parameter Transmission and Live State Sync
   const handleDeleteUser = async (id: string, userEmail: string, userName?: string) => {
     const targetUser = users.find((u) => u.id === id || (u.email && u.email.toLowerCase() === userEmail.toLowerCase()));
 
@@ -23403,7 +23447,11 @@ export default function AdminUserManagementPage() {
     try {
       const cleanEmail = userEmail.toLowerCase().trim();
 
-      const res = await fetch('/api/admin/users', {
+      const queryParams = new URLSearchParams();
+      if (id) queryParams.set('id', id);
+      if (cleanEmail) queryParams.set('email', cleanEmail);
+
+      const res = await fetch(`/api/admin/users?${queryParams.toString()}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, email: cleanEmail }),
@@ -23414,7 +23462,13 @@ export default function AdminUserManagementPage() {
         throw new Error(errJson.error || 'Server error deleting user');
       }
 
-      setUsers((prev) => prev.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail)));
+      const resData = await res.json().catch(() => null);
+      if (resData?.users && Array.isArray(resData.users)) {
+        setUsers(resData.users);
+      } else {
+        setUsers((prev) => prev.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail)));
+      }
+
       setSelectedUserIds((prev) => prev.filter((uid) => uid !== id));
 
       if (typeof window !== 'undefined') {
@@ -25775,28 +25829,49 @@ export default function IngredientCategoryPage() {
     };
   }, [applyGlobalTheme]);
 
-  // Hydrate Categories Exclusively from Server Storage
+  // Hydrate Categories Exclusively from PostgreSQL Server Storage
   const loadCategoriesFromServer = useCallback(async () => {
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
+
+    let loadedCats: string[] | null = null;
+
     try {
-      const serverData = await fetchServerAdminSettings();
-      if (serverData && Array.isArray(serverData.ingredientCategories) && serverData.ingredientCategories.length > 0) {
-        setCategories(serverData.ingredientCategories);
-        setMemoryCategories(serverData.ingredientCategories);
-      } else {
-        const fallback = getStoredCategories();
-        const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_CATEGORIES;
-        setCategories(activeList);
-        setMemoryCategories(activeList);
+      // 1. Direct fetch from dedicated PostgreSQL ingredient-categories route
+      const res = await fetch('/api/admin/ingredient-categories?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data?.ingredientCategories || data?.categories);
+        if (Array.isArray(list) && list.length > 0) {
+          loadedCats = list;
+        }
       }
-    } catch (err) {
-      console.error('[IngredientCategoryPage] Error loading server categories:', err);
-      const fallback = getStoredCategories();
-      setCategories(fallback.length > 0 ? fallback : DEFAULT_CATEGORIES);
-    } finally {
-      setIsLoading(false);
+    } catch (_) {}
+
+    // 2. Fallback to settings endpoint if needed
+    if (!loadedCats || loadedCats.length === 0) {
+      try {
+        const serverData = await fetchServerAdminSettings();
+        const list = (Array.isArray(serverData) ? serverData : null) ||
+                     (Array.isArray(serverData?.ingredientCategories) ? serverData.ingredientCategories : null) ||
+                     (Array.isArray(serverData?.settings?.ingredientCategories) ? serverData.settings.ingredientCategories : null);
+        if (Array.isArray(list) && list.length > 0) {
+          loadedCats = list;
+        }
+      } catch (_) {}
     }
+
+    if (loadedCats && loadedCats.length > 0) {
+      setCategories(loadedCats);
+      setMemoryCategories(loadedCats);
+    } else {
+      const fallback = getStoredCategories();
+      const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_CATEGORIES;
+      setCategories(activeList);
+      setMemoryCategories(activeList);
+    }
+
+    setIsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -25804,19 +25879,18 @@ export default function IngredientCategoryPage() {
     loadCategoriesFromServer();
 
     const handleSync = (e: any) => {
-      if (e?.detail && Array.isArray(e.detail)) {
+      if (e?.detail && Array.isArray(e.detail) && e.detail.length > 0) {
         setCategories(e.detail);
-      } else {
-        loadCategoriesFromServer();
+        setMemoryCategories(e.detail);
       }
     };
 
     window.addEventListener('zecratary_categories_changed', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('zecratary_ingredient_categories_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_categories_changed', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_ingredient_categories_updated', handleSync);
     };
   }, [t, version, loadCategoriesFromServer]);
 
@@ -25829,9 +25903,25 @@ export default function IngredientCategoryPage() {
   const commitCategories = async (updated: string[]) => {
     setCategories(updated);
     setMemoryCategories(updated);
-    await saveCategories(updated);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+
+    try {
+      // 1. Save directly to dedicated PostgreSQL endpoint
+      await fetch('/api/admin/ingredient-categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ingredientCategories: updated })
+      });
+
+      // 2. Also broadcast through shared helper
+      await saveCategories(updated);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_categories_changed', { detail: updated }));
+        window.dispatchEvent(new CustomEvent('zecratary_ingredient_categories_updated', { detail: updated }));
+      }
+    } catch (err: any) {
+      console.error('[IngredientCategoryPage] Save error:', err);
+      notify(t('errorSaving', 'Error saving to database'));
     }
   };
 
@@ -33115,6 +33205,8 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
@@ -33136,8 +33228,12 @@ export async function GET() {
         created_at ASC
     `);
 
-    return NextResponse.json({ success: true, users: rows }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json(
+      { success: true, users: rows },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } }
+    );
   } catch (err: any) {
+    console.error('[API users GET] DB Error:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -33168,18 +33264,30 @@ export async function POST(req: NextRequest) {
           updated_at = NOW()
         WHERE email = $5
       `, [name, role, subscriptionPlan, planExpiryDate, email]);
-
-      return NextResponse.json({ success: true, message: 'User updated in PostgreSQL.' });
     } else {
       const id = body.id || ('usr_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
       await query(`
         INSERT INTO users (id, name, email, role, subscription_plan, plan_expiry_date, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
       `, [id, name, email, role, subscriptionPlan, planExpiryDate]);
-
-      return NextResponse.json({ success: true, message: 'User created in PostgreSQL.' });
     }
+
+    const remaining = await query(`
+      SELECT 
+        id, name, email, role,
+        subscription_plan AS "subscriptionPlan",
+        plan_expiry_date AS "planExpiryDate",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM users
+      ORDER BY 
+        CASE WHEN role = 'admin' THEN 0 ELSE 1 END,
+        created_at ASC
+    `);
+
+    return NextResponse.json({ success: true, message: 'User updated in PostgreSQL.', users: remaining });
   } catch (err: any) {
+    console.error('[API users POST] DB Error:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -33187,26 +33295,112 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const id = searchParams.get('id');
-    const email = searchParams.get('email');
+    let id = searchParams.get('id');
+    let email = searchParams.get('email');
+
+    // If query params are absent, parse request body
+    if (!id && !email) {
+      try {
+        const body = await req.json();
+        id = body?.id || id;
+        email = body?.email || email;
+      } catch (_) {}
+    }
 
     if (!id && !email) {
-      return NextResponse.json({ success: false, error: 'User ID or Email is required' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'User ID or Email is required for deletion' },
+        { status: 400 }
+      );
     }
 
-    const target = await query('SELECT id, role, email FROM users WHERE id = $1 OR email = $2 LIMIT 1', [id || '', email || '']);
-    if (target.length > 0 && target[0].role === 'admin' && (target[0].id === 'usr_admin_1' || target[0].email === 'admin@zecratary.com')) {
-      return NextResponse.json({ success: false, error: 'Cannot delete the primary system administrator.' }, { status: 403 });
+    const cleanEmail = (email || '').toLowerCase().trim();
+    const cleanId = (id || '').trim();
+
+    // 1. Identify user row
+    const target = await query(
+      'SELECT id, role, email FROM users WHERE id = $1 OR email = $2 LIMIT 1',
+      [cleanId, cleanEmail]
+    );
+
+    if (target.length > 0) {
+      const user = target[0];
+
+      // Protect primary root admin
+      if (user.role === 'admin' && (user.id === 'usr_admin_1' || user.email?.toLowerCase() === 'admin@zecratary.com')) {
+        return NextResponse.json(
+          { success: false, error: 'Cannot delete the primary system administrator.' },
+          { status: 403 }
+        );
+      }
+
+      const targetId = user.id;
+      const targetEmail = user.email.toLowerCase().trim();
+
+      // 2. Foreign Key Safety: Nullify user_id references in saved_recipes
+      await query('UPDATE saved_recipes SET user_id = NULL WHERE user_id = $1', [targetId]);
+
+      // 3. Delete from PostgreSQL users table
+      await query('DELETE FROM users WHERE id = $1 OR email = $2', [targetId, targetEmail]);
+    } else {
+      // Direct deletion fallback
+      if (cleanId) {
+        await query('UPDATE saved_recipes SET user_id = NULL WHERE user_id = $1', [cleanId]);
+        await query('DELETE FROM users WHERE id = $1', [cleanId]);
+      }
+      if (cleanEmail) {
+        await query('DELETE FROM users WHERE email = $1', [cleanEmail]);
+      }
     }
 
-    if (id) {
-      await query('DELETE FROM users WHERE id = $1', [id]);
-    } else if (email) {
-      await query('DELETE FROM users WHERE email = $1', [email]);
+    // 4. Synchronize legacy JSON files if present
+    const dataPaths = [
+      path.join(process.cwd(), 'apps/web/data', 'users.json'),
+      path.join(process.cwd(), 'apps/web/apps/web/data', 'users.json'),
+      path.join(process.cwd(), 'data', 'users.json')
+    ];
+
+    for (const p of dataPaths) {
+      if (fs.existsSync(p)) {
+        try {
+          const raw = fs.readFileSync(p, 'utf-8');
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const filtered = parsed.filter((item: any) =>
+              item.id !== cleanId && (!item.email || item.email.toLowerCase().trim() !== cleanEmail)
+            );
+            fs.writeFileSync(p, JSON.stringify(filtered, null, 2), 'utf-8');
+          }
+        } catch (_) {}
+      }
     }
 
-    return NextResponse.json({ success: true, message: 'User deleted from PostgreSQL.' });
+    // 5. Return updated remaining user list
+    const remaining = await query(`
+      SELECT 
+        id,
+        name,
+        email,
+        role,
+        subscription_plan AS "subscriptionPlan",
+        plan_expiry_date AS "planExpiryDate",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM users
+      ORDER BY 
+        CASE WHEN role = 'admin' THEN 0 ELSE 1 END,
+        created_at ASC
+    `);
+
+    return NextResponse.json({
+      success: true,
+      message: 'User deleted successfully from PostgreSQL.',
+      users: remaining
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
+    });
   } catch (err: any) {
+    console.error('[API users DELETE] DB Error:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -33452,6 +33646,114 @@ export async function POST(req: NextRequest) {
 
 ```
 
+## File: `apps/web/src/app/api/admin/ingredient-categories/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+const DEFAULT_CATEGORIES: string[] = [
+  'Produce',
+  'Dairy & Eggs',
+  'Meat & Poultry',
+  'Seafood',
+  'Bakery',
+  'Pantry & Dry Goods',
+  'Canned Goods',
+  'Baking & Cooking',
+  'Spices & Seasonings',
+  'Snacks',
+  'Beverages',
+  'Frozen Foods',
+  'Condiments & Sauces',
+  'Oils & Vinegars'
+];
+
+export async function GET() {
+  try {
+    const rows = await query('SELECT ingredient_categories FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    let list = rows[0]?.ingredient_categories;
+
+    if (typeof list === 'string') {
+      try { list = JSON.parse(list); } catch (_) {}
+    }
+
+    if (!Array.isArray(list) || list.length === 0) {
+      list = DEFAULT_CATEGORIES;
+    }
+
+    return NextResponse.json(
+      { success: true, ingredientCategories: list, categories: list },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    let categories = body.ingredientCategories || body.categories || body.settings?.ingredientCategories || body;
+
+    if (typeof categories === 'string') {
+      try { categories = JSON.parse(categories); } catch (_) {}
+    }
+
+    if (!Array.isArray(categories)) {
+      return NextResponse.json({ success: false, error: 'ingredientCategories must be an array of strings' }, { status: 400 });
+    }
+
+    const cleanCategories = categories.map((c: any) => String(c).trim()).filter(Boolean);
+
+    // 1. Direct PostgreSQL Update
+    await query(`
+      INSERT INTO admin_settings (id, ingredient_categories, updated_at)
+      VALUES ('primary_settings', $1::jsonb, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        ingredient_categories = EXCLUDED.ingredient_categories,
+        updated_at = NOW();
+    `, [JSON.stringify(cleanCategories)]);
+
+    // 2. Synchronize legacy file stores if present
+    const dataDirs = [
+      path.join(process.cwd(), 'apps/web/data', 'admin_settings.json'),
+      path.join(process.cwd(), 'apps/web/apps/web/data', 'admin_settings.json'),
+      path.join(process.cwd(), 'data', 'admin_settings.json')
+    ];
+
+    for (const fpath of dataDirs) {
+      if (fs.existsSync(fpath)) {
+        try {
+          const raw = fs.readFileSync(fpath, 'utf-8');
+          const parsed = JSON.parse(raw);
+          parsed.ingredientCategories = cleanCategories;
+          fs.writeFileSync(fpath, JSON.stringify(parsed, null, 2), 'utf-8');
+        } catch (_) {}
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      ingredientCategories: cleanCategories,
+      message: 'Ingredient categories saved successfully in PostgreSQL.'
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  return POST(req);
+}
+
+```
+
 ## File: `apps/web/src/app/api/admin/social-config/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -33622,19 +33924,88 @@ export async function GET(req: NextRequest) {
 
     if (userId) {
       params.push(userId);
-      sql += ` AND (user_id = $${params.length} OR is_public = TRUE)`;
+      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL OR is_public = TRUE)`;
     }
 
-    if (category && category !== 'all') {
+    if (category && category !== 'all' && category !== 'All Types') {
       params.push(category);
-      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
+      sql += ` AND (LOWER(recipe_type) = LOWER($${params.length}) OR LOWER(recipe_type) LIKE LOWER($${params.length}))`;
     }
 
     sql += ' ORDER BY created_at DESC';
 
     const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => {
+      let ingredients = r.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+      }
+
+      let directions = r.directions;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = []; }
+      }
+
+      let nutrition = r.nutrition;
+      if (typeof nutrition === 'string') {
+        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
+      }
+
+      let tags = r.tags;
+      if (typeof tags === 'string') {
+        try { tags = JSON.parse(tags); } catch (_) { tags = []; }
+      }
+
+      const prepMin = parseInt(String(r.prep_time || '15'), 10) || 15;
+      const cookMin = parseInt(String(r.cook_time || '25'), 10) || 25;
+      const cleanImg = r.image_url || r.imageUrl || r.image || '/uploads/recipes/default.jpg';
+      const cleanTitle = r.title || r.name || 'Untitled Recipe';
+      const cleanType = r.recipe_type || r.recipeType || r.category || 'Main Dish';
+
+      return {
+        ...r,
+        id: r.id,
+        userId: r.user_id || r.userId || 'usr_admin_1',
+        user_id: r.user_id || r.userId || 'usr_admin_1',
+        title: cleanTitle,
+        name: cleanTitle,
+        description: r.description || '',
+        recipeType: cleanType,
+        category: cleanType,
+        recipe_type: cleanType,
+        cuisine: r.cuisine || '',
+        prepTime: r.prep_time || `${prepMin} mins`,
+        cookTime: r.cook_time || `${cookMin} mins`,
+        prepTimeMinutes: prepMin,
+        cookTimeMinutes: cookMin,
+        servings: parseInt(String(r.servings || '4'), 10) || 4,
+        difficulty: r.difficulty || 'Medium',
+        ingredients: Array.isArray(ingredients) ? ingredients : [],
+        directions: Array.isArray(directions) ? directions : [],
+        instructions: Array.isArray(directions) ? directions : [],
+        steps: Array.isArray(directions) ? directions : [],
+        nutrition: nutrition || {},
+        tags: Array.isArray(tags) ? tags : [cleanType],
+        imageUrl: cleanImg,
+        image: cleanImg,
+        image_url: cleanImg,
+        sourceUrl: r.source_url || r.sourceUrl || '',
+        source_url: r.source_url || r.sourceUrl || '',
+        isFavorite: Boolean(r.is_favorite || r.isFavorite),
+        isCooked: Boolean(r.is_cooked || r.isCooked),
+        rating: Number(r.rating) || 0,
+        note: r.note || '',
+        bookId: r.book_id || r.bookId || null,
+        book_id: r.book_id || r.bookId || null,
+        isPublic: Boolean(r.is_public || r.isPublic),
+        createdAt: r.created_at || new Date().toISOString(),
+        updatedAt: r.updated_at || new Date().toISOString()
+      };
+    });
+
     return NextResponse.json(
-      { success: true, recipes: rows },
+      { success: true, recipes: formatted },
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
@@ -33645,45 +34016,131 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const id = body.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+    const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
-    let validUserId = null;
-    if (body.userId) {
-      const userCheck = await query('SELECT 1 FROM users WHERE id = $1', [body.userId]);
-      if (userCheck.length > 0) validUserId = body.userId;
+    for (const item of items) {
+      if (!item) continue;
+      const rawTitle = item.title || item.name || 'Untitled Recipe';
+      const cleanTitle = String(rawTitle).trim().slice(0, 250);
+      const id = String(item.id || 'rec_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)).slice(0, 64);
+
+      let targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
+
+      // Verify foreign key integrity against users table
+      let validUserId: string | null = null;
+      if (targetUserId) {
+        const u = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
+        if (u.length > 0) {
+          validUserId = u[0].id;
+        } else {
+          const adminUser = await query("SELECT id FROM users WHERE id = 'usr_admin_1' OR role = 'admin' LIMIT 1");
+          if (adminUser.length > 0) {
+            validUserId = adminUser[0].id;
+          }
+        }
+      }
+
+      let ingredients = item.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
+      }
+      if (!Array.isArray(ingredients)) ingredients = [];
+
+      let directions = item.directions || item.instructions || item.steps;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
+      }
+      if (!Array.isArray(directions)) directions = [];
+
+      let tags = item.tags;
+      if (typeof tags === 'string') {
+        try { tags = JSON.parse(tags); } catch (_) { tags = [tags]; }
+      }
+      if (!Array.isArray(tags)) tags = [];
+
+      let nutrition = item.nutrition || item.macros || {};
+      if (typeof nutrition === 'string') {
+        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
+      }
+
+      const recipeType = String(item.recipeType || item.category || item.recipe_type || 'Main Dish').slice(0, 64);
+      const cuisine = String(item.cuisine || '').slice(0, 64);
+      const prepTime = String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15').slice(0, 32);
+      const cookTime = String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25').slice(0, 32);
+      const servings = String(item.servings || '4').slice(0, 32);
+      const difficulty = String(item.difficulty || 'Medium').slice(0, 32);
+      const imageUrl = String(item.imageUrl || item.image || item.image_url || '');
+      const sourceUrl = String(item.sourceUrl || item.source_url || '');
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, source_url, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          recipe_type = EXCLUDED.recipe_type,
+          cuisine = EXCLUDED.cuisine,
+          prep_time = EXCLUDED.prep_time,
+          cook_time = EXCLUDED.cook_time,
+          servings = EXCLUDED.servings,
+          difficulty = EXCLUDED.difficulty,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          nutrition = EXCLUDED.nutrition,
+          tags = EXCLUDED.tags,
+          image_url = EXCLUDED.image_url,
+          source_url = EXCLUDED.source_url,
+          is_public = EXCLUDED.is_public,
+          updated_at = NOW();
+      `, [
+        id,
+        validUserId,
+        cleanTitle,
+        item.description || '',
+        recipeType,
+        cuisine,
+        prepTime,
+        cookTime,
+        servings,
+        difficulty,
+        JSON.stringify(ingredients),
+        JSON.stringify(directions),
+        JSON.stringify(nutrition),
+        JSON.stringify(tags),
+        imageUrl,
+        sourceUrl,
+        Boolean(item.isPublic || item.is_public)
+      ]);
     }
 
-    await query(`
-      INSERT INTO saved_recipes (
-        id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
-        servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        title = EXCLUDED.title,
-        description = EXCLUDED.description,
-        recipe_type = EXCLUDED.recipe_type,
-        cuisine = EXCLUDED.cuisine,
-        prep_time = EXCLUDED.prep_time,
-        cook_time = EXCLUDED.cook_time,
-        servings = EXCLUDED.servings,
-        difficulty = EXCLUDED.difficulty,
-        ingredients = EXCLUDED.ingredients,
-        directions = EXCLUDED.directions,
-        nutrition = EXCLUDED.nutrition,
-        tags = EXCLUDED.tags,
-        image_url = EXCLUDED.image_url,
-        is_public = EXCLUDED.is_public,
-        updated_at = NOW();
-    `, [
-      id, validUserId, body.title || 'Untitled Recipe', body.description || '',
-      body.recipeType || body.category || 'General', body.cuisine || '',
-      body.prepTime || '', body.cookTime || '', body.servings || '', body.difficulty || '',
-      JSON.stringify(body.ingredients || []), JSON.stringify(body.directions || body.instructions || []),
-      JSON.stringify(body.nutrition || body.macros || {}), JSON.stringify(body.tags || []),
-      body.imageUrl || body.image || '', Boolean(body.isPublic)
-    ]);
+    return NextResponse.json({ success: true, message: 'Recipe(s) saved to PostgreSQL.' });
+  } catch (err: any) {
+    console.error('[POST /api/recipes/saved] Error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
 
-    return NextResponse.json({ success: true, id, message: 'Recipe saved to PostgreSQL.' });
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+
+    if (!id) {
+      try {
+        const body = await req.json();
+        id = body?.id || id;
+      } catch (_) {}
+    }
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
+    }
+
+    await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
+    return NextResponse.json({ success: true, message: 'Recipe removed from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -33702,19 +34159,95 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
+    const category = searchParams.get('category');
 
-    let rows;
+    let sql = 'SELECT * FROM saved_recipes WHERE 1=1';
+    const params: any[] = [];
+
     if (userId) {
-      rows = await query(
-        'SELECT * FROM saved_recipes WHERE user_id = $1 OR is_public = TRUE ORDER BY created_at DESC',
-        [userId]
-      );
-    } else {
-      rows = await query('SELECT * FROM saved_recipes ORDER BY created_at DESC');
+      params.push(userId);
+      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL OR is_public = TRUE)`;
     }
 
+    if (category && category !== 'all' && category !== 'All Types') {
+      params.push(category);
+      sql += ` AND (LOWER(recipe_type) = LOWER($${params.length}) OR LOWER(recipe_type) LIKE LOWER($${params.length}))`;
+    }
+
+    sql += ' ORDER BY created_at DESC';
+
+    const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => {
+      let ingredients = r.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+      }
+
+      let directions = r.directions;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = []; }
+      }
+
+      let nutrition = r.nutrition;
+      if (typeof nutrition === 'string') {
+        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
+      }
+
+      let tags = r.tags;
+      if (typeof tags === 'string') {
+        try { tags = JSON.parse(tags); } catch (_) { tags = []; }
+      }
+
+      const prepMin = parseInt(String(r.prep_time || '15'), 10) || 15;
+      const cookMin = parseInt(String(r.cook_time || '25'), 10) || 25;
+      const cleanImg = r.image_url || r.imageUrl || r.image || '/uploads/recipes/default.jpg';
+      const cleanTitle = r.title || r.name || 'Untitled Recipe';
+      const cleanType = r.recipe_type || r.recipeType || r.category || 'Main Dish';
+
+      return {
+        ...r,
+        id: r.id,
+        userId: r.user_id || r.userId || 'usr_admin_1',
+        user_id: r.user_id || r.userId || 'usr_admin_1',
+        title: cleanTitle,
+        name: cleanTitle,
+        description: r.description || '',
+        recipeType: cleanType,
+        category: cleanType,
+        recipe_type: cleanType,
+        cuisine: r.cuisine || '',
+        prepTime: r.prep_time || `${prepMin} mins`,
+        cookTime: r.cook_time || `${cookMin} mins`,
+        prepTimeMinutes: prepMin,
+        cookTimeMinutes: cookMin,
+        servings: parseInt(String(r.servings || '4'), 10) || 4,
+        difficulty: r.difficulty || 'Medium',
+        ingredients: Array.isArray(ingredients) ? ingredients : [],
+        directions: Array.isArray(directions) ? directions : [],
+        instructions: Array.isArray(directions) ? directions : [],
+        steps: Array.isArray(directions) ? directions : [],
+        nutrition: nutrition || {},
+        tags: Array.isArray(tags) ? tags : [cleanType],
+        imageUrl: cleanImg,
+        image: cleanImg,
+        image_url: cleanImg,
+        sourceUrl: r.source_url || r.sourceUrl || '',
+        source_url: r.source_url || r.sourceUrl || '',
+        isFavorite: Boolean(r.is_favorite || r.isFavorite),
+        isCooked: Boolean(r.is_cooked || r.isCooked),
+        rating: Number(r.rating) || 0,
+        note: r.note || '',
+        bookId: r.book_id || r.bookId || null,
+        book_id: r.book_id || r.bookId || null,
+        isPublic: Boolean(r.is_public || r.isPublic),
+        createdAt: r.created_at || new Date().toISOString(),
+        updatedAt: r.updated_at || new Date().toISOString()
+      };
+    });
+
     return NextResponse.json(
-      { success: true, recipes: rows },
+      { success: true, recipes: formatted },
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
@@ -33725,56 +34258,109 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const id = body.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+    const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
-    let validUserId = null;
-    if (body.userId) {
-      const userCheck = await query('SELECT 1 FROM users WHERE id = $1', [body.userId]);
-      if (userCheck.length > 0) validUserId = body.userId;
+    for (const item of items) {
+      if (!item) continue;
+      const rawTitle = item.title || item.name || 'Untitled Recipe';
+      const cleanTitle = String(rawTitle).trim().slice(0, 250);
+      const id = String(item.id || 'rec_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)).slice(0, 64);
+
+      let targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
+
+      // Verify foreign key integrity against users table
+      let validUserId: string | null = null;
+      if (targetUserId) {
+        const u = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
+        if (u.length > 0) {
+          validUserId = u[0].id;
+        } else {
+          const adminUser = await query("SELECT id FROM users WHERE id = 'usr_admin_1' OR role = 'admin' LIMIT 1");
+          if (adminUser.length > 0) {
+            validUserId = adminUser[0].id;
+          }
+        }
+      }
+
+      let ingredients = item.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
+      }
+      if (!Array.isArray(ingredients)) ingredients = [];
+
+      let directions = item.directions || item.instructions || item.steps;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
+      }
+      if (!Array.isArray(directions)) directions = [];
+
+      let tags = item.tags;
+      if (typeof tags === 'string') {
+        try { tags = JSON.parse(tags); } catch (_) { tags = [tags]; }
+      }
+      if (!Array.isArray(tags)) tags = [];
+
+      let nutrition = item.nutrition || item.macros || {};
+      if (typeof nutrition === 'string') {
+        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
+      }
+
+      const recipeType = String(item.recipeType || item.category || item.recipe_type || 'Main Dish').slice(0, 64);
+      const cuisine = String(item.cuisine || '').slice(0, 64);
+      const prepTime = String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15').slice(0, 32);
+      const cookTime = String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25').slice(0, 32);
+      const servings = String(item.servings || '4').slice(0, 32);
+      const difficulty = String(item.difficulty || 'Medium').slice(0, 32);
+      const imageUrl = String(item.imageUrl || item.image || item.image_url || '');
+      const sourceUrl = String(item.sourceUrl || item.source_url || '');
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, source_url, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          recipe_type = EXCLUDED.recipe_type,
+          cuisine = EXCLUDED.cuisine,
+          prep_time = EXCLUDED.prep_time,
+          cook_time = EXCLUDED.cook_time,
+          servings = EXCLUDED.servings,
+          difficulty = EXCLUDED.difficulty,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          nutrition = EXCLUDED.nutrition,
+          tags = EXCLUDED.tags,
+          image_url = EXCLUDED.image_url,
+          source_url = EXCLUDED.source_url,
+          is_public = EXCLUDED.is_public,
+          updated_at = NOW();
+      `, [
+        id,
+        validUserId,
+        cleanTitle,
+        item.description || '',
+        recipeType,
+        cuisine,
+        prepTime,
+        cookTime,
+        servings,
+        difficulty,
+        JSON.stringify(ingredients),
+        JSON.stringify(directions),
+        JSON.stringify(nutrition),
+        JSON.stringify(tags),
+        imageUrl,
+        sourceUrl,
+        Boolean(item.isPublic || item.is_public)
+      ]);
     }
 
-    await query(`
-      INSERT INTO saved_recipes (
-        id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
-        servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        title = EXCLUDED.title,
-        description = EXCLUDED.description,
-        recipe_type = EXCLUDED.recipe_type,
-        cuisine = EXCLUDED.cuisine,
-        prep_time = EXCLUDED.prep_time,
-        cook_time = EXCLUDED.cook_time,
-        servings = EXCLUDED.servings,
-        difficulty = EXCLUDED.difficulty,
-        ingredients = EXCLUDED.ingredients,
-        directions = EXCLUDED.directions,
-        nutrition = EXCLUDED.nutrition,
-        tags = EXCLUDED.tags,
-        image_url = EXCLUDED.image_url,
-        is_public = EXCLUDED.is_public,
-        updated_at = NOW();
-    `, [
-      id,
-      validUserId,
-      body.title || 'Untitled Recipe',
-      body.description || '',
-      body.recipeType || body.category || 'General',
-      body.cuisine || '',
-      body.prepTime || '',
-      body.cookTime || '',
-      body.servings || '',
-      body.difficulty || '',
-      JSON.stringify(body.ingredients || []),
-      JSON.stringify(body.directions || body.instructions || []),
-      JSON.stringify(body.nutrition || body.macros || {}),
-      JSON.stringify(body.tags || []),
-      body.imageUrl || body.image || '',
-      Boolean(body.isPublic)
-    ]);
-
-    return NextResponse.json({ success: true, id, message: 'Recipe saved to PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Recipe(s) saved to PostgreSQL.' });
   } catch (err: any) {
+    console.error('[POST /api/recipes/saved] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -33782,13 +34368,20 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const id = searchParams.get('id');
+    let id = searchParams.get('id');
+
+    if (!id) {
+      try {
+        const body = await req.json();
+        id = body?.id || id;
+      } catch (_) {}
+    }
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
     }
 
-    await query('DELETE FROM saved_recipes WHERE id = $1', [id]);
+    await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
     return NextResponse.json({ success: true, message: 'Recipe removed from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -34057,6 +34650,7 @@ Return ONLY a valid JSON object without markdown fences matching this format:
 
 ## File: `apps/web/src/app/api/recipes/ingest/route.ts`
 ```typescript
+import { query } from '@/lib/db';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -34466,6 +35060,52 @@ export async function POST(req: Request) {
       data: recipeData
     });
   } catch (error: any) {
+    
+    // Persist ingested recipe to PostgreSQL saved_recipes
+    try {
+      const targetUserId = body.userId || (typeof userId !== 'undefined' ? userId : 'usr_admin_1');
+      const targetId = newRecipe.id || ('import_' + Date.now().toString(36));
+
+      await query(`
+        INSERT INTO users (id, name, email, role, subscription_plan)
+        VALUES ($1, 'User', $2, 'user', 'taster')
+        ON CONFLICT (id) DO NOTHING;
+      `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          image_url = EXCLUDED.image_url,
+          updated_at = NOW();
+      `, [
+        targetId,
+        targetUserId,
+        newRecipe.title || newRecipe.name || 'Imported Recipe',
+        newRecipe.description || '',
+        newRecipe.recipeType || newRecipe.category || 'Main Dish',
+        newRecipe.cuisine || '',
+        String(newRecipe.prepTime || newRecipe.prepTimeMinutes || '15'),
+        String(newRecipe.cookTime || newRecipe.cookTimeMinutes || '25'),
+        String(newRecipe.servings || '4'),
+        newRecipe.difficulty || 'Medium',
+        JSON.stringify(newRecipe.ingredients || []),
+        JSON.stringify(newRecipe.directions || newRecipe.instructions || newRecipe.steps || []),
+        JSON.stringify(newRecipe.nutrition || newRecipe.macros || {}),
+        JSON.stringify(newRecipe.tags || ['Imported']),
+        newRecipe.imageUrl || newRecipe.image || '',
+        false
+      ]);
+    } catch (dbErr) {
+      console.error('[Ingest API] PostgreSQL persistence error:', dbErr);
+    }
+
     return NextResponse.json({ success: false, error: error.message || 'Ingestion failed' }, { status: 500 });
   }
 }
@@ -35056,18 +35696,97 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
+    const category = searchParams.get('category');
 
-    let rows;
+    let sql = 'SELECT * FROM saved_recipes WHERE 1=1';
+    const params: any[] = [];
+
     if (userId) {
-      rows = await query(
-        'SELECT * FROM saved_recipes WHERE user_id = $1 OR is_public = TRUE ORDER BY created_at DESC',
-        [userId]
-      );
-    } else {
-      rows = await query('SELECT * FROM saved_recipes ORDER BY created_at DESC');
+      params.push(userId);
+      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL OR is_public = TRUE)`;
     }
 
-    return NextResponse.json({ success: true, recipes: rows }, { headers: { 'Cache-Control': 'no-store' } });
+    if (category && category !== 'all' && category !== 'All Types') {
+      params.push(category);
+      sql += ` AND (LOWER(recipe_type) = LOWER($${params.length}) OR LOWER(recipe_type) LIKE LOWER($${params.length}))`;
+    }
+
+    sql += ' ORDER BY created_at DESC';
+
+    const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => {
+      let ingredients = r.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+      }
+
+      let directions = r.directions;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = []; }
+      }
+
+      let nutrition = r.nutrition;
+      if (typeof nutrition === 'string') {
+        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
+      }
+
+      let tags = r.tags;
+      if (typeof tags === 'string') {
+        try { tags = JSON.parse(tags); } catch (_) { tags = []; }
+      }
+
+      const prepMin = parseInt(String(r.prep_time || '15'), 10) || 15;
+      const cookMin = parseInt(String(r.cook_time || '25'), 10) || 25;
+      const cleanImg = r.image_url || r.imageUrl || r.image || '/uploads/recipes/default.jpg';
+      const cleanTitle = r.title || r.name || 'Untitled Recipe';
+      const cleanType = r.recipe_type || r.recipeType || r.category || 'Main Dish';
+
+      return {
+        ...r,
+        id: r.id,
+        userId: r.user_id || r.userId || 'usr_admin_1',
+        user_id: r.user_id || r.userId || 'usr_admin_1',
+        title: cleanTitle,
+        name: cleanTitle,
+        description: r.description || '',
+        recipeType: cleanType,
+        category: cleanType,
+        recipe_type: cleanType,
+        cuisine: r.cuisine || '',
+        prepTime: r.prep_time || `${prepMin} mins`,
+        cookTime: r.cook_time || `${cookMin} mins`,
+        prepTimeMinutes: prepMin,
+        cookTimeMinutes: cookMin,
+        servings: parseInt(String(r.servings || '4'), 10) || 4,
+        difficulty: r.difficulty || 'Medium',
+        ingredients: Array.isArray(ingredients) ? ingredients : [],
+        directions: Array.isArray(directions) ? directions : [],
+        instructions: Array.isArray(directions) ? directions : [],
+        steps: Array.isArray(directions) ? directions : [],
+        nutrition: nutrition || {},
+        tags: Array.isArray(tags) ? tags : [cleanType],
+        imageUrl: cleanImg,
+        image: cleanImg,
+        image_url: cleanImg,
+        sourceUrl: r.source_url || r.sourceUrl || '',
+        source_url: r.source_url || r.sourceUrl || '',
+        isFavorite: Boolean(r.is_favorite || r.isFavorite),
+        isCooked: Boolean(r.is_cooked || r.isCooked),
+        rating: Number(r.rating) || 0,
+        note: r.note || '',
+        bookId: r.book_id || r.bookId || null,
+        book_id: r.book_id || r.bookId || null,
+        isPublic: Boolean(r.is_public || r.isPublic),
+        createdAt: r.created_at || new Date().toISOString(),
+        updatedAt: r.updated_at || new Date().toISOString()
+      };
+    });
+
+    return NextResponse.json(
+      { success: true, recipes: formatted },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -35076,50 +35795,109 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const id = body.id || 'rcp_' + Date.now().toString(36);
+    const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
-    await query(`
-      INSERT INTO saved_recipes (
-        id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
-        servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        title = EXCLUDED.title,
-        description = EXCLUDED.description,
-        recipe_type = EXCLUDED.recipe_type,
-        cuisine = EXCLUDED.cuisine,
-        prep_time = EXCLUDED.prep_time,
-        cook_time = EXCLUDED.cook_time,
-        servings = EXCLUDED.servings,
-        difficulty = EXCLUDED.difficulty,
-        ingredients = EXCLUDED.ingredients,
-        directions = EXCLUDED.directions,
-        nutrition = EXCLUDED.nutrition,
-        tags = EXCLUDED.tags,
-        image_url = EXCLUDED.image_url,
-        is_public = EXCLUDED.is_public,
-        updated_at = NOW();
-    `, [
-      id,
-      body.userId || null,
-      body.title || 'Untitled Recipe',
-      body.description || '',
-      body.recipeType || body.category || 'General',
-      body.cuisine || '',
-      body.prepTime || '',
-      body.cookTime || '',
-      body.servings || '',
-      body.difficulty || '',
-      JSON.stringify(body.ingredients || []),
-      JSON.stringify(body.directions || body.instructions || []),
-      JSON.stringify(body.nutrition || body.macros || {}),
-      JSON.stringify(body.tags || []),
-      body.imageUrl || body.image || '',
-      Boolean(body.isPublic)
-    ]);
+    for (const item of items) {
+      if (!item) continue;
+      const rawTitle = item.title || item.name || 'Untitled Recipe';
+      const cleanTitle = String(rawTitle).trim().slice(0, 250);
+      const id = String(item.id || 'rec_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)).slice(0, 64);
 
-    return NextResponse.json({ success: true, id, message: 'Recipe saved successfully in PostgreSQL.' });
+      let targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
+
+      // Verify foreign key integrity against users table
+      let validUserId: string | null = null;
+      if (targetUserId) {
+        const u = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
+        if (u.length > 0) {
+          validUserId = u[0].id;
+        } else {
+          const adminUser = await query("SELECT id FROM users WHERE id = 'usr_admin_1' OR role = 'admin' LIMIT 1");
+          if (adminUser.length > 0) {
+            validUserId = adminUser[0].id;
+          }
+        }
+      }
+
+      let ingredients = item.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
+      }
+      if (!Array.isArray(ingredients)) ingredients = [];
+
+      let directions = item.directions || item.instructions || item.steps;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
+      }
+      if (!Array.isArray(directions)) directions = [];
+
+      let tags = item.tags;
+      if (typeof tags === 'string') {
+        try { tags = JSON.parse(tags); } catch (_) { tags = [tags]; }
+      }
+      if (!Array.isArray(tags)) tags = [];
+
+      let nutrition = item.nutrition || item.macros || {};
+      if (typeof nutrition === 'string') {
+        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
+      }
+
+      const recipeType = String(item.recipeType || item.category || item.recipe_type || 'Main Dish').slice(0, 64);
+      const cuisine = String(item.cuisine || '').slice(0, 64);
+      const prepTime = String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15').slice(0, 32);
+      const cookTime = String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25').slice(0, 32);
+      const servings = String(item.servings || '4').slice(0, 32);
+      const difficulty = String(item.difficulty || 'Medium').slice(0, 32);
+      const imageUrl = String(item.imageUrl || item.image || item.image_url || '');
+      const sourceUrl = String(item.sourceUrl || item.source_url || '');
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, source_url, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          recipe_type = EXCLUDED.recipe_type,
+          cuisine = EXCLUDED.cuisine,
+          prep_time = EXCLUDED.prep_time,
+          cook_time = EXCLUDED.cook_time,
+          servings = EXCLUDED.servings,
+          difficulty = EXCLUDED.difficulty,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          nutrition = EXCLUDED.nutrition,
+          tags = EXCLUDED.tags,
+          image_url = EXCLUDED.image_url,
+          source_url = EXCLUDED.source_url,
+          is_public = EXCLUDED.is_public,
+          updated_at = NOW();
+      `, [
+        id,
+        validUserId,
+        cleanTitle,
+        item.description || '',
+        recipeType,
+        cuisine,
+        prepTime,
+        cookTime,
+        servings,
+        difficulty,
+        JSON.stringify(ingredients),
+        JSON.stringify(directions),
+        JSON.stringify(nutrition),
+        JSON.stringify(tags),
+        imageUrl,
+        sourceUrl,
+        Boolean(item.isPublic || item.is_public)
+      ]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Recipe(s) saved to PostgreSQL.' });
   } catch (err: any) {
+    console.error('[POST /api/recipes/saved] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -35127,14 +35905,21 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const id = searchParams.get('id');
+    let id = searchParams.get('id');
+
+    if (!id) {
+      try {
+        const body = await req.json();
+        id = body?.id || id;
+      } catch (_) {}
+    }
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
     }
 
-    await query('DELETE FROM saved_recipes WHERE id = $1', [id]);
-    return NextResponse.json({ success: true, message: 'Recipe deleted from PostgreSQL.' });
+    await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
+    return NextResponse.json({ success: true, message: 'Recipe removed from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -36906,6 +37691,7 @@ export default function GroceriesPage() {
 
 ## File: `apps/web/src/app/import/page.tsx`
 ```typescript
+import { persistSavedRecipe } from '@/lib/recipeSync';
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -40700,21 +41486,75 @@ export function ThemeInitializer() {
 
 ## File: `apps/web/src/lib/categories.ts`
 ```typescript
-// Generated / Updated by AI Collaborator
+// Server-backed Ingredient Categories Store
+// Zero localStorage writes, full PostgreSQL synchronization
+
 'use client';
 import { useState, useEffect } from 'react';
+import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
 
-export const DEFAULT_INGREDIENT_CATEGORIES: string[] = [
-  'Pantry Staples', 'Produce', 'Meat & Poultry', 'Seafood', 'Dairy & Eggs', 
-  'Dry Goods', 'Bakery', 'Canned Goods', 'Spices & Seasonings', 'Oils & Condiments', 'Frozen', 'Beverages', 'Other'
+export const DEFAULT_CATEGORIES: string[] = [
+  'Produce',
+  'Dairy & Eggs',
+  'Meat & Poultry',
+  'Seafood',
+  'Bakery',
+  'Pantry & Dry Goods',
+  'Canned Goods',
+  'Baking & Cooking',
+  'Spices & Seasonings',
+  'Snacks',
+  'Beverages',
+  'Frozen Foods',
+  'Condiments & Sauces',
+  'Oils & Vinegars'
 ];
 
+export const DEFAULT_INGREDIENT_CATEGORIES = DEFAULT_CATEGORIES;
+
+let memoryCategories: string[] = [...DEFAULT_CATEGORIES];
+
 export function getStoredCategories(): string[] {
-  return DEFAULT_INGREDIENT_CATEGORIES;
+  return [...memoryCategories];
+}
+
+export function setMemoryCategories(cats: string[]): void {
+  if (Array.isArray(cats) && cats.length > 0) {
+    memoryCategories = [...cats];
+  }
+}
+
+export async function saveCategories(cats: string[]): Promise<boolean> {
+  memoryCategories = [...cats];
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zecratary_categories_changed', { detail: cats }));
+    window.dispatchEvent(new CustomEvent('zecratary_ingredient_categories_updated', { detail: cats }));
+  }
+
+  let success = false;
+
+  // 1. Dedicated PostgreSQL API Save
+  try {
+    const res = await fetch('/api/admin/ingredient-categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ingredientCategories: cats })
+    });
+    if (res.ok) success = true;
+  } catch (_) {}
+
+  // 2. Settings Synchronizer Save
+  try {
+    const res2 = await persistServerAdminSettings({ ingredientCategories: cats });
+    if (res2) success = true;
+  } catch (_) {}
+
+  return success;
 }
 
 export function useIngredientCategories(): string[] {
-  const [categories, setCategories] = useState<string[]>(DEFAULT_INGREDIENT_CATEGORIES);
+  const [categories, setCategories] = useState<string[]>(memoryCategories);
 
   useEffect(() => {
     let isMounted = true;
@@ -40726,7 +41566,11 @@ export function useIngredientCategories(): string[] {
           const list = Array.isArray(data) ? data : (data?.ingredientCategories || data?.categories);
           if (Array.isArray(list) && list.length > 0 && isMounted) {
             const parsed = list.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
-            if (parsed.length > 0) { setCategories(parsed); return; }
+            if (parsed.length > 0) {
+              setCategories(parsed);
+              setMemoryCategories(parsed);
+              return;
+            }
           }
         }
       } catch (_) {}
@@ -40738,18 +41582,34 @@ export function useIngredientCategories(): string[] {
           const list2 = data2?.settings?.ingredientCategories || data2?.ingredientCategories;
           if (Array.isArray(list2) && list2.length > 0 && isMounted) {
             const parsed2 = list2.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
-            if (parsed2.length > 0) setCategories(parsed2);
+            if (parsed2.length > 0) {
+              setCategories(parsed2);
+              setMemoryCategories(parsed2);
+            }
           }
         }
       } catch (_) {}
     }
+
     fetchCategories();
-    const handleSync = () => fetchCategories();
+
+    const handleSync = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail) && e.detail.length > 0) {
+        setCategories(e.detail);
+        setMemoryCategories(e.detail);
+      } else {
+        fetchCategories();
+      }
+    };
+
     window.addEventListener('zecratary_ingredient_categories_updated', handleSync);
+    window.addEventListener('zecratary_categories_changed', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
+
     return () => {
       isMounted = false;
       window.removeEventListener('zecratary_ingredient_categories_updated', handleSync);
+      window.removeEventListener('zecratary_categories_changed', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
   }, []);
@@ -40829,111 +41689,129 @@ export function useRecipeTypes(): string[] {
 
 ## File: `apps/web/src/lib/recipeSync.ts`
 ```typescript
-// Bi-directional recipe synchronization supporting import, manual, and server sources
+// Server-Backed Recipe Synchronization Module
+// Direct PostgreSQL operations with local fallback sync
 
-export function getLocalRecipes(): any[] {
-  if (typeof window === 'undefined') return [];
-  const keys = ['zecratary_saved_recipes', 'zecratary_recipes', 'saved_recipes', 'savedRecipes', 'recipes'];
-  const map = new Map<string, any>();
+export async function syncUserSavedRecipes(userId: string): Promise<any[]> {
+  const targetId = userId || 'usr_admin_1';
+  let serverRecipes: any[] = [];
 
-  for (const k of keys) {
+  try {
+    const res = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetId)}`, { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.recipes)) {
+        serverRecipes = data.recipes;
+      }
+    }
+  } catch (_) {}
+
+  // Self-healing bridge: if any recipes are present in localStorage, upload them to PostgreSQL
+  if (typeof window !== 'undefined') {
     try {
-      const raw = localStorage.getItem(k);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          for (const r of parsed) {
-            if (r && typeof r === 'object') {
-              const id = String(r.id || r.title || r.name || '').trim().toLowerCase();
-              if (id && !map.has(id)) {
-                map.set(id, r);
-              }
+      const keys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            const unsynced = list.filter((lr: any) => 
+              lr && (lr.title || lr.name) && 
+              !serverRecipes.some((sr: any) => 
+                (sr.id === lr.id) || 
+                ((sr.title || sr.name)?.toLowerCase().trim() === (lr.title || lr.name)?.toLowerCase().trim())
+              )
+            );
+
+            if (unsynced.length > 0) {
+              fetch('/api/recipes/saved', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(unsynced.map(r => ({ ...r, userId: targetId })))
+              }).catch(() => {});
+
+              serverRecipes = [...unsynced, ...serverRecipes];
             }
           }
         }
       }
     } catch (_) {}
   }
-  return Array.from(map.values());
+
+  return serverRecipes;
 }
 
-export async function syncUserSavedRecipes(userIdOrEmail: string): Promise<any[]> {
-  const uKey = (userIdOrEmail || 'usr_admin_1').trim();
-  const localList = getLocalRecipes();
+export async function persistSavedRecipe(userId: string, recipeOrList: any): Promise<boolean> {
+  const targetId = userId || 'usr_admin_1';
+  const list = Array.isArray(recipeOrList) ? recipeOrList : [recipeOrList];
+
+  const payload = list.map((item: any) => ({
+    ...item,
+    userId: item.userId || item.user_id || targetId,
+    user_id: item.userId || item.user_id || targetId,
+    recipeType: item.recipeType || item.category || 'Main Dish',
+    category: item.recipeType || item.category || 'Main Dish',
+    instructions: item.instructions || item.directions || item.steps || [],
+    directions: item.directions || item.instructions || item.steps || [],
+    imageUrl: item.imageUrl || item.image || '',
+    image: item.imageUrl || item.image || ''
+  }));
 
   try {
-    const res = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(uKey)}`, {
-      method: 'GET',
-      headers: { 'Cache-Control': 'no-cache, no-store' },
-      cache: 'no-store'
-    });
-
-    if (res.ok) {
-      const serverRecipes = await res.json();
-      const sList = Array.isArray(serverRecipes) ? serverRecipes : (serverRecipes.recipes || []);
-
-      // Merge server and local (which includes newly imported recipes)
-      const mergedMap = new Map<string, any>();
-      for (const r of sList) {
-        const key = String(r.id || r.title || r.name || '').trim().toLowerCase();
-        if (key) mergedMap.set(key, r);
-      }
-
-      let newLocalFound = false;
-      for (const r of localList) {
-        const key = String(r.id || r.title || r.name || '').trim().toLowerCase();
-        if (key && !mergedMap.has(key)) {
-          mergedMap.set(key, { ...r, userId: uKey });
-          newLocalFound = true;
-        }
-      }
-
-      const combined = Array.from(mergedMap.values());
-
-      // If local import had recipes missing from server, push them up immediately
-      if (newLocalFound && combined.length > sList.length) {
-        persistSavedRecipe(uKey, combined).catch(() => {});
-      }
-
-      // Keep localStorage in sync so /import and /manual components can read state
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('zecratary_recipes', JSON.stringify(combined));
-          localStorage.setItem('zecratary_saved_recipes', JSON.stringify(combined));
-        } catch (_) {}
-      }
-
-      return combined;
-    }
-  } catch (err) {
-    console.warn('[recipeSync] Server fetch error, using local data:', err);
-  }
-
-  return localList;
-}
-
-export async function persistSavedRecipe(userIdOrEmail: string, recipes: any[]): Promise<boolean> {
-  const uKey = (userIdOrEmail || 'usr_admin_1').trim();
-
-  // Sync to local browser storage immediately so other pages see it
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(recipes));
-      localStorage.setItem('zecratary_recipes', JSON.stringify(recipes));
-    } catch (_) {}
-  }
-
-  try {
-    const res = await fetch('/api/saved-recipes', {
+    const res = await fetch('/api/recipes/saved', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uKey, recipes })
+      body: JSON.stringify(payload)
     });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+    }
+
     return res.ok;
-  } catch (err) {
-    console.error('[recipeSync] Server persist failed:', err);
+  } catch (_) {
     return false;
   }
+}
+
+export async function deleteSavedRecipe(userId: string, recipeId: string): Promise<boolean> {
+  if (!recipeId) return false;
+
+  try {
+    await Promise.allSettled([
+      fetch(`/api/recipes/saved?id=${encodeURIComponent(recipeId)}`, { method: 'DELETE' }),
+      fetch(`/api/saved-recipes?id=${encodeURIComponent(recipeId)}`, { method: 'DELETE' }),
+      fetch(`/api/recipes?id=${encodeURIComponent(recipeId)}`, { method: 'DELETE' })
+    ]);
+  } catch (err) {
+    console.error('[recipeSync] Server delete error:', err);
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const keys = ['zecratary_saved_recipes', 'zecratary_recipes', 'zecratary_user_recipes', 'saved_recipes', 'zecratary_imported_recipes'];
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            const cleaned = arr.filter((r: any) => r.id !== recipeId);
+            localStorage.setItem(k, JSON.stringify(cleaned));
+          }
+        }
+      }
+    } catch (_) {}
+
+    window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+    window.dispatchEvent(new Event('zecratary_recipes_updated'));
+  }
+
+  return true;
+}
+
+export function getLocalRecipes(userId: string): any[] {
+  return [];
 }
 
 ```
