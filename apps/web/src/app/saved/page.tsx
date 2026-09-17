@@ -53,6 +53,11 @@ const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label:
   }
 };
 
+const isRecipeInBook = (rec: any, bookId: string): boolean => {
+  if (!rec || !bookId) return false;
+  return rec.bookId === bookId || rec.book_id === bookId;
+};
+
 export default function SavedRecipesPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -364,7 +369,7 @@ export default function SavedRecipesPage() {
   // 1. FIX "ADD TO COOKBOOK"
   const handleAssignToBook = async (bookId: string) => {
     if (!selectedRecipe) return;
-    const isRemoving = selectedRecipe.bookId === bookId || selectedRecipe.book_id === bookId;
+    const isRemoving = isRecipeInBook(selectedRecipe, bookId);
     const targetBookId = isRemoving ? null : bookId;
     
     const updatedRecipe = {
@@ -378,7 +383,7 @@ export default function SavedRecipesPage() {
     setRecipes(updatedRecipes);
 
     try {
-      // 1. Persist to PostgreSQL
+      // 1. Direct PostgreSQL commit
       await fetch('/api/recipes/saved', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -388,6 +393,7 @@ export default function SavedRecipesPage() {
       window.dispatchEvent(new Event('zecratary_recipes_updated'));
       window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+      window.dispatchEvent(new Event('storage'));
     } catch (err) {
       console.error('Error assigning recipe to book:', err);
     }

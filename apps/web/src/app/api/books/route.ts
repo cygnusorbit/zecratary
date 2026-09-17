@@ -20,6 +20,9 @@ async function ensureBooksTable() {
       );
       CREATE INDEX IF NOT EXISTS idx_recipe_books_user_id ON recipe_books(user_id);
     `);
+    await query(`
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(128);
+    `);
   } catch (_) {}
 }
 
@@ -34,7 +37,7 @@ export async function GET(req: NextRequest) {
 
     if (userId) {
       params.push(userId);
-      sql += ' WHERE user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
+      sql += ' WHERE user_id = $1 OR created_by = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
     }
 
     sql += ' ORDER BY created_at ASC';
@@ -42,16 +45,18 @@ export async function GET(req: NextRequest) {
     const books = await query(sql, params);
 
     // Dynamic count calculation from saved_recipes
-    const countRows = await query(`
-      SELECT book_id, COUNT(*) as count 
-      FROM saved_recipes 
-      WHERE book_id IS NOT NULL 
-      GROUP BY book_id
-    `);
-    const countMap: Record<string, number> = {};
-    countRows.forEach((r: any) => {
-      countMap[r.book_id] = Number(r.count) || 0;
-    });
+    let countMap: Record<string, number> = {};
+    try {
+      const countRows = await query(`
+        SELECT book_id, COUNT(*) as count 
+        FROM saved_recipes 
+        WHERE book_id IS NOT NULL 
+        GROUP BY book_id
+      `);
+      countRows.forEach((r: any) => {
+        countMap[r.book_id] = Number(r.count) || 0;
+      });
+    } catch (_) {}
 
     const formatted = books.map((b: any) => ({
       id: b.id,
@@ -113,6 +118,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  await ensureBooksTable();
   try {
     const { searchParams } = new URL(req.url);
     let id = searchParams.get('id');
@@ -130,7 +136,10 @@ export async function DELETE(req: NextRequest) {
 
     const cleanId = id.trim();
     await query('DELETE FROM recipe_books WHERE id = $1', [cleanId]);
-    await query('UPDATE saved_recipes SET book_id = NULL WHERE book_id = $1', [cleanId]);
+    
+    try {
+      await query('UPDATE saved_recipes SET book_id = NULL WHERE book_id = $1', [cleanId]);
+    } catch (_) {}
 
     return NextResponse.json({ success: true, message: 'Book deleted from PostgreSQL.' });
   } catch (err: any) {

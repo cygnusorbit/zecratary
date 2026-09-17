@@ -233,31 +233,25 @@ export default function BooksPage() {
 
     // 2. Fetch live books from PostgreSQL
     let loadedBooks: any[] = [];
+    let fetchSuccess = false;
     try {
       const bRes = await fetch(`/api/books?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
       if (bRes.ok) {
         const bData = await bRes.json();
         if (Array.isArray(bData.books)) {
           loadedBooks = bData.books;
+          fetchSuccess = true;
         }
       }
     } catch (_) {}
 
-    // Fallback/merge with local storage if PostgreSQL books not populated
-    if (loadedBooks.length === 0 && typeof window !== 'undefined') {
+    // Fallback ONLY if network request failed (do not resurrect deleted books)
+    if (!fetchSuccess && typeof window !== 'undefined') {
       try {
         const localB = localStorage.getItem('zecratary_recipe_books');
         if (localB) {
           const arrB = JSON.parse(localB);
-          if (Array.isArray(arrB) && arrB.length > 0) {
-            loadedBooks = arrB;
-            // Bridge existing local books into PostgreSQL
-            fetch('/api/books', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(arrB)
-            }).catch(() => {});
-          }
+          if (Array.isArray(arrB)) loadedBooks = arrB;
         }
       } catch (_) {}
     }
@@ -447,17 +441,36 @@ export default function BooksPage() {
     if (!confirm(t('confirmDeleteBook') || 'Are you sure you want to delete this recipe book?')) return;
     
     try {
-      await fetch(`/api/books?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/books?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        console.error('Failed to delete book from server, status:', res.status);
+      }
+
       const updated = books.filter((b) => b.id !== id);
       setBooks(updated);
-      
+
+      // Clean local storage cache immediately
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('zecratary_recipe_books');
+          if (raw) {
+            const arr = JSON.parse(raw);
+            const filtered = Array.isArray(arr) ? arr.filter((b: any) => b.id !== id) : [];
+            localStorage.setItem('zecratary_recipe_books', JSON.stringify(filtered));
+          }
+        } catch (_) {}
+      }
+
       // Update local recipes state removing book assignment
       const cleanedRecipes = recipes.map(r => (isRecipeInBook(r, id) ? { ...r, bookId: null, book_id: null } : r));
       setRecipes(cleanedRecipes);
 
       if (selectedBook?.id === id) setSelectedBook(null);
+      
+      // Dispatch sync events
       window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
       window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      window.dispatchEvent(new Event('storage'));
     } catch (err) {
       console.error('Error deleting book:', err);
     }
