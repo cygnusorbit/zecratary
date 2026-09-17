@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   Shield, UserPlus, Trash2, Edit3, Mail, User as UserIcon, Lock, 
@@ -99,7 +99,7 @@ export default function AdminUserManagementPage() {
   const [editSubscriptionPlan, setEditSubscriptionPlan] = useState<string>('taster');
   const [editError, setEditError] = useState('');
 
-  // Helper: Strictly identify primary root administrator (usr_admin_1)
+  // Identify primary root administrator (usr_admin_1)
   const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
     if (!targetUser) return false;
     return targetUser.id === 'usr_admin_1' || targetUser.email?.toLowerCase() === 'admin@zecratary.com';
@@ -194,7 +194,7 @@ export default function AdminUserManagementPage() {
     }
   }, []);
 
-  // Hydrate Users Exclusively from Server Storage with Self-Healing Guarantee
+  // Hydrate Users Exclusively from Server Storage
   const loadUsers = useCallback(async () => {
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
@@ -206,7 +206,7 @@ export default function AdminUserManagementPage() {
         if (data.success && Array.isArray(data.users)) {
           let list: AppUser[] = [...data.users];
 
-          // Self-Healing 1: Ensure primary root admin exists
+          // Ensure primary root admin exists
           const hasRootAdmin = list.some(
             (u) => u.id === 'usr_admin_1' || u.email?.toLowerCase() === 'admin@zecratary.com'
           );
@@ -226,30 +226,6 @@ export default function AdminUserManagementPage() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(rootAdmin)
             }).catch(() => {});
-          }
-
-          // Self-Healing 2: If active user is admin, ensure they are in the list
-          const activeSession = getCurrentUser();
-          if (activeSession && (activeSession.role || '').toLowerCase() === 'admin') {
-            const inList = list.some(
-              (u) => (u.id && u.id === activeSession.id) || (u.email && u.email.toLowerCase() === activeSession.email.toLowerCase())
-            );
-            if (!inList) {
-              const activeAdminObj: AppUser = {
-                id: activeSession.id || 'usr_' + Date.now().toString(36),
-                name: activeSession.name || 'Administrator',
-                email: activeSession.email,
-                role: 'admin',
-                subscriptionPlan: activeSession.subscriptionPlan || 'nutrition-pro-annual',
-                createdAt: activeSession.createdAt || new Date().toISOString()
-              };
-              list.push(activeAdminObj);
-              fetch('/api/admin/users', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(activeAdminObj)
-              }).catch(() => {});
-            }
           }
 
           setUsers(list);
@@ -457,7 +433,7 @@ export default function AdminUserManagementPage() {
     setUserCurrentPage(1);
   }, [search]);
 
-  // Add User Modal
+  // Add User Modal Handlers
   const handleOpenAddModal = (presetRole: 'admin' | 'user' = 'user') => {
     setAddName('');
     setAddEmail('');
@@ -536,7 +512,7 @@ export default function AdminUserManagementPage() {
     }
   };
 
-  // Edit User Modal
+  // Edit User Modal Handlers
   const handleOpenEditModal = (user: AppUser) => {
     setEditingUserId(user.id);
     setEditName(user.name);
@@ -621,7 +597,7 @@ export default function AdminUserManagementPage() {
     }
   };
 
-  // Safe Deletion Handler
+  // Safe Deletion Handler with Dual Parameter Transmission and Live State Sync
   const handleDeleteUser = async (id: string, userEmail: string, userName?: string) => {
     const targetUser = users.find((u) => u.id === id || (u.email && u.email.toLowerCase() === userEmail.toLowerCase()));
 
@@ -641,7 +617,11 @@ export default function AdminUserManagementPage() {
     try {
       const cleanEmail = userEmail.toLowerCase().trim();
 
-      const res = await fetch('/api/admin/users', {
+      const queryParams = new URLSearchParams();
+      if (id) queryParams.set('id', id);
+      if (cleanEmail) queryParams.set('email', cleanEmail);
+
+      const res = await fetch(`/api/admin/users?${queryParams.toString()}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, email: cleanEmail }),
@@ -652,7 +632,13 @@ export default function AdminUserManagementPage() {
         throw new Error(errJson.error || 'Server error deleting user');
       }
 
-      setUsers((prev) => prev.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail)));
+      const resData = await res.json().catch(() => null);
+      if (resData?.users && Array.isArray(resData.users)) {
+        setUsers(resData.users);
+      } else {
+        setUsers((prev) => prev.filter((u) => u.id !== id && (!u.email || u.email.toLowerCase() !== cleanEmail)));
+      }
+
       setSelectedUserIds((prev) => prev.filter((uid) => uid !== id));
 
       if (typeof window !== 'undefined') {

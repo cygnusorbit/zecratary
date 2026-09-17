@@ -1,3 +1,4 @@
+import { query } from '@/lib/db';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -407,6 +408,52 @@ export async function POST(req: Request) {
       data: recipeData
     });
   } catch (error: any) {
+    
+    // Persist ingested recipe to PostgreSQL saved_recipes
+    try {
+      const targetUserId = body.userId || (typeof userId !== 'undefined' ? userId : 'usr_admin_1');
+      const targetId = newRecipe.id || ('import_' + Date.now().toString(36));
+
+      await query(`
+        INSERT INTO users (id, name, email, role, subscription_plan)
+        VALUES ($1, 'User', $2, 'user', 'taster')
+        ON CONFLICT (id) DO NOTHING;
+      `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          image_url = EXCLUDED.image_url,
+          updated_at = NOW();
+      `, [
+        targetId,
+        targetUserId,
+        newRecipe.title || newRecipe.name || 'Imported Recipe',
+        newRecipe.description || '',
+        newRecipe.recipeType || newRecipe.category || 'Main Dish',
+        newRecipe.cuisine || '',
+        String(newRecipe.prepTime || newRecipe.prepTimeMinutes || '15'),
+        String(newRecipe.cookTime || newRecipe.cookTimeMinutes || '25'),
+        String(newRecipe.servings || '4'),
+        newRecipe.difficulty || 'Medium',
+        JSON.stringify(newRecipe.ingredients || []),
+        JSON.stringify(newRecipe.directions || newRecipe.instructions || newRecipe.steps || []),
+        JSON.stringify(newRecipe.nutrition || newRecipe.macros || {}),
+        JSON.stringify(newRecipe.tags || ['Imported']),
+        newRecipe.imageUrl || newRecipe.image || '',
+        false
+      ]);
+    } catch (dbErr) {
+      console.error('[Ingest API] PostgreSQL persistence error:', dbErr);
+    }
+
     return NextResponse.json({ success: false, error: error.message || 'Ingestion failed' }, { status: 500 });
   }
 }

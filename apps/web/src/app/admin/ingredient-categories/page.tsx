@@ -106,28 +106,49 @@ export default function IngredientCategoryPage() {
     };
   }, [applyGlobalTheme]);
 
-  // Hydrate Categories Exclusively from Server Storage
+  // Hydrate Categories Exclusively from PostgreSQL Server Storage
   const loadCategoriesFromServer = useCallback(async () => {
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
+
+    let loadedCats: string[] | null = null;
+
     try {
-      const serverData = await fetchServerAdminSettings();
-      if (serverData && Array.isArray(serverData.ingredientCategories) && serverData.ingredientCategories.length > 0) {
-        setCategories(serverData.ingredientCategories);
-        setMemoryCategories(serverData.ingredientCategories);
-      } else {
-        const fallback = getStoredCategories();
-        const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_CATEGORIES;
-        setCategories(activeList);
-        setMemoryCategories(activeList);
+      // 1. Direct fetch from dedicated PostgreSQL ingredient-categories route
+      const res = await fetch('/api/admin/ingredient-categories?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data?.ingredientCategories || data?.categories);
+        if (Array.isArray(list) && list.length > 0) {
+          loadedCats = list;
+        }
       }
-    } catch (err) {
-      console.error('[IngredientCategoryPage] Error loading server categories:', err);
-      const fallback = getStoredCategories();
-      setCategories(fallback.length > 0 ? fallback : DEFAULT_CATEGORIES);
-    } finally {
-      setIsLoading(false);
+    } catch (_) {}
+
+    // 2. Fallback to settings endpoint if needed
+    if (!loadedCats || loadedCats.length === 0) {
+      try {
+        const serverData = await fetchServerAdminSettings();
+        const list = (Array.isArray(serverData) ? serverData : null) ||
+                     (Array.isArray(serverData?.ingredientCategories) ? serverData.ingredientCategories : null) ||
+                     (Array.isArray(serverData?.settings?.ingredientCategories) ? serverData.settings.ingredientCategories : null);
+        if (Array.isArray(list) && list.length > 0) {
+          loadedCats = list;
+        }
+      } catch (_) {}
     }
+
+    if (loadedCats && loadedCats.length > 0) {
+      setCategories(loadedCats);
+      setMemoryCategories(loadedCats);
+    } else {
+      const fallback = getStoredCategories();
+      const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_CATEGORIES;
+      setCategories(activeList);
+      setMemoryCategories(activeList);
+    }
+
+    setIsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -135,19 +156,18 @@ export default function IngredientCategoryPage() {
     loadCategoriesFromServer();
 
     const handleSync = (e: any) => {
-      if (e?.detail && Array.isArray(e.detail)) {
+      if (e?.detail && Array.isArray(e.detail) && e.detail.length > 0) {
         setCategories(e.detail);
-      } else {
-        loadCategoriesFromServer();
+        setMemoryCategories(e.detail);
       }
     };
 
     window.addEventListener('zecratary_categories_changed', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('zecratary_ingredient_categories_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_categories_changed', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_ingredient_categories_updated', handleSync);
     };
   }, [t, version, loadCategoriesFromServer]);
 
@@ -160,9 +180,25 @@ export default function IngredientCategoryPage() {
   const commitCategories = async (updated: string[]) => {
     setCategories(updated);
     setMemoryCategories(updated);
-    await saveCategories(updated);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+
+    try {
+      // 1. Save directly to dedicated PostgreSQL endpoint
+      await fetch('/api/admin/ingredient-categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ingredientCategories: updated })
+      });
+
+      // 2. Also broadcast through shared helper
+      await saveCategories(updated);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_categories_changed', { detail: updated }));
+        window.dispatchEvent(new CustomEvent('zecratary_ingredient_categories_updated', { detail: updated }));
+      }
+    } catch (err: any) {
+      console.error('[IngredientCategoryPage] Save error:', err);
+      notify(t('errorSaving', 'Error saving to database'));
     }
   };
 

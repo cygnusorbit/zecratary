@@ -12,7 +12,7 @@ import {
   Grid3X3, Rows3
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
-import { syncUserSavedRecipes, persistSavedRecipe, getLocalRecipes } from '@/lib/recipeSync';
+import { syncUserSavedRecipes, persistSavedRecipe, getLocalRecipes, deleteSavedRecipe } from '@/lib/recipeSync';
 import { getStoredCategories } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -418,12 +418,71 @@ export default function SavedRecipesPage() {
     saveAllRecipes(updatedList);
   };
 
-  const handleDeleteRecipe = (id: string) => {
+  const handleDeleteRecipe = async (id: string) => {
     if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
-    const updated = recipes.filter(r => r.id !== id);
-    saveAllRecipes(updated);
-    setSelectedRecipe(null);
-    setIsEditing(false);
+    
+    try {
+      // 1. Direct DELETE requests to PostgreSQL API endpoints
+      await Promise.allSettled([
+        fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        }),
+        fetch(`/api/saved-recipes?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        }),
+        fetch(`/api/recipes?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        })
+      ]);
+
+      // 2. Call deleteSavedRecipe helper
+      if (typeof deleteSavedRecipe === 'function') {
+        await deleteSavedRecipe(currentUser?.id || 'usr_admin_1', id).catch(() => {});
+      }
+
+      // 3. Update component state
+      const updated = recipes.filter(r => r.id !== id);
+      setRecipes(updated);
+      setSelectedRecipe(null);
+      setIsEditing(false);
+
+      // 4. Update books count
+      const updatedBooks = books.map((b: any) => ({
+        ...b,
+        recipeCount: updated.filter((r: any) => r.bookId === b.id).length
+      }));
+      setBooks(updatedBooks);
+
+      // 5. Clean residual local storage to prevent zombie resurrection
+      try {
+        const localKeys = ['zecratary_saved_recipes', 'zecratary_recipes', 'zecratary_user_recipes', 'saved_recipes', 'zecratary_imported_recipes'];
+        for (const k of localKeys) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) {
+              const cleaned = arr.filter((x: any) => x.id !== id);
+              localStorage.setItem(k, JSON.stringify(cleaned));
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 6. Broadcast event
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_recipes_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      }
+    } catch (err) {
+      console.error('[SavedRecipesPage] Error deleting recipe:', err);
+      alert(t('errorDeletingRecipe') || 'Failed to delete recipe. Please try again.');
+    }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1801,7 +1860,16 @@ export default function SavedRecipesPage() {
                   <div className="px-5 flex items-center justify-end text-xs">
                     <button
                       onClick={() => handleDeleteRecipe(selectedRecipe.id)}
-                      className="bg-red-950/60 border border-red-500/40 text-red-400 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 hover:bg-red-900/50 cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                      style={isDayMode ? {
+                        backgroundColor: '#fef2f2',
+                        borderColor: '#fca5a5',
+                        color: '#dc2626'
+                      } : {
+                        backgroundColor: 'rgba(127, 29, 29, 0.4)',
+                        borderColor: 'rgba(239, 68, 68, 0.4)',
+                        color: '#f87171'
+                      }}
                     >
                       <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
                     </button>
