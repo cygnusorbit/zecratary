@@ -534,7 +534,7 @@ export default function AdminPaymentPage() {
   }, [getCurrencySymbol]);
 
   // Validate user subscription against payment transactions
-  const validateAndSyncUserPlans = useCallback((usersList: AppUser[], txList: PaymentTransaction[]): AppUser[] => {
+    const validateAndSyncUserPlans = useCallback((usersList: AppUser[], txList: PaymentTransaction[]): AppUser[] => {
     const now = new Date();
     return usersList.map((u) => {
       const currentPlan = sanitizeSinglePlan(u.subscriptionPlan);
@@ -548,8 +548,10 @@ export default function AdminPaymentPage() {
         const matchesEmail = txEmail === uEmail && txEmail !== '';
         
         const statusLower = String(tx.status || '').toLowerCase().trim();
-        const isValidStatus = isSucceeded(statusLower) || isRefunded(statusLower) || isCanceled(statusLower);
-        const notExpired = !tx.expiryDate || new Date(tx.expiryDate) > now;
+        // Cancelled & Succeeded keep the plan active until expiryDate is reached!
+        // Refunded does NOT keep the plan active (refunded = immediate revocation)
+        const isValidStatus = isSucceeded(statusLower) || isCanceled(statusLower);
+        const notExpired = !tx.expiryDate || new Date(tx.expiryDate).getTime() > now.getTime();
         
         const matchesPlan = (tx.planSlug && sanitizeSinglePlan(tx.planSlug) === currentPlan) || 
                             (tx.planName && tx.planName.toLowerCase().includes(currentPlan.replace(/-/g, ' ')));
@@ -670,7 +672,7 @@ export default function AdminPaymentPage() {
     return registeredUsers.find((u) => u.id === selectedUserId) || null;
   }, [registeredUsers, selectedUserId]);
 
-  const planTransitionInfo = useMemo(() => {
+    const planTransitionInfo = useMemo(() => {
     if (!showAddModal || !selectedUserId || !currentSelectedUser) return null;
 
     const currentPlan = sanitizeSinglePlan(currentSelectedUser.subscriptionPlan);
@@ -680,11 +682,29 @@ export default function AdminPaymentPage() {
     const currentBase = getBase(currentPlan);
     const chosenBase = getBase(chosenPlan);
 
-    if (currentPlan === chosenPlan && chosenPlan !== 'taster') {
+    if (currentPlan === chosenPlan && chosenPlan !== 'taster' && chosenPlan !== 'free') {
       return {
         isDuplicate: true,
         isTransition: false,
+        isDowngradeToFree: false,
         message: `User "${currentSelectedUser.name}" already has active plan "${chosenPlan}". Adding duplicate same plan is not allowed.`
+      };
+    }
+
+    if (currentPlan !== 'taster' && currentPlan !== 'free' && (chosenPlan === 'taster' || chosenPlan === 'free')) {
+      const activeTx = transactionsRef.current.find(
+        (t) => (t.customerEmail || '').toLowerCase().trim() === (currentSelectedUser.email || '').toLowerCase().trim() && (isSucceeded(t.status) || isCanceled(t.status))
+      );
+      const hasExpiry = Boolean(activeTx?.expiryDate && new Date(activeTx.expiryDate).getTime() > Date.now());
+      return {
+        isDuplicate: false,
+        isTransition: true,
+        isDowngradeToFree: true,
+        from: currentPlan,
+        to: 'Free (Taster)',
+        message: hasExpiry
+          ? `Downgrading "${currentSelectedUser.name}" to Free Plan. Recurring will be turned OFF, the transaction status will turn to "cancelled", and the current plan "${currentPlan}" will remain ACTIVE until expired (${new Date(activeTx!.expiryDate!).toLocaleDateString()}).`
+          : `Reverting "${currentSelectedUser.name}" to Free Plan immediately.`
       };
     }
 
@@ -694,6 +714,7 @@ export default function AdminPaymentPage() {
       return {
         isDuplicate: false,
         isTransition: true,
+        isDowngradeToFree: false,
         from: fromInterval,
         to: toInterval,
         message: `Switching "${currentSelectedUser.name}" on plan "${currentBase}" from ${fromInterval} to ${toInterval}. The previous transaction will be cancelled & new payment recorded.`
@@ -704,6 +725,7 @@ export default function AdminPaymentPage() {
       return {
         isDuplicate: false,
         isTransition: true,
+        isDowngradeToFree: false,
         from: currentPlan,
         to: chosenPlan,
         message: `Upgrading/downgrading "${currentSelectedUser.name}" from "${currentPlan}" to "${chosenPlan}". Previous payment transaction will be refunded.`
@@ -839,14 +861,28 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const handlePlanSelectChange = (slug: string) => {
+    const handlePlanSelectChange = (slug: string) => {
     const singleSlug = sanitizeSinglePlan(slug);
     setSelectedPlanSlug(singleSlug);
     const matched = availablePlans.find((p) => p.slug === singleSlug);
     if (matched) {
       setPaymentAmount(matched.priceDollars);
-      const calculatedExpiry = calculateDefaultExpiry(paymentDate, matched.interval);
-      setPaymentExpiryDate(calculatedExpiry);
+      const isFree = Boolean(matched.isFree || singleSlug === 'taster' || singleSlug === 'free' || matched.priceDollars === 0);
+      if (isFree) {
+        setIsPaymentRecurring(false);
+        const existingTx = transactionsRef.current.find(
+          (t) => (t.customerEmail || '').toLowerCase().trim() === (currentSelectedUser?.email || '').toLowerCase().trim() && (isSucceeded(t.status) || isCanceled(t.status))
+        );
+        if (existingTx?.expiryDate && new Date(existingTx.expiryDate).getTime() > Date.now()) {
+          setPaymentExpiryDate(new Date(existingTx.expiryDate).toISOString().slice(0, 10));
+        } else {
+          setPaymentExpiryDate('');
+        }
+      } else {
+        setIsPaymentRecurring(true);
+        const calculatedExpiry = calculateDefaultExpiry(paymentDate, matched.interval);
+        setPaymentExpiryDate(calculatedExpiry);
+      }
     }
   };
 
@@ -945,18 +981,22 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const handleCancelPlan = async (tx: PaymentTransaction) => {
+    const handleCancelPlan = async (tx: PaymentTransaction) => {
     const confirmMsg = t('confirmCancelPlanFor', 'Are you sure you want to cancel plan');
-    if (!window.confirm(`${confirmMsg} "${tx.planName}" for ${tx.customerName}?`)) {
+    if (!window.confirm(`${confirmMsg} "${tx.planName}" for ${tx.customerName}? Recurring will be turned OFF and status set to "cancelled", keeping the current plan active until expiration.`)) {
       return;
     }
 
+    const now = new Date();
+    const hasUnreachedExpiry = Boolean(tx.expiryDate && new Date(tx.expiryDate).getTime() > now.getTime());
+
+    // 1. Recurring turned OFF, status to 'canceled', expiryDate preserved
     const updatedTx: PaymentTransaction = { 
       ...tx, 
-      status: 'canceled' as any, 
+      status: 'canceled', 
       isRecurring: false,
       autoRenew: false,
-      expiryDate: tx.expiryDate || new Date().toISOString() 
+      expiryDate: hasUnreachedExpiry ? tx.expiryDate : now.toISOString() 
     };
 
     try {
@@ -970,16 +1010,44 @@ export default function AdminPaymentPage() {
         throw new Error(data.error || 'Failed to cancel plan');
       }
 
+      const cleanEmail = (tx.customerEmail || '').toLowerCase().trim();
+      const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
+      if (targetUser) {
+        if (hasUnreachedExpiry) {
+          // Current plan remains ACTIVE until expired!
+          await fetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              ...targetUser, 
+              subscriptionPlan: targetUser.subscriptionPlan || tx.planSlug, 
+              planExpiryDate: tx.expiryDate, 
+              expiryDate: tx.expiryDate 
+            }),
+          }).catch(() => {});
+        } else {
+          // Already expired, revert to taster immediately
+          await fetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...targetUser, subscriptionPlan: 'taster', planExpiryDate: null, expiryDate: null }),
+          }).catch(() => {});
+        }
+      }
+
       await fetchData();
 
       if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_users_updated'));
         window.dispatchEvent(new Event('zecratary_payment_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
 
       setFeedback({
         type: 'success',
-        msg: `Plan status set to "canceled" and recurring disabled for ${tx.customerName}. Privileges remain active until ${tx.expiryDate ? new Date(tx.expiryDate).toLocaleDateString() : 'expiry'}.`,
+        msg: hasUnreachedExpiry
+          ? `Recurring turned OFF and status set to "cancelled" for ${tx.customerName}. Current plan remains ACTIVE until ${new Date(tx.expiryDate!).toLocaleDateString()}.`
+          : `Plan cancelled and user subscription reverted to Free (Taster) for ${tx.customerName}.`,
       });
     } catch (err: any) {
       setFeedback({
@@ -1142,7 +1210,7 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const handleAddPaymentSubmit = async (e: React.FormEvent) => {
+    const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError('');
 
@@ -1165,6 +1233,10 @@ export default function AdminPaymentPage() {
     const cleanAmount = parseAmount(paymentAmount);
     const normalizedStatus = paymentStatus.toLowerCase();
 
+    const isDowngradingToFree = Boolean(
+      singlePlanSlug === 'taster' || singlePlanSlug === 'free' || matchedPlan?.isFree
+    );
+
     const formattedCreatedAt = paymentDate 
       ? new Date(`${paymentDate}T12:00:00Z`).toISOString() 
       : new Date().toISOString();
@@ -1175,6 +1247,76 @@ export default function AdminPaymentPage() {
 
     const detectedInterval = (matchedPlan?.interval || (singlePlanSlug.includes('annual') ? 'YEAR' : 'MONTH')) as any;
 
+    if (isDowngradingToFree) {
+      // Downgrading to Free Plan:
+      // Turn OFF recurring, set prior active transactions to 'canceled', and keep current plan active until expiry date
+      const activeUserTxs = transactionsRef.current.filter(
+        (tItem) => (tItem.customerEmail || '').toLowerCase().trim() === customerEmail && (isSucceeded(tItem.status) || isCanceled(tItem.status))
+      );
+      
+      let preservedExpiry: string | undefined = undefined;
+      for (const oldTx of activeUserTxs) {
+        if (oldTx.expiryDate && new Date(oldTx.expiryDate).getTime() > Date.now()) {
+          preservedExpiry = oldTx.expiryDate;
+        }
+        const cancelledTx: PaymentTransaction = { 
+          ...oldTx, 
+          status: 'canceled', 
+          isRecurring: false,
+          autoRenew: false,
+          expiryDate: oldTx.expiryDate || formattedExpiryDate 
+        };
+        await fetch('/api/admin/payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cancel_transaction', transaction: cancelledTx, id: oldTx.id }),
+        }).catch(() => {});
+      }
+
+      if (preservedExpiry) {
+        // Current plan remains ACTIVE until expired!
+        await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            ...targetUser, 
+            subscriptionPlan: targetUser.subscriptionPlan || 'nutrition-pro-monthly',
+            planExpiryDate: preservedExpiry,
+            expiryDate: preservedExpiry
+          }),
+        }).catch(() => {});
+      } else {
+        await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            ...targetUser, 
+            subscriptionPlan: 'taster',
+            planExpiryDate: null,
+            expiryDate: null
+          }),
+        }).catch(() => {});
+      }
+
+      await fetchData();
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+
+      setShowAddModal(false);
+      setFeedback({
+        type: 'success',
+        msg: preservedExpiry
+          ? `Downgraded to Free Plan. Recurring turned OFF, status set to "cancelled". Current plan remains ACTIVE until ${new Date(preservedExpiry).toLocaleDateString()}.`
+          : `Reverted ${customerName} to default Free (Taster) plan.`,
+      });
+      return;
+    }
+
+    // Standard Upgrade/Downgrade between paid plans
     if (isSucceeded(normalizedStatus)) {
       const existingUserTxs = transactionsRef.current.filter(
         (tItem) => (tItem.customerEmail || '').toLowerCase().trim() === customerEmail && isSucceeded(tItem.status)
@@ -1247,7 +1389,7 @@ export default function AdminPaymentPage() {
       setFeedback({
         type: 'success',
         msg: isSwitched 
-          ? `Successfully upgraded/downgraded plan to ${planName} for ${customerName} (Recurring: ${isPaymentRecurring ? 'ON' : 'OFF'})!`
+          ? `Successfully updated plan to ${planName} for ${customerName} (Recurring: ${isPaymentRecurring ? 'ON' : 'OFF'})!`
           : `Payment of ${activeCurrencySymbol}${cleanAmount.toFixed(2)} recorded for ${customerName} (${planName}, Recurring: ${isPaymentRecurring ? 'ON' : 'OFF'})!`,
       });
     } catch (err: any) {
@@ -1312,10 +1454,11 @@ export default function AdminPaymentPage() {
     );
   };
 
-  const metrics = useMemo(() => {
+    const metrics = useMemo(() => {
     const succeeded = transactions.filter((t) => isSucceeded(t.status));
     const failed = transactions.filter((t) => isFailed(t.status));
-    const refunded = transactions.filter((t) => isRefunded(t.status) || isCanceled(t.status));
+    const canceled = transactions.filter((t) => isCanceled(t.status));
+    const refunded = transactions.filter((t) => isRefunded(t.status));
 
     const totalRevenue = succeeded.reduce((sum, t) => sum + parseAmount(t.amount), 0);
     const refundedTotal = refunded.reduce((sum, t) => sum + parseAmount(t.amount), 0);
@@ -1326,6 +1469,7 @@ export default function AdminPaymentPage() {
       refundedTotal,
       succeededCount: succeeded.length,
       failedCount: failed.length,
+      canceledCount: canceled.length,
       refundedCount: refunded.length,
     };
   }, [transactions]);
@@ -1636,7 +1780,7 @@ export default function AdminPaymentPage() {
           </div>
 
           {/* KPI STATS TILES */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
             <div 
               className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
               style={{
@@ -1647,7 +1791,7 @@ export default function AdminPaymentPage() {
               <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
                 {t('totalRevenueTitle', 'Total Revenue')}
               </div>
-              <div className="text-2xl font-black flex items-baseline gap-1" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              <div className="text-xl font-black flex items-baseline gap-1" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
                 <span>{activeCurrencySymbol}{metrics.totalRevenue.toFixed(2)}</span>
                 <span className="text-[10px] font-semibold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{config.currency}</span>
               </div>
@@ -1661,10 +1805,10 @@ export default function AdminPaymentPage() {
               }}
             >
               <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('successfulPaymentsTitle', 'Successful Payments')}
+                {t('successfulPaymentsTitle', 'Successful')}
               </div>
               <div 
-                className="text-2xl font-black flex items-center gap-2"
+                className="text-xl font-black flex items-center gap-1.5"
                 style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }}
               >
                 {metrics.succeededCount}
@@ -1672,6 +1816,7 @@ export default function AdminPaymentPage() {
               </div>
             </div>
 
+            {/* SEPARATED: CANCELLED TILE */}
             <div 
               className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
               style={{
@@ -1680,11 +1825,28 @@ export default function AdminPaymentPage() {
               }}
             >
               <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('failedPaymentsTitle', 'Failed Payments')}
+                {t('cancelledTitle', 'Cancelled')}
               </div>
-              <div className="text-2xl font-black flex items-center gap-2" style={{ color: isDayMode ? '#b91c1c' : '#f87171' }}>
-                {metrics.failedCount}
-                <XCircle className="h-4 w-4" />
+              <div className="text-xl font-black flex items-center gap-1.5" style={{ color: isDayMode ? '#c2410c' : '#fb923c' }}>
+                {metrics.canceledCount}
+                <Ban className="h-4 w-4 text-orange-500" />
+              </div>
+            </div>
+
+            {/* SEPARATED: REFUNDED TILE */}
+            <div 
+              className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
+              style={{
+                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              }}
+            >
+              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('refundedTitle', 'Refunded')}
+              </div>
+              <div className="text-xl font-black flex items-center gap-1.5" style={{ color: isDayMode ? '#b45309' : '#fbbf24' }}>
+                {metrics.refundedCount}
+                <ArrowDownLeft className="h-4 w-4" />
               </div>
             </div>
 
@@ -1696,11 +1858,11 @@ export default function AdminPaymentPage() {
               }}
             >
               <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('cancelledTitle', 'Refunded / Cancelled')}
+                {t('failedPaymentsTitle', 'Failed')}
               </div>
-              <div className="text-2xl font-black flex items-center gap-2" style={{ color: isDayMode ? '#b45309' : '#fbbf24' }}>
-                {metrics.refundedCount}
-                <ArrowDownLeft className="h-4 w-4" />
+              <div className="text-xl font-black flex items-center gap-1.5" style={{ color: isDayMode ? '#b91c1c' : '#f87171' }}>
+                {metrics.failedCount}
+                <XCircle className="h-4 w-4" />
               </div>
             </div>
           </div>
@@ -2809,7 +2971,7 @@ export default function AdminPaymentPage() {
                     color: isDayMode ? '#0f172a' : '#ffffff'
                   }}
                 >
-                  {paidSubscriptionPlans.map((plan) => (
+                  {availablePlans.map((plan) => (
                     <option key={plan.id || plan.slug} value={plan.slug}>
                       {plan.name} — {plan.priceFormatted}
                     </option>
