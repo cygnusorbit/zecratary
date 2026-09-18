@@ -1,4 +1,4 @@
-// Generated / Updated by AI Collaborator
+// Generated / Cleaned by AI Collaborator
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -10,7 +10,7 @@ import {
   PlusCircle, X, User as UserIcon, Activity, Calendar,
   Pencil, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   ShieldAlert, Ban, ArrowUpRight, AlertTriangle, Repeat, RotateCcw,
-  ShieldCheck, CheckCheck
+  ShieldCheck, CheckCheck, Columns3
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -91,6 +91,16 @@ const SUPPORTED_CURRENCIES = [
   { code: 'NZD', label: 'NZD - New Zealand Dollar ($)', symbol: 'NZ$' },
   { code: 'THB', label: 'THB - Thai Baht (฿)', symbol: '฿' },
 ];
+
+const DEFAULT_COLUMNS = {
+  customer: true,
+  plan: true,
+  amount: true,
+  status: true,
+  date: true,
+  expiryDate: true,
+  actions: true,
+};
 
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
   if (!planInput) return 'taster';
@@ -206,8 +216,12 @@ export default function AdminPaymentPage() {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
-  const [togglingTxId, setTogglingTxId] = useState<string | null>(null);
   const [refundingTxId, setRefundingTxId] = useState<string | null>(null);
+
+  // Table Column Visibility State
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(DEFAULT_COLUMNS);
+  const [showColumnPopup, setShowColumnPopup] = useState<boolean>(false);
+  const columnPopupRef = useRef<HTMLDivElement>(null);
 
   // Selection state
   const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
@@ -253,6 +267,79 @@ export default function AdminPaymentPage() {
   useEffect(() => {
     configRef.current = config;
   }, [config]);
+
+  // Load Saved Column Visibility Preferences
+  useEffect(() => {
+    try {
+      const savedLocal = typeof window !== 'undefined' ? localStorage.getItem('zecratary_payment_columns') : null;
+      if (savedLocal) {
+        const parsed = JSON.parse(savedLocal);
+        setVisibleColumns((prev) => ({ ...prev, ...parsed }));
+      }
+      fetchServerAdminSettings().then((serverData) => {
+        const remoteCols = serverData?.settings?.paymentTableColumns || serverData?.paymentTableColumns;
+        if (remoteCols && typeof remoteCols === 'object') {
+          setVisibleColumns((prev) => ({ ...prev, ...remoteCols }));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_payment_columns', JSON.stringify(remoteCols));
+          }
+        }
+      }).catch(() => {});
+    } catch (_) {}
+  }, []);
+
+  // Click outside to dismiss column popup
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (columnPopupRef.current && !columnPopupRef.current.contains(event.target as Node)) {
+        setShowColumnPopup(false);
+      }
+    };
+    if (showColumnPopup) {
+      document.addEventListener('mousedown', handlePointerDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [showColumnPopup]);
+
+  const toggleColumnVisibility = async (colKey: string) => {
+    const nextState = {
+      ...visibleColumns,
+      [colKey]: !visibleColumns[colKey]
+    };
+    if (!Object.values(nextState).some(Boolean)) return; // Keep at least one column visible
+
+    setVisibleColumns(nextState);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_payment_columns', JSON.stringify(nextState));
+      }
+      await persistServerAdminSettings({ paymentTableColumns: nextState });
+    } catch (_) {}
+  };
+
+  const resetColumnVisibility = async () => {
+    setVisibleColumns(DEFAULT_COLUMNS);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_payment_columns', JSON.stringify(DEFAULT_COLUMNS));
+      }
+      await persistServerAdminSettings({ paymentTableColumns: DEFAULT_COLUMNS });
+    } catch (_) {}
+  };
+
+  const activeColumnCount = useMemo(() => {
+    let count = 1; // Checkbox column is always present
+    if (visibleColumns.customer) count++;
+    if (visibleColumns.plan) count++;
+    if (visibleColumns.amount) count++;
+    if (visibleColumns.status) count++;
+    if (visibleColumns.date) count++;
+    if (visibleColumns.expiryDate) count++;
+    if (visibleColumns.actions) count++;
+    return count;
+  }, [visibleColumns]);
 
   // Add Payment Modal States
   const [showAddModal, setShowAddModal] = useState(false);
@@ -746,75 +833,6 @@ export default function AdminPaymentPage() {
     );
     return paid.length > 0 ? paid : availablePlans;
   }, [availablePlans]);
-
-  // TOGGLE RECURRING HANDLER
-  const handleToggleRecurring = async (tx: PaymentTransaction) => {
-    const isCurrentlyActive = tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : (tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true);
-    const nextState = !isCurrentlyActive;
-    setTogglingTxId(tx.id);
-
-    const updatedTx: PaymentTransaction = {
-      ...tx,
-      isRecurring: nextState,
-      autoRenew: nextState,
-    };
-
-    setTransactions((prev) =>
-      prev.map((tItem) => (tItem.id === tx.id ? updatedTx : tItem))
-    );
-    transactionsRef.current = transactionsRef.current.map((tItem) =>
-      tItem.id === tx.id ? updatedTx : tItem
-    );
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          action: 'update_transaction',
-          id: tx.id,
-          transaction: {
-            ...updatedTx,
-            is_recurring: nextState,
-            auto_renew: nextState,
-          }
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to update recurring setting');
-      }
-
-      setFeedback({
-        type: 'success',
-        msg: nextState
-          ? t('recurringTurnedOnMsg', `Recurring renewal turned ON for ${tx.customerName} (${tx.planName})`)
-          : t('recurringTurnedOffMsg', `Recurring renewal turned OFF for ${tx.customerName} (${tx.planName})`),
-      });
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
-    } catch (err: any) {
-      const revertedTx: PaymentTransaction = {
-        ...tx,
-        isRecurring: isCurrentlyActive,
-        autoRenew: isCurrentlyActive,
-      };
-      setTransactions((prev) =>
-        prev.map((tItem) => (tItem.id === tx.id ? revertedTx : tItem))
-      );
-      transactionsRef.current = transactionsRef.current.map((tItem) =>
-        tItem.id === tx.id ? revertedTx : tItem
-      );
-      setFeedback({
-        type: 'error',
-        msg: err.message || 'Failed to update recurring status.',
-      });
-    } finally {
-      setTogglingTxId(null);
-    }
-  };
 
   // TRIGGER GATEWAY REFUND HANDLER
   const handleRefundTransaction = async (tx: PaymentTransaction) => {
@@ -2093,7 +2111,7 @@ export default function AdminPaymentPage() {
             </div>
           </div>
 
-          {/* SEARCH, FILTERS & BULK ACTIONS BAR */}
+          {/* SEARCH, FILTERS, TABLE COLUMNS & BULK ACTIONS BAR */}
           <div 
             className="border p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm transition-colors duration-200"
             style={{
@@ -2183,6 +2201,82 @@ export default function AdminPaymentPage() {
                 <option value={20}>{t('perPage20', '20 per page')}</option>
                 <option value={50}>{t('perPage50', '50 per page')}</option>
               </select>
+
+              {/* TABLE COLUMN SHOW / HIDE POPUP TOGGLE */}
+              <div className="relative" ref={columnPopupRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowColumnPopup(!showColumnPopup)}
+                  className="border rounded-xl px-3 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
+                    borderColor: showColumnPopup ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'),
+                    color: showColumnPopup ? 'var(--color-primary, #E05638)' : (isDayMode ? '#334155' : '#cbd5e1')
+                  }}
+                  title={t('customizeColumnsTooltip', 'Show / Hide Table Columns')}
+                >
+                  <Columns3 className="h-3.5 w-3.5" style={{ color: showColumnPopup ? 'var(--color-primary, #E05638)' : undefined }} />
+                  <span className="hidden sm:inline">{t('columnsBtn', 'Columns')}</span>
+                </button>
+
+                {showColumnPopup && (
+                  <div
+                    className="absolute right-0 mt-2 w-56 rounded-2xl border shadow-2xl p-3.5 z-50 text-xs animate-in fade-in transition-colors duration-200"
+                    style={{
+                      backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  >
+                    <div 
+                      className="flex items-center justify-between pb-2.5 border-b mb-2"
+                      style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs">
+                        <Columns3 className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                        <span>{t('tableColumnsTitle', 'Table Columns')}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={resetColumnVisibility}
+                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
+                      >
+                        {t('resetColumnsBtn', 'Reset')}
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {[
+                        { key: 'customer', label: t('customerCol', 'Customer') },
+                        { key: 'plan', label: t('planCol', 'Plan') },
+                        { key: 'amount', label: t('amountCol', 'Amount') },
+                        { key: 'status', label: t('statusCol', 'Status') },
+                        { key: 'date', label: t('dateCol', 'Date') },
+                        { key: 'expiryDate', label: t('expiryDateCol', 'Expiry Date') },
+                        { key: 'actions', label: t('actionsCol', 'Actions') },
+                      ].map((col) => {
+                        const isChecked = visibleColumns[col.key] !== false;
+                        return (
+                          <label
+                            key={col.key}
+                            className="flex items-center justify-between px-2.5 py-1.5 rounded-xl cursor-pointer transition select-none hover:bg-emerald-500/10"
+                          >
+                            <span className="font-medium text-xs" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                              {col.label}
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleColumnVisibility(col.key)}
+                              className="w-3.5 h-3.5 rounded cursor-pointer accent-[#E05638]"
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -2226,7 +2320,7 @@ export default function AdminPaymentPage() {
             </div>
           )}
 
-          {/* TRANSACTIONS TABLE */}
+          {/* TRANSACTIONS TABLE WITH DYNAMIC VISIBLE COLUMNS */}
           <div 
             className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
             style={{
@@ -2254,14 +2348,13 @@ export default function AdminPaymentPage() {
                         title="Select All On Current Page"
                       />
                     </th>
-                    <th className="px-5 py-3.5">{t('customerCol', 'Customer')}</th>
-                    <th className="px-5 py-3.5">{t('planCol', 'Plan')}</th>
-                    <th className="px-5 py-3.5">{t('amountCol', 'Amount')}</th>
-                    <th className="px-5 py-3.5">{t('statusCol', 'Status')}</th>
-                    <th className="px-5 py-3.5">{t('recurringCol', 'Recurring')}</th>
-                    <th className="px-5 py-3.5">{t('dateCol', 'Date')}</th>
-                    <th className="px-5 py-3.5">{t('expiryDateCol', 'Expiry Date')}</th>
-                    <th className="px-5 py-3.5 text-right">{t('actionsCol', 'Actions')}</th>
+                    {visibleColumns.customer && <th className="px-5 py-3.5">{t('customerCol', 'Customer')}</th>}
+                    {visibleColumns.plan && <th className="px-5 py-3.5">{t('planCol', 'Plan')}</th>}
+                    {visibleColumns.amount && <th className="px-5 py-3.5">{t('amountCol', 'Amount')}</th>}
+                    {visibleColumns.status && <th className="px-5 py-3.5">{t('statusCol', 'Status')}</th>}
+                    {visibleColumns.date && <th className="px-5 py-3.5">{t('dateCol', 'Date')}</th>}
+                    {visibleColumns.expiryDate && <th className="px-5 py-3.5">{t('expiryDateCol', 'Expiry Date')}</th>}
+                    {visibleColumns.actions && <th className="px-5 py-3.5 text-right">{t('actionsCol', 'Actions')}</th>}
                   </tr>
                 </thead>
                 <tbody 
@@ -2270,7 +2363,7 @@ export default function AdminPaymentPage() {
                 >
                   {paginatedTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="text-center py-10 font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      <td colSpan={activeColumnCount} className="text-center py-10 font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
                         {t('noTransactionsFound', 'No payment transactions found matching your criteria.')}
                       </td>
                     </tr>
@@ -2278,9 +2371,7 @@ export default function AdminPaymentPage() {
                     paginatedTransactions.map((tx) => {
                       const txSymbol = getCurrencySymbol(tx.currency || config.currency);
                       const isRowSelected = selectedTxIds.includes(tx.id);
-                      const isTxToggling = togglingTxId === tx.id;
                       const isTxRefunding = refundingTxId === tx.id;
-                      const isRecurringActive = Boolean(tx.isRecurring ?? true);
                       const isTxCanceled = isCanceled(tx.status);
                       const isTxRefunded = isRefunded(tx.status);
                       const isTxSucceeded = isSucceeded(tx.status);
@@ -2302,280 +2393,252 @@ export default function AdminPaymentPage() {
                               className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
                             />
                           </td>
-                          <td className="px-5 py-3.5">
-                            <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.customerName || 'Customer'}</div>
-                            <div className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.customerEmail || ''}</div>
-                          </td>
-                          <td className="px-5 py-3.5 font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                            {tx.planName || tx.planSlug || 'Plan'}
-                          </td>
-                          <td className="px-5 py-3.5 font-bold whitespace-nowrap" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                            {txSymbol}{parseAmount(tx.amount).toFixed(2)}{' '}
-                            <span className="text-[10px] font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.currency || config.currency}</span>
-                          </td>
-                          <td className="px-5 py-3.5 whitespace-nowrap">
-                            {isSucceeded(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                                  borderColor: 'var(--color-emerald, #10b981)',
-                                  color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                                }}
-                                title={tx.gatewayTransactionId ? `Gateway Ref: ${tx.gatewayTransactionId}` : 'Confirmed Payment'}
-                              >
-                                <CheckCircle2 className="h-3 w-3" /> {t('statusSucceeded', 'Succeeded')}
-                              </span>
-                            )}
-                            {isCanceled(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#fff7ed' : 'rgba(249, 115, 22, 0.15)',
-                                  borderColor: '#f97316',
-                                  color: isDayMode ? '#c2410c' : '#fb923c'
-                                }}
-                              >
-                                <Ban className="h-3 w-3" /> {t('statusCanceled', 'Cancelled')}
-                              </span>
-                            )}
-                            {isFailed(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs cursor-help"
-                                style={{
-                                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                                  borderColor: '#ef4444',
-                                  color: isDayMode ? '#b91c1c' : '#f87171'
-                                }}
-                                title={tx.failureReason || 'Declined by payment processor'}
-                              >
-                                <XCircle className="h-3 w-3" /> {t('statusFailed', 'Failed')}
-                              </span>
-                            )}
-                            {isRefunded(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
-                                  borderColor: '#f59e0b',
-                                  color: isDayMode ? '#b45309' : '#fbbf24'
-                                }}
-                              >
-                                <ArrowDownLeft className="h-3 w-3" /> {t('statusRefunded', 'Refunded')}
-                              </span>
-                            )}
-                            {isPending(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#f1f5f9' : '#1e293b',
-                                  borderColor: isDayMode ? '#cbd5e1' : '#334155',
-                                  color: isDayMode ? '#334155' : '#cbd5e1'
-                                }}
-                              >
-                                <RefreshCw className="h-3 w-3 animate-spin" /> {t('statusPending', 'Pending')}
-                              </span>
-                            )}
-                          </td>
 
-                          {/* RECURRING SLIDE BUTTON */}
-                          <td className="px-5 py-3.5 whitespace-nowrap">
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={isRecurringActive}
-                                disabled={isTxToggling || isTxRefunded}
-                                onClick={() => handleToggleRecurring(tx)}
-                                title={
-                                  isTxRefunded 
-                                    ? t('refundedNoRecurring', 'Plan is refunded/voided') 
-                                    : isRecurringActive 
-                                    ? t('clickTurnRecurringOff', 'Click to turn recurring OFF') 
-                                    : t('clickTurnRecurringOn', 'Click to turn recurring ON')
-                                }
-                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-xs disabled:opacity-40 disabled:cursor-not-allowed ${
-                                  isRecurringActive 
-                                    ? (isDayMode ? 'bg-emerald-600' : 'bg-[var(--color-emerald,#10b981)]') 
-                                    : (isDayMode ? 'bg-slate-300' : 'bg-slate-700')
-                                }`}
-                              >
-                                <span
-                                  aria-hidden="true"
-                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                                    isRecurringActive ? 'translate-x-4' : 'translate-x-0'
-                                  }`}
-                                />
-                              </button>
+                          {visibleColumns.customer && (
+                            <td className="px-5 py-3.5">
+                              <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.customerName || 'Customer'}</div>
+                              <div className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.customerEmail || ''}</div>
+                            </td>
+                          )}
 
-                              <span 
-                                className="text-[10px] font-black uppercase tracking-wider"
-                                style={{
-                                  color: isRecurringActive 
-                                    ? (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)') 
-                                    : (isDayMode ? '#64748b' : '#94a3b8')
-                                }}
-                              >
-                                {isRecurringActive 
-                                  ? (tx.recurringInterval === 'YEAR' ? t('annualRecurring', 'Annual') : t('monthlyRecurring', 'Monthly'))
-                                  : t('offLabel', 'OFF')}
-                              </span>
-                            </div>
-                          </td>
-                          
-                          <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                            {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '-'}
-                          </td>
-                          
-                          <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                            {tx.expiryDate ? (() => {
-                              const exp = new Date(tx.expiryDate);
-                              const now = new Date();
-                              const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                              const expMidnight = new Date(exp.getFullYear(), exp.getMonth(), exp.getDate());
-                              const diffDays = Math.ceil((expMidnight.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
+                          {visibleColumns.plan && (
+                            <td className="px-5 py-3.5 font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                              {tx.planName || tx.planSlug || 'Plan'}
+                            </td>
+                          )}
 
-                              let badgeStyle = isDayMode 
-                                ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
-                                : 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400';
-                              let badgeNotice = '';
+                          {visibleColumns.amount && (
+                            <td className="px-5 py-3.5 font-bold whitespace-nowrap" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                              {txSymbol}{parseAmount(tx.amount).toFixed(2)}{' '}
+                              <span className="text-[10px] font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.currency || config.currency}</span>
+                            </td>
+                          )}
 
-                              if (diffDays < 0) {
-                                badgeStyle = isDayMode
-                                  ? 'bg-red-50 border-red-300 text-red-800'
-                                  : 'bg-red-950/50 border-red-600/70 text-red-400';
-                                badgeNotice = t('expiredBadge', 'EXPIRED');
-                              } else if (diffDays <= 7) {
-                                badgeStyle = isDayMode
-                                  ? 'bg-orange-50 border-orange-300 text-orange-800'
-                                  : 'bg-orange-950/50 border-orange-500/70 text-orange-400';
-                              }
-
-                              return (
-                                <span
-                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold text-[11px] transition shadow-xs ${badgeStyle}`}
-                                  title={badgeNotice ? `${exp.toLocaleDateString()} (${badgeNotice})` : exp.toLocaleDateString()}
+                          {visibleColumns.status && (
+                            <td className="px-5 py-3.5 whitespace-nowrap">
+                              {isSucceeded(tx.status) && (
+                                <span 
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+                                    borderColor: 'var(--color-emerald, #10b981)',
+                                    color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                                  }}
+                                  title={tx.gatewayTransactionId ? `Gateway Ref: ${tx.gatewayTransactionId}` : 'Confirmed Payment'}
                                 >
-                                  <Calendar className="h-3 w-3 shrink-0" />
-                                  {exp.toLocaleDateString()}
-                                  {badgeNotice && (
-                                    <span className="text-[9px] font-extrabold uppercase px-1 py-0.2 rounded border border-current/30 leading-none">
-                                      {badgeNotice}
-                                    </span>
-                                  )}
+                                  <CheckCircle2 className="h-3 w-3" /> {t('statusSucceeded', 'Succeeded')}
                                 </span>
-                              );
-                            })() : (
-                              <span className="text-[11px] italic font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                                {t('lifetimeNone', 'Lifetime / None')}
-                              </span>
-                            )}
-                          </td>
+                              )}
+                              {isCanceled(tx.status) && (
+                                <span 
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#fff7ed' : 'rgba(249, 115, 22, 0.15)',
+                                    borderColor: '#f97316',
+                                    color: isDayMode ? '#c2410c' : '#fb923c'
+                                  }}
+                                >
+                                  <Ban className="h-3 w-3" /> {t('statusCanceled', 'Cancelled')}
+                                </span>
+                              )}
+                              {isFailed(tx.status) && (
+                                <span 
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs cursor-help"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
+                                    borderColor: '#ef4444',
+                                    color: isDayMode ? '#b91c1c' : '#f87171'
+                                  }}
+                                  title={tx.failureReason || 'Declined by payment processor'}
+                                >
+                                  <XCircle className="h-3 w-3" /> {t('statusFailed', 'Failed')}
+                                </span>
+                              )}
+                              {isRefunded(tx.status) && (
+                                <span 
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
+                                    borderColor: '#f59e0b',
+                                    color: isDayMode ? '#b45309' : '#fbbf24'
+                                  }}
+                                >
+                                  <ArrowDownLeft className="h-3 w-3" /> {t('statusRefunded', 'Refunded')}
+                                </span>
+                              )}
+                              {isPending(tx.status) && (
+                                <span 
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#f1f5f9' : '#1e293b',
+                                    borderColor: isDayMode ? '#cbd5e1' : '#334155',
+                                    color: isDayMode ? '#334155' : '#cbd5e1'
+                                  }}
+                                >
+                                  <RefreshCw className="h-3 w-3 animate-spin" /> {t('statusPending', 'Pending')}
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          
+                          {visibleColumns.date && (
+                            <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                              {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '-'}
+                            </td>
+                          )}
+                          
+                          {visibleColumns.expiryDate && (
+                            <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                              {tx.expiryDate ? (() => {
+                                const exp = new Date(tx.expiryDate);
+                                const now = new Date();
+                                const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                                const expMidnight = new Date(exp.getFullYear(), exp.getMonth(), exp.getDate());
+                                const diffDays = Math.ceil((expMidnight.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
 
-                          {/* ACTIONS */}
-                          <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1.5">
-                              {/* 0. CONFIRM PAYMENT FROM GATEWAY BUTTON (FOR PENDING / UNCONFIRMED) */}
-                              {!isTxSucceeded && !isTxRefunded && (
+                                let badgeStyle = isDayMode 
+                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
+                                  : 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400';
+                                let badgeNotice = '';
+
+                                if (diffDays < 0) {
+                                  badgeStyle = isDayMode
+                                    ? 'bg-red-50 border-red-300 text-red-800'
+                                    : 'bg-red-950/50 border-red-600/70 text-red-400';
+                                  badgeNotice = t('expiredBadge', 'EXPIRED');
+                                } else if (diffDays <= 7) {
+                                  badgeStyle = isDayMode
+                                    ? 'bg-orange-50 border-orange-300 text-orange-800'
+                                    : 'bg-orange-950/50 border-orange-500/70 text-orange-400';
+                                }
+
+                                return (
+                                  <span
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold text-[11px] transition shadow-xs ${badgeStyle}`}
+                                    title={badgeNotice ? `${exp.toLocaleDateString()} (${badgeNotice})` : exp.toLocaleDateString()}
+                                  >
+                                    <Calendar className="h-3 w-3 shrink-0" />
+                                    {exp.toLocaleDateString()}
+                                    {badgeNotice && (
+                                      <span className="text-[9px] font-extrabold uppercase px-1 py-0.2 rounded border border-current/30 leading-none">
+                                        {badgeNotice}
+                                      </span>
+                                    )}
+                                  </span>
+                                );
+                              })() : (
+                                <span className="text-[11px] italic font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                                  {t('lifetimeNone', 'Lifetime / None')}
+                                </span>
+                              )}
+                            </td>
+                          )}
+
+                          {visibleColumns.actions && (
+                            <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {/* CONFIRM PAYMENT FROM GATEWAY BUTTON */}
+                                {!isTxSucceeded && !isTxRefunded && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenConfirmModal(tx)}
+                                    className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer text-emerald-600 hover:text-emerald-700 hover:border-emerald-500"
+                                    style={{
+                                      backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
+                                      borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.35)',
+                                    }}
+                                    title={t('confirmPaymentTooltip', 'Confirm payment amount from gateway to mark Succeeded')}
+                                  >
+                                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                                  </button>
+                                )}
+
+                                {/* EDIT BUTTON */}
                                 <button
                                   type="button"
-                                  onClick={() => handleOpenConfirmModal(tx)}
-                                  className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer text-emerald-600 hover:text-emerald-700 hover:border-emerald-500"
+                                  disabled={isTxRefunded}
+                                  onClick={() => handleOpenEditModal(tx)}
+                                  className={`p-1.5 rounded-lg border transition shadow-xs ${
+                                    isTxRefunded
+                                      ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                      : 'cursor-pointer'
+                                  }`}
                                   style={{
-                                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
-                                    borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.35)',
+                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                                    color: isDayMode ? '#0f172a' : '#cbd5e1'
                                   }}
-                                  title={t('confirmPaymentTooltip', 'Confirm payment amount from gateway to mark Succeeded')}
+                                  title={isTxRefunded ? t('cannotModifyRefundedTooltip', 'Cannot modify refunded payment') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
                                 >
-                                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                                  <Pencil 
+                                    className="h-3.5 w-3.5" 
+                                    style={{ color: isTxRefunded ? (isDayMode ? '#94a3b8' : '#64748b') : 'var(--color-primary, #E05638)' }} 
+                                  />
                                 </button>
-                              )}
 
-                              {/* 1. EDIT BUTTON */}
-                              <button
-                                type="button"
-                                disabled={isTxRefunded}
-                                onClick={() => handleOpenEditModal(tx)}
-                                className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxRefunded
-                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                    : 'cursor-pointer'
-                                }`}
-                                style={{
-                                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                  color: isDayMode ? '#0f172a' : '#cbd5e1'
-                                }}
-                                title={isTxRefunded ? t('cannotModifyRefundedTooltip', 'Cannot modify refunded payment') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
-                              >
-                                <Pencil 
-                                  className="h-3.5 w-3.5" 
-                                  style={{ color: isTxRefunded ? (isDayMode ? '#94a3b8' : '#64748b') : 'var(--color-primary, #E05638)' }} 
-                                />
-                              </button>
-
-                              {/* 2. GATEWAY REFUND BUTTON */}
-                              <button
-                                type="button"
-                                disabled={isTxRefunded || isTxRefunding || isFailed(tx.status)}
-                                onClick={() => handleRefundTransaction(tx)}
-                                className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxRefunded || isFailed(tx.status)
-                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                    : 'text-amber-600 hover:text-amber-700 cursor-pointer hover:border-amber-400'
-                                }`}
-                                style={{
-                                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                                }}
-                                title={
-                                  isTxRefunded
-                                    ? t('alreadyRefundedTooltip', 'Payment already refunded')
-                                    : t('refundPaymentTooltip', 'Trigger payment gateway refund')
+                                {/* GATEWAY REFUND BUTTON */}
+                                <button
+                                  type="button"
+                                  disabled={isTxRefunded || isTxRefunding || isFailed(tx.status)}
+                                  onClick={() => handleRefundTransaction(tx)}
+                                  className={`p-1.5 rounded-lg border transition shadow-xs ${
+                                    isTxRefunded || isFailed(tx.status)
+                                      ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                      : 'text-amber-600 hover:text-amber-700 cursor-pointer hover:border-amber-400'
+                                  }`}
+                                  style={{
+                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                                  }}
+                                  title={
+                                    isTxRefunded
+                                      ? t('alreadyRefundedTooltip', 'Payment already refunded')
+                                      : t('refundPaymentTooltip', 'Trigger payment gateway refund')
                                 }
-                              >
-                                {isTxRefunding ? (
-                                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-500" />
-                                ) : (
-                                  <RotateCcw className="h-3.5 w-3.5" />
-                                )}
-                              </button>
+                                >
+                                  {isTxRefunding ? (
+                                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-500" />
+                                  ) : (
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
 
-                              {/* 3. CANCEL RENEWAL BUTTON */}
-                              <button
-                                type="button"
-                                disabled={isTxCanceled || isTxRefunded}
-                                onClick={() => handleCancelPlan(tx)}
-                                className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxCanceled || isTxRefunded
+                                {/* CANCEL RENEWAL BUTTON */}
+                                <button
+                                  type="button"
+                                  disabled={isTxCanceled || isTxRefunded}
+                                  onClick={() => handleCancelPlan(tx)}
+                                  className={`p-1.5 rounded-lg border transition shadow-xs ${
+                                    isTxCanceled || isTxRefunded
                                     ? 'opacity-30 cursor-not-allowed text-slate-400'
                                     : 'text-orange-500 hover:text-orange-600 cursor-pointer'
-                                }`}
-                                style={{
-                                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                                }}
-                                title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan renewal & keep active until expiry')}
-                              >
-                                <XCircle className="h-3.5 w-3.5" />
-                              </button>
+                                  }`}
+                                  style={{
+                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                                  }}
+                                  title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan renewal & keep active until expiry')}
+                                >
+                                  <XCircle className="h-3.5 w-3.5" />
+                                </button>
 
-                              {/* 4. DELETE BUTTON */}
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteTransaction(tx.id, tx.customerName)}
-                                className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                  color: isDayMode ? '#64748b' : '#94a3b8'
-                                }}
-                                title={t('deletePaymentTooltip', 'Delete payment record permanently')}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </td>
+                                {/* DELETE BUTTON */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteTransaction(tx.id, tx.customerName)}
+                                  className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                                    color: isDayMode ? '#64748b' : '#94a3b8'
+                                  }}
+                                  title={t('deletePaymentTooltip', 'Delete payment record permanently')}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       );
                     })
@@ -3116,7 +3179,7 @@ export default function AdminPaymentPage() {
         </form>
       )}
 
-      {/* 0. CONFIRM PAYMENT FROM GATEWAY MODAL */}
+      {/* CONFIRM PAYMENT FROM GATEWAY MODAL */}
       {confirmingTx && (
         <div 
           onClick={() => !isSubmittingConfirm && setConfirmingTx(null)}
@@ -3308,7 +3371,7 @@ export default function AdminPaymentPage() {
         </div>
       )}
 
-      {/* 1. ADD PAYMENT MODAL */}
+      {/* ADD PAYMENT MODAL */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
@@ -3452,7 +3515,7 @@ export default function AdminPaymentPage() {
                 </p>
               </div>
 
-              {/* RECURRING SLIDE BUTTON CONTROLLER */}
+              {/* RECURRING SLIDE BUTTON CONTROLLER IN ADD MODAL */}
               <div 
                 className="p-3.5 rounded-2xl border flex items-center justify-between transition-colors shadow-xs"
                 style={{
@@ -3705,7 +3768,7 @@ export default function AdminPaymentPage() {
                 >
                   {planTransitionInfo?.isDuplicate ? (
                     <>
-                      <Ban className="h-4 w-4" /> {t('duplicatePlanBtn', 'Duplicate Plan ExExists')}
+                      <Ban className="h-4 w-4" /> {t('duplicatePlanBtn', 'Duplicate Plan Exists')}
                     </>
                   ) : planTransitionInfo?.isTransition ? (
                     <>
@@ -3723,7 +3786,7 @@ export default function AdminPaymentPage() {
         </div>
       )}
 
-      {/* 2. MODIFY (EDIT) PAYMENT MODAL */}
+      {/* MODIFY (EDIT) PAYMENT MODAL */}
       {editingTx && (
         <div 
           onClick={() => setEditingTx(null)}

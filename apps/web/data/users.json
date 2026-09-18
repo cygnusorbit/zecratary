@@ -15,7 +15,8 @@
     "password": null,
     "role": "user",
     "subscriptionPlan": "taster",
-    "createdAt": "2026-09-14T13:11:39.978Z"
+    "createdAt": "2026-09-14T13:11:39.978Z",
+    "planExpiryDate": null
   },
   {
     "id": "usr_1789391472150_gjur",

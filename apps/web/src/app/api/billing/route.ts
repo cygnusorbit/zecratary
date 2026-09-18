@@ -8,6 +8,9 @@ async function ensureBillingSchema() {
     await query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method VARCHAR(64) DEFAULT 'stripe';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(128) PRIMARY KEY,
         customer_name VARCHAR(255),
@@ -27,7 +30,11 @@ async function ensureBillingSchema() {
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE INDEX IF NOT EXISTS idx_payment_transactions_email ON payment_transactions(customer_email);
+
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT TRUE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(32) DEFAULT 'MONTH';
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
     `);
   } catch (_) {}
 }
@@ -225,19 +232,44 @@ export async function POST(req: NextRequest) {
     }
 
     // ACTION 2: Cancel Subscription Renewal
-    if (action === 'cancel_subscription') {
-      await query(`
-        UPDATE payment_transactions
-        SET auto_renew = FALSE,
-            is_recurring = FALSE,
-            status = 'canceled',
-            updated_at = NOW()
-        WHERE LOWER(TRIM(customer_email)) = $1 AND LOWER(status) IN ('succeeded', 'successful', 'paid', 'active')
-      `, [email]);
+        if (action === 'cancel_subscription') {
+      const email = (body.email || '').toLowerCase().trim();
+      const txId = body.transactionId;
+
+      if (txId) {
+        await query(`
+          UPDATE payment_transactions
+          SET is_recurring = FALSE,
+              auto_renew = FALSE,
+              status = 'canceled',
+              updated_at = NOW()
+          WHERE id = $1
+        `, [txId]);
+      } else if (email) {
+        await query(`
+          UPDATE payment_transactions
+          SET is_recurring = FALSE,
+              auto_renew = FALSE,
+              status = 'canceled',
+              updated_at = NOW()
+          WHERE LOWER(customer_email) = LOWER($1)
+            AND (status IN ('succeeded', 'paid', 'successful', 'canceled'))
+            AND (expiry_date IS NULL OR expiry_date > NOW())
+        `, [email]);
+      }
+
+      if (email) {
+        await query(`
+          UPDATE users
+          SET auto_renew = FALSE,
+              updated_at = NOW()
+          WHERE LOWER(email) = LOWER($1)
+        `, [email]).catch(() => {});
+      }
 
       return NextResponse.json({
         success: true,
-        message: 'Subscription renewal cancelled. Access remains active until the end of your billing cycle.'
+        message: 'Auto-renewal has been cancelled. Your active paid benefits remain accessible until the end of your billing cycle.'
       });
     }
 

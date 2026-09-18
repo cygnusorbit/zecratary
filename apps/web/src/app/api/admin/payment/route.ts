@@ -1,3 +1,14 @@
+async function ensurePaymentSchema() {
+  try {
+    await query(`
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT TRUE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(32) DEFAULT 'MONTH';
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+    `);
+  } catch (_) {}
+}
+
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -146,6 +157,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export async function GET() {
+  await ensurePaymentSchema();
   const pool = await getDbClient();
   if (pool) {
     try {
@@ -186,6 +198,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  await ensurePaymentSchema();
   try {
     const body = await req.json();
     const pool = await getDbClient();

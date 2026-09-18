@@ -229,18 +229,30 @@ export default function UserBillingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'cancel_subscription',
-          email: user?.email
+          email: user?.email,
+          transactionId: activeTransaction?.id
         })
       });
       const data = await res.json();
       if (data.success) {
-        setFeedback({ type: 'success', msg: data.message || 'Auto-renewal cancelled successfully.' });
-        fetchData();
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('renewalCancelledSuccess', 'Auto-renewal cancelled successfully.') 
+        });
+
+        // Broadcast cross-component synchronization events
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+
+        await fetchData();
       } else {
-        throw new Error(data.error);
+        throw new Error(data.error || 'Failed to cancel subscription');
       }
     } catch (err: any) {
-      setFeedback({ type: 'error', msg: err.message || 'Failed to cancel subscription' });
+      setFeedback({ type: 'error', msg: err.message || t('cancelSubscriptionFailed', 'Failed to cancel subscription') });
     } finally {
       setProcessing(false);
     }
