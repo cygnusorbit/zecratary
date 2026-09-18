@@ -1,281 +1,205 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-function getStorePaths(): string[] {
-  const cwd = process.cwd();
-  return [
-    path.join(cwd, 'apps/web/data/admin_settings.json'),
-    path.join(cwd, 'data/admin_settings.json')
-  ];
-}
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  'Pragma': 'no-cache',
+  'Expires': '0',
+};
 
-let cachedPool: any = null;
-
-async function getPostgresPool() {
-  if (cachedPool) return cachedPool;
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
-  if (!connStr) return null;
+async function ensureAdminSettingsSchema() {
   try {
-    const { Pool } = await import('pg');
-    const requiresSsl = connStr.includes('sslmode=require') || 
-                        connStr.includes('neon.tech') || 
-                        connStr.includes('supabase.co') || 
-                        process.env.NODE_ENV === 'production';
-    cachedPool = new Pool({
-      connectionString: connStr,
-      ssl: requiresSsl ? { rejectUnauthorized: false } : false
-    });
-    return cachedPool;
-  } catch (err) {
-    console.error('[PostgreSQL] Failed to initialize connection pool:', err);
-    return null;
-  }
-}
-
-async function initPostgresTables(pool: any) {
-  if (!pool) return;
-  try {
-    await pool.query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS admin_settings (
-        id SERIAL PRIMARY KEY,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        id VARCHAR(64) PRIMARY KEY DEFAULT 'primary_settings',
+        site_name VARCHAR(255) DEFAULT 'Zecratary',
+        titlebar_emoji VARCHAR(32) DEFAULT '🍳',
+        titlebar_image TEXT DEFAULT '',
+        favicon_emoji VARCHAR(32) DEFAULT '🍳',
+        favicon_image TEXT DEFAULT '',
+        currency VARCHAR(10) DEFAULT 'USD',
+        ai_provider VARCHAR(64) DEFAULT 'gemini',
+        ai_model VARCHAR(128) DEFAULT 'gemini-3.5-flash-lite',
+        theme_colors JSONB DEFAULT '{}'::jsonb,
+        font_family VARCHAR(255) DEFAULT 'Inter',
+        font_size VARCHAR(50) DEFAULT '16px',
+        letter_spacing VARCHAR(50) DEFAULT '0em',
+        payment_settings JSONB DEFAULT '{}'::jsonb,
+        social_login JSONB DEFAULT '{}'::jsonb,
+        chef_ai_settings JSONB DEFAULT '{}'::jsonb,
+        recipe_types JSONB DEFAULT '[]'::jsonb,
+        ingredient_categories JSONB DEFAULT '[]'::jsonb,
+        supported_languages JSONB DEFAULT '[]'::jsonb,
+        subscription_plans JSONB DEFAULT '[]'::jsonb,
+        value JSONB DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(100);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name VARCHAR(255);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_emoji VARCHAR(50);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_image TEXT;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_emoji VARCHAR(50);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_image TEXT;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS recipe_types JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ingredient_categories JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS social_login JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS subscription_plans JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-
-      CREATE TABLE IF NOT EXISTS user_theme (
-        user_id VARCHAR(100) PRIMARY KEY,
-        theme_colors JSONB NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-      ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);
-      ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS theme_colors JSONB;
-      ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-    `);
-  } catch (err) {
-    console.error('[PostgreSQL] Table alteration error:', err);
-  }
-}
-
-async function readFromPostgres(pool: any): Promise<Record<string, any> | null> {
-  if (!pool) return null;
-  try {
-    await initPostgresTables(pool);
-
-    // Query with SELECT * so undefined column errors can never occur
-    const res = await pool.query(`
-      SELECT * FROM admin_settings 
-      ORDER BY CASE WHEN key = 'current' THEN 0 ELSE 1 END, updated_at DESC NULLS LAST 
-      LIMIT 1;
     `);
 
-    if (res.rows && res.rows.length > 0) {
-      const row = res.rows[0];
-      let settings: Record<string, any> = {};
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_image TEXT DEFAULT '';`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_image TEXT DEFAULT '';`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB DEFAULT '{}'::jsonb;`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS font_family VARCHAR(255) DEFAULT 'Inter';`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS font_size VARCHAR(50) DEFAULT '16px';`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS letter_spacing VARCHAR(50) DEFAULT '0em';`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS subscription_plans JSONB DEFAULT '[]'::jsonb;`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB DEFAULT '{}'::jsonb;`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(100);`);
 
-      if (row.value) {
-        settings = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
-      } else if (row.settings) {
-        settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings;
-      } else if (row.data) {
-        settings = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-      }
-
-      // Merge discrete columns if value JSON was partial or empty
-      if (row.theme_colors && !settings.themeColors) {
-        settings.themeColors = typeof row.theme_colors === 'string' ? JSON.parse(row.theme_colors) : row.theme_colors;
-      }
-      if (row.themeColors && !settings.themeColors) {
-        settings.themeColors = typeof row.themeColors === 'string' ? JSON.parse(row.themeColors) : row.themeColors;
-      }
-      if (row.site_name && !settings.siteName) settings.siteName = row.site_name;
-      if (row.siteName && !settings.siteName) settings.siteName = row.siteName;
-      if (row.titlebar_emoji && !settings.titlebarEmoji) settings.titlebarEmoji = row.titlebar_emoji;
-      if (row.titlebar_image && !settings.titlebarImage) settings.titlebarImage = row.titlebar_image;
-      if (row.favicon_emoji && !settings.faviconEmoji) settings.faviconEmoji = row.favicon_emoji;
-      if (row.favicon_image && !settings.faviconImage) settings.faviconImage = row.favicon_image;
-      if (row.recipe_types && !settings.recipeTypes) settings.recipeTypes = row.recipe_types;
-      if (row.ingredient_categories && !settings.ingredientCategories) settings.ingredientCategories = row.ingredient_categories;
-      if (row.supported_languages && !settings.supportedLanguages) settings.supportedLanguages = row.supported_languages;
-      if (row.social_login && !settings.socialLogin) settings.socialLogin = row.social_login;
-      if (row.subscription_plans && !settings.subscriptionPlans) settings.subscriptionPlans = row.subscription_plans;
-
-      if (Object.keys(settings).length > 0) {
-        return settings;
-      }
+    const existing = await query(`SELECT id FROM admin_settings LIMIT 1;`);
+    if (existing.length === 0) {
+      await query(`
+        INSERT INTO admin_settings (id, site_name, titlebar_emoji, favicon_emoji, font_family, font_size, letter_spacing)
+        VALUES ('primary_settings', 'Zecratary', '🍳', '🍳', 'Inter', '16px', '0em')
+        ON CONFLICT DO NOTHING;
+      `);
     }
   } catch (err) {
-    console.error('[PostgreSQL] Read error:', err);
+    console.error('[AdminSettings API] Error ensuring schema:', err);
   }
-  return null;
-}
-
-async function saveToPostgres(pool: any, data: Record<string, any>): Promise<boolean> {
-  if (!pool) return false;
-  try {
-    await initPostgresTables(pool);
-    const jsonStr = JSON.stringify(data);
-    const themeJson = data.themeColors ? JSON.stringify(data.themeColors) : null;
-    const siteName = data.siteName || null;
-    const titlebarEmoji = data.titlebarEmoji || null;
-    const titlebarImage = data.titlebarImage || null;
-    const faviconEmoji = data.faviconEmoji || null;
-    const faviconImage = data.faviconImage || null;
-
-    const existing = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
-
-    if (existing.rows && existing.rows.length > 0) {
-      const firstRow = existing.rows[0];
-      const matchKey = firstRow.key !== undefined && firstRow.key !== null;
-      const whereCond = matchKey ? "key = COALESCE(key, 'current')" : `id = ${firstRow.id || 1}`;
-
-      await pool.query(
-        `UPDATE admin_settings 
-         SET value = $1::jsonb,
-             key = COALESCE(key, 'current'),
-             theme_colors = COALESCE($2::jsonb, theme_colors),
-             site_name = COALESCE($3, site_name),
-             titlebar_emoji = COALESCE($4, titlebar_emoji),
-             titlebar_image = COALESCE($5, titlebar_image),
-             favicon_emoji = COALESCE($6, favicon_emoji),
-             favicon_image = COALESCE($7, favicon_image),
-             updated_at = NOW()
-         WHERE ${whereCond};`,
-        [jsonStr, themeJson, siteName, titlebarEmoji, titlebarImage, faviconEmoji, faviconImage]
-      );
-    } else {
-      await pool.query(
-        `INSERT INTO admin_settings (key, value, theme_colors, site_name, titlebar_emoji, titlebar_image, favicon_emoji, favicon_image, updated_at)
-         VALUES ('current', $1::jsonb, $2::jsonb, $3, $4, $5, $6, $7, NOW());`,
-        [jsonStr, themeJson, siteName, titlebarEmoji, titlebarImage, faviconEmoji, faviconImage]
-      );
-    }
-
-    if (data.themeColors) {
-      const checkUserTheme = await pool.query("SELECT user_id FROM user_theme WHERE user_id = 'default' LIMIT 1;");
-      if (checkUserTheme.rows && checkUserTheme.rows.length > 0) {
-        await pool.query(
-          "UPDATE user_theme SET theme_colors = $1::jsonb, updated_at = NOW() WHERE user_id = 'default';",
-          [themeJson]
-        );
-      } else {
-        await pool.query(
-          "INSERT INTO user_theme (user_id, theme_colors, updated_at) VALUES ('default', $1::jsonb, NOW());",
-          [themeJson]
-        );
-      }
-    }
-    return true;
-  } catch (err) {
-    console.error('[PostgreSQL] Save error:', err);
-    return false;
-  }
-}
-
-function readServerSettings(): Record<string, any> {
-  const filePaths = getStorePaths();
-  for (const fp of filePaths) {
-    if (fs.existsSync(fp)) {
-      try {
-        const raw = fs.readFileSync(fp, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') return parsed;
-      } catch (_) {}
-    }
-  }
-  return {};
-}
-
-function writeServerSettings(data: Record<string, any>): boolean {
-  const filePaths = getStorePaths();
-  let wrote = false;
-  const payload = {
-    ...data,
-    updatedAt: new Date().toISOString()
-  };
-  for (const fp of filePaths) {
-    try {
-      const dir = path.dirname(fp);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(fp, JSON.stringify(payload, null, 2), 'utf-8');
-      wrote = true;
-    } catch (_) {}
-  }
-  return wrote;
 }
 
 export async function GET() {
   try {
-    const pool = await getPostgresPool();
-    const pgData = await readFromPostgres(pool);
-    const diskData = readServerSettings();
-    const settings = { ...diskData, ...(pgData || {}) };
+    await ensureAdminSettingsSchema();
+    const rows = await query('SELECT * FROM admin_settings LIMIT 1');
+    const data = rows[0] || {};
+    const themeColors = data.theme_colors || {};
 
-    return NextResponse.json(
-      { success: true, settings, themeColors: settings.themeColors },
-      {
-        headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
-        }
-      }
-    );
+    const settings = {
+      siteName: data.site_name || 'Zecratary',
+      titlebarEmoji: data.titlebar_emoji || '🍳',
+      titlebarImage: data.titlebar_image || '',
+      faviconEmoji: data.favicon_emoji || '🍳',
+      faviconImage: data.favicon_image || '',
+      themeColors: themeColors,
+      theme_colors: themeColors,
+      fontFamily: data.font_family || 'Inter',
+      font_family: data.font_family || 'Inter',
+      fontSize: data.font_size || '16px',
+      font_size: data.font_size || '16px',
+      fontLetterSpacing: data.letter_spacing || '0em',
+      letter_spacing: data.letter_spacing || '0em',
+      currency: data.currency || 'USD',
+      aiProvider: data.ai_provider || 'gemini',
+      aiModel: data.ai_model || 'gemini-3.5-flash-lite',
+      chefAiSettings: data.chef_ai_settings || {},
+      recipeTypes: data.recipe_types || [],
+      ingredientCategories: data.ingredient_categories || [],
+      supportedLanguages: data.supported_languages || [],
+      subscriptionPlans: data.subscription_plans || [],
+      updatedAt: data.updated_at
+    };
+
+    return NextResponse.json({
+      success: true,
+      settings,
+      ...settings
+    }, { headers: NO_CACHE_HEADERS });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Failed to read settings' }, { status: 500 });
+    console.error('[AdminSettings API GET] Error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureAdminSettingsSchema();
+
     const body = await req.json();
-    const pool = await getPostgresPool();
-    const pgData = await readFromPostgres(pool);
-    const current = { ...readServerSettings(), ...(pgData || {}) };
+    const existing = await query('SELECT * FROM admin_settings LIMIT 1');
+    const targetId = existing.length > 0 && existing[0].id !== undefined ? existing[0].id : 'primary_settings';
+    const current = existing[0] || {};
 
-    const merged = {
-      ...current,
-      ...body,
-      themeColors: {
-        ...(current.themeColors || {}),
-        ...(body.themeColors || {})
-      },
-      socialLogin: {
-        ...(current.socialLogin || {}),
-        ...(body.socialLogin || {})
-      },
-      subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || []
-    };
+    const siteName = body.siteName !== undefined ? body.siteName : (current.site_name || 'Zecratary');
+    const titlebarEmoji = body.titlebarEmoji !== undefined ? body.titlebarEmoji : (current.titlebar_emoji || '🍳');
+    const titlebarImage = body.titlebarImage !== undefined ? body.titlebarImage : (current.titlebar_image || '');
+    const faviconEmoji = body.faviconEmoji !== undefined ? body.faviconEmoji : (current.favicon_emoji || '🍳');
+    const faviconImage = body.faviconImage !== undefined ? body.faviconImage : (current.favicon_image || '');
+    
+    const themeColors = body.themeColors || body.theme_colors || current.theme_colors || {};
+    const fontFamily = body.fontFamily || body.font_family || current.font_family || 'Inter';
+    const fontSize = body.fontSize || body.font_size || current.font_size || '16px';
+    const letterSpacing = body.fontLetterSpacing || body.letter_spacing || current.letter_spacing || '0em';
 
-    const pgSaved = await saveToPostgres(pool, merged);
-    const diskSaved = writeServerSettings(merged);
+    const updateRes = await query(`
+      UPDATE admin_settings SET
+        site_name = $1,
+        titlebar_emoji = $2,
+        titlebar_image = $3,
+        favicon_emoji = $4,
+        favicon_image = $5,
+        theme_colors = $6::jsonb,
+        font_family = $7,
+        font_size = $8,
+        letter_spacing = $9,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $10
+      RETURNING *;
+    `, [
+      siteName,
+      titlebarEmoji,
+      titlebarImage,
+      faviconEmoji,
+      faviconImage,
+      JSON.stringify(themeColors),
+      fontFamily,
+      fontSize,
+      letterSpacing,
+      targetId
+    ]);
 
-    if (!pgSaved && !diskSaved) {
-      return NextResponse.json({ error: 'Failed to write settings to storage' }, { status: 500 });
+    let updatedRow = updateRes[0];
+
+    if (!updatedRow) {
+      const insertRes = await query(`
+        INSERT INTO admin_settings (
+          id, site_name, titlebar_emoji, titlebar_image, favicon_emoji, favicon_image,
+          theme_colors, font_family, font_size, letter_spacing, updated_at
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, CURRENT_TIMESTAMP
+        )
+        RETURNING *;
+      `, [
+        targetId,
+        siteName,
+        titlebarEmoji,
+        titlebarImage,
+        faviconEmoji,
+        faviconImage,
+        JSON.stringify(themeColors),
+        fontFamily,
+        fontSize,
+        letterSpacing
+      ]);
+      updatedRow = insertRes[0] || {};
     }
 
-    return NextResponse.json(
-      { success: true, settings: merged, themeColors: merged.themeColors },
-      {
-        headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
-        }
-      }
-    );
+    const responsePayload = {
+      siteName: updatedRow.site_name,
+      titlebarEmoji: updatedRow.titlebar_emoji,
+      titlebarImage: updatedRow.titlebar_image,
+      faviconEmoji: updatedRow.favicon_emoji,
+      faviconImage: updatedRow.favicon_image,
+      themeColors: updatedRow.theme_colors,
+      fontFamily: updatedRow.font_family,
+      fontSize: updatedRow.font_size,
+      fontLetterSpacing: updatedRow.letter_spacing,
+      updatedAt: updatedRow.updated_at
+    };
+
+    return NextResponse.json({
+      success: true,
+      message: 'Settings saved successfully to PostgreSQL',
+      settings: responsePayload,
+      data: responsePayload
+    }, { headers: NO_CACHE_HEADERS });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Failed to persist settings' }, { status: 500 });
+    console.error('[AdminSettings API POST] Error saving settings:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }

@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&family=Roboto:wght@400;500;700;900&display=swap');
 
 :root {
   --color-primary: #E05638;
@@ -168,4 +169,16 @@ body:has(#register-page-root) [class*="h-screen"] {
 /* Dynamic Sidebar Navigation Icon Token */
 :root {
   --color-sidebar-icon: #10b981;
+}
+
+:root {
+  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family-base: var(--font-family, system-ui, -apple-system, sans-serif);
+  --font-size-base: 16px;
+  --font-letter-spacing: 0em;
+}
+
+html, body {
+  font-family: var(--font-family-base) !important;
+  letter-spacing: var(--font-letter-spacing, normal);
 }

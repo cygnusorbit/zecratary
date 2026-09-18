@@ -10,20 +10,9 @@ import {
   CheckCircle2, 
   RefreshCw, 
   Palette,
-  Image as ImageIcon, 
-  Smile, 
-  Globe, 
-  Cpu, 
-  CreditCard, 
-  Wallet, 
-  Users, 
-  Utensils, 
-  Tag, 
-  Key,
-  Languages,
-  LayoutGrid,
-  BookOpen,
-  AlertCircle
+  AlertCircle,
+  Utensils,
+  Type
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { 
@@ -39,7 +28,9 @@ import {
   applyThemeToDocument, 
   saveThemeColors, 
   setMemoryThemeColors,
-  getMemoryThemeColors
+  getMemoryThemeColors,
+  applyGlobalFont,
+  AVAILABLE_FONTS
 } from '@/lib/themeConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -117,6 +108,27 @@ const PRESET_PALETTES = [
   },
 ];
 
+const FONT_OPTIONS = [
+  { id: 'Inter', name: 'Inter', family: "'Inter', system-ui, -apple-system, sans-serif", description: 'Clean, modern, optimized for screens' },
+  { id: 'Plus Jakarta Sans', name: 'Plus Jakarta Sans', family: "'Plus Jakarta Sans', system-ui, sans-serif", description: 'Geometric, stylish, high legibility' },
+  { id: 'Outfit', name: 'Outfit', family: "'Outfit', system-ui, sans-serif", description: 'Contemporary, smooth, elegant curves' },
+  { id: 'Poppins', name: 'Poppins', family: "'Poppins', system-ui, sans-serif", description: 'Friendly, geometric, distinctive accents' },
+  { id: 'Roboto', name: 'Roboto', family: "'Roboto', system-ui, sans-serif", description: 'Neutral, neo-grotesque, highly versatile' },
+  { id: 'System Default', name: 'System Default', family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", description: 'Native operating system typography' },
+];
+
+const FONT_SIZES = [
+  { id: '14px', label: 'Compact', scaleDesc: 'High information density' },
+  { id: '16px', label: 'Standard', scaleDesc: 'Default balanced readability' },
+  { id: '18px', label: 'Comfortable', scaleDesc: 'Relaxed, enhanced legibility' },
+];
+
+const LETTER_SPACINGS = [
+  { id: '-0.025em', label: 'Tight' },
+  { id: '0em', label: 'Normal' },
+  { id: '0.025em', label: 'Wide' },
+];
+
 export default function AdminSettingsPage() {
   const langContext = useTranslation();
   const translate = langContext?.t;
@@ -128,7 +140,7 @@ export default function AdminSettingsPage() {
     return fallback;
   }, [translate]);
 
-  const [activeTab, setActiveTab] = useState<'branding' | 'theme'>('branding');
+  const [activeTab, setActiveTab] = useState<'branding' | 'theme' | 'font'>('branding');
   const [user, setUser] = useState<User | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [saved, setSaved] = useState<boolean>(false);
@@ -154,6 +166,11 @@ export default function AdminSettingsPage() {
   const [cardBackgroundColor, setCardBackgroundColor] = useState<string>('#0b0f17');
   const [cardBorderColor, setCardBorderColor] = useState<string>('#1e293b');
   const [secondaryTextColor, setSecondaryTextColor] = useState<string>('#94a3b8');
+
+  // Font Setting State
+  const [fontFamily, setFontFamily] = useState<string>('Inter');
+  const [fontSize, setFontSize] = useState<string>('16px');
+  const [fontLetterSpacing, setFontLetterSpacing] = useState<string>('0em');
 
   const titlebarFileRef = useRef<HTMLInputElement>(null);
   const faviconFileRef = useRef<HTMLInputElement>(null);
@@ -209,6 +226,10 @@ export default function AdminSettingsPage() {
     });
   };
 
+  const applyFontLocally = (fontName: string, sz: string = fontSize, spacing: string = fontLetterSpacing) => {
+    applyGlobalFont(fontName, sz, spacing);
+  };
+
   const loadSettingsFromServer = useCallback(async () => {
     if (isSavingRef.current) return;
     setIsLoading(true);
@@ -243,7 +264,16 @@ export default function AdminSettingsPage() {
         setCardBorderColor(border);
         setSecondaryTextColor(textSec);
 
+        const ff = payload.fontFamily || payload.font_family || 'Inter';
+        const fs = payload.fontSize || payload.font_size || '16px';
+        const fls = payload.fontLetterSpacing || payload.letter_spacing || '0em';
+
+        setFontFamily(ff);
+        setFontSize(fs);
+        setFontLetterSpacing(fls);
+
         applyColorsLocally(p, ph, ac, sbi, bg, card, border, textSec);
+        applyFontLocally(ff, fs, fls);
       }
     } catch (err) {
       console.error('[AdminSettingsPage] Error loading settings from server:', err);
@@ -347,6 +377,21 @@ export default function AdminSettingsPage() {
     );
   };
 
+  const handleFontSelect = (selectedId: string) => {
+    setFontFamily(selectedId);
+    applyFontLocally(selectedId, fontSize, fontLetterSpacing);
+  };
+
+  const handleFontSizeSelect = (selectedSize: string) => {
+    setFontSize(selectedSize);
+    applyFontLocally(fontFamily, selectedSize, fontLetterSpacing);
+  };
+
+  const handleLetterSpacingSelect = (selectedSpacing: string) => {
+    setFontLetterSpacing(selectedSpacing);
+    applyFontLocally(fontFamily, fontSize, selectedSpacing);
+  };
+
   const handleSave = async (e?: React.SyntheticEvent) => {
     if (e && typeof e.preventDefault === 'function') {
       e.preventDefault();
@@ -399,8 +444,15 @@ export default function AdminSettingsPage() {
         cardBorderColor,
         secondaryTextColor
       );
+      applyFontLocally(fontFamily, fontSize, fontLetterSpacing);
 
       await saveThemeColors(themeColors);
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_font_family', fontFamily);
+        localStorage.setItem('zecratary_font_size', fontSize);
+        localStorage.setItem('zecratary_font_spacing', fontLetterSpacing);
+      }
 
       const success = await persistServerAdminSettings({
         siteName: updatedBranding.siteName,
@@ -408,7 +460,13 @@ export default function AdminSettingsPage() {
         titlebarImage: updatedBranding.titlebarImage || '',
         faviconEmoji: updatedBranding.faviconEmoji,
         faviconImage: updatedBranding.faviconImage || '',
-        themeColors
+        themeColors,
+        fontFamily,
+        font_family: fontFamily,
+        fontSize,
+        font_size: fontSize,
+        fontLetterSpacing,
+        letter_spacing: fontLetterSpacing
       });
 
       if (!success) {
@@ -418,6 +476,7 @@ export default function AdminSettingsPage() {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: updatedBranding }));
         window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
+        window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily, fontSize, fontLetterSpacing } }));
         window.dispatchEvent(new Event('zecratary_theme_changed'));
       }
 
@@ -446,7 +505,7 @@ export default function AdminSettingsPage() {
   };
 
   const handleResetDefaults = async () => {
-    if (!confirm(t('admin.confirmReset', 'Reset branding and theme settings to defaults?'))) return;
+    if (!confirm(t('admin.confirmReset', 'Reset branding, theme, and font settings to defaults?'))) return;
     setIsSaving(true);
     isSavingRef.current = true;
     setSaveError('');
@@ -462,6 +521,9 @@ export default function AdminSettingsPage() {
       const defaultCard = '#0b0f17';
       const defaultBorder = '#1e293b';
       const defaultTextSec = '#94a3b8';
+      const defaultFont = 'Inter';
+      const defaultSize = '16px';
+      const defaultSpacing = '0em';
 
       setSiteName(defaultName);
       setTitlebarEmoji(defaultIcon);
@@ -477,6 +539,10 @@ export default function AdminSettingsPage() {
       setCardBackgroundColor(defaultCard);
       setCardBorderColor(defaultBorder);
       setSecondaryTextColor(defaultTextSec);
+
+      setFontFamily(defaultFont);
+      setFontSize(defaultSize);
+      setFontLetterSpacing(defaultSpacing);
 
       const defaultBranding = {
         siteName: defaultName,
@@ -515,19 +581,33 @@ export default function AdminSettingsPage() {
         defaultBorder,
         defaultTextSec
       );
+      applyFontLocally(defaultFont, defaultSize, defaultSpacing);
 
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
       updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
 
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_font_family', defaultFont);
+        localStorage.setItem('zecratary_font_size', defaultSize);
+        localStorage.setItem('zecratary_font_spacing', defaultSpacing);
+      }
+
       await saveThemeColors(defaultColors);
       await persistServerAdminSettings({
         ...defaultBranding,
-        themeColors: defaultColors
+        themeColors: defaultColors,
+        fontFamily: defaultFont,
+        font_family: defaultFont,
+        fontSize: defaultSize,
+        font_size: defaultSize,
+        fontLetterSpacing: defaultSpacing,
+        letter_spacing: defaultSpacing
       });
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
         window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
+        window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily: defaultFont, fontSize: defaultSize, fontLetterSpacing: defaultSpacing } }));
         window.dispatchEvent(new Event('zecratary_theme_changed'));
       }
 
@@ -564,7 +644,7 @@ export default function AdminSettingsPage() {
             </h1>
           </div>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('admin.siteIdentityDesc', 'Configure application name, comprehensive color themes, backgrounds, titlebar logo, and browser tab favicon.')}
+            {t('admin.siteIdentityDesc', 'Configure application name, comprehensive color themes, typography fonts, titlebar logo, and browser tab favicon.')}
           </p>
         </div>
 
@@ -615,7 +695,7 @@ export default function AdminSettingsPage() {
 
       {/* TABS NAVIGATION */}
       <div 
-        className="flex items-center gap-2 border-b pb-3" 
+        className="flex items-center gap-2 border-b pb-3 flex-wrap" 
         style={{ borderColor: 'var(--color-border)' }}
       >
         <button
@@ -657,13 +737,32 @@ export default function AdminSettingsPage() {
           <Palette className="h-4 w-4" />
           <span>{t('admin.tabTheme', 'Theme')}</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('font')}
+          className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer border shadow-xs"
+          style={{
+            backgroundColor: activeTab === 'font' 
+              ? 'var(--color-card)' 
+              : 'transparent',
+            borderColor: activeTab === 'font' 
+              ? 'var(--color-border)' 
+              : 'transparent',
+            color: activeTab === 'font' 
+              ? 'var(--color-primary)' 
+              : 'var(--color-text-secondary)'
+          }}
+        >
+          <Type className="h-4 w-4" />
+          <span>{t('admin.tabFont', 'Font Setting')}</span>
+        </button>
       </div>
 
-      {/* SETTINGS CONTAINER (Decoupled from Form Autofill Heuristics) */}
+      {/* SETTINGS CONTAINER */}
       <div onKeyDown={handleKeyDown} className="space-y-6">
         {/* TAB 1: BRANDING */}
         <div className={activeTab === 'branding' ? 'space-y-6' : 'hidden'}>
-          {/* APPLICATION NAME */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
             style={{ 
@@ -701,7 +800,6 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
-          {/* TITLEBAR BRAND ICON */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
             style={{ 
@@ -822,7 +920,6 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
-          {/* FAVICON */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
             style={{ 
@@ -950,7 +1047,6 @@ export default function AdminSettingsPage() {
 
         {/* TAB 2: THEME */}
         <div className={activeTab === 'theme' ? 'space-y-6' : 'hidden'}>
-          {/* THEME COLOR & PALETTE SETTINGS */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-6 text-xs" 
             style={{ 
@@ -1030,13 +1126,12 @@ export default function AdminSettingsPage() {
               </div>
             </div>
 
-            {/* Brand & Interaction Colors */}
+            {/* Brand Colors */}
             <div className="space-y-3 pt-2">
               <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('admin.brandColors', 'Brand & Interaction Colors')}
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                {/* Primary Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.primaryBrandColor', 'Primary Brand Color')}
@@ -1057,9 +1152,6 @@ export default function AdminSettingsPage() {
                       type="text" 
                       id="theme_primary_color"
                       name="theme_primary_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={primaryColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1068,7 +1160,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(val, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#E05638"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -1077,12 +1168,8 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.primaryBrandColorDesc', 'Brand highlights, buttons, and headers.')}
-                  </span>
                 </div>
 
-                {/* Primary Hover Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.primaryHoverColor', 'Primary Hover Color')}
@@ -1103,9 +1190,6 @@ export default function AdminSettingsPage() {
                       type="text" 
                       id="theme_primary_hover_color"
                       name="theme_primary_hover_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={primaryHoverColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1114,7 +1198,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, val, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#c94529"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -1123,12 +1206,8 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.primaryHoverColorDesc', 'Hover and focus states for buttons.')}
-                  </span>
                 </div>
 
-                {/* Accent Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.accentColor', 'Accent / Success Color')}
@@ -1149,9 +1228,6 @@ export default function AdminSettingsPage() {
                       type="text" 
                       id="theme_accent_color"
                       name="theme_accent_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={accentColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1160,7 +1236,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, val, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#10b981"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -1169,12 +1244,8 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.accentColorDesc', 'Badges, success alerts, and secondary accents.')}
-                  </span>
                 </div>
 
-                {/* Sidebar & Nav Icon Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.sidebarIconColor', 'Sidebar Icon Color')}
@@ -1195,9 +1266,6 @@ export default function AdminSettingsPage() {
                       type="text" 
                       id="theme_sidebar_icon_color"
                       name="theme_sidebar_icon_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={sidebarIconColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1206,7 +1274,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#10b981"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -1215,20 +1282,16 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.sidebarIconColorDesc', 'Icons for navigation and categories in the sidebar.')}
-                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Surfaces & Container Colors Group */}
+            {/* Surfaces & Container Colors */}
             <div className="space-y-3 pt-2">
               <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('admin.surfacesBordersTypography', 'Surfaces, Borders & Typography')}
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                {/* Background Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.pageBackground', 'Page Background')}
@@ -1247,11 +1310,6 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_page_bg_color"
-                      name="theme_page_bg_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={backgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1260,7 +1318,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#070b13"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -1269,15 +1326,11 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.pageBackgroundDesc', 'Root viewport background in night mode.')}
-                  </span>
                 </div>
 
-                {/* Card / Surface Background */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.cardBackground', 'Card / Surface Background')}
+                    {t('admin.cardBackground', 'Card Background')}
                   </label>
                   <div className="flex items-center gap-2">
                     <input 
@@ -1293,11 +1346,6 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_card_bg_color"
-                      name="theme_card_bg_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={cardBackgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1306,7 +1354,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#0b0f17"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -1315,15 +1362,11 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.cardBackgroundDesc', 'Cards, modals, and container panels.')}
-                  </span>
                 </div>
 
-                {/* Card / Container Border Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.containerBorderColor', 'Container Border Color')}
+                    {t('admin.containerBorderColor', 'Container Border')}
                   </label>
                   <div className="flex items-center gap-2">
                     <input 
@@ -1339,11 +1382,6 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_card_border_color"
-                      name="theme_card_border_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={cardBorderColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1352,7 +1390,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
                         }
                       }}
-                      placeholder="#1e293b"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -1361,12 +1398,8 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.containerBorderColorDesc', 'Borders, dividers, and outlines.')}
-                  </span>
                 </div>
 
-                {/* Secondary Subtitle Text Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.mutedSubtitleText', 'Muted / Subtitle Text')}
@@ -1385,11 +1418,6 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_muted_text_color"
-                      name="theme_muted_text_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={secondaryTextColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1398,7 +1426,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
                         }
                       }}
-                      placeholder="#94a3b8"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -1407,102 +1434,235 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.mutedSubtitleTextDesc', 'Descriptions and helper captions.')}
-                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* TAB 3: FONT SETTING */}
+        <div className={activeTab === 'font' ? 'space-y-6' : 'hidden'}>
+          <div 
+            className="border rounded-3xl p-6 shadow-xl space-y-6 text-xs" 
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)' 
+            }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Type className="h-4 w-4 text-[var(--color-primary)]" />
+                  <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                    {t('admin.globalTypographySettings', 'Global Typography & Font Settings')}
+                  </h2>
+                </div>
+                <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('admin.globalTypographyDesc', 'Select your site-wide typography font family, base scaling, and heading tracking. Changes apply across the entire project.')}
+                </p>
+              </div>
+              <div 
+                className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5"
+                style={{ 
+                  backgroundColor: 'var(--color-inner-dark)', 
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-primary)'
+                }}
+              >
+                <span>{t('admin.activeFont', 'Active Font')}:</span>
+                <span className="font-extrabold">{fontFamily}</span>
+              </div>
+            </div>
+
+            {/* Font Family Selection Cards */}
+            <div className="space-y-2.5">
+              <label className="block font-bold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('admin.fontFamilyOptions', 'Font Family Selection')}
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {FONT_OPTIONS.map((font) => {
+                  const isSelected = fontFamily.toLowerCase() === font.id.toLowerCase();
+                  return (
+                    <button
+                      key={font.id}
+                      type="button"
+                      onClick={() => handleFontSelect(font.id)}
+                      className={`p-4 rounded-2xl border text-left transition cursor-pointer relative flex flex-col justify-between ${
+                        isSelected ? 'ring-2 ring-[var(--color-primary)] shadow-md' : 'hover:opacity-90'
+                      }`}
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)',
+                        fontFamily: font.family
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
+                          {font.name}
+                        </span>
+                        {isSelected && (
+                          <span 
+                            className="px-2 py-0.5 rounded-full text-[9px] font-extrabold flex items-center gap-1"
+                            style={{ 
+                              backgroundColor: 'rgba(16, 185, 129, 0.15)', 
+                              color: 'var(--color-emerald)',
+                              border: '1px solid var(--color-emerald)'
+                            }}
+                          >
+                            <CheckCircle2 className="h-3 w-3" /> {t('common.selected', 'Selected')}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] mb-3 opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
+                        {font.description}
+                      </p>
+                      <div 
+                        className="text-xs font-medium truncate pt-2 border-t"
+                        style={{ 
+                          borderColor: 'var(--color-border)', 
+                          color: 'var(--color-text)' 
+                        }}
+                      >
+                        ABCDEFGHIJKLM 1234567890
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Sizing & Letter Spacing Controls */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              {/* Base Font Size */}
+              <div className="space-y-2">
+                <label className="block font-bold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('admin.baseFontSize', 'Base Font Size Scaling')}
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {FONT_SIZES.map((size) => {
+                    const isSelected = fontSize === size.id;
+                    return (
+                      <button
+                        key={size.id}
+                        type="button"
+                        onClick={() => handleFontSizeSelect(size.id)}
+                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition cursor-pointer ${
+                          isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
+                        }`}
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)'
+                        }}
+                      >
+                        <span className="font-extrabold text-xs" style={{ color: isSelected ? 'var(--color-primary)' : 'var(--color-text)' }}>
+                          {size.label}
+                        </span>
+                        <span className="text-[10px] opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
+                          {size.id}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Letter Spacing */}
+              <div className="space-y-2">
+                <label className="block font-bold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('admin.letterSpacing', 'Heading Letter Spacing (Tracking)')}
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {LETTER_SPACINGS.map((spacing) => {
+                    const isSelected = fontLetterSpacing === spacing.id;
+                    return (
+                      <button
+                        key={spacing.id}
+                        type="button"
+                        onClick={() => handleLetterSpacingSelect(spacing.id)}
+                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition cursor-pointer ${
+                          isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
+                        }`}
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)'
+                        }}
+                      >
+                        <span className="font-extrabold text-xs" style={{ color: isSelected ? 'var(--color-primary)' : 'var(--color-text)' }}>
+                          {spacing.label}
+                        </span>
+                        <span className="text-[10px] opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
+                          {spacing.id}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
-            {/* Interactive Live Component Preview */}
+            {/* Live Interactive Typography Preview */}
             <div className="pt-3 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
               <span className="font-bold text-[11px] block" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.previewTitle', 'Full Interactive Component Preview:')}
+                {t('admin.liveFontPreview', 'Live Typography Sandbox Preview:')}
               </span>
               <div 
-                className="p-5 rounded-3xl border transition-colors space-y-3" 
+                className="p-5 rounded-3xl border transition-colors space-y-4 shadow-inner"
                 style={{ 
                   backgroundColor: 'var(--color-inner-dark)', 
                   borderColor: 'var(--color-border)' 
                 }}
               >
-                {/* Surface Card Preview */}
-                <div 
-                  className="p-4 rounded-2xl border transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md"
-                  style={{ 
-                    backgroundColor: 'var(--color-card)', 
-                    borderColor: 'var(--color-border)' 
-                  }}
-                >
-                  <div className="space-y-0.5">
-                    <div className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                      {t('admin.surfaceCardPreview', 'Surface Card Preview')}
-                    </div>
-                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('admin.surfaceCardPreviewDesc', 'This demonstrates your secondary text color, card surface, and card border.')}
-                    </p>
+                <div className="space-y-1">
+                  <div 
+                    className="text-2xl font-black tracking-tight"
+                    style={{ 
+                      color: 'var(--color-primary)',
+                      letterSpacing: fontLetterSpacing
+                    }}
+                  >
+                    Heading 1: Culinary Innovation Powered by AI
                   </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div 
-                      className="px-2.5 py-1 rounded-xl border text-[10px] font-extrabold flex items-center gap-1"
-                      style={{ 
-                        backgroundColor: 'var(--color-inner-dark)', 
-                        borderColor: 'var(--color-border)', 
-                        color: accentColor 
-                      }}
-                    >
-                      <CheckCircle2 className="h-3 w-3" /> {t('common.active', 'Active')}
-                    </div>
-                    <button 
-                      type="button" 
-                      className="px-3.5 py-1.5 rounded-xl text-white font-extrabold text-xs shadow-md transition cursor-pointer"
-                      style={{ backgroundColor: primaryColor }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = primaryHoverColor)}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = primaryColor)}
-                    >
-                      {t('common.actionButton', 'Action Button')}
-                    </button>
+                  <div 
+                    className="text-lg font-bold"
+                    style={{ 
+                      color: 'var(--color-text)',
+                      letterSpacing: fontLetterSpacing
+                    }}
+                  >
+                    Heading 2: Tailored Weekly Meal Plans & Automated Nutrition
                   </div>
                 </div>
 
-                {/* Sidebar Navigation Item Live Preview */}
-                <div 
-                  className="p-3.5 rounded-2xl border transition-colors flex items-center justify-between gap-3 shadow-sm"
+                <p 
+                  className="leading-relaxed"
                   style={{ 
-                    backgroundColor: 'var(--color-card)', 
-                    borderColor: 'var(--color-border)' 
+                    color: 'var(--color-text-secondary)',
+                    fontSize: fontSize 
                   }}
                 >
-                  <div className="flex items-center gap-3">
-                    <div 
-                      className="p-2 rounded-xl flex items-center justify-center transition-colors shadow-xs"
-                      style={{ 
-                        backgroundColor: 'var(--color-inner-dark)',
-                        border: '1px solid var(--color-border)',
-                        color: sidebarIconColor 
-                      }}
-                    >
-                      <Utensils className="h-4 w-4" style={{ color: sidebarIconColor }} />
-                    </div>
-                    <div>
-                      <div className="text-xs font-black" style={{ color: 'var(--color-text)' }}>
-                        {t('admin.sidebarIconPreview', 'Sidebar Icon Color Preview')}
-                      </div>
-                      <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('admin.sidebarIconPreviewDesc', 'Reflects live on Dashboard, Chef, Pantry, and Plan icons.')}
-                      </p>
-                    </div>
-                  </div>
-                  <span 
-                    className="text-[10px] px-2.5 py-1 rounded-lg font-mono font-bold"
+                  This live preview box demonstrates paragraph text rendered using your chosen font ({fontFamily}), base size ({fontSize}), and heading tracking ({fontLetterSpacing}). All buttons, badges, tables, and navigation drawers across the application immediately inherit these font rules.
+                </p>
+
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <button 
+                    type="button" 
+                    className="px-4 py-2 rounded-xl text-white font-extrabold text-xs shadow-md transition"
+                    style={{ backgroundColor: primaryColor }}
+                  >
+                    {t('admin.samplePrimaryBtn', 'Primary Action')}
+                  </button>
+                  <div 
+                    className="px-3 py-1.5 rounded-xl border text-xs font-bold"
                     style={{ 
-                      backgroundColor: 'var(--color-inner-dark)', 
-                      color: sidebarIconColor,
-                      border: '1px solid var(--color-border)' 
+                      backgroundColor: 'var(--color-card)', 
+                      borderColor: 'var(--color-border)', 
+                      color: accentColor 
                     }}
                   >
-                    {sidebarIconColor}
+                    <CheckCircle2 className="h-3.5 w-3.5 inline mr-1" /> {t('admin.sampleBadge', 'Active Preset Badge')}
+                  </div>
+                  <span className="text-xs font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    $1,249.00 / mo
                   </span>
                 </div>
               </div>
@@ -1541,7 +1701,13 @@ export default function AdminSettingsPage() {
             ) : (
               <>
                 <CheckCircle2 className="h-4 w-4" />
-                <span>{activeTab === 'theme' ? t('admin.saveThemeSettings', 'Save Theme Settings') : t('admin.saveBrandingSettings', 'Save Branding Settings')}</span>
+                <span>
+                  {activeTab === 'theme' 
+                    ? t('admin.saveThemeSettings', 'Save Theme Settings') 
+                    : activeTab === 'font'
+                    ? t('admin.saveFontSettings', 'Save Font Settings')
+                    : t('admin.saveBrandingSettings', 'Save Branding Settings')}
+                </span>
               </>
             )}
           </button>

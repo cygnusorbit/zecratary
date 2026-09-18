@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    const rows = await query('SELECT * FROM admin_settings LIMIT 1');
     if (rows.length === 0) {
       return NextResponse.json({
         success: true,
@@ -16,6 +16,9 @@ export async function GET() {
         faviconImage: '',
         currency: 'USD',
         themeColors: {},
+        fontFamily: 'Inter',
+        fontSize: '16px',
+        fontLetterSpacing: '0em',
         supportedLanguages: []
       }, { headers: { 'Cache-Control': 'no-store' } });
     }
@@ -30,6 +33,9 @@ export async function GET() {
       faviconImage: r.favicon_image || '',
       currency: r.currency || 'USD',
       themeColors: r.theme_colors || {},
+      fontFamily: r.font_family || 'Inter',
+      fontSize: r.font_size || '16px',
+      fontLetterSpacing: r.letter_spacing || '0em',
       supportedLanguages: r.supported_languages || []
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
