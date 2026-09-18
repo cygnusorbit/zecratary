@@ -16,7 +16,6 @@ export default function ManualRecipePage() {
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<'info' | 'ingredients' | 'steps'>('info');
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
   
   const recipeTypes = useRecipeTypes();
   const ingredientCategories = useIngredientCategories();
@@ -48,58 +47,7 @@ export default function ManualRecipePage() {
 
   const applySavedTheme = useCallback(() => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
-      setIsDayMode(isDay);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
-      if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
-      if (c.accentEmerald || c.accentColor) root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
-
-      if (isDay) {
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-inner', '#f1f5f9');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-
-        root.classList.remove('dark');
-        root.classList.add('light');
-
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
-          document.body.style.color = '#0f172a';
-        }
-      } else {
-        const bg = c.backgroundDark || c.backgroundColor || '#070b13';
-        const card = c.cardDark || c.cardBackground || '#111726';
-        const inner = c.innerDark || '#070b13';
-        const border = c.borderColor || c.cardBorder || '#1e293b';
-
-        root.style.setProperty('--color-bg', bg);
-        root.style.setProperty('--color-bg-dark', bg);
-        root.style.setProperty('--color-card', card);
-        root.style.setProperty('--color-card-dark', card);
-        root.style.setProperty('--color-inner', inner);
-        root.style.setProperty('--color-inner-dark', inner);
-        root.style.setProperty('--color-border', border);
-        root.style.setProperty('--color-text', '#ffffff');
-        root.style.setProperty('--color-text-secondary', '#94a3b8');
-
-        root.classList.remove('light');
-        root.classList.add('dark');
-
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-          document.body.style.color = '';
-        }
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (e) {}
   }, []);
 
@@ -124,9 +72,6 @@ export default function ManualRecipePage() {
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-        document.body.style.color = '';
-      }
     };
   }, [router, t, applySavedTheme]);
 
@@ -266,42 +211,33 @@ export default function ManualRecipePage() {
     }
   };
 
-  const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
-  const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #111726)';
-  const cInnerBg = isDayMode ? '#f1f5f9' : 'var(--color-inner, #070b13)';
-  const cInputBg = isDayMode ? '#f8fafc' : 'var(--color-inner, #070b13)';
-  const cBorder = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)';
-  const cText = isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)';
-  const cSubText = isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)';
-  const cLabel = isDayMode ? '#334155' : '#cbd5e1';
-
   return (
     <div 
       className="w-full min-h-screen pb-24 px-2 sm:px-6 pt-4 font-sans transition-colors duration-200"
-      style={{ backgroundColor: cPageBg, color: cText }}
+      style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
     >
       <div className="max-w-5xl mx-auto space-y-6">
         <div 
           className="flex items-center justify-between border-b pb-4"
-          style={{ borderColor: cBorder }}
+          style={{ borderColor: 'var(--color-border)' }}
         >
           <div className="flex items-center gap-3">
             <Link 
               href="/saved" 
               className="p-2.5 rounded-xl transition shadow-xs border"
               style={{
-                backgroundColor: cCardBg,
-                borderColor: cBorder,
-                color: cSubText
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)'
               }}
             >
               <ArrowLeft className="h-4 w-4" />
             </Link>
             <div>
-              <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary,#E05638)]">
+              <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
                 {t('createRecipe') || 'Create Recipe'}
               </h1>
-              <p className="text-xs" style={{ color: cSubText }}>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('createRecipeSubtitle') || 'Fill in details, ingredients, and preparation steps'}
               </p>
             </div>
@@ -310,7 +246,7 @@ export default function ManualRecipePage() {
 
         <div 
           className="flex p-1.5 rounded-2xl border shadow-xs"
-          style={{ backgroundColor: cInnerBg, borderColor: cBorder }}
+          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
         >
           {[
             { id: 'info', label: t('basicInfoTab') || 'Basic Info' },
@@ -325,13 +261,13 @@ export default function ManualRecipePage() {
                 onClick={() => setActiveTab(tab.id as any)}
                 className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer border"
                 style={isActive ? {
-                  backgroundColor: cCardBg,
-                  color: 'var(--color-primary, #E05638)',
-                  borderColor: cBorder
+                  backgroundColor: 'var(--color-card)',
+                  color: 'var(--color-primary)',
+                  borderColor: 'var(--color-border)'
                 } : {
                   backgroundColor: 'transparent',
                   borderColor: 'transparent',
-                  color: cSubText
+                  color: 'var(--color-text-secondary)'
                 }}
               >
                 {tab.label}
@@ -344,20 +280,20 @@ export default function ManualRecipePage() {
           {activeTab === 'info' && (
             <div className="space-y-6 animate-in fade-in">
               <div className="space-y-2">
-                <label className="text-xs font-bold text-[var(--color-primary,#E05638)] uppercase tracking-wider">
+                <label className="text-xs font-bold text-[var(--color-primary)] uppercase tracking-wider">
                   {t('photoLabel') || 'Photo'}
                 </label>
                 <label 
                   className="border-2 border-dashed rounded-2xl h-48 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group shadow-xs"
-                  style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
                 >
                   {form.imageUrl ? (
                     <img src={form.imageUrl} alt="Recipe Preview" className="absolute inset-0 w-full h-full object-cover" />
                   ) : (
                     <div className="text-center space-y-2">
-                      <ImagePlus className="h-8 w-8 mx-auto transition text-slate-400 group-hover:text-[var(--color-primary,#E05638)]" />
-                      <span className="text-xs font-bold block" style={{ color: cText }}>{t('addAPhoto') || 'Add a photo'}</span>
-                      <span className="text-[11px]" style={{ color: cSubText }}>{t('uploadsHint') || 'Uploads save to local drive /uploads/recipes/'}</span>
+                      <ImagePlus className="h-8 w-8 mx-auto transition text-slate-400 group-hover:text-[var(--color-primary)]" />
+                      <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{t('addAPhoto') || 'Add a photo'}</span>
+                      <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{t('uploadsHint') || 'Uploads save to local drive /uploads/recipes/'}</span>
                     </div>
                   )}
                   <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
@@ -366,10 +302,10 @@ export default function ManualRecipePage() {
 
               <div 
                 className="border rounded-2xl p-6 space-y-4 text-xs shadow-xs"
-                style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
               >
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: cLabel }}>
+                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
                     {t('recipeTitleRequired') || 'Recipe Title *'}
                   </label>
                   <input
@@ -380,15 +316,15 @@ export default function ManualRecipePage() {
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: cInputBg,
-                      borderColor: cBorder,
-                      color: cText
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
 
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: cLabel }}>
+                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
                     {t('description') || 'Description'}
                   </label>
                   <textarea
@@ -398,73 +334,73 @@ export default function ManualRecipePage() {
                     onChange={(e) => setForm({ ...form, description: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none resize-y transition"
                     style={{
-                      backgroundColor: cInputBg,
-                      borderColor: cBorder,
-                      color: cText
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
-                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('recipeTypeLabel') || 'Recipe Type'}</label>
+                    <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>{t('recipeTypeLabel') || 'Recipe Type'}</label>
                     <select
                       value={form.recipeType}
                       onChange={(e) => setForm({ ...form, recipeType: e.target.value })}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
                       style={{
-                        backgroundColor: cInputBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     >
                       {recipeTypes.map((type) => (
-                        <option key={type} value={type}>{type}</option>
+                        <option key={type} value={type} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{type}</option>
                       ))}
                     </select>
                   </div>
 
                   <div>
-                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('servingsLabel') || 'Servings'}</label>
+                    <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>{t('servingsLabel') || 'Servings'}</label>
                     <input
                       type="number"
                       value={form.servings}
                       onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
-                        backgroundColor: cInputBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
 
                   <div>
-                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('prepTimeMinsLabel') || 'Prep Time (m)'}</label>
+                    <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>{t('prepTimeMinsLabel') || 'Prep Time (m)'}</label>
                     <input
                       type="number"
                       value={form.prepTimeMinutes}
                       onChange={(e) => setForm({ ...form, prepTimeMinutes: parseInt(e.target.value) || 0 })}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
-                        backgroundColor: cInputBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
 
                   <div>
-                    <label className="block font-semibold mb-1" style={{ color: cLabel }}>{t('cookTimeMinsLabel') || 'Cook Time (m)'}</label>
+                    <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>{t('cookTimeMinsLabel') || 'Cook Time (m)'}</label>
                     <input
                       type="number"
                       value={form.cookTimeMinutes}
                       onChange={(e) => setForm({ ...form, cookTimeMinutes: parseInt(e.target.value) || 0 })}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
-                        backgroundColor: cInputBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
@@ -476,7 +412,7 @@ export default function ManualRecipePage() {
                   type="button"
                   onClick={() => setActiveTab('ingredients')}
                   className="text-white font-bold px-6 py-3 rounded-xl text-xs transition shadow-md cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                  style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   {t('nextStepsBtn') || 'Next: Ingredients →'}
                 </button>
@@ -487,10 +423,10 @@ export default function ManualRecipePage() {
           {activeTab === 'ingredients' && (
             <div 
               className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
-              style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <div className="flex justify-between items-center">
-                <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--color-primary,#E05638)]">
+                <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--color-primary)]">
                   {t('ingredientsHeading') || 'Ingredients'}
                 </h2>
                 <div className="flex gap-2 text-xs">
@@ -499,13 +435,13 @@ export default function ManualRecipePage() {
                     onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
                     className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
                     style={isReorderingIngredients ? {
-                      backgroundColor: 'var(--color-emerald, #10b981)',
-                      borderColor: 'var(--color-emerald, #10b981)',
+                      backgroundColor: 'var(--color-emerald)',
+                      borderColor: 'var(--color-emerald)',
                       color: '#ffffff'
                     } : {
-                      backgroundColor: cInputBg,
-                      borderColor: cBorder,
-                      color: cSubText
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
                     }}
                   >
                     {isReorderingIngredients ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
@@ -514,7 +450,7 @@ export default function ManualRecipePage() {
                     type="button"
                     onClick={() => setForm({ ...form, ingredients: [...form.ingredients, { amount: '', unit: 'g', item: '', category: ingredientCategories[0] || 'Pantry Staples' }] })}
                     className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs"
-                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                    style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-3.5 w-3.5" /> {t('addIngredient') || 'Add Ingredient'}
                   </button>
@@ -531,8 +467,8 @@ export default function ManualRecipePage() {
                     onDrop={handleDrop}
                     className="flex items-center gap-2 p-2.5 rounded-xl border transition"
                     style={{
-                      backgroundColor: cInputBg,
-                      borderColor: isReorderingIngredients ? 'var(--color-emerald, #10b981)' : cBorder,
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-border)',
                       cursor: isReorderingIngredients ? 'grab' : 'default'
                     }}
                   >
@@ -547,9 +483,9 @@ export default function ManualRecipePage() {
                       }}
                       className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
                       style={{
-                        backgroundColor: cCardBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                     <input
@@ -563,9 +499,9 @@ export default function ManualRecipePage() {
                       }}
                       className="w-20 border rounded-lg p-2 text-center outline-none"
                       style={{
-                        backgroundColor: cCardBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                     <input
@@ -578,7 +514,7 @@ export default function ManualRecipePage() {
                         setForm({ ...form, ingredients: list });
                       }}
                       className="flex-1 bg-transparent border-none outline-none px-2 font-medium"
-                      style={{ color: cText }}
+                      style={{ color: 'var(--color-text)' }}
                     />
                     <select
                       value={ing.category}
@@ -589,18 +525,18 @@ export default function ManualRecipePage() {
                       }}
                       className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
                       style={{
-                        backgroundColor: cCardBg,
-                        borderColor: cBorder,
-                        color: cText
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     >
                       {ingredientCategories.map((cat) => (
-                        <option key={cat} value={cat}>{cat}</option>
+                        <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
                       ))}
                     </select>
 
                     {isReorderingIngredients ? (
-                      <div className="p-2 text-[var(--color-emerald,#10b981)] cursor-grab">
+                      <div className="p-2 text-[var(--color-emerald)] cursor-grab">
                         <GripVertical className="h-4 w-4" />
                       </div>
                     ) : (
@@ -618,16 +554,16 @@ export default function ManualRecipePage() {
 
               <div 
                 className="flex justify-between pt-3 border-t"
-                style={{ borderColor: cBorder }}
+                style={{ borderColor: 'var(--color-border)' }}
               >
                 <button
                   type="button"
                   onClick={() => setActiveTab('info')}
                   className="border font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer"
                   style={{
-                    backgroundColor: cInputBg,
-                    borderColor: cBorder,
-                    color: cLabel
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
                   {t('backBtn') || '← Back'}
@@ -636,7 +572,7 @@ export default function ManualRecipePage() {
                   type="button"
                   onClick={() => setActiveTab('steps')}
                   className="text-white font-bold px-6 py-2.5 rounded-xl text-xs transition shadow-md cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                  style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   {t('nextStepsBtn') || 'Next: Steps →'}
                 </button>
@@ -647,10 +583,10 @@ export default function ManualRecipePage() {
           {activeTab === 'steps' && (
             <div 
               className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
-              style={{ backgroundColor: cCardBg, borderColor: cBorder }}
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <div className="flex justify-between items-center">
-                <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--color-primary,#E05638)]">
+                <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--color-primary)]">
                   {t('stepByStepInstructions') || 'Step-by-Step Instructions'}
                 </h2>
                 <div className="flex gap-2 text-xs">
@@ -659,13 +595,13 @@ export default function ManualRecipePage() {
                     onClick={() => setIsReorderingSteps(!isReorderingSteps)}
                     className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
                     style={isReorderingSteps ? {
-                      backgroundColor: 'var(--color-emerald, #10b981)',
-                      borderColor: 'var(--color-emerald, #10b981)',
+                      backgroundColor: 'var(--color-emerald)',
+                      borderColor: 'var(--color-emerald)',
                       color: '#ffffff'
                     } : {
-                      backgroundColor: cInputBg,
-                      borderColor: cBorder,
-                      color: cSubText
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
                     }}
                   >
                     {isReorderingSteps ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
@@ -674,7 +610,7 @@ export default function ManualRecipePage() {
                     type="button"
                     onClick={() => setForm({ ...form, instructions: [...form.instructions, ''] })}
                     className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs"
-                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                    style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-3.5 w-3.5" /> {t('addStep') || 'Add Step'}
                   </button>
@@ -691,15 +627,17 @@ export default function ManualRecipePage() {
                     onDrop={handleDrop}
                     className="flex items-start gap-3 p-3 rounded-xl border transition"
                     style={{
-                      backgroundColor: cInputBg,
-                      borderColor: isReorderingSteps ? 'var(--color-emerald, #10b981)' : cBorder
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-border)'
                     }}
                   >
                     <span 
                       className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
                       style={{
-                        backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                        color: 'var(--color-primary, #E05638)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-primary)',
+                        borderColor: 'var(--color-primary)',
+                        borderWidth: '1px'
                       }}
                     >
                       {idx + 1}
@@ -714,11 +652,11 @@ export default function ManualRecipePage() {
                         setForm({ ...form, instructions: list });
                       }}
                       className="flex-1 bg-transparent border-none outline-none resize-y font-medium"
-                      style={{ color: cText }}
+                      style={{ color: 'var(--color-text)' }}
                     />
 
                     {isReorderingSteps ? (
-                      <div className="p-2 text-[var(--color-emerald,#10b981)] cursor-grab mt-1">
+                      <div className="p-2 text-[var(--color-emerald)] cursor-grab mt-1">
                         <GripVertical className="h-4 w-4" />
                       </div>
                     ) : (
@@ -736,16 +674,16 @@ export default function ManualRecipePage() {
 
               <div 
                 className="flex justify-between pt-3 border-t"
-                style={{ borderColor: cBorder }}
+                style={{ borderColor: 'var(--color-border)' }}
               >
                 <button
                   type="button"
                   onClick={() => setActiveTab('ingredients')}
                   className="border font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer"
                   style={{
-                    backgroundColor: cInputBg,
-                    borderColor: cBorder,
-                    color: cLabel
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
                   {t('backBtn') || '← Back'}
@@ -754,7 +692,7 @@ export default function ManualRecipePage() {
                   type="submit"
                   disabled={saving}
                   className="text-white font-bold px-8 py-3 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                  style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   <Save className="h-4 w-4" /> {saving ? (t('savingRecipe') || 'Saving Recipe...') : (t('saveRecipe') || 'Save Recipe')}
                 </button>

@@ -122,7 +122,6 @@ export default function ImportPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'url' | 'text' | 'image'>('url');
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
   
   const [url, setUrl] = useState('');
   const [recipeTypes, setRecipeTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
@@ -169,47 +168,7 @@ export default function ImportPage() {
 
   const applyGlobalTheme = useCallback(() => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
-      setIsDayMode(isDay);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const cfg = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', cfg.primary || cfg.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', cfg.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', cfg.primary || cfg.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', cfg.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', cfg.backgroundDark || cfg.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', cfg.backgroundDark || cfg.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', cfg.backgroundDark || cfg.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', cfg.cardDark || cfg.cardBackground || '#111726');
-        root.style.setProperty('--color-card', cfg.cardDark || cfg.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', cfg.innerDark || cfg.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', cfg.borderColor || cfg.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-text', cfg.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', cfg.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-        }
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (_) {}
   }, []);
 
@@ -235,8 +194,6 @@ export default function ImportPage() {
       window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
       window.removeEventListener('zecratary_recipe_types_changed', syncRecipeTypes);
       window.removeEventListener('storage', handleStorageUpdate);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-      }
     };
   }, [applyGlobalTheme, t]);
 
@@ -600,13 +557,13 @@ export default function ImportPage() {
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-24 px-4 transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      style={{ color: 'var(--color-text)' }}
     >
       <div>
-        <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary,#E05638)]">
+        <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
           {t('importRecipeTitle') || 'Import Recipe'}
         </h1>
-        <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
           {t('importRecipeSubtitle') || 'Import recipes from websites, text notes, or photos and save directly to your recipe library'}
         </p>
       </div>
@@ -614,15 +571,15 @@ export default function ImportPage() {
       <div 
         className="rounded-3xl p-6 space-y-6 shadow-xl border transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card-dark, #111726)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
         }}
       >
         <div 
           className="flex p-1.5 rounded-2xl border transition-colors duration-200"
           style={{
-            backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
           }}
         >
           {[
@@ -641,13 +598,13 @@ export default function ImportPage() {
                 }}
                 className="flex-1 py-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
                 style={isActive ? {
-                  backgroundColor: 'rgba(16, 185, 129, 0.18)',
-                  color: 'var(--color-emerald, #10b981)',
-                  borderColor: 'rgba(16, 185, 129, 0.45)',
+                  backgroundColor: 'var(--color-card)',
+                  color: 'var(--color-emerald)',
+                  borderColor: 'var(--color-emerald)',
                   borderWidth: '1px',
                   boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
                 } : {
-                  color: isDayMode ? '#64748b' : '#94a3b8'
+                  color: 'var(--color-text-secondary)'
                 }}
               >
                 <tab.icon className="h-4 w-4" /> {tab.label}
@@ -659,7 +616,7 @@ export default function ImportPage() {
         {activeTab === 'url' && (
           <form onSubmit={handleUrlImport} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold mb-1.5" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                 {t('recipeWebUrlLabel') || 'Recipe Web URL *'}
               </label>
               <input
@@ -670,21 +627,21 @@ export default function ImportPage() {
                 onChange={(e) => setUrl(e.target.value)}
                 className="w-full border rounded-xl px-4 py-3.5 text-sm outline-none transition font-medium"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
               />
             </div>
             <button
               type="submit"
               disabled={loading || !url.trim()}
               className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
-              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
             >
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading ? (t('downloadingPhotoParsingSteps') || 'Downloading photo & parsing all steps...') : (t('importRecipeBtn') || 'Import Recipe')}
@@ -696,7 +653,7 @@ export default function ImportPage() {
           <form onSubmit={handleTextImport} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                   {t('recipeTitleLabel') || 'Recipe Title'}
                 </label>
                 <input
@@ -706,16 +663,16 @@ export default function ImportPage() {
                   onChange={(e) => setTextTitle(e.target.value)}
                   className="w-full border rounded-xl px-4 py-3 text-sm outline-none"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                   {t('categoryLabel') || 'Category (Recipe Type)'}
                 </label>
                 <select
@@ -723,13 +680,13 @@ export default function ImportPage() {
                   onChange={(e) => setTextCategory(e.target.value)}
                   className="w-full border rounded-xl px-4 py-3 text-sm outline-none cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
                   {recipeTypes.map(c => (
-                    <option key={c} value={c} style={{ backgroundColor: isDayMode ? '#ffffff' : '#111726', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={c} value={c} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {c}
                     </option>
                   ))}
@@ -738,7 +695,7 @@ export default function ImportPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-bold mb-2" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>
+              <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
                 {t('recipeImagesOptional') || 'Recipe Images (Optional - Drag & drop or click to upload)'}
               </label>
 
@@ -748,11 +705,11 @@ export default function ImportPage() {
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsTextDragging(false); if (e.dataTransfer.files) handleTextFilesAdded(e.dataTransfer.files); }}
                 onClick={() => textFileInputRef.current?.click()}
                 className={`border-2 border-dashed rounded-2xl py-8 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative ${
-                  isTextDragging ? 'bg-emerald-500/10 border-emerald-400' : 'hover:border-emerald-400'
+                  isTextDragging ? 'border-emerald-400' : 'hover:border-emerald-400'
                 }`}
                 style={{
-                  borderColor: isTextDragging ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : 'rgba(16, 185, 129, 0.4)'),
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'
+                  borderColor: isTextDragging ? 'var(--color-emerald)' : 'var(--color-border)',
+                  backgroundColor: 'var(--color-inner-dark)'
                 }}
               >
                 <input
@@ -764,24 +721,24 @@ export default function ImportPage() {
                   className="hidden"
                 />
                 <div className="w-12 h-12 rounded-full flex items-center justify-center mb-2">
-                  <Upload className="h-8 w-8 text-emerald-500 stroke-[2.2]" />
+                  <Upload className="h-8 w-8 stroke-[2.2]" style={{ color: 'var(--color-emerald)' }} />
                 </div>
-                <p className="text-xs sm:text-sm font-semibold tracking-wide" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <span style={{ color: 'var(--color-primary, #E05638)' }} className="font-bold">
+                <p className="text-xs sm:text-sm font-semibold tracking-wide" style={{ color: 'var(--color-text)' }}>
+                  <span style={{ color: 'var(--color-primary)' }} className="font-bold">
                     {t('clickToUpload') || 'Click to upload'}
                   </span>{' '}
-                  <span className="text-emerald-500 font-semibold">
+                  <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
                     {t('orDragAndDrop') || 'or drag and drop'}
                   </span>
                 </p>
-                <p className="text-[11px] font-medium mt-1" style={{ color: isDayMode ? '#059669' : 'rgba(16, 185, 129, 0.7)' }}>
+                <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-emerald)' }}>
                   {t('pngJpgWebpOptional') || 'PNG, JPG, or WEBP (optional photo for recipe)'}
                 </p>
               </div>
 
               {textPreviewUrls.length > 0 && (
                 <div className="space-y-1.5 mt-3">
-                  <div className="text-[11px] font-bold" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>
+                  <div className="text-[11px] font-bold" style={{ color: 'var(--color-text)' }}>
                     {t('selectedPhoto') || 'Selected Photo'} ({textPreviewUrls.length}/5):
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -790,8 +747,8 @@ export default function ImportPage() {
                         key={idx}
                         className="relative h-24 rounded-xl overflow-hidden border group shadow"
                         style={{
-                          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                          backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'
+                          borderColor: 'var(--color-border)',
+                          backgroundColor: 'var(--color-inner-dark)'
                         }}
                       >
                         <img src={previewUrl} alt={`Upload ${idx + 1}`} className="w-full h-full object-cover" />
@@ -810,7 +767,7 @@ export default function ImportPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-bold mb-1.5" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                 {t('pasteIngredientsSteps') || 'Paste Ingredients & Steps *'}
               </label>
               <textarea
@@ -821,21 +778,21 @@ export default function ImportPage() {
                 onChange={(e) => setRawText(e.target.value)}
                 className="w-full border rounded-xl p-4 text-xs outline-none resize-none font-mono"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
               />
             </div>
             <button
               type="submit"
               disabled={loading || !rawText.trim()}
               className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
-              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
             >
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading ? (t('processingSavingRecipe') || 'Processing & saving recipe...') : (t('saveAndImportRecipe') || 'Save & Import Recipe')}
@@ -846,7 +803,7 @@ export default function ImportPage() {
         {activeTab === 'image' && (
           <form onSubmit={handleImageImport} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold mb-2" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>
+              <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
                 {t('recipeImagesMax5') || 'Recipe Images (up to 5)'}
               </label>
 
@@ -856,11 +813,11 @@ export default function ImportPage() {
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); if (e.dataTransfer.files) handleFilesAdded(e.dataTransfer.files); }}
                 onClick={() => fileInputRef.current?.click()}
                 className={`border-2 border-dashed rounded-2xl py-12 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative ${
-                  isDragging ? 'bg-emerald-500/10 border-emerald-400' : 'hover:border-emerald-400'
+                  isDragging ? 'border-emerald-400' : 'hover:border-emerald-400'
                 }`}
                 style={{
-                  borderColor: isDragging ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : 'rgba(16, 185, 129, 0.4)'),
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'
+                  borderColor: isDragging ? 'var(--color-emerald)' : 'var(--color-border)',
+                  backgroundColor: 'var(--color-inner-dark)'
                 }}
               >
                 <input
@@ -872,17 +829,17 @@ export default function ImportPage() {
                   className="hidden"
                 />
                 <div className="w-14 h-14 rounded-full flex items-center justify-center mb-3">
-                  <Upload className="h-10 w-10 text-emerald-500 stroke-[2.2]" />
+                  <Upload className="h-10 w-10 stroke-[2.2]" style={{ color: 'var(--color-emerald)' }} />
                 </div>
-                <p className="text-xs sm:text-sm font-semibold tracking-wide" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <span style={{ color: 'var(--color-primary, #E05638)' }} className="font-bold">
+                <p className="text-xs sm:text-sm font-semibold tracking-wide" style={{ color: 'var(--color-text)' }}>
+                  <span style={{ color: 'var(--color-primary)' }} className="font-bold">
                     {t('clickToUpload') || 'Click to upload'}
                   </span>{' '}
-                  <span className="text-emerald-500 font-semibold">
+                  <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
                     {t('orDragAndDrop') || 'or drag and drop'}
                   </span>
                 </p>
-                <p className="text-[11px] font-medium mt-1" style={{ color: isDayMode ? '#059669' : 'rgba(16, 185, 129, 0.7)' }}>
+                <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-emerald)' }}>
                   {t('pngJpgWebpMax5') || 'PNG, JPG, or WEBP (max 5 images)'}
                 </p>
               </div>
@@ -890,7 +847,7 @@ export default function ImportPage() {
 
             {previewUrls.length > 0 && (
               <div className="space-y-1.5">
-                <div className="text-[11px] font-bold" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>
+                <div className="text-[11px] font-bold" style={{ color: 'var(--color-text)' }}>
                   {t('selectedPhotos') || 'Selected Photos'} ({previewUrls.length}/5):
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -899,8 +856,8 @@ export default function ImportPage() {
                       key={idx}
                       className="relative h-24 rounded-xl overflow-hidden border group shadow"
                       style={{
-                        borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'
+                        borderColor: 'var(--color-border)',
+                        backgroundColor: 'var(--color-inner-dark)'
                       }}
                     >
                       <img src={previewUrl} alt={`Upload ${idx + 1}`} className="w-full h-full object-cover" />
@@ -921,9 +878,9 @@ export default function ImportPage() {
               type="submit"
               disabled={loading || selectedFiles.length === 0}
               className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
-              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
             >
               <Upload className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading ? (t('aiSearchingRecipeImporting') || 'AI searching recipe & importing...') : (t('importRecipeFromImages') || 'Import Recipe from Images')}
@@ -935,19 +892,19 @@ export default function ImportPage() {
           <div
             className="p-4 rounded-2xl border text-xs font-semibold flex items-center gap-2 animate-in fade-in"
             style={status.type === 'success' ? {
-              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.1)',
-              borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.4)',
-              color: isDayMode ? '#065f46' : 'var(--color-emerald, #10b981)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
             } : {
-              backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.1)',
-              borderColor: isDayMode ? '#fecaca' : 'rgba(239, 68, 68, 0.4)',
-              color: isDayMode ? '#991b1b' : '#f87171'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'rgba(239, 68, 68, 0.4)',
+              color: '#ef4444'
             }}
           >
             {status.type === 'success' ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
             ) : (
-              <AlertCircle className="h-4 w-4 shrink-0" />
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
             )}
             <span>{status.msg}</span>
           </div>

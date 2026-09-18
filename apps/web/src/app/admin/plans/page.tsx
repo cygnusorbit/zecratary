@@ -197,49 +197,7 @@ export default function AdminSubscriptionPlans() {
 
   const applySavedTheme = useCallback(() => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light' || mode === 'day';
-      setIsDayMode(isDay);
-
-      const stored = typeof window !== 'undefined'
-        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
-        : null;
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-        }
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (_) {}
   }, []);
 
@@ -255,8 +213,6 @@ export default function AdminSubscriptionPlans() {
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-      }
     };
   }, [applySavedTheme]);
 
@@ -264,55 +220,53 @@ export default function AdminSubscriptionPlans() {
     if (isFetchingPackagesRef.current) return;
     isFetchingPackagesRef.current = true;
     try {
-    purgeLegacyBrowserAdminStorage();
-    try {
-      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        const serverConfigs = Array.isArray(data) ? data : (data?.packages || data?.plans || data?.configs);
-        if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
-          const hasTaster = serverConfigs.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster');
-          let list = hasTaster ? serverConfigs : [{ ...DEFAULT_PRESET_TASTER }, ...serverConfigs];
+      purgeLegacyBrowserAdminStorage();
+      try {
+        const res = await fetch('/api/admin/plans', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          const serverConfigs = Array.isArray(data) ? data : (data?.packages || data?.plans || data?.configs);
+          if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
+            const hasTaster = serverConfigs.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster');
+            let list = hasTaster ? serverConfigs : [{ ...DEFAULT_PRESET_TASTER }, ...serverConfigs];
 
-          list = list.map((p: any) => {
-            const cleanSlug = (p.slug || p.id || 'plan').replace(/-(monthly|annual)$/, '');
-            return {
-              ...p,
-              planGroupId: p.planGroupId || ('group_' + cleanSlug),
-              monthlyPlanId: p.monthlyPlanId || (p.isFree ? p.id : `${p.id || cleanSlug}_monthly`),
-              annualPlanId: p.annualPlanId || (p.isFree ? p.id : `${p.id || cleanSlug}_annual`),
-              featuresText: typeof p.featuresText === 'string' && p.featuresText
-                ? p.featuresText
-                : (Array.isArray(p.features) ? p.features.join('\n') : (p.descriptionMonthly || '')),
-              allowedAiModels: Array.isArray(p.allowedAiModels)
-                ? p.allowedAiModels.join(',')
-                : (p.allowedAiModels || 'gemini-3.6-flash'),
-              tokenLimit: p.tokenLimit !== undefined ? p.tokenLimit : (p.slug === 'taster' ? 50000 : 500000),
-              tokenReimburseFrequency: p.tokenReimburseFrequency || 'monthly',
-              isDefault: p.slug === 'taster' || p.id === 'preset_taster',
-            };
-          });
+            list = list.map((p: any) => {
+              const cleanSlug = (p.slug || p.id || 'plan').replace(/-(monthly|annual)$/, '');
+              return {
+                ...p,
+                planGroupId: p.planGroupId || ('group_' + cleanSlug),
+                monthlyPlanId: p.monthlyPlanId || (p.isFree ? p.id : `${p.id || cleanSlug}_monthly`),
+                annualPlanId: p.annualPlanId || (p.isFree ? p.id : `${p.id || cleanSlug}_annual`),
+                featuresText: typeof p.featuresText === 'string' && p.featuresText
+                  ? p.featuresText
+                  : (Array.isArray(p.features) ? p.features.join('\n') : (p.descriptionMonthly || '')),
+                allowedAiModels: Array.isArray(p.allowedAiModels)
+                  ? p.allowedAiModels.join(',')
+                  : (p.allowedAiModels || 'gemini-3.6-flash'),
+                tokenLimit: p.tokenLimit !== undefined ? p.tokenLimit : (p.slug === 'taster' ? 50000 : 500000),
+                tokenReimburseFrequency: p.tokenReimburseFrequency || 'monthly',
+                isDefault: p.slug === 'taster' || p.id === 'preset_taster',
+              };
+            });
 
-          setPackages(prev => JSON.stringify(prev) === JSON.stringify(list) ? prev : list);
-          return;
+            setPackages(prev => JSON.stringify(prev) === JSON.stringify(list) ? prev : list);
+            return;
+          }
         }
+      } catch (e) {
+        console.error('Failed to fetch packages from server:', e);
       }
-    } catch (e) {
-      console.error('Failed to fetch packages from server:', e);
-    }
-    setPackages([{ ...DEFAULT_PRESET_TASTER }]);
+      setPackages([{ ...DEFAULT_PRESET_TASTER }]);
     } finally {
       isFetchingPackagesRef.current = false;
     }
   }, []);
 
-    // Decoupled document title
   useEffect(() => {
     if (!mounted) return;
     document.title = `${t('subscriptionPlansTitle', 'Subscription Plans')} - FoodiePrep Admin`;
   }, [mounted, t]);
 
-  // Mount-only fetch with debounced event listener
   useEffect(() => {
     if (!mounted) return;
     initAuthStorage();
@@ -336,7 +290,7 @@ export default function AdminSubscriptionPlans() {
       window.removeEventListener('zecratary_plans_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [mounted]);
+  }, [mounted, fetchPackages]);
 
   const handleSetDefaultPlan = async (targetPkg: SubscriptionPackageConfig) => {
     const isTaster = targetPkg.id === 'preset_taster' || targetPkg.slug === 'taster';
@@ -609,7 +563,7 @@ export default function AdminSubscriptionPlans() {
   };
 
   if (!mounted) {
-    return <div className="max-w-7xl mx-auto p-8 text-slate-400 text-xs">{t('loadingPlans', 'Loading subscription plans...')}</div>;
+    return <div className="max-w-7xl mx-auto p-8 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('loadingPlans', 'Loading subscription plans...')}</div>;
   }
 
   const currentFeaturesList = (typeof form.featuresText === 'string'
@@ -637,8 +591,8 @@ export default function AdminSubscriptionPlans() {
     : t('createPublishPackageBtn', 'Create & Publish Package');
 
   const isCreateMode = !editingId;
-  const submitButtonBg = isCreateMode ? '#10b981' : 'var(--color-primary, #E05638)';
-  const submitButtonHoverBg = isCreateMode ? '#059669' : 'var(--color-primary-hover, #c94529)';
+  const submitButtonBg = isCreateMode ? 'var(--color-emerald, #10b981)' : 'var(--color-primary, #E05638)';
+  const submitButtonHoverBg = isCreateMode ? 'var(--color-primary-hover, #c94529)' : 'var(--color-primary-hover, #c94529)';
 
   const getReimburseLabel = (freq: string) => {
     switch (freq) {
@@ -652,14 +606,14 @@ export default function AdminSubscriptionPlans() {
   return (
     <div 
       className="max-w-7xl mx-auto space-y-8 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      style={{ color: 'var(--color-text)' }}
     >
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
             {t('subscriptionPlansTitle', 'Subscription Plans')}
           </h1>
-          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {t('subscriptionPlansSubtitle', 'Manage plan pricing, usage quotas, token availability, reimburse schedule, and subscriber packages')}
           </p>
         </div>
@@ -669,7 +623,9 @@ export default function AdminSubscriptionPlans() {
             type="button"
             onClick={handleStartNewPlan}
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             <Plus className="h-4 w-4" /> {t('addNewPlanBtn', 'Add New Plan')}
           </button>
@@ -677,12 +633,12 @@ export default function AdminSubscriptionPlans() {
             href="/admin"
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#cbd5e1'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
-            <Shield className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminSettingsBtn', 'Admin Settings')}
+            <Shield className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('adminSettingsBtn', 'Admin Settings')}
           </Link>
         </div>
       </div>
@@ -690,13 +646,13 @@ export default function AdminSubscriptionPlans() {
       <div 
         className="p-4 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
         }}
       >
         <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
-          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+          <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
             {t('quickFillPresets', 'Quick-Fill Presets:')}
           </span>
         </div>
@@ -706,9 +662,9 @@ export default function AdminSubscriptionPlans() {
             onClick={() => handleApplyPreset(DEFAULT_PRESET_TASTER)}
             className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#334155' : '#cbd5e1'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             {t('presetTasterBtn', 'Preset: Taster (Free)')}
@@ -718,9 +674,9 @@ export default function AdminSubscriptionPlans() {
             onClick={() => handleApplyPreset(DEFAULT_PRESET_NUTRITION_PRO)}
             className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
-              borderColor: 'var(--color-primary, #E05638)',
-              color: 'var(--color-primary, #E05638)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-primary)',
+              color: 'var(--color-primary)'
             }}
           >
             {t('presetNutritionProBtn', 'Preset: Nutrition Pro')}
@@ -730,9 +686,9 @@ export default function AdminSubscriptionPlans() {
             onClick={handleStartNewPlan}
             className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-              borderColor: 'var(--color-emerald, #10b981)',
-              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
             }}
           >
             {t('presetBlankBtn', 'Blank Custom Plan')}
@@ -744,14 +700,12 @@ export default function AdminSubscriptionPlans() {
         <div
           className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 border shadow-xs animate-in fade-in"
           style={{
-            backgroundColor: feedback.type === 'success' 
-              ? (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)') 
-              : (isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)'),
-            borderColor: feedback.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444',
-            color: feedback.type === 'success' ? (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)') : (isDayMode ? '#b91c1c' : '#fca5a5')
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
+            color: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
           }}
         >
-          {feedback.type === 'success' ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+          {feedback.type === 'success' ? <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} /> : <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />}
           <span>{feedback.msg}</span>
         </div>
       )}
@@ -761,19 +715,19 @@ export default function AdminSubscriptionPlans() {
           onSubmit={handleSavePlan} 
           className="lg:col-span-6 border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200"
           style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
           }}
         >
-          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
             <div className="flex items-center gap-2">
-              <PlusCircle className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} />
+              <PlusCircle className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
               <div>
-                <h2 className="text-base font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                <h2 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
                   {editingId ? `${t('editPlanPrefix', 'Edit Plan:')} ${form.name || t('planNameLabel', 'Plan')}` : t('addNewPlanTitle', 'Add New Subscription Plan')}
                 </h2>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[10px] font-mono text-orange-500 font-bold">
+                  <span className="text-[10px] font-mono font-bold" style={{ color: 'var(--color-primary)' }}>
                     Group: {form.planGroupId || form.id || 'new'}
                   </span>
                 </div>
@@ -787,9 +741,9 @@ export default function AdminSubscriptionPlans() {
                   onClick={handleStartNewPlan}
                   className="text-[10px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : '#1e293b',
-                    borderColor: isDayMode ? '#cbd5e1' : '#334155',
-                    color: isDayMode ? '#334155' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
                   {t('clearNewBtn', 'Clear / New')}
@@ -798,8 +752,8 @@ export default function AdminSubscriptionPlans() {
               <div 
                 className="flex items-center gap-1 p-1 rounded-xl border transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
-                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
                 <button
@@ -810,9 +764,10 @@ export default function AdminSubscriptionPlans() {
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                     isFree 
-                      ? 'bg-[#10b981] text-white shadow-sm' 
-                      : (isDayMode ? 'text-slate-600 hover:text-black' : 'text-slate-400 hover:text-white')
+                      ? 'bg-[var(--color-emerald)] text-white shadow-sm' 
+                      : ''
                   }`}
+                  style={!isFree ? { color: 'var(--color-text-secondary)' } : undefined}
                 >
                   {t('freeTierToggle', 'Free Plan')}
                 </button>
@@ -824,9 +779,10 @@ export default function AdminSubscriptionPlans() {
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                     !isFree 
-                      ? 'bg-[var(--color-primary,#E05638)] text-white shadow-sm' 
-                      : (isDayMode ? 'text-slate-600 hover:text-black' : 'text-slate-400 hover:text-white')
+                      ? 'bg-[var(--color-primary)] text-white shadow-sm' 
+                      : ''
                   }`}
+                  style={isFree ? { color: 'var(--color-text-secondary)' } : undefined}
                 >
                   {t('paidTierToggle', 'Paid Plan')}
                 </button>
@@ -836,7 +792,7 @@ export default function AdminSubscriptionPlans() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('planNameLabel', 'Plan Name')}
               </label>
               <input
@@ -858,15 +814,15 @@ export default function AdminSubscriptionPlans() {
                 placeholder={t('planNamePlaceholder', 'e.g. Starter, Family Pro, Unlimited')}
                 className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               />
             </div>
 
             <div>
-              <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('slugLabel', 'Slug Identifier')}
               </label>
               <input
@@ -888,17 +844,17 @@ export default function AdminSubscriptionPlans() {
                 placeholder={t('slugPlaceholder', 'e.g. starter-plan')}
                 className="w-full border rounded-xl p-2.5 text-xs font-mono outline-none transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#cbd5e1'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               />
             </div>
 
             <div>
-              <label className="text-xs uppercase font-bold block mb-1 flex items-center justify-between" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+              <label className="text-xs uppercase font-bold block mb-1 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                 <span>{t('planGroupIdLabel', 'Plan Group ID')}</span>
-                <Layers className="h-3.5 w-3.5 text-orange-500" />
+                <Layers className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
               </label>
               <input
                 type="text"
@@ -908,9 +864,9 @@ export default function AdminSubscriptionPlans() {
                 placeholder="e.g. group_nutrition_pro"
                 className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#cbd5e1'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               />
             </div>
@@ -920,17 +876,17 @@ export default function AdminSubscriptionPlans() {
           <div 
             className="p-4 rounded-2xl border space-y-3 transition shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
             }}
           >
-            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-orange-500">
+            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
               <Cpu className="h-4 w-4" /> Token Availability & Reimburse Schedule
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <div>
-                <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                   Token Limit (Availability)
                 </label>
                 <input
@@ -940,16 +896,16 @@ export default function AdminSubscriptionPlans() {
                   placeholder="e.g. 50000"
                   className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : '#0B101D',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 />
-                <span className="text-[10px] block mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>(-1 for unlimited tokens)</span>
+                <span className="text-[10px] block mt-1" style={{ color: 'var(--color-text-secondary)' }}>(-1 for unlimited tokens)</span>
               </div>
 
               <div>
-                <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                   Token Reimburse Frequency
                 </label>
                 <select
@@ -957,16 +913,16 @@ export default function AdminSubscriptionPlans() {
                   onChange={(e) => setForm({ ...form, tokenReimburseFrequency: e.target.value as any })}
                   className="w-full border rounded-xl p-2.5 text-xs font-bold outline-none transition cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : '#0B101D',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
-                  <option value="once">Once (Non-recurring)</option>
-                  <option value="weekly">Every Week (From purchase date)</option>
-                  <option value="monthly">Every Month (From purchase date)</option>
+                  <option value="once" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Once (Non-recurring)</option>
+                  <option value="weekly" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Every Week (From purchase date)</option>
+                  <option value="monthly" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Every Month (From purchase date)</option>
                 </select>
-                <span className="text-[10px] block mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Quota refresh schedule</span>
+                <span className="text-[10px] block mt-1" style={{ color: 'var(--color-text-secondary)' }}>Quota refresh schedule</span>
               </div>
             </div>
           </div>
@@ -975,13 +931,13 @@ export default function AdminSubscriptionPlans() {
           <div 
             className="p-4 rounded-2xl border space-y-3 transition shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="flex items-center justify-between">
-              <label className="text-xs uppercase font-bold flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                <Bot className="h-4 w-4 text-[var(--color-primary)]" />
+              <label className="text-xs uppercase font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                <Bot className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                 {t('allowedAiModelsLabel', 'Allowed AI Models')}
               </label>
 
@@ -991,9 +947,9 @@ export default function AdminSubscriptionPlans() {
                   onClick={() => handleAddAiModel(activeSettingsModel)}
                   className="text-[10px] font-mono px-2 py-0.5 rounded-md border cursor-pointer transition flex items-center gap-1 font-bold shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.12)',
-                    borderColor: 'var(--color-primary, #E05638)',
-                    color: 'var(--color-primary, #E05638)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-primary)'
                   }}
                   title="Click to sync and add active model configured in /admin/ai-settings"
                 >
@@ -1003,7 +959,7 @@ export default function AdminSubscriptionPlans() {
             </div>
 
             <div>
-              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                 1. Choose AI Model Provider
               </span>
               <div className="grid grid-cols-2 gap-2">
@@ -1013,11 +969,16 @@ export default function AdminSubscriptionPlans() {
                     setSelectedAiProvider('gemini');
                     setSelectedAiVersion(GEMINI_MODEL_VERSIONS[0]?.value || 'gemini-3.6-flash');
                   }}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
-                    selectedAiProvider === 'gemini'
-                      ? 'bg-[var(--color-primary,#E05638)] text-white border-[var(--color-primary,#E05638)]'
-                      : (isDayMode ? 'bg-white text-slate-700 border-slate-300' : 'bg-[#111726] text-slate-300 border-slate-700')
-                  }`}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs`}
+                  style={selectedAiProvider === 'gemini' ? {
+                    backgroundColor: 'var(--color-primary)',
+                    color: '#ffffff',
+                    borderColor: 'var(--color-primary)'
+                  } : {
+                    backgroundColor: 'var(--color-card)',
+                    color: 'var(--color-text-secondary)',
+                    borderColor: 'var(--color-border)'
+                  }}
                 >
                   <Bot className="h-3.5 w-3.5" /> Google Gemini
                 </button>
@@ -1027,11 +988,16 @@ export default function AdminSubscriptionPlans() {
                     setSelectedAiProvider('openai');
                     setSelectedAiVersion(OPENAI_MODEL_VERSIONS[0]?.value || 'gpt-4o');
                   }}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
-                    selectedAiProvider === 'openai'
-                      ? 'bg-[#10b981] text-white border-[#10b981]'
-                      : (isDayMode ? 'bg-white text-slate-700 border-slate-300' : 'bg-[#111726] text-slate-300 border-slate-700')
-                  }`}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs`}
+                  style={selectedAiProvider === 'openai' ? {
+                    backgroundColor: 'var(--color-emerald)',
+                    color: '#ffffff',
+                    borderColor: 'var(--color-emerald)'
+                  } : {
+                    backgroundColor: 'var(--color-card)',
+                    color: 'var(--color-text-secondary)',
+                    borderColor: 'var(--color-border)'
+                  }}
                 >
                   <Zap className="h-3.5 w-3.5" /> OpenAI GPT
                 </button>
@@ -1039,7 +1005,7 @@ export default function AdminSubscriptionPlans() {
             </div>
 
             <div>
-              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                 2. Choose AI Version (Synced from /admin/ai-settings)
               </span>
               <div className="flex gap-2">
@@ -1048,13 +1014,13 @@ export default function AdminSubscriptionPlans() {
                   onChange={(e) => setSelectedAiVersion(e.target.value)}
                   className="flex-1 border rounded-xl px-3 py-2 text-xs font-medium outline-none transition cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : '#0B101D',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
                   {(selectedAiProvider === 'gemini' ? GEMINI_MODEL_VERSIONS : OPENAI_MODEL_VERSIONS).map((m) => (
-                    <option key={m.value} value={m.value}>
+                    <option key={m.value} value={m.value} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {m.label} {m.value === activeSettingsModel ? '★ [Active]' : ''}
                     </option>
                   ))}
@@ -1063,7 +1029,7 @@ export default function AdminSubscriptionPlans() {
                   type="button"
                   onClick={() => handleAddAiModel(selectedAiVersion)}
                   className="px-4 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1 shadow-md cursor-pointer transition shrink-0"
-                  style={{ backgroundColor: selectedAiProvider === 'gemini' ? 'var(--color-primary, #E05638)' : '#10b981' }}
+                  style={{ backgroundColor: selectedAiProvider === 'gemini' ? 'var(--color-primary)' : 'var(--color-emerald)' }}
                 >
                   <Plus className="h-3.5 w-3.5" /> Add
                 </button>
@@ -1071,7 +1037,7 @@ export default function AdminSubscriptionPlans() {
             </div>
 
             <div>
-              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                 Configured Allowed Models for this plan:
               </span>
               {currentAllowedModels.length === 0 ? (
@@ -1085,13 +1051,9 @@ export default function AdminSubscriptionPlans() {
                         key={modelName}
                         className="border px-2.5 py-1 rounded-lg text-xs font-mono font-semibold flex items-center gap-1.5 shadow-xs"
                         style={{
-                          backgroundColor: isGem 
-                            ? (isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)') 
-                            : (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)'),
-                          borderColor: isGem ? 'var(--color-primary, #E05638)' : '#10b981',
-                          color: isGem 
-                            ? (isDayMode ? '#991b1b' : 'var(--color-primary, #E05638)') 
-                            : (isDayMode ? '#047857' : '#10b981')
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: isGem ? 'var(--color-primary)' : 'var(--color-emerald)',
+                          color: isGem ? 'var(--color-primary)' : 'var(--color-emerald)'
                         }}
                       >
                         {modelName}
@@ -1113,24 +1075,25 @@ export default function AdminSubscriptionPlans() {
 
           {!isFree ? (
             <div className="space-y-4">
-              <div className="flex items-center justify-between border-b pb-2 pt-1" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-                <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  <DollarSign className="h-4 w-4 text-[var(--color-primary)]" /> {t('pricingDisplaySettings', 'Pricing & Billing Display Settings')}
+              <div className="flex items-center justify-between border-b pb-2 pt-1" style={{ borderColor: 'var(--color-border)' }}>
+                <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <DollarSign className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('pricingDisplaySettings', 'Pricing & Billing Display Settings')}
                 </span>
 
                 <div 
                   className="p-1 rounded-xl border flex items-center gap-1 transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
-                    borderColor: isDayMode ? '#cbd5e1' : '#1e293b'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   <button
                     type="button"
                     onClick={() => setSettingsFilter('both')}
                     className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
-                      settingsFilter === 'both' ? 'bg-slate-700 text-white shadow-sm' : (isDayMode ? 'text-slate-600 hover:text-black' : 'text-slate-400 hover:text-white')
+                      settingsFilter === 'both' ? 'bg-slate-700 text-white shadow-sm' : ''
                     }`}
+                    style={settingsFilter !== 'both' ? { color: 'var(--color-text-secondary)' } : undefined}
                   >
                     {t('viewBothBtn', 'View Both')}
                   </button>
@@ -1138,8 +1101,9 @@ export default function AdminSubscriptionPlans() {
                     type="button"
                     onClick={() => setSettingsFilter('monthly')}
                     className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
-                      settingsFilter === 'monthly' ? 'bg-[#E05638] text-white shadow-sm' : (isDayMode ? 'text-slate-600 hover:text-black' : 'text-slate-400 hover:text-white')
+                      settingsFilter === 'monthly' ? 'bg-[var(--color-primary)] text-white shadow-sm' : ''
                     }`}
+                    style={settingsFilter !== 'monthly' ? { color: 'var(--color-text-secondary)' } : undefined}
                   >
                     {t('monthlyBtn', 'Monthly')}
                   </button>
@@ -1147,8 +1111,9 @@ export default function AdminSubscriptionPlans() {
                     type="button"
                     onClick={() => setSettingsFilter('annual')}
                     className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
-                      settingsFilter === 'annual' ? 'bg-[#10b981] text-white shadow-sm' : (isDayMode ? 'text-slate-600 hover:text-black' : 'text-slate-400 hover:text-white')
+                      settingsFilter === 'annual' ? 'bg-[var(--color-emerald)] text-white shadow-sm' : ''
                     }`}
+                    style={settingsFilter !== 'annual' ? { color: 'var(--color-text-secondary)' } : undefined}
                   >
                     {t('annualBtn', 'Annual')}
                   </button>
@@ -1160,25 +1125,32 @@ export default function AdminSubscriptionPlans() {
                 <div 
                   className="p-4 rounded-2xl border space-y-3 relative transition shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.04)',
-                    borderColor: isDayMode ? '#fdba74' : 'rgba(224, 86, 56, 0.35)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4 text-[#E05638]" />
-                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
                         {t('monthlySubscriptionTitle', 'Monthly Subscription Settings')}
                       </span>
                     </div>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase bg-orange-500/15 text-orange-600 border border-orange-500/30">
+                    <span 
+                      className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
                       {t('billedEveryMonth', 'Billed Every Month')}
                     </span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                     <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                         {t('monthlyPlanIdLabel', 'Monthly Plan ID')}
                       </label>
                       <input
@@ -1189,15 +1161,15 @@ export default function AdminSubscriptionPlans() {
                         placeholder="plan_xxx_monthly"
                         className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#0f172a' : '#ffffff'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
                         }}
                       />
                     </div>
 
                     <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                         {t('monthlyPriceLabel', 'Monthly Price ($)')}
                       </label>
                       <input
@@ -1208,15 +1180,15 @@ export default function AdminSubscriptionPlans() {
                         placeholder="8.99"
                         className="w-full border rounded-xl p-2.5 text-xs font-bold outline-none transition"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#0f172a' : '#ffffff'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
                         }}
                       />
                     </div>
 
                     <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                         {t('badgeOptional', 'Badge Text (Optional)')}
                       </label>
                       <input
@@ -1226,16 +1198,16 @@ export default function AdminSubscriptionPlans() {
                         placeholder="e.g. Billed Immediately"
                         className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#0f172a' : '#ffffff'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
                         }}
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                       {t('subtextTagline', 'Subtext / Tagline')}
                     </label>
                     <input
@@ -1245,9 +1217,9 @@ export default function AdminSubscriptionPlans() {
                       placeholder="e.g. Full kitchen access, billed monthly"
                       className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
@@ -1259,30 +1231,37 @@ export default function AdminSubscriptionPlans() {
                 <div 
                   className="p-4 rounded-2xl border space-y-3 relative transition shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.04)',
-                    borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.35)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-[#10b981]" />
-                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      <Sparkles className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
                         {t('annualSubscriptionTitle', 'Annual Subscription Settings')}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1.5">
                       {calculatedSavings > 0 && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase bg-emerald-500/20 text-emerald-800 border border-emerald-500/30">
+                        <span 
+                          className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-emerald)'
+                          }}
+                        >
                           {t('savesBadge', `Saves ${calculatedSavings}%`).replace('{percent}', calculatedSavings.toString())}
                         </span>
                       )}
                       <span 
                         className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : '#1e293b',
-                          color: isDayMode ? '#334155' : '#cbd5e1',
-                          borderColor: isDayMode ? '#cbd5e1' : '#334155'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          color: 'var(--color-text-secondary)',
+                          borderColor: 'var(--color-border)'
                         }}
                       >
                         {t('moEqBadge', `$${annualMonthlyEquivalent}/mo eq.`).replace('{amount}', annualMonthlyEquivalent)}
@@ -1292,7 +1271,7 @@ export default function AdminSubscriptionPlans() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
                     <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                         {t('annualPlanIdLabel', 'Annual Plan ID')}
                       </label>
                       <input
@@ -1303,15 +1282,15 @@ export default function AdminSubscriptionPlans() {
                         placeholder="plan_xxx_annual"
                         className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#0f172a' : '#ffffff'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
                         }}
                       />
                     </div>
 
                     <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                         {t('annualPriceLabel', 'Annual Price ($)')}
                       </label>
                       <input
@@ -1322,15 +1301,15 @@ export default function AdminSubscriptionPlans() {
                         placeholder="59.99"
                         className="w-full border rounded-xl p-2.5 text-xs font-bold outline-none transition"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#0f172a' : '#ffffff'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
                         }}
                       />
                     </div>
 
                     <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                         {t('discountBadge', 'Discount Badge')}
                       </label>
                       <input
@@ -1340,15 +1319,15 @@ export default function AdminSubscriptionPlans() {
                         placeholder="e.g. Save 44%"
                         className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#0f172a' : '#ffffff'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
                         }}
                       />
                     </div>
 
                     <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                         {t('trialBadgeLabel', 'Trial Badge')}
                       </label>
                       <input
@@ -1358,16 +1337,16 @@ export default function AdminSubscriptionPlans() {
                         placeholder="e.g. 7-Day Free Trial"
                         className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#0f172a' : '#ffffff'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
                         }}
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-[11px] font-bold block mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
                       {t('annualSubtext', 'Annual Subtext')}
                     </label>
                     <input
@@ -1377,9 +1356,9 @@ export default function AdminSubscriptionPlans() {
                       placeholder="e.g. Best value - all premium features, billed annually"
                       className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
@@ -1391,16 +1370,16 @@ export default function AdminSubscriptionPlans() {
               <div 
                 className="p-3.5 border rounded-2xl text-xs flex items-center justify-between shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.1)',
-                  borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.3)',
-                  color: isDayMode ? '#047857' : '#10b981'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
                 }}
               >
                 <span>{t('zeroCostPlanNotice', 'This is a free plan package. Pricing fields are automatically set to $0.')}</span>
               </div>
 
               <div>
-                <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('freePlanDescLabel', 'Free Plan Description / Subtitle')}
                 </label>
                 <input
@@ -1410,9 +1389,9 @@ export default function AdminSubscriptionPlans() {
                   placeholder={t('freePlanDescPlaceholder', 'e.g. Free tier with limited features')}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 />
               </div>
@@ -1421,7 +1400,7 @@ export default function AdminSubscriptionPlans() {
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 text-xs pt-1">
             <div>
-              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('buttonLabelField', 'Button Label')}</label>
+              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('buttonLabelField', 'Button Label')}</label>
               <input
                 type="text"
                 value={form.buttonText}
@@ -1429,65 +1408,65 @@ export default function AdminSubscriptionPlans() {
                 placeholder="Choose Plan"
                 className="w-full border rounded-xl p-2 text-xs outline-none transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               />
             </div>
             <div>
-              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('aiRecipeLimitField', 'AI Recipe Limit')}</label>
+              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('aiRecipeLimitField', 'AI Recipe Limit')}</label>
               <input
                 type="number"
                 value={form.aiRecipeLimit}
                 onChange={(e) => setForm({ ...form, aiRecipeLimit: parseInt(e.target.value) || 0 })}
                 className="w-full border rounded-xl p-2 text-xs outline-none transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               />
-              <span className="text-[10px] block mt-1 leading-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('recipeLimitHint', '(-1 for unlimited)')}</span>
+              <span className="text-[10px] block mt-1 leading-tight" style={{ color: 'var(--color-text-secondary)' }}>{t('recipeLimitHint', '(-1 for unlimited)')}</span>
             </div>
             <div>
-              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('libraryMaxField', 'Library Max')}</label>
+              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('libraryMaxField', 'Library Max')}</label>
               <input
                 type="number"
                 value={form.recipeLibraryLimit}
                 onChange={(e) => setForm({ ...form, recipeLibraryLimit: parseInt(e.target.value) || 0 })}
                 className="w-full border rounded-xl p-2 text-xs outline-none transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               />
-              <span className="text-[10px] block mt-1 leading-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('libraryLimitHint', '(-1 for unlimited)')}</span>
+              <span className="text-[10px] block mt-1 leading-tight" style={{ color: 'var(--color-text-secondary)' }}>{t('libraryLimitHint', '(-1 for unlimited)')}</span>
             </div>
             <div>
-              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('scrapeLimitField', 'Scrape Limit')}</label>
+              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('scrapeLimitField', 'Scrape Limit')}</label>
               <input
                 type="number"
                 value={form.socialScrapeLimit}
                 onChange={(e) => setForm({ ...form, socialScrapeLimit: parseInt(e.target.value) || 0 })}
                 className="w-full border rounded-xl p-2 text-xs outline-none transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               />
-              <span className="text-[10px] block mt-1 leading-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('scrapeLimitHint', '(-1 for unlimited)')}</span>
+              <span className="text-[10px] block mt-1 leading-tight" style={{ color: 'var(--color-text-secondary)' }}>{t('scrapeLimitHint', '(-1 for unlimited)')}</span>
             </div>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-xs uppercase font-bold" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+              <label className="text-xs uppercase font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('featuresChecklistLabel', 'Features Checklist (One per line)')}
               </label>
-              <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{currentFeaturesList.length} {t('itemsCountSuffix', 'items')}</span>
+              <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{currentFeaturesList.length} {t('itemsCountSuffix', 'items')}</span>
             </div>
             <textarea
               rows={4}
@@ -1496,12 +1475,12 @@ export default function AdminSubscriptionPlans() {
               placeholder="Unlimited AI-powered recipe generation&#10;Unlimited recipe library&#10;Comprehensive nutritional analysis"
               className="w-full border rounded-xl p-2.5 text-xs outline-none transition font-sans"
               style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
             />
-            <span className="text-[10px] block mt-1 leading-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('onePerLineNote', 'Each line will render with a checkmark on the pricing card.')}</span>
+            <span className="text-[10px] block mt-1 leading-tight" style={{ color: 'var(--color-text-secondary)' }}>{t('onePerLineNote', 'Each line will render with a checkmark on the pricing card.')}</span>
           </div>
 
           <div className="flex items-center gap-2 pt-1">
@@ -1510,9 +1489,9 @@ export default function AdminSubscriptionPlans() {
               id="macros_box"
               checked={form.canViewMacros}
               onChange={(e) => setForm({ ...form, canViewMacros: e.target.checked })}
-              className="rounded w-4 h-4 cursor-pointer accent-[#E05638]"
+              className="rounded w-4 h-4 cursor-pointer accent-[var(--color-primary)]"
             />
-            <label htmlFor="macros_box" className="text-xs cursor-pointer select-none" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+            <label htmlFor="macros_box" className="text-xs cursor-pointer select-none" style={{ color: 'var(--color-text-secondary)' }}>
               {t('unlockMacrosLabel', 'Unlock detailed macro analysis (calories, protein, carbs, fat, etc.)')}
             </label>
           </div>
@@ -1536,20 +1515,21 @@ export default function AdminSubscriptionPlans() {
           <div 
             className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                <PackageCheck className="h-5 w-5" style={{ color: '#10b981' }} />
+              <h2 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <PackageCheck className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} />
                 {t('systemPackagesList', 'System Plans List')} ({packages.length})
               </h2>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleStartNewPlan}
-                  className="text-xs font-bold flex items-center gap-1 text-emerald-600 hover:text-emerald-500 transition cursor-pointer"
+                  className="text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                  style={{ color: 'var(--color-emerald)' }}
                 >
                   <Plus className="h-3.5 w-3.5" /> {t('newTierBtn', 'New Plan')}
                 </button>
@@ -1557,7 +1537,7 @@ export default function AdminSubscriptionPlans() {
                   type="button"
                   onClick={fetchPackages}
                   className="text-xs font-bold flex items-center gap-1 transition ml-2 cursor-pointer"
-                  style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                  style={{ color: 'var(--color-text-secondary)' }}
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                 </button>
@@ -1569,9 +1549,9 @@ export default function AdminSubscriptionPlans() {
                 <div 
                   className="text-xs py-8 text-center rounded-2xl border"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#64748b' : '#94a3b8'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('noPackagesConfigured', 'No subscription plans configured.')}
@@ -1593,26 +1573,26 @@ export default function AdminSubscriptionPlans() {
                   return (
                     <div
                       key={cardIdentifier}
-                      className="p-4 rounded-2xl border flex items-center justify-between transition shadow-xs cursor-pointer hover:border-[var(--color-primary,#E05638)]"
+                      className="p-4 rounded-2xl border flex items-center justify-between transition shadow-xs cursor-pointer"
                       onClick={() => handleEditPackage(pkg)}
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                        backgroundColor: 'var(--color-inner-dark)',
                         borderColor: editingId === cardIdentifier 
-                          ? 'var(--color-primary, #E05638)' 
-                          : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)')
+                          ? 'var(--color-primary)' 
+                          : 'var(--color-border)'
                       }}
                     >
                       <div className="space-y-1.5 min-w-0 flex-1 pr-3">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{pkg.name}</span>
+                          <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{pkg.name}</span>
                           
                           {/* PLAN GROUP ID BADGE */}
                           <span 
                             className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
                             style={{
-                              backgroundColor: isDayMode ? '#f1f5f9' : 'rgba(15, 23, 42, 0.6)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              color: isDayMode ? '#475569' : '#94a3b8'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)'
                             }}
                             title={`Plan Group: ${effectiveGroupId}`}
                           >
@@ -1625,9 +1605,9 @@ export default function AdminSubscriptionPlans() {
                               <span 
                                 className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
                                 style={{
-                                  backgroundColor: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.15)',
-                                  borderColor: 'var(--color-primary, #E05638)',
-                                  color: isDayMode ? '#c2410c' : 'var(--color-primary, #E05638)'
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-primary)',
+                                  color: 'var(--color-primary)'
                                 }}
                                 title={`Monthly Plan ID: ${effectiveMonthlyId}`}
                               >
@@ -1637,9 +1617,9 @@ export default function AdminSubscriptionPlans() {
                               <span 
                                 className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
                                 style={{
-                                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                                  borderColor: '#10b981',
-                                  color: isDayMode ? '#047857' : '#10b981'
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-emerald)',
+                                  color: 'var(--color-emerald)'
                                 }}
                                 title={`Annual Plan ID: ${effectiveAnnualId}`}
                               >
@@ -1652,9 +1632,9 @@ export default function AdminSubscriptionPlans() {
                             <span 
                               className="text-[10px] border px-2 py-0.5 rounded-full font-black uppercase flex items-center gap-1 shadow-xs"
                               style={{
-                                backgroundColor: isDayMode ? '#fef3c7' : 'rgba(73, 178, 238, 0.2)',
-                                borderColor: isDayMode ? '#f59e0b' : '#0bc2f5',
-                                color: isDayMode ? '#b45309' : '#e6be2e'
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-primary)',
+                                color: 'var(--color-primary)'
                               }}
                               title={t('currentDefaultPlanTooltip', 'Current Default Plan for new user signups')}
                             >
@@ -1666,9 +1646,9 @@ export default function AdminSubscriptionPlans() {
                             <span 
                               className="text-[10px] border px-2 py-0.5 rounded-full font-bold uppercase shadow-xs"
                               style={{
-                                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
-                                borderColor: '#10b981',
-                                color: isDayMode ? '#047857' : '#10b981'
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-emerald)',
+                                color: 'var(--color-emerald)'
                               }}
                             >
                               {t('freeBadge', 'FREE')}
@@ -1678,9 +1658,9 @@ export default function AdminSubscriptionPlans() {
                               <span 
                                 className="text-[10px] border px-2 py-0.5 rounded-full font-bold shadow-xs"
                                 style={{
-                                  backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.2)',
-                                  borderColor: 'var(--color-primary, #E05638)',
-                                  color: 'var(--color-primary, #E05638)'
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-primary)',
+                                  color: 'var(--color-primary)'
                                 }}
                               >
                                 ${pkg.monthlyPriceDollars.toFixed(2)}{t('perMonth', '/month')}
@@ -1688,9 +1668,9 @@ export default function AdminSubscriptionPlans() {
                               <span 
                                 className="text-[10px] border px-2 py-0.5 rounded-full font-bold shadow-xs"
                                 style={{
-                                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
-                                  borderColor: '#10b981',
-                                  color: isDayMode ? '#047857' : '#10b981'
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-emerald)',
+                                  color: 'var(--color-emerald)'
                                 }}
                               >
                                 ${pkg.annualPriceDollars.toFixed(2)}{t('perYear', '/year')}
@@ -1699,30 +1679,31 @@ export default function AdminSubscriptionPlans() {
                           )}
                         </div>
 
-                        <div className="text-xs space-x-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                        <div className="text-xs space-x-2" style={{ color: 'var(--color-text-secondary)' }}>
                           <span>{pkg.aiRecipeLimit === -1 ? t('unlimitedLabel', 'Unlimited') : pkg.aiRecipeLimit} AI recipes</span>
                           <span>•</span>
-                          <span className="text-orange-400 font-mono font-semibold">
+                          <span className="font-mono font-semibold" style={{ color: 'var(--color-primary)' }}>
                             {pkg.tokenLimit === -1 ? 'Unlimited Tokens' : `${(pkg.tokenLimit || 0).toLocaleString()} tokens`} ({getReimburseLabel(pkg.tokenReimburseFrequency)})
                           </span>
                         </div>
 
                         <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                          {modelsList.map((m) => (
-                            <span
-                              key={m}
-                              className="text-[9px] font-mono px-1.5 py-0.2 rounded border"
-                              style={{
-                                backgroundColor: m.includes('gemini')
-                                  ? (isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.1)')
-                                  : (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.1)'),
-                                borderColor: m.includes('gemini') ? 'var(--color-primary, #E05638)' : '#10b981',
-                                color: m.includes('gemini') ? 'var(--color-primary, #E05638)' : '#10b981'
-                              }}
-                            >
-                              {m}
-                            </span>
-                          ))}
+                          {modelsList.map((m) => {
+                            const isGem = m.includes('gemini');
+                            return (
+                              <span
+                                key={m}
+                                className="text-[9px] font-mono px-1.5 py-0.2 rounded border"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: isGem ? 'var(--color-primary)' : 'var(--color-emerald)',
+                                  color: isGem ? 'var(--color-primary)' : 'var(--color-emerald)'
+                                }}
+                              >
+                                {m}
+                              </span>
+                            );
+                          })}
                         </div>
                       </div>
 
@@ -1736,14 +1717,13 @@ export default function AdminSubscriptionPlans() {
                           }}
                           className={`p-2 rounded-xl border transition flex items-center gap-1 shadow-xs ${
                             isTaster
-                              ? 'text-amber-500 border-amber-500/50 bg-amber-500/15 cursor-default'
-                              : 'opacity-30 cursor-not-allowed text-slate-400'
+                              ? 'cursor-default'
+                              : 'opacity-35 cursor-not-allowed'
                           }`}
                           style={{
-                            backgroundColor: isTaster
-                              ? (isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)')
-                              : (isDayMode ? '#ffffff' : 'var(--color-card, #111726)'),
-                            borderColor: isTaster ? '#f59e0b' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: isTaster ? 'var(--color-primary)' : 'var(--color-border)',
+                            color: isTaster ? 'var(--color-primary)' : 'var(--color-text-secondary)'
                           }}
                           title={
                             isTaster
@@ -1751,7 +1731,7 @@ export default function AdminSubscriptionPlans() {
                               : t('tasterLockedDefaultTooltip', 'The Taster plan (ID: preset_taster) is permanently locked as the default plan')
                           }
                         >
-                          <Star className={`h-4 w-4 ${isTaster ? 'fill-amber-500 text-amber-500' : ''}`} />
+                          <Star className={`h-4 w-4 ${isTaster ? 'fill-current' : ''}`} style={{ color: isTaster ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
                         </button>
 
                         <button
@@ -1762,13 +1742,13 @@ export default function AdminSubscriptionPlans() {
                           }}
                           className="p-2 rounded-xl border transition cursor-pointer shadow-xs"
                           style={{
-                            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#0f172a' : '#cbd5e1'
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                           title={t('editPlanTooltip', 'Edit Plan')}
                         >
-                          <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                          <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                         </button>
 
                         <button
@@ -1780,13 +1760,13 @@ export default function AdminSubscriptionPlans() {
                           }}
                           className={`p-2 rounded-xl border transition shadow-xs ${
                             isTaster
-                              ? 'opacity-30 cursor-not-allowed text-slate-400'
+                              ? 'opacity-35 cursor-not-allowed'
                               : 'hover:text-red-500 cursor-pointer'
                           }`}
                           style={{
-                            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#64748b' : '#94a3b8'
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
                           }}
                           title={isTaster ? t('tasterPermanentProtected', 'Taster plan is permanently protected') : t('deletePackageTooltip', 'Delete Plan')}
                         >
@@ -1808,31 +1788,30 @@ export default function AdminSubscriptionPlans() {
           <div 
             className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                <Eye className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+              <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                 {t('liveCardMockup', 'Live Card Mockup Preview')}
               </h2>
 
               <div 
                 className="rounded-full p-1 border shadow-xs flex items-center transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : '#ffffff',
-                  borderColor: isDayMode ? '#cbd5e1' : '#e2e8f0'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
                 <button
                   type="button"
                   onClick={() => setPreviewTab('monthly')}
                   className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
-                    previewTab === 'monthly'
-                      ? 'bg-[#E05638] text-white shadow-sm'
-                      : 'text-slate-600 hover:text-black'
+                    previewTab === 'monthly' ? 'bg-[var(--color-primary)] text-white shadow-sm' : ''
                   }`}
+                  style={previewTab !== 'monthly' ? { color: 'var(--color-text-secondary)' } : undefined}
                 >
                   {t('monthlyBtn', 'Monthly')}
                 </button>
@@ -1840,21 +1819,24 @@ export default function AdminSubscriptionPlans() {
                   type="button"
                   onClick={() => setPreviewTab('annual')}
                   className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
-                    previewTab === 'annual'
-                      ? 'bg-[#E05638] text-white shadow-sm'
-                      : 'text-slate-600 hover:text-black'
+                    previewTab === 'annual' ? 'bg-[var(--color-primary)] text-white shadow-sm' : ''
                   }`}
+                  style={previewTab !== 'annual' ? { color: 'var(--color-text-secondary)' } : undefined}
                 >
                   {t('annualBtn', 'Annual')}
                 </button>
               </div>
             </div>
 
-            <div className="bg-[#FFFDF9] text-slate-800 rounded-3xl p-7 border-2 relative transition shadow-md"
-              style={{ borderColor: isFree ? 'var(--color-primary, #E05638)' : '#e2e8f0' }}
+            <div className="rounded-3xl p-7 border-2 relative transition shadow-md"
+              style={{ 
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: isFree ? 'var(--color-primary)' : 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
             >
               {!isFree && previewTab === 'annual' && form.annualBadge && (
-                <div className="absolute -top-3.5 right-6 px-3.5 py-1 rounded-full text-[11px] font-black text-white shadow-md bg-[#589c3a]">
+                <div className="absolute -top-3.5 right-6 px-3.5 py-1 rounded-full text-[11px] font-black text-white shadow-md" style={{ backgroundColor: 'var(--color-emerald)' }}>
                   {form.annualBadge}
                 </div>
               )}
@@ -1862,113 +1844,113 @@ export default function AdminSubscriptionPlans() {
               <div className="space-y-3.5">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-2xl font-black text-[#589c3a]">
+                    <h3 className="text-2xl font-black" style={{ color: 'var(--color-emerald)' }}>
                       {form.name || t('planNameLabel', 'Plan Name')}
                     </h3>
                     <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                      <span className="text-[10px] font-mono text-slate-500 font-bold bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
                         Group: {form.planGroupId || form.id || form.slug}
                       </span>
                       {!isFree && previewTab === 'monthly' && (
-                        <span className="text-[10px] font-mono text-orange-700 font-bold bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
                           Monthly Plan ID: {form.monthlyPlanId || `${form.id || form.slug}_monthly`}
                         </span>
                       )}
                       {!isFree && previewTab === 'annual' && (
-                        <span className="text-[10px] font-mono text-emerald-800 font-bold bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-emerald)' }}>
                           Annual Plan ID: {form.annualPlanId || `${form.id || form.slug}_annual`}
                         </span>
                       )}
                     </div>
                   </div>
-                  <span className="text-[10px] bg-orange-100 text-orange-800 font-bold px-2.5 py-1 rounded-full border border-orange-300 font-mono">
+                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border font-mono" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
                     {form.tokenLimit === -1 ? 'Unlimited Tokens' : `${(form.tokenLimit || 0).toLocaleString()} tokens`} ({getReimburseLabel(form.tokenReimburseFrequency)})
                   </span>
                 </div>
 
                 {isFree ? (
                   <div>
-                    <div className="text-4xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                    <div className="text-4xl font-black" style={{ color: 'var(--color-primary)' }}>
                       {t('freeMockupText', 'Free')}
                     </div>
-                    <p className="text-xs text-slate-500 font-medium mt-1">
+                    <p className="text-xs font-medium mt-1" style={{ color: 'var(--color-text-secondary)' }}>
                       {form.descriptionMonthly || t('defaultFreeDesc', 'Free plan with limited features')}
                     </p>
                   </div>
                 ) : previewTab === 'monthly' ? (
                   <div>
                     <div className="flex items-baseline gap-1">
-                      <span className="text-4xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                      <span className="text-4xl font-black" style={{ color: 'var(--color-primary)' }}>
                         ${form.monthlyPriceDollars.toFixed(2)}
                       </span>
-                      <span className="text-base font-bold text-slate-600">
+                      <span className="text-base font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         {t('perMonth', '/month')}
                       </span>
                     </div>
 
-                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mt-1">
+                    <div className="text-[11px] font-bold uppercase tracking-wide mt-1" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('usdCurrency', 'USD')}
                     </div>
 
                     {form.monthlyBadge && (
                       <div className="mt-2 inline-block px-3 py-1 rounded-full text-[11px] font-bold text-white shadow-sm"
-                        style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                        style={{ backgroundColor: 'var(--color-primary)' }}
                       >
                         {form.monthlyBadge}
                       </div>
                     )}
 
-                    <p className="text-xs text-slate-600 font-medium mt-2">
+                    <p className="text-xs font-medium mt-2" style={{ color: 'var(--color-text-secondary)' }}>
                       {form.descriptionMonthly || t('defaultMonthlyDesc', 'Full kitchen access, billed monthly')}
                     </p>
                   </div>
                 ) : (
                   <div>
                     <div className="flex items-baseline gap-1">
-                      <span className="text-4xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                      <span className="text-4xl font-black" style={{ color: 'var(--color-primary)' }}>
                         ${form.annualPriceDollars.toFixed(2)}
                       </span>
-                      <span className="text-base font-bold text-slate-600">
+                      <span className="text-base font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         {t('perYear', '/year')}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 text-xs text-slate-700 font-bold mt-1">
+                    <div className="flex items-center gap-1.5 text-xs font-bold mt-1" style={{ color: 'var(--color-text)' }}>
                       <span>${annualMonthlyEquivalent}{t('perMonth', '/month')}</span>
-                      <span className="line-through text-slate-400 font-normal">
+                      <span className="line-through font-normal" style={{ color: 'var(--color-text-secondary)' }}>
                         ${form.monthlyPriceDollars.toFixed(2)}{t('perMonth', '/month')}
                       </span>
                     </div>
 
-                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mt-1">
+                    <div className="text-[11px] font-bold uppercase tracking-wide mt-1" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('usdCurrency', 'USD')}
                     </div>
 
                     {form.trialBadge && (
-                      <div className="mt-2 inline-block px-3 py-1 rounded-full text-[11px] font-bold text-white shadow-sm bg-[#2563eb]">
+                      <div className="mt-2 inline-block px-3 py-1 rounded-full text-[11px] font-bold text-white shadow-sm" style={{ backgroundColor: '#2563eb' }}>
                         {form.trialBadge}
                       </div>
                     )}
 
-                    <p className="text-xs text-slate-600 font-medium mt-2">
+                    <p className="text-xs font-medium mt-2" style={{ color: 'var(--color-text-secondary)' }}>
                       {form.descriptionAnnual || t('defaultAnnualDesc', 'Best value - all premium features, billed annually')}
                     </p>
                   </div>
                 )}
 
                 <div className="flex items-center gap-1 flex-wrap pt-1">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase">Allowed AI Models:</span>
+                  <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>Allowed AI Models:</span>
                   {currentAllowedModels.map((m) => (
-                    <span key={m} className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-slate-100 border-slate-300 text-slate-700 font-bold">
+                    <span key={m} className="text-[10px] font-mono px-2 py-0.5 rounded-full border font-bold" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                       {m}
                     </span>
                   ))}
                 </div>
 
-                <div className="pt-2 space-y-2 text-xs font-semibold text-slate-700">
+                <div className="pt-2 space-y-2 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
                   {currentFeaturesList.map((feature, i) => (
                     <div key={i} className="flex items-start gap-2.5">
-                      <Check className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                      <Check className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
                       <span className="leading-snug">{feature}</span>
                     </div>
                   ))}
@@ -1978,7 +1960,7 @@ export default function AdminSubscriptionPlans() {
                   <button
                     type="button"
                     className="w-full py-3 rounded-2xl text-xs font-bold text-white transition shadow-md cursor-pointer"
-                    style={{ backgroundColor: isFree ? 'var(--color-primary, #E05638)' : '#65a30d' }}
+                    style={{ backgroundColor: isFree ? 'var(--color-primary)' : 'var(--color-emerald)' }}
                   >
                     {form.buttonText || (isFree ? t('manageDefaultBtn', 'Manage') : t('choosePlanDefaultBtn', 'Choose Plan'))}
                   </button>

@@ -108,8 +108,8 @@ export default function ChefAISettingsPage() {
 
   const [saved, setSaved] = useState(false);
 
-  // Dynamic Theme Synchronization
-  const syncTheme = useCallback((incomingColors?: any) => {
+  // Dynamic Theme Synchronization & Smooth Day/Dark Transition
+  const applySavedTheme = useCallback((incomingColors?: any) => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
       const root = document.documentElement;
@@ -128,27 +128,48 @@ export default function ChefAISettingsPage() {
       if (isDay) {
         root.classList.remove('dark');
         root.classList.add('light');
-        if (document.body) { // preserved by global theme#f8fafc';
-          document.body.style.color = '#0f172a';
+        if (document.body) {
+          document.body.style.backgroundColor = 'var(--color-bg)';
+          document.body.style.color = 'var(--color-text)';
         }
       } else {
         root.classList.remove('light');
         root.classList.add('dark');
-        const bg = colors?.backgroundColor || colors?.backgroundDark || '#070b13';
+        const bg = colors?.backgroundColor || colors?.backgroundDark || 'var(--color-bg)';
         if (document.body) {
           document.body.style.backgroundColor = bg;
-          document.body.style.color = colors?.textColor || '#ffffff';
+          document.body.style.color = colors?.textColor || 'var(--color-text)';
         }
       }
     } catch (_) {}
   }, []);
 
   useEffect(() => {
-    syncTheme();
+    applySavedTheme();
+
+    fetch('/api/admin/settings', { cache: 'no-store' })
+      .then(res => res.json())
+      .then(data => {
+        if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
+          localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
+          applySavedTheme(data.themeColors);
+        }
+      })
+      .catch(() => {
+        fetch('/api/user/theme', { cache: 'no-store' })
+          .then(res => res.json())
+          .then(data => {
+            if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
+              localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
+              applySavedTheme(data.themeColors);
+            }
+          })
+          .catch(() => {});
+      });
 
     const handleThemeEvent = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      syncTheme(detail);
+      applySavedTheme(detail);
     };
 
     window.addEventListener('zecratary_theme_updated', handleThemeEvent);
@@ -164,7 +185,7 @@ export default function ChefAISettingsPage() {
       window.removeEventListener('zecratary_admin_settings_updated', handleThemeEvent);
       window.removeEventListener('storage', handleThemeEvent);
     };
-  }, [syncTheme]);
+  }, [applySavedTheme]);
 
   // Fetch API Keys from .env / PostgreSQL
   const fetchEnvKeys = async () => {
@@ -202,10 +223,6 @@ export default function ChefAISettingsPage() {
     try {
       const serverData = await fetchServerAdminSettings();
       if (serverData) {
-        if (serverData.themeColors && Object.keys(serverData.themeColors).length > 0) {
-          syncTheme(serverData.themeColors);
-        }
-
         const c = serverData.chefAiSettings || serverData.aiSettings || serverData;
         if (c.provider) setProvider(c.provider);
         else if (serverData.aiProvider) setProvider(serverData.aiProvider);
@@ -240,7 +257,7 @@ export default function ChefAISettingsPage() {
     } catch (err) {
       console.error('[ChefAISettings] Failed to load server settings:', err);
     }
-  }, [syncTheme]);
+  }, []);
 
   useEffect(() => {
     fetchEnvKeys();
@@ -574,7 +591,7 @@ export default function ChefAISettingsPage() {
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-24 font-sans px-2 sm:px-4 pt-2 transition-colors duration-200"
       style={{ 
-        color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)',
+        color: 'var(--color-text)',
         transition: 'background-color 200ms ease, color 200ms ease'
       }}
     >
@@ -585,22 +602,22 @@ export default function ChefAISettingsPage() {
         .settings-input:-webkit-autofill:hover,
         .settings-input:-webkit-autofill:focus,
         .settings-input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'} inset !important;
-          box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'} inset !important;
-          -webkit-text-fill-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
-          caret-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
+          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          -webkit-text-fill-color: var(--color-text) !important;
+          caret-color: var(--color-text) !important;
           transition: background-color 50000s ease-in-out 0s !important;
         }
       `}} />
 
       {/* TOP HEADER */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4 transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4 transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
         <div>
-          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary, #E05638)' }}>
-            <Settings className="h-6 w-6" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('aiAssistantConfigTitle', 'AI Assistant Configuration')}
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+            <Settings className="h-6 w-6" style={{ color: 'var(--color-primary)' }} /> {t('aiAssistantConfigTitle', 'AI Assistant Configuration')}
           </h1>
-          <p className="text-xs mt-0.5" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('aiAssistantConfigSubtitle', 'Update settings and functional AI provider models for the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('agentSuffix', 'agent')}
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('aiAssistantConfigSubtitle', 'Update settings and functional AI provider models for the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary)' }}>/chef</span> {t('agentSuffix', 'agent')}
           </p>
         </div>
 
@@ -609,12 +626,12 @@ export default function ChefAISettingsPage() {
             <span 
               className="border px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-emerald)',
+                color: 'var(--color-emerald)'
               }}
             >
-              <CheckCircle className="h-4 w-4" style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }} /> {t('settingsAppliedSynced', 'Settings Applied & Synced')}
+              <CheckCircle className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('settingsAppliedSynced', 'Settings Applied & Synced')}
             </span>
           )}
           <button
@@ -622,11 +639,11 @@ export default function ChefAISettingsPage() {
             onClick={handleSave}
             className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90"
             style={{ 
-              backgroundColor: 'var(--color-primary, #E05638)',
+              backgroundColor: 'var(--color-primary)',
               boxShadow: '0 8px 20px -4px rgba(224, 86, 56, 0.3)'
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             <Check className="h-4 w-4" /> {t('saveConfigurationBtn', 'Save Configuration')}
           </button>
@@ -634,7 +651,7 @@ export default function ChefAISettingsPage() {
       </div>
 
       {/* HORIZONTAL CONFIGURATION TABS */}
-      <div className="flex border-b gap-6 overflow-x-auto transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+      <div className="flex border-b gap-6 overflow-x-auto transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
         {[
           { id: 'general', label: t('tabGeneralConfig', 'General AI Configuration'), icon: Cpu },
           { id: 'questionnaire', label: `${t('tabQuestionnaires', 'Multi-Topic Questionnaires')} (${sections.filter(s => s.enabled !== false).length}/${sections.length} Active)`, icon: Layers },
@@ -652,8 +669,8 @@ export default function ChefAISettingsPage() {
                 isActive ? '' : 'border-transparent hover:opacity-80'
               }`}
               style={{
-                borderColor: isActive ? 'var(--color-primary, #E05638)' : 'transparent',
-                color: isActive ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)')
+                borderColor: isActive ? 'var(--color-primary)' : 'transparent',
+                color: isActive ? 'var(--color-primary)' : 'var(--color-text-secondary)'
               }}
             >
               <Icon className="h-4 w-4" /> {tab.label}
@@ -670,20 +687,20 @@ export default function ChefAISettingsPage() {
             <div 
               className="border rounded-3xl p-6 space-y-5 shadow-sm transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
               <div className="flex items-center justify-between">
                 <div>
                   <h2 
                     className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                    style={{ color: 'var(--color-primary, #E05638)' }}
+                    style={{ color: 'var(--color-primary)' }}
                   >
                     <Sparkles className="h-4 w-4" /> {t('aiEngineProviderTitle', 'AI Engine Provider & Model Selection')}
                   </h2>
-                  <p className="text-xs mt-0.5" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>
-                    {t('aiEngineProviderDesc', 'Select your active AI provider and model version. This choice controls which model processes prompts in')} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/api/ai</span>.
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('aiEngineProviderDesc', 'Select your active AI provider and model version. This choice controls which model processes prompts in')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/api/ai</span>.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -693,13 +710,13 @@ export default function ChefAISettingsPage() {
                     disabled={autoConnecting}
                     className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 shadow-xs hover:opacity-90"
                     style={{
-                      backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)',
-                      borderColor: 'var(--color-primary, #E05638)',
-                      color: 'var(--color-primary, #E05638)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-primary)',
+                      color: 'var(--color-primary)'
                     }}
                     title="Auto-connect and sync Gemini API key"
                   >
-                    <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse' : ''}`} style={{ color: autoConnecting ? '#f59e0b' : 'var(--color-primary, #E05638)' }} />
+                    <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse' : ''}`} style={{ color: autoConnecting ? '#f59e0b' : 'var(--color-primary)' }} />
                     <span>{autoConnecting ? t('connecting', 'Connecting...') : t('autoConnectGemini', 'Auto-Connect Gemini')}</span>
                   </button>
 
@@ -708,13 +725,13 @@ export default function ChefAISettingsPage() {
                     onClick={handleReloadEnvKey}
                     className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs hover:opacity-80"
                     style={{
-                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#334155' : '#cbd5e1'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
                     }}
                     title="Reload API Key from .env"
                   >
-                    <RefreshCw className={`h-3 w-3 ${syncingEnvKey ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald, #10b981)' }} />
+                    <RefreshCw className={`h-3 w-3 ${syncingEnvKey ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald)' }} />
                     <span>{t('syncFromEnv', 'Sync from .env')}</span>
                   </button>
                 </div>
@@ -726,16 +743,14 @@ export default function ChefAISettingsPage() {
                   onClick={() => handleProviderChange('gemini')}
                   className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: provider === 'gemini' 
-                      ? (isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)') 
-                      : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
-                    borderColor: provider === 'gemini' ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
-                    color: provider === 'gemini' ? (isDayMode ? '#991b1b' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                    backgroundColor: provider === 'gemini' ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                    borderColor: provider === 'gemini' ? 'var(--color-primary)' : 'var(--color-border)',
+                    color: provider === 'gemini' ? 'var(--color-text)' : 'var(--color-text-secondary)'
                   }}
                 >
-                  <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary, #E05638)' }} />
+                  <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                   <div>
-                    <span className="block font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Google Gemini</span>
+                    <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>Google Gemini</span>
                     <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 1.5</span>
                   </div>
                 </button>
@@ -745,16 +760,14 @@ export default function ChefAISettingsPage() {
                   onClick={() => handleProviderChange('openai')}
                   className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: provider === 'openai' 
-                      ? (isDayMode ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.2)') 
-                      : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
-                    borderColor: provider === 'openai' ? 'var(--color-emerald, #10b981)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
-                    color: provider === 'openai' ? (isDayMode ? '#065f46' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                    backgroundColor: provider === 'openai' ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                    borderColor: provider === 'openai' ? 'var(--color-emerald)' : 'var(--color-border)',
+                    color: provider === 'openai' ? 'var(--color-text)' : 'var(--color-text-secondary)'
                   }}
                 >
-                  <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                  <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
                   <div>
-                    <span className="block font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>OpenAI GPT</span>
+                    <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>OpenAI GPT</span>
                     <span className="text-[11px] opacity-75">GPT-4o / GPT-4 Turbo</span>
                   </div>
                 </button>
@@ -763,8 +776,8 @@ export default function ChefAISettingsPage() {
               <div className="pt-2 space-y-4 text-xs">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('apiKeyLabel', 'API Key')}</label>
-                    <span className="text-[10px] font-mono font-bold" style={{ color: isDayMode ? '#7e22ce' : '#c084fc' }}>
+                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('apiKeyLabel', 'API Key')}</label>
+                    <span className="text-[10px] font-mono font-bold" style={{ color: 'var(--color-primary)' }}>
                       {provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}
                     </span>
                   </div>
@@ -776,19 +789,19 @@ export default function ChefAISettingsPage() {
                       placeholder={provider === 'gemini' ? "AIzaSy..." : "sk-..."}
                       className="settings-input w-full border rounded-xl px-4 py-3 pr-36 font-mono text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                        borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => setShowApiKey(!showApiKey)}
                         className="p-1.5 transition cursor-pointer"
-                        style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                        style={{ color: 'var(--color-text-secondary)' }}
                         title={showApiKey ? 'Hide API key' : 'Show API key'}
                       >
                         {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -798,7 +811,7 @@ export default function ChefAISettingsPage() {
                         onClick={handleTestApiKey}
                         disabled={testingKey}
                         className="px-2.5 py-1.5 rounded-lg text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-md disabled:opacity-50 hover:opacity-90"
-                        style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                        style={{ backgroundColor: 'var(--color-primary)' }}
                         title="Test API Key connection live"
                       >
                         {testingKey ? (
@@ -817,26 +830,29 @@ export default function ChefAISettingsPage() {
                   </div>
 
                   {testResult && (
-                    <div className={`mt-2 p-2.5 rounded-xl border text-xs font-semibold flex items-start gap-2 animate-in fade-in shadow-xs ${
-                      testResult.success 
-                        ? (isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300')
-                        : (isDayMode ? 'bg-red-50 border-red-300 text-red-900' : 'bg-red-950/60 border-red-500/50 text-red-300')
-                    }`}>
+                    <div 
+                      className="mt-2 p-2.5 rounded-xl border text-xs font-semibold flex items-start gap-2 animate-in fade-in shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: testResult.success ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
+                        color: testResult.success ? 'var(--color-emerald)' : '#ef4444'
+                      }}
+                    >
                       {testResult.success ? (
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                        <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald)' }} />
                       ) : (
-                        <XCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                        <XCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
                       )}
                       <span className="leading-snug">{testResult.message}</span>
                     </div>
                   )}
-                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('persistedServerSyncNotice', 'Persisted directly to server storage and synced to disk environment.')}
                   </span>
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('modelVersionIdentifier', 'Model Version Identifier')}
                   </label>
                   <select
@@ -844,25 +860,25 @@ export default function ChefAISettingsPage() {
                     onChange={(e) => setModel(e.target.value)}
                     className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition font-medium"
                     style={{
-                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     {provider === 'gemini' ? (
                       <>
-                        <option value="gemini-3.6-flash" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.6 Flash (Latest Recommended)</option>
-                        <option value="gemini-3.5-flash-lite" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Gemini 3.5 Flash Lite (Lightweight & Fast)</option>
+                        <option value="gemini-3.6-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 3.6 Flash (Latest Recommended)</option>
+                        <option value="gemini-3.5-flash-lite" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 3.5 Flash Lite (Lightweight & Fast)</option>
                       </>
                     ) : (
                       <>
-                        <option value="gpt-4o" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>GPT-4o (Advanced reasoning)</option>
-                        <option value="gpt-4-turbo" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>GPT-4 Turbo</option>
-                        <option value="gpt-3.5-turbo" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>GPT-3.5 Turbo (High speed)</option>
+                        <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4o (Advanced reasoning)</option>
+                        <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4 Turbo</option>
+                        <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-3.5 Turbo (High speed)</option>
                       </>
                     )}
                   </select>
-                  <span className="text-[10px] mt-1 block" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}
                   </span>
                 </div>
@@ -877,28 +893,28 @@ export default function ChefAISettingsPage() {
             <div 
               className="border rounded-3xl p-6 space-y-5 shadow-sm text-xs transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
                   <h2 
                     className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
-                    style={{ color: 'var(--color-primary, #E05638)' }}
+                    style={{ color: 'var(--color-primary)' }}
                   >
                     <Layers className="h-4 w-4" /> {t('questionnaireManagerTitle', 'Multi-Topic Questionnaire & Wizard Manager')}
                   </h2>
-                  <p className="text-xs mt-0.5" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>
-                    {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
                   </p>
                 </div>
                 <span 
                   className="border px-3 py-1 rounded-full font-bold text-xs shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)',
-                    borderColor: 'var(--color-primary, #E05638)',
-                    color: 'var(--color-primary, #E05638)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-primary)'
                   }}
                 >
                   {sections.filter(s => s.enabled !== false).length}/{sections.length} {t('topicsActiveBadge', 'Topics Active')}
@@ -907,7 +923,7 @@ export default function ChefAISettingsPage() {
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
                 <div className="lg:col-span-5 space-y-3">
-                  <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('questionnaireTopicsHeader', 'Questionnaire Topics')}
                   </label>
                   
@@ -921,31 +937,32 @@ export default function ChefAISettingsPage() {
                           onClick={() => setActiveTopicId(sec.id)}
                           className="p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between shadow-xs"
                           style={{
-                            backgroundColor: isActive 
-                              ? (isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)') 
-                              : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
-                            borderColor: isActive ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
+                            backgroundColor: isActive ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                            borderColor: isActive ? 'var(--color-primary)' : 'var(--color-border)',
                             opacity: isEnabled ? 1 : 0.65
                           }}
                         >
                           <div className="space-y-0.5 min-w-0 pr-2 flex-1">
-                            <div className="font-bold text-xs truncate flex items-center justify-between" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                            <div className="font-bold text-xs truncate flex items-center justify-between" style={{ color: 'var(--color-text)' }}>
                               <span className="flex items-center gap-1.5 truncate">
-                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isEnabled ? 'var(--color-primary, #E05638)' : '#64748b' }} />
+                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isEnabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
                                 <span className="truncate">{sec.topicTitle}</span>
                               </span>
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase shrink-0 ${
-                                isEnabled 
-                                  ? (isDayMode ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30') 
-                                  : (isDayMode ? 'bg-slate-200 text-slate-700' : 'bg-slate-800 text-slate-400')
-                              }`}>
+                              <span 
+                                className="text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase shrink-0 border"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: isEnabled ? 'var(--color-emerald)' : 'var(--color-border)',
+                                  color: isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+                                }}
+                              >
                                 {isEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                               </span>
                             </div>
-                            <p className="text-[10px] truncate" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>{sec.description}</p>
+                            <p className="text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{sec.description}</p>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0 pl-2 border-l" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+                          <div className="flex items-center gap-2 shrink-0 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
                             <button
                               type="button"
                               onClick={(e) => handleToggleSectionEnabled(sec.id, e)}
@@ -964,7 +981,7 @@ export default function ChefAISettingsPage() {
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); handleDeleteSection(sec.id); }}
                                 className="p-1 rounded-lg hover:text-red-500 transition cursor-pointer"
-                                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
+                                style={{ color: 'var(--color-text-secondary)' }}
                                 title="Delete topic section"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -979,12 +996,12 @@ export default function ChefAISettingsPage() {
                   <div 
                     className="p-4 rounded-2xl border space-y-3 mt-4 transition-colors duration-200"
                     style={{
-                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)'
                     }}
                   >
-                    <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                      <FolderPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addNewTopicHeader', 'Add New Questionnaire Topic')}
+                    <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                      <FolderPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('addNewTopicHeader', 'Add New Questionnaire Topic')}
                     </span>
                     <input
                       type="text"
@@ -993,12 +1010,12 @@ export default function ChefAISettingsPage() {
                       onChange={(e) => setNewTopicTitle(e.target.value)}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                        borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <input
                       type="text"
@@ -1007,21 +1024,21 @@ export default function ChefAISettingsPage() {
                       onChange={(e) => setNewTopicDesc(e.target.value)}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                        borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
                       onClick={handleAddTopicSection}
                       disabled={!newTopicTitle.trim()}
-                      className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md hover:opacity-90"
-                      style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                      className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                     >
                       {t('createTopicBtn', 'Create Topic Category')}
                     </button>
@@ -1031,16 +1048,16 @@ export default function ChefAISettingsPage() {
                 <div 
                   className="lg:col-span-7 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
                   style={{
-                    backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
                     opacity: activeSection?.enabled !== false ? 1 : 0.7
                   }}
                 >
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+                    <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
                       <div className="flex-1 min-w-0 pr-4">
                         <div className="flex items-center gap-2 mb-1">
-                          <ListPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary, #E05638)' }} /> 
+                          <ListPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} /> 
                           <input
                             type="text"
                             value={activeSection?.topicTitle || ''}
@@ -1049,15 +1066,18 @@ export default function ChefAISettingsPage() {
                               setSections(sections.map(s => s.id === activeSection?.id ? { ...s, topicTitle: newTitle } : s));
                             }}
                             className="font-bold text-sm bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none min-w-[200px] transition-colors truncate"
-                            style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                            style={{ color: 'var(--color-text)' }}
                             placeholder="Topic Title..."
                             title="Edit Topic Title"
                           />
-                          <span className={`text-[9px] px-2 py-0.5 rounded font-extrabold uppercase shrink-0 ${
-                            activeSection?.enabled !== false 
-                              ? (isDayMode ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30') 
-                              : (isDayMode ? 'bg-slate-200 text-slate-700' : 'bg-slate-800 text-slate-400')
-                          }`}>
+                          <span 
+                            className="text-[9px] px-2 py-0.5 rounded font-extrabold uppercase shrink-0 border"
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: activeSection?.enabled !== false ? 'var(--color-emerald)' : 'var(--color-border)',
+                              color: activeSection?.enabled !== false ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+                            }}
+                          >
                             {activeSection?.enabled !== false ? t('statusActive', 'Status: Active') : t('statusDisabled', 'Status: Disabled')}
                           </span>
                         </div>
@@ -1069,19 +1089,19 @@ export default function ChefAISettingsPage() {
                             setSections(sections.map(s => s.id === activeSection?.id ? { ...s, description: newDesc } : s));
                           }}
                           className="text-[11px] bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none w-full transition-colors truncate"
-                          style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}
+                          style={{ color: 'var(--color-text-secondary)' }}
                           placeholder="Topic Description..."
                           title="Edit Topic Description"
                         />
                       </div>
-                      <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         {activeSection?.questions.length || 0} {t('questionsCount', 'Questions')}
                       </span>
                     </div>
 
                     <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
                       {activeSection?.questions.length === 0 ? (
-                        <div className="text-center py-8 text-xs italic" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                        <div className="text-center py-8 text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
                           {t('noQuestionsYet', 'No questions in this topic yet. Add one below.')}
                         </div>
                       ) : (
@@ -1090,15 +1110,16 @@ export default function ChefAISettingsPage() {
                             key={qIdx} 
                             className="flex items-center gap-2.5 border rounded-xl p-3 shadow-xs"
                             style={{
-                              backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                              borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)'
                             }}
                           >
                             <span 
-                              className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0"
+                              className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
                               style={{
-                                backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.15)' : 'rgba(224, 86, 56, 0.25)',
-                                color: 'var(--color-primary, #E05638)'
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-primary)',
+                                color: 'var(--color-primary)'
                               }}
                             >
                               {qIdx + 1}
@@ -1118,13 +1139,13 @@ export default function ChefAISettingsPage() {
                                 }));
                               }}
                               className="bg-transparent border-none text-xs outline-none flex-1 font-medium"
-                              style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                              style={{ color: 'var(--color-text)' }}
                             />
                             <button
                               type="button"
                               onClick={() => handleRemoveQuestionFromTopic(activeSection.id, qIdx)}
                               className="hover:text-red-500 transition p-1 cursor-pointer"
-                              style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
+                              style={{ color: 'var(--color-text-secondary)' }}
                               title="Remove question"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -1135,7 +1156,7 @@ export default function ChefAISettingsPage() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2 pt-3 border-t" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+                  <div className="flex gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                     <input
                       type="text"
                       placeholder={`${t('addQuestionPrefix', 'Add question to')} "${activeSection?.topicTitle}"...`}
@@ -1144,18 +1165,18 @@ export default function ChefAISettingsPage() {
                       onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
                       className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                        borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
                       onClick={() => handleAddQuestionToTopic(activeSection.id)}
                       className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90"
-                      style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
+                      style={{ backgroundColor: 'var(--color-emerald)' }}
                     >
                       <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
                     </button>
@@ -1168,13 +1189,13 @@ export default function ChefAISettingsPage() {
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs mt-6 transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
               <h2 
                 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
               </h2>
@@ -1192,30 +1213,28 @@ export default function ChefAISettingsPage() {
                       onClick={() => setResultDisplayMode(mode.id as any)}
                       className="p-4 rounded-2xl border cursor-pointer transition space-y-2 shadow-xs hover:opacity-90"
                       style={{
-                        backgroundColor: isSel 
-                          ? (isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)') 
-                          : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
-                        borderColor: isSel ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
-                        color: isSel ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                        backgroundColor: isSel ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                        borderColor: isSel ? 'var(--color-primary)' : 'var(--color-border)',
+                        color: isSel ? 'var(--color-text)' : 'var(--color-text-secondary)'
                       }}
                     >
-                      <div className="flex items-center justify-between font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      <div className="flex items-center justify-between font-bold" style={{ color: 'var(--color-text)' }}>
                         <span>{mode.title}</span>
-                        {isSel && <Check className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />}
+                        {isSel && <Check className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />}
                       </div>
-                      <p className="text-[11px]">{mode.desc}</p>
+                      <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{mode.desc}</p>
                     </div>
                   );
                 })}
               </div>
 
               {/* LIVE PREVIEW BOX */}
-              <div className="pt-3 border-t space-y-3" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+              <div className="pt-3 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center justify-between">
-                  <span className="font-bold flex items-center gap-1.5 text-xs" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('liveUiPreview', 'Live UI Preview')} ({resultDisplayMode.toUpperCase()} MODE)
+                  <span className="font-bold flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text)' }}>
+                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('liveUiPreview', 'Live UI Preview')} ({resultDisplayMode.toUpperCase()} MODE)
                   </span>
-                  <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('liveUiPreviewNotice', 'Updates instantly when selecting above')}
                   </span>
                 </div>
@@ -1223,40 +1242,40 @@ export default function ChefAISettingsPage() {
                 <div 
                   className="border rounded-2xl p-4 space-y-3 shadow-inner transition-colors duration-200"
                   style={{
-                    backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   {resultDisplayMode === 'compact' && (
                     <div className="space-y-2 animate-in fade-in">
-                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
-                        <span className="font-bold flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                          <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('previewPlanTitle', 'High Protein Plan (3 Days)')}
+                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: 'var(--color-border)' }}>
+                        <span className="font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                          <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('previewPlanTitle', 'High Protein Plan (3 Days)')}
                         </span>
-                        <span style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>3/3 Days</span>
+                        <span style={{ color: 'var(--color-text-secondary)' }}>3/3 Days</span>
                       </div>
                       <div className="space-y-1.5">
                         <div 
                           className="flex items-center justify-between p-2 rounded-xl border text-[11px]"
                           style={{
-                            backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                            borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)'
                           }}
                         >
-                          <span className="font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>Day 1 - Sunday:</span>
-                          <span className="font-medium" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Avocado Quinoa Bowl</span>
-                          <span style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>25m</span>
+                          <span className="font-bold" style={{ color: 'var(--color-primary)' }}>Day 1 - Sunday:</span>
+                          <span className="font-medium" style={{ color: 'var(--color-text)' }}>Avocado Quinoa Bowl</span>
+                          <span style={{ color: 'var(--color-text-secondary)' }}>25m</span>
                         </div>
                         <div 
                           className="flex items-center justify-between p-2 rounded-xl border text-[11px]"
                           style={{
-                            backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                            borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)'
                           }}
                         >
-                          <span className="font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>Day 2 - Monday:</span>
-                          <span className="font-medium" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Grilled Salmon Salad</span>
-                          <span style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>20m</span>
+                          <span className="font-bold" style={{ color: 'var(--color-primary)' }}>Day 2 - Monday:</span>
+                          <span className="font-medium" style={{ color: 'var(--color-text)' }}>Grilled Salmon Salad</span>
+                          <span style={{ color: 'var(--color-text-secondary)' }}>20m</span>
                         </div>
                       </div>
                     </div>
@@ -1264,27 +1283,27 @@ export default function ChefAISettingsPage() {
 
                   {resultDisplayMode === 'detailed' && (
                     <div className="space-y-3 animate-in fade-in">
-                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
-                        <span className="font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-primary, #E05638)' }}>Detailed Master Plan Preview</span>
-                        <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>3 Days</span>
+                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: 'var(--color-border)' }}>
+                        <span className="font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-primary)' }}>Detailed Master Plan Preview</span>
+                        <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>3 Days</span>
                       </div>
                       <div 
                         className="border rounded-xl p-3 space-y-2 text-[11px]"
                         style={{
-                          backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                          borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)'
                         }}
                       >
-                        <div className="flex justify-between font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>
+                        <div className="flex justify-between font-bold" style={{ color: 'var(--color-primary)' }}>
                           <span>Day 1 - Sunday</span>
                           <span>DINNER</span>
                         </div>
                         <div className="flex gap-2.5 items-start">
-                          <div className="w-10 h-10 rounded-lg shrink-0 bg-cover bg-center" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=150&q=80)' }} />
+                          <div className="w-10 h-10 rounded-lg shrink-0 bg-cover bg-center border" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=150&q=80)', borderColor: 'var(--color-border)' }} />
                           <div className="space-y-0.5 flex-1">
-                            <h5 className="font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Avocado Quinoa Bowl</h5>
-                            <p className="text-[10px] line-clamp-1" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>Nutritious plant-based high-protein bowl with fresh lime dressing.</p>
-                            <span className="text-[9px] block" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>Ingredients: Quinoa, Avocado, Chickpeas, Olive Oil</span>
+                            <h5 className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>Avocado Quinoa Bowl</h5>
+                            <p className="text-[10px] line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>Nutritious plant-based high-protein bowl with fresh lime dressing.</p>
+                            <span className="text-[9px] block" style={{ color: 'var(--color-text-secondary)' }}>Ingredients: Quinoa, Avocado, Chickpeas, Olive Oil</span>
                           </div>
                         </div>
                       </div>
@@ -1296,26 +1315,26 @@ export default function ChefAISettingsPage() {
                       <div 
                         className="rounded-xl overflow-hidden border"
                         style={{
-                          backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                          borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)'
                         }}
                       >
-                        <div className="text-white px-3 py-2 flex items-center justify-between font-bold text-xs" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
+                        <div className="text-white px-3 py-2 flex items-center justify-between font-bold text-xs" style={{ backgroundColor: 'var(--color-primary)' }}>
                           <span>Day 1 - Sunday</span>
                           <span className="text-[10px] opacity-90">Sep 6</span>
                         </div>
                         <div className="p-3 space-y-2">
                           <div className="flex items-start gap-3">
-                            <div className="w-12 h-12 rounded-lg shrink-0 bg-cover bg-center border" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=150&q=80)', borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #334155)' }} />
+                            <div className="w-12 h-12 rounded-lg shrink-0 bg-cover bg-center border" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=150&q=80)', borderColor: 'var(--color-border)' }} />
                             <div className="min-w-0 flex-1">
-                              <span className="text-[10px] font-black uppercase" style={{ color: 'var(--color-primary, #E05638)' }}>Dinner</span>
-                              <h4 className="font-extrabold text-xs truncate" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Avocado Quinoa Bowl</h4>
-                              <p className="text-[10px] line-clamp-1" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>Nutritious chef-curated home recipe suited to your diet.</p>
+                              <span className="text-[10px] font-black uppercase" style={{ color: 'var(--color-primary)' }}>Dinner</span>
+                              <h4 className="font-extrabold text-xs truncate" style={{ color: 'var(--color-text)' }}>Avocado Quinoa Bowl</h4>
+                              <p className="text-[10px] line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>Nutritious chef-curated home recipe suited to your diet.</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-3 text-[10px] pt-1 border-t" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)', color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> 15m</span>
-                            <span className="flex items-center gap-1"><Flame className="h-3 w-3" style={{ color: 'var(--color-primary, #E05638)' }} /> 20m</span>
+                          <div className="flex items-center gap-3 text-[10px] pt-1 border-t" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> 15m</span>
+                            <span className="flex items-center gap-1"><Flame className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> 20m</span>
                             <span className="flex items-center gap-1"><Users className="h-3 w-3" /> 2 servings</span>
                           </div>
                         </div>
@@ -1334,19 +1353,19 @@ export default function ChefAISettingsPage() {
           <div 
             className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
             }}
           >
-            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <div>
                 <h2 
                   className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   <Mic className="h-4 w-4" /> {t('voiceInteractionHeader', 'Voice Interaction & Speech Configuration')}
                 </h2>
-                <p className="text-xs mt-0.5" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('voiceInteractionDesc', 'Configure text-to-speech engine, voice models, playback speed, and auto-read behavior.')}
                 </p>
               </div>
@@ -1355,14 +1374,14 @@ export default function ChefAISettingsPage() {
                 onClick={() => setEnableVoiceInteraction(!enableVoiceInteraction)}
                 className="flex items-center gap-3 cursor-pointer border px-4 py-2.5 rounded-2xl shadow-xs transition hover:opacity-90"
                 style={{
-                  backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
-                <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('enableVoiceMode', 'Enable Voice Mode')}</span>
+                <span className="font-bold" style={{ color: 'var(--color-text)' }}>{t('enableVoiceMode', 'Enable Voice Mode')}</span>
                 <div 
                   className="w-9 h-5 rounded-full p-0.5 transition"
-                  style={{ backgroundColor: enableVoiceInteraction ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                  style={{ backgroundColor: enableVoiceInteraction ? 'var(--color-primary)' : 'var(--color-border)' }}
                 >
                   <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableVoiceInteraction ? 'translate-x-4' : 'translate-x-0'}`} />
                 </div>
@@ -1371,7 +1390,7 @@ export default function ChefAISettingsPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('voiceSynthesisEngine', 'Voice Synthesis Engine')}
                 </label>
                 <div className="grid grid-cols-2 gap-3">
@@ -1384,15 +1403,13 @@ export default function ChefAISettingsPage() {
                         onClick={() => setVoiceEngine(ver as any)}
                         className="p-3.5 rounded-2xl border text-left transition cursor-pointer shadow-xs hover:opacity-90"
                         style={{
-                          backgroundColor: isSel 
-                            ? (isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)') 
-                            : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
-                          borderColor: isSel ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
-                          color: isSel ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: isSel ? 'var(--color-primary)' : 'var(--color-border)',
+                          color: 'var(--color-text)'
                         }}
                       >
-                        <span className="block font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Version {ver === 'version1' ? '1.0' : '2.0'}</span>
-                        <span className="text-[10px] opacity-75">{ver === 'version1' ? 'Standard Web Speech API' : 'Neural HD Studio Voices'}</span>
+                        <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>Version {ver === 'version1' ? '1.0' : '2.0'}</span>
+                        <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{ver === 'version1' ? 'Standard Web Speech API' : 'Neural HD Studio Voices'}</span>
                       </button>
                     );
                   })}
@@ -1400,7 +1417,7 @@ export default function ChefAISettingsPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('assistantVoicePersona', 'Assistant Voice Persona')}
                 </label>
                 <select
@@ -1408,15 +1425,15 @@ export default function ChefAISettingsPage() {
                   onChange={(e) => setSelectedVoiceName(e.target.value)}
                   className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
-                  <option value="en-US-Neural2-F" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Aria (US Female - Warm & Professional)</option>
-                  <option value="en-US-Neural2-D" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Marcus (US Male - Deep & Authoritative)</option>
-                  <option value="en-GB-Neural2-A" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Oliver (UK Male - Refined Accent)</option>
-                  <option value="en-AU-Neural2-B" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>Chef Matilda (Australian - Friendly & Casual)</option>
+                  <option value="en-US-Neural2-F" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Chef Aria (US Female - Warm & Professional)</option>
+                  <option value="en-US-Neural2-D" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Chef Marcus (US Male - Deep & Authoritative)</option>
+                  <option value="en-GB-Neural2-A" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Chef Oliver (UK Male - Refined Accent)</option>
+                  <option value="en-AU-Neural2-B" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Chef Matilda (Australian - Friendly & Casual)</option>
                 </select>
               </div>
             </div>
@@ -1424,8 +1441,8 @@ export default function ChefAISettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
               <div className="space-y-2">
                 <div className="flex justify-between font-bold">
-                  <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('speechSpeed', 'Speech Speed')}: {voiceSpeed}x</span>
-                  <span style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}>{voiceSpeed === 1.0 ? 'Normal' : voiceSpeed > 1.0 ? 'Fast' : 'Relaxed'}</span>
+                  <span style={{ color: 'var(--color-text-secondary)' }}>{t('speechSpeed', 'Speech Speed')}: {voiceSpeed}x</span>
+                  <span style={{ color: 'var(--color-emerald)' }}>{voiceSpeed === 1.0 ? 'Normal' : voiceSpeed > 1.0 ? 'Fast' : 'Relaxed'}</span>
                 </div>
                 <input
                   type="range"
@@ -1435,9 +1452,9 @@ export default function ChefAISettingsPage() {
                   value={voiceSpeed}
                   onChange={(e) => setVoiceSpeed(parseFloat(e.target.value))}
                   className="w-full cursor-pointer"
-                  style={{ accentColor: 'var(--color-primary, #E05638)' }}
+                  style={{ accentColor: 'var(--color-primary)' }}
                 />
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('speechSpeedDesc', 'Adjust the speaking pace of the AI assistant when reading recipe steps aloud.')}
                 </p>
               </div>
@@ -1447,20 +1464,20 @@ export default function ChefAISettingsPage() {
                   onClick={() => setVoiceAutoPlay(!voiceAutoPlay)}
                   className="flex items-center justify-between p-3.5 rounded-2xl border transition cursor-pointer shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   <div className="flex items-center gap-2.5">
-                    <Volume2 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                    <Volume2 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                     <div>
-                      <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('autoReadAiResponses', 'Auto-Read AI Responses')}</span>
-                      <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>{t('autoReadAiResponsesDesc', 'Automatically speak answers aloud upon generation.')}</span>
+                      <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('autoReadAiResponses', 'Auto-Read AI Responses')}</span>
+                      <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('autoReadAiResponsesDesc', 'Automatically speak answers aloud upon generation.')}</span>
                     </div>
                   </div>
                   <div 
                     className="w-9 h-5 rounded-full p-0.5 transition"
-                    style={{ backgroundColor: voiceAutoPlay ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                    style={{ backgroundColor: voiceAutoPlay ? 'var(--color-primary)' : 'var(--color-border)' }}
                   >
                     <div className={`w-4 h-4 rounded-full bg-white transition transform ${voiceAutoPlay ? 'translate-x-4' : 'translate-x-0'}`} />
                   </div>
@@ -1477,18 +1494,18 @@ export default function ChefAISettingsPage() {
             <div 
               className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
               <h2 
                 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 <Globe className="h-4 w-4" /> {t('autonomousCapabilitiesHeader', 'Autonomous Capabilities & Search Scope Control')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? 'var(--color-text-secondary, #64748b)' : 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('autonomousCapabilitiesDesc', 'Control what data sources the AI agent searches and incorporates when responding on')} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>/chef</span>.
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('autonomousCapabilitiesDesc', 'Control what data sources the AI agent searches and incorporates when responding on')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span>.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
@@ -1496,25 +1513,23 @@ export default function ChefAISettingsPage() {
                   onClick={() => setEnableWebSearch(!enableWebSearch)}
                   className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: enableWebSearch 
-                      ? (isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)') 
-                      : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
-                    borderColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
-                    color: enableWebSearch ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: enableWebSearch ? 'var(--color-primary)' : 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
                   <div className="flex items-center justify-between">
-                    <Globe className="h-5 w-5" style={{ color: enableWebSearch ? 'var(--color-primary, #E05638)' : '#64748b' }} />
+                    <Globe className="h-5 w-5" style={{ color: enableWebSearch ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
                     <div 
                       className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: enableWebSearch ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                      style={{ backgroundColor: enableWebSearch ? 'var(--color-primary)' : 'var(--color-border)' }}
                     >
                       <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableWebSearch ? 'translate-x-4' : 'translate-x-0'}`} />
                     </div>
                   </div>
                   <div>
-                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('liveWebSearch', 'Live Web Search')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                    <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('liveWebSearch', 'Live Web Search')}</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('liveWebSearchDesc', 'Allows AI to search external culinary web data, trends, and ingredient substitutes.')}
                     </span>
                   </div>
@@ -1524,25 +1539,23 @@ export default function ChefAISettingsPage() {
                   onClick={() => setEnablePantryContext(!enablePantryContext)}
                   className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: enablePantryContext 
-                      ? (isDayMode ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.2)') 
-                      : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
-                    borderColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
-                    color: enablePantryContext ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
                   <div className="flex items-center justify-between">
-                    <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? 'var(--color-emerald, #10b981)' : '#64748b' }} />
+                    <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }} />
                     <div 
                       className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                      style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-border)' }}
                     >
                       <div className={`w-4 h-4 rounded-full bg-white transition transform ${enablePantryContext ? 'translate-x-4' : 'translate-x-0'}`} />
                     </div>
                   </div>
                   <div>
-                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('pantryContextSearch', 'Pantry Context Search')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                    <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('pantryContextSearch', 'Pantry Context Search')}</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('pantryContextSearchDesc', 'Automatically scans user pantry inventory to build recipes matching in-stock ingredients.')}
                     </span>
                   </div>
@@ -1552,25 +1565,23 @@ export default function ChefAISettingsPage() {
                   onClick={() => setStrictDietEnforcement(!strictDietEnforcement)}
                   className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: strictDietEnforcement 
-                      ? (isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)') 
-                      : (isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)'),
-                    borderColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'),
-                    color: strictDietEnforcement ? (isDayMode ? '#0f172a' : '#ffffff') : (isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)')
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: strictDietEnforcement ? '#3b82f6' : 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
                   <div className="flex items-center justify-between">
-                    <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? (isDayMode ? '#2563eb' : '#60a5fa') : '#64748b' }} />
+                    <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? '#3b82f6' : 'var(--color-text-secondary)' }} />
                     <div 
                       className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: strictDietEnforcement ? '#3b82f6' : (isDayMode ? '#cbd5e1' : '#334155') }}
+                      style={{ backgroundColor: strictDietEnforcement ? '#3b82f6' : 'var(--color-border)' }}
                     >
                       <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
                     </div>
                   </div>
                   <div>
-                    <span className="font-bold text-xs block" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('strictDietaryFilters', 'Strict Dietary Filters')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                    <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('strictDietaryFilters', 'Strict Dietary Filters')}</span>
+                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('strictDietaryFiltersDesc', 'Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.')}
                     </span>
                   </div>
@@ -1582,23 +1593,23 @@ export default function ChefAISettingsPage() {
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? 'var(--color-card, #ffffff)' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
               <h2 
                 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 <SlidersHorizontal className="h-4 w-4" /> {t('agentParametersHeader', 'Agent Parameters & Knowledge Tuning')}
               </h2>
 
               {/* CREATIVITY & MAX PLAN DAYS */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div className="space-y-2">
                   <div className="flex justify-between font-bold">
-                    <span style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('temperatureLabel', 'Temperature (Creativity)')}: {temperature}</span>
-                    <span style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>{t('temperatureLabel', 'Temperature (Creativity)')}: {temperature}</span>
+                    <span style={{ color: 'var(--color-emerald)' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
                   </div>
                   <input
                     type="range"
@@ -1608,15 +1619,15 @@ export default function ChefAISettingsPage() {
                     value={temperature}
                     onChange={(e) => setTemperature(parseFloat(e.target.value))}
                     className="w-full cursor-pointer"
-                    style={{ accentColor: 'var(--color-primary, #E05638)' }}
+                    style={{ accentColor: 'var(--color-primary)' }}
                   />
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('temperatureDesc', 'Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.')}
                   </p>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('maxPlanDaysCap', 'Max Plan Days Limit (Wizard Cap)')}
                   </label>
                   <input
@@ -1627,14 +1638,14 @@ export default function ChefAISettingsPage() {
                     onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
                     className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('maxPlanDaysDesc', 'Maximum number of days the AI can structure in a single meal plan wizard sequence.')}
                   </p>
                 </div>
@@ -1643,10 +1654,10 @@ export default function ChefAISettingsPage() {
               {/* KNOWLEDGE BASE FEATURE */}
               <div className="space-y-3 pt-1">
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('knowledgeBaseHeader', 'Knowledge Base')}
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                    <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('knowledgeBaseHeader', 'Knowledge Base')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('knowledgeBaseDesc', 'Fine-tune the assistant to your needs by adding reference source documents or databases.')}
                   </p>
                 </div>
@@ -1655,9 +1666,9 @@ export default function ChefAISettingsPage() {
                   <div 
                     className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
                     style={{
-                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     <input
@@ -1673,7 +1684,7 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       className="bg-transparent border-none outline-none w-full text-xs"
-                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                      style={{ color: 'var(--color-text)' }}
                     />
                     <button
                       type="button"
@@ -1685,8 +1696,8 @@ export default function ChefAISettingsPage() {
                       }}
                       className="w-6 h-6 rounded-lg font-bold flex items-center justify-center shrink-0 cursor-pointer transition hover:opacity-80"
                       style={{
-                        backgroundColor: isDayMode ? 'var(--color-inner-dark, #e2e8f0)' : 'var(--color-card, #0b0f17)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-card)',
+                        color: 'var(--color-text)'
                       }}
                     >
                       +
@@ -1700,9 +1711,9 @@ export default function ChefAISettingsPage() {
                       key={idx}
                       className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
                       style={{
-                        backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.12)' : 'rgba(224, 86, 56, 0.2)',
-                        borderColor: 'var(--color-primary, #E05638)',
-                        color: isDayMode ? '#991b1b' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-text)'
                       }}
                     >
                       {item}
@@ -1719,12 +1730,12 @@ export default function ChefAISettingsPage() {
               </div>
 
               {/* CUSTOM VOCABULARY FEATURE */}
-              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                    <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                    <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('customVocabularyDesc', 'Enhance accuracy with specialized culinary or business terminology.')}
                   </p>
                 </div>
@@ -1733,9 +1744,9 @@ export default function ChefAISettingsPage() {
                   <div 
                     className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
                     style={{
-                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     <input
@@ -1751,7 +1762,7 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       className="bg-transparent border-none outline-none w-full text-xs"
-                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                      style={{ color: 'var(--color-text)' }}
                     />
                     <span 
                       onClick={() => {
@@ -1762,8 +1773,8 @@ export default function ChefAISettingsPage() {
                       }}
                       className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80"
                       style={{
-                        backgroundColor: isDayMode ? 'var(--color-inner-dark, #e2e8f0)' : 'var(--color-card, #0b0f17)',
-                        color: isDayMode ? '#334155' : '#cbd5e1'
+                        backgroundColor: 'var(--color-card)',
+                        color: 'var(--color-text)'
                       }}
                     >
                       {t('enterKey', 'Enter')}
@@ -1777,9 +1788,9 @@ export default function ChefAISettingsPage() {
                       key={idx}
                       className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
                       style={{
-                        backgroundColor: isDayMode ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.2)' ,
-                        borderColor: 'var(--color-emerald, #10b981)',
-                        color: isDayMode ? '#065f46' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-text)'
                       }}
                     >
                       {item}
@@ -1796,12 +1807,12 @@ export default function ChefAISettingsPage() {
               </div>
 
               {/* FILTER WORDS FEATURE */}
-              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
+              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
                     <Ban className="h-4 w-4 text-red-500" /> {t('filterWordsHeader', 'Filter Words')}
                   </h3>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('filterWordsDesc', 'Restricted words or ingredients remain unspoken or avoided in AI outputs.')}
                   </p>
                 </div>
@@ -1810,9 +1821,9 @@ export default function ChefAISettingsPage() {
                   <div 
                     className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
                     style={{
-                      backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     <input
@@ -1828,7 +1839,7 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       className="bg-transparent border-none outline-none w-full text-xs"
-                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                      style={{ color: 'var(--color-text)' }}
                     />
                     <span 
                       onClick={() => {
@@ -1839,8 +1850,8 @@ export default function ChefAISettingsPage() {
                       }}
                       className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80"
                       style={{
-                        backgroundColor: isDayMode ? 'var(--color-inner-dark, #e2e8f0)' : 'var(--color-card, #0b0f17)',
-                        color: isDayMode ? '#334155' : '#cbd5e1'
+                        backgroundColor: 'var(--color-card)',
+                        color: 'var(--color-text)'
                       }}
                     >
                       {t('enterKey', 'Enter')}
@@ -1854,9 +1865,9 @@ export default function ChefAISettingsPage() {
                       key={idx}
                       className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
                       style={{
-                        backgroundColor: isDayMode ? 'rgba(239, 68, 68, 0.12)' : 'rgba(127, 29, 29, 0.3)',
-                        borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.6)',
-                        color: isDayMode ? '#991b1b' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'rgba(239, 68, 68, 0.4)',
+                        color: 'var(--color-text)'
                       }}
                     >
                       {item}
@@ -1873,8 +1884,8 @@ export default function ChefAISettingsPage() {
               </div>
 
               {/* SYSTEM PROMPT / PERSONA */}
-              <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: isDayMode ? 'var(--color-border, #e2e8f0)' : 'var(--color-border, #1e293b)' }}>
-                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+              <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
                 </label>
                 <textarea
@@ -1883,15 +1894,15 @@ export default function ChefAISettingsPage() {
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
                   style={{
-                    backgroundColor: isDayMode ? 'var(--color-inner-dark, #f8fafc)' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? 'var(--color-border, #cbd5e1)' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
-                <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('systemPromptDesc', 'Defines how the AI agent behaves, formats responses, and handles user queries on the')} <span className="font-mono font-bold" style={{ color: 'var(--color-primary, #E05638)' }}>/chef</span> {t('pageSuffix', 'page.')}
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('systemPromptDesc', 'Defines how the AI agent behaves, formats responses, and handles user queries on the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('pageSuffix', 'page.')}
                 </p>
               </div>
             </div>

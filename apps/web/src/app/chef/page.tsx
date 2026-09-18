@@ -200,46 +200,8 @@ export default function ChefChatPage() {
 
   // Day / Night Theme Application
   const applySavedTheme = useCallback(() => {
-    if (typeof window === 'undefined') return;
     try {
-      const isDay = typeof window !== 'undefined' && (
-        localStorage.getItem('zecratary_theme_mode') === 'light' || 
-        !document.documentElement.classList.contains('dark')
-      );
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (_) {}
   }, []);
 
@@ -531,7 +493,6 @@ export default function ChefChatPage() {
     showToast("Chat reset.");
   };
 
-  // Start specific topic wizard from synced admin buttons
   const handleStartTopicWizard = (sec: any) => {
     const qList = Array.isArray(sec.questions) && sec.questions.length > 0
       ? sec.questions
@@ -729,7 +690,6 @@ export default function ChefChatPage() {
 
     const lower = textToSend.toLowerCase();
 
-    // Natural Pantry check
     if (lower === "what's in my pantry?" || lower.includes("what is in my pantry")) {
       setTimeout(() => {
         const count = pantryIngredientsList.length;
@@ -743,7 +703,6 @@ export default function ChefChatPage() {
       return;
     }
 
-    // Explicit Meal Plan initiation command
     const isExplicitMealPlanCommand = /^(?:create|start|make|build)\s+(?:a\s+)?meal\s+plan/i.test(lower) || lower === 'create a meal plan' || lower === 'meal plan';
     if (isExplicitMealPlanCommand && wizardStep === null) {
       handleStartFullWizard();
@@ -751,7 +710,6 @@ export default function ChefChatPage() {
       return;
     }
 
-    // Active Wizard Question Sequence
     if (wizardStep !== null) {
       const currentIdx = wizardStep;
       const updatedAnswers = { ...wizardAnswers, [currentIdx]: textToSend };
@@ -773,7 +731,6 @@ export default function ChefChatPage() {
         }, 350);
         return;
       } else {
-        // Complete wizard flow and build meal plan
         updateWizardStep(null);
         setActiveTopicTitle('Standard Wizard');
         const resolvedDays = parseInt(updatedAnswers[0]) || wizardData.days || 3;
@@ -801,7 +758,6 @@ export default function ChefChatPage() {
       }
     }
 
-    // General Conversational Query sent to AI
     try {
       let storedAiSettings = {};
       try {
@@ -1228,7 +1184,6 @@ export default function ChefChatPage() {
     return activeSwapPlan.meals.filter(m => !activeSwapMeal || m.id !== activeSwapMeal.id);
   }, [activeSwapPlan, activeSwapMeal]);
 
-  // Active enabled questionnaire sections for topic buttons on /chef
   const activeQuestionnaireSections = useMemo(() => {
     return questionnaireSections.filter((s: any) => s.enabled !== false);
   }, [questionnaireSections]);
@@ -1236,19 +1191,19 @@ export default function ChefChatPage() {
   return (
     <div 
       className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
-      style={{ color: 'var(--color-text, #0f172a)' }}
+      style={{ color: 'var(--color-text)' }}
     >
       <AiQuotaBar />
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
           style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-primary, #E05638)',
-            color: 'var(--color-text, #0f172a)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-primary)',
+            color: 'var(--color-text)'
           }}
         >
-          <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} />
+          <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
           <span>{toastMessage}</span>
         </div>
       )}
@@ -1256,16 +1211,16 @@ export default function ChefChatPage() {
       {/* Top Header */}
       <div 
         className="space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
-        style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+        style={{ borderColor: 'var(--color-border)' }}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div 
               className="w-10 h-10 rounded-2xl flex items-center justify-center border"
               style={{
-                backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                borderColor: 'var(--color-primary, #E05638)',
-                color: 'var(--color-primary, #E05638)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
               }}
             >
               <ChefHat className="h-6 w-6" />
@@ -1273,13 +1228,13 @@ export default function ChefChatPage() {
             <div>
               <h1 
                 className="text-xl font-bold tracking-tight"
-                style={{ color: 'var(--color-text, #0f172a)' }}
+                style={{ color: 'var(--color-text)' }}
               >
                 {t('foodieChatHeading') || 'Foodie Chat'}
               </h1>
               <p 
                 className="text-xs"
-                style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                style={{ color: 'var(--color-text-secondary)' }}
               >
                 {t('foodieChatSubtitle') || 'Ask me anything about recipes and cooking'}
               </p>
@@ -1292,9 +1247,9 @@ export default function ChefChatPage() {
               onClick={() => setShowPreferences(true)}
               className="p-2 rounded-xl border transition cursor-pointer shadow-sm"
               style={{
-                backgroundColor: 'var(--color-card, #ffffff)',
-                borderColor: 'var(--color-border, #e2e8f0)',
-                color: 'var(--color-text-secondary, #64748b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)'
               }}
               title={t('preferencesTooltip') || 'Preferences'}
             >
@@ -1305,9 +1260,9 @@ export default function ChefChatPage() {
               onClick={resetChat}
               className="p-2 rounded-xl border transition cursor-pointer shadow-sm"
               style={{
-                backgroundColor: 'var(--color-card, #ffffff)',
-                borderColor: 'var(--color-border, #e2e8f0)',
-                color: 'var(--color-text-secondary, #64748b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)'
               }}
               title={t('newChatTooltip') || 'New Chat'}
             >
@@ -1321,34 +1276,34 @@ export default function ChefChatPage() {
           <span 
             className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
-              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-              borderColor: 'var(--color-emerald, #10b981)',
-              color: 'var(--color-emerald, #10b981)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
             }}
           >
-            {t('servingsLabelPref') || 'Servings:'} <strong className="font-bold" style={{ color: 'var(--color-text, #0f172a)' }}>{(t('peopleSuffix') || '{count} people').replace('{count}', String(servings))}</strong>
+            {t('servingsLabelPref') || 'Servings:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{(t('peopleSuffix') || '{count} people').replace('{count}', String(servings))}</strong>
           </span>
           <span 
             className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
-              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-              borderColor: 'var(--color-emerald, #10b981)',
-              color: 'var(--color-emerald, #10b981)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
             }}
           >
-            {t('countryLabelPref') || 'Country:'} <strong className="font-bold" style={{ color: 'var(--color-text, #0f172a)' }}>{country}</strong>
+            {t('countryLabelPref') || 'Country:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{country}</strong>
           </span>
           {selectedDiets.map((d) => (
             <span 
               key={`diet-${d}`}
               className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
-                backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: 'var(--color-emerald, #10b981)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-emerald)',
+                color: 'var(--color-emerald)'
               }}
             >
-              {t('dietLabelPref') || 'Diet:'} <strong className="font-bold" style={{ color: 'var(--color-text, #0f172a)' }}>{d}</strong>
+              {t('dietLabelPref') || 'Diet:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{d}</strong>
             </span>
           ))}
           {selectedAllergies.map((a) => (
@@ -1356,12 +1311,12 @@ export default function ChefChatPage() {
               key={`allergy-${a}`}
               className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                borderColor: 'rgba(239, 68, 68, 0.4)',
-                color: '#dc2626'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-primary)'
               }}
             >
-              {t('allergyLabelPref') || 'Allergy:'} <strong className="font-bold" style={{ color: 'var(--color-text, #0f172a)' }}>{a}</strong>
+              {t('allergyLabelPref') || 'Allergy:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{a}</strong>
             </span>
           ))}
           {ingredientsToAvoid.map((av) => (
@@ -1369,12 +1324,12 @@ export default function ChefChatPage() {
               key={`avoid-${av}`}
               className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
-                backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                borderColor: 'var(--color-primary, #E05638)',
-                color: 'var(--color-primary, #E05638)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
               }}
             >
-              {t('avoidLabelPref') || 'Avoid:'} <strong className="font-bold" style={{ color: 'var(--color-text, #0f172a)' }}>{av}</strong>
+              {t('avoidLabelPref') || 'Avoid:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{av}</strong>
             </span>
           ))}
           {tastesList.map((itemTaste) => (
@@ -1382,12 +1337,12 @@ export default function ChefChatPage() {
               key={`taste-${itemTaste}`}
               className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
-                backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                borderColor: 'rgba(59, 130, 246, 0.4)',
-                color: '#2563eb'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-primary)'
               }}
             >
-              {t('tasteLabelPref') || 'Taste:'} <strong className="font-bold" style={{ color: 'var(--color-text, #0f172a)' }}>{itemTaste}</strong>
+              {t('tasteLabelPref') || 'Taste:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{itemTaste}</strong>
             </span>
           ))}
         </div>
@@ -1400,20 +1355,20 @@ export default function ChefChatPage() {
             <div 
               className="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto border shadow-lg"
               style={{
-                backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                borderColor: 'var(--color-primary, #E05638)',
-                color: 'var(--color-primary, #E05638)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
               }}
             >
               <ChefHat className="h-8 w-8" />
             </div>
             <div>
-              <h2 className="text-2xl font-black" style={{ color: 'var(--color-text, #0f172a)' }}>
+              <h2 className="text-2xl font-black" style={{ color: 'var(--color-text)' }}>
                 {t('heyImChef') || "Hey, I'm Chef Foodie!"}
               </h2>
               <p 
                 className="text-sm mt-1"
-                style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                style={{ color: 'var(--color-text-secondary)' }}
               >
                 Choose an intake questionnaire or ask any question to get started
               </p>
@@ -1426,8 +1381,8 @@ export default function ChefChatPage() {
                 onClick={handleStartFullWizard}
                 className="border text-xs font-bold px-5 py-3 rounded-2xl transition shadow-md hover:scale-[1.02] cursor-pointer flex items-center gap-2 text-white"
                 style={{
-                  backgroundColor: 'var(--color-primary, #E05638)',
-                  borderColor: 'var(--color-primary, #E05638)'
+                  backgroundColor: 'var(--color-primary)',
+                  borderColor: 'var(--color-primary)'
                 }}
               >
                 <Sparkles className="h-4 w-4" /> Start Complete Meal Plan Intake
@@ -1440,14 +1395,14 @@ export default function ChefChatPage() {
                   onClick={() => handleStartTopicWizard(sec)}
                   className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
                   style={{
-                    backgroundColor: 'var(--color-card, #ffffff)',
-                    borderColor: 'var(--color-border, #e2e8f0)',
-                    color: 'var(--color-text, #0f172a)'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 >
-                  <Layers className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                  <Layers className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                   <span>{sec.topicTitle}</span>
                   <span className="text-[10px] opacity-75 font-mono">({(sec.questions || []).length} steps)</span>
                 </button>
@@ -1463,9 +1418,9 @@ export default function ChefChatPage() {
                   <div 
                     className="w-7 h-7 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
                     style={{
-                      backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                      borderColor: 'var(--color-primary, #E05638)',
-                      color: 'var(--color-primary, #E05638)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-primary)',
+                      color: 'var(--color-primary)'
                     }}
                   >
                     <ChefHat className="h-4 w-4" />
@@ -1477,11 +1432,11 @@ export default function ChefChatPage() {
                     <div 
                       className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border'}`}
                       style={isUser ? {
-                        backgroundColor: 'var(--color-primary, #E05638)'
+                        backgroundColor: 'var(--color-primary)'
                       } : {
-                        backgroundColor: 'var(--color-card, #ffffff)',
-                        borderColor: 'var(--color-border, #e2e8f0)',
-                        color: 'var(--color-text, #0f172a)'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     >
                       <p className="whitespace-pre-line">{m.content}</p>
@@ -1493,18 +1448,18 @@ export default function ChefChatPage() {
                     <div 
                       className="space-y-3 pt-1 border rounded-2xl p-4 shadow-sm"
                       style={{
-                        backgroundColor: 'var(--color-card, #ffffff)',
-                        borderColor: 'var(--color-border, #e2e8f0)'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
                       }}
                     >
                       <div 
                         className="flex items-center justify-between border-b pb-2"
-                        style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+                        style={{ borderColor: 'var(--color-border)' }}
                       >
-                        <span className="font-extrabold text-sm flex items-center gap-2" style={{ color: 'var(--color-text, #0f172a)' }}>
-                          <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {m.plan.title} (Compact View)
+                        <span className="font-extrabold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                          <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {m.plan.title} (Compact View)
                         </span>
-                        <span className="text-xs" style={{ color: 'var(--color-text-secondary, #64748b)' }}>{m.plan.totalDays} Days</span>
+                        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{m.plan.totalDays} Days</span>
                       </div>
                       <div className="space-y-2">
                         {m.plan.meals.map((meal) => (
@@ -1512,20 +1467,21 @@ export default function ChefChatPage() {
                             key={meal.id} 
                             className="flex items-center justify-between p-2.5 rounded-xl border text-xs"
                             style={{
-                              backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                              borderColor: 'var(--color-border, #e2e8f0)'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
                             }}
                           >
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="font-bold shrink-0" style={{ color: 'var(--color-primary, #E05638)' }}>{meal.dayLabel}:</span>
-                              <span className="truncate font-medium" style={{ color: 'var(--color-text, #0f172a)' }}>{meal.title}</span>
+                              <span className="font-bold shrink-0" style={{ color: 'var(--color-primary)' }}>{meal.dayLabel}:</span>
+                              <span className="truncate font-medium" style={{ color: 'var(--color-text)' }}>{meal.title}</span>
                             </div>
-                            <div className="flex items-center gap-3 shrink-0" style={{ color: 'var(--color-text-secondary, #64748b)' }}>
+                            <div className="flex items-center gap-3 shrink-0" style={{ color: 'var(--color-text-secondary)' }}>
                               <span>{meal.prepMinutes + meal.cookMinutes}m</span>
                               <button
                                 type="button"
                                 onClick={() => openSwapMeal(m.id, meal, m.plan!)}
-                                className="text-sky-600 hover:underline font-bold"
+                                className="font-bold hover:underline"
+                                style={{ color: 'var(--color-primary)' }}
                               >
                                 Swap
                               </button>
@@ -1537,7 +1493,8 @@ export default function ChefChatPage() {
                         <button
                           type="button"
                           onClick={() => handleCreatePlan(m.plan!)}
-                          className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          className="w-full py-2.5 rounded-xl text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-emerald)' }}
                         >
                           <CalendarPlus className="h-4 w-4" /> Create Plan
                         </button>
@@ -1550,26 +1507,26 @@ export default function ChefChatPage() {
                     <div 
                       className="space-y-4 pt-1 border rounded-3xl p-5 shadow-sm"
                       style={{
-                        backgroundColor: 'var(--color-card, #ffffff)',
-                        borderColor: 'var(--color-border, #e2e8f0)'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
                       }}
                     >
                       <div 
                         className="flex items-center justify-between border-b pb-3"
-                        style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+                        style={{ borderColor: 'var(--color-border)' }}
                       >
                         <div>
-                          <span className="text-[10px] uppercase font-extrabold tracking-wider block" style={{ color: 'var(--color-primary, #E05638)' }}>Detailed Master Plan</span>
-                          <h3 className="font-black text-base" style={{ color: 'var(--color-text, #0f172a)' }}>{m.plan.title}</h3>
+                          <span className="text-[10px] uppercase font-extrabold tracking-wider block" style={{ color: 'var(--color-primary)' }}>Detailed Master Plan</span>
+                          <h3 className="font-black text-base" style={{ color: 'var(--color-text)' }}>{m.plan.title}</h3>
                         </div>
                         <button
                           type="button"
                           onClick={() => handleCopyPlan(m.plan!)}
                           className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 shadow-sm"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                            borderColor: 'var(--color-border, #e2e8f0)',
-                            color: 'var(--color-text, #0f172a)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                         >
                           <Copy className="h-3.5 w-3.5" /> Copy Summary
@@ -1581,34 +1538,39 @@ export default function ChefChatPage() {
                             key={meal.id} 
                             className="border rounded-2xl p-4 space-y-3"
                             style={{
-                              backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                              borderColor: 'var(--color-border, #e2e8f0)'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
                             }}
                           >
                             <div className="flex justify-between items-center text-xs">
-                              <span className="font-extrabold" style={{ color: 'var(--color-primary, #E05638)' }}>{meal.dayLabel} ({meal.dateStr})</span>
-                              <span className="uppercase font-bold" style={{ color: 'var(--color-text-secondary, #64748b)' }}>{meal.mealType}</span>
+                              <span className="font-extrabold" style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
+                              <span className="uppercase font-bold" style={{ color: 'var(--color-text-secondary)' }}>{meal.mealType}</span>
                             </div>
                             <div className="flex gap-3 items-start">
-                              <img src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} alt={meal.title} className="w-14 h-14 rounded-xl object-cover border shrink-0" style={{ borderColor: 'var(--color-border, #e2e8f0)' }} />
+                              <img src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} alt={meal.title} className="w-14 h-14 rounded-xl object-cover border shrink-0" style={{ borderColor: 'var(--color-border)' }} />
                               <div className="space-y-1 flex-1 min-w-0">
-                                <h4 className="font-bold text-sm" style={{ color: 'var(--color-text, #0f172a)' }}>{meal.title}</h4>
-                                <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary, #64748b)' }}>{meal.description}</p>
+                                <h4 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
+                                <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
                                 {Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
-                                  <div className="pt-1 text-[11px]" style={{ color: 'var(--color-text-secondary, #64748b)' }}>
-                                    <strong style={{ color: 'var(--color-text, #0f172a)' }}>Ingredients:</strong> {meal.ingredients.join(', ')}
+                                  <div className="pt-1 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                                    <strong style={{ color: 'var(--color-text)' }}>Ingredients:</strong> {meal.ingredients.join(', ')}
                                   </div>
                                 )}
                               </div>
                             </div>
                             <div 
                               className="flex justify-end gap-2 pt-2 border-t"
-                              style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+                              style={{ borderColor: 'var(--color-border)' }}
                             >
                               <button
                                 type="button"
                                 onClick={() => openSwapMeal(m.id, meal, m.plan!)}
-                                className="px-3 py-1.5 rounded-lg border text-sky-700 bg-sky-100 border-sky-300 font-bold text-xs shadow-sm"
+                                className="px-3 py-1.5 rounded-lg border font-bold text-xs shadow-sm"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-primary)'
+                                }}
                               >
                                 Swap Meal
                               </button>
@@ -1620,7 +1582,8 @@ export default function ChefChatPage() {
                         <button
                           type="button"
                           onClick={() => handleCreatePlan(m.plan!)}
-                          className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
+                          className="w-full py-3 rounded-2xl text-white font-extrabold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
+                          style={{ backgroundColor: 'var(--color-emerald)' }}
                         >
                           <CalendarPlus className="h-4 w-4" /> Create & Sync Plan
                         </button>
@@ -1633,8 +1596,8 @@ export default function ChefChatPage() {
                     <div className="space-y-4 pt-1">
                       <div className="flex items-center justify-between px-1">
                         <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
-                          <span className="font-extrabold text-sm tracking-wide" style={{ color: 'var(--color-text, #0f172a)' }}>{m.plan.title}</span>
+                          <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                          <span className="font-extrabold text-sm tracking-wide" style={{ color: 'var(--color-text)' }}>{m.plan.title}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <button
@@ -1642,9 +1605,9 @@ export default function ChefChatPage() {
                             onClick={() => handleCopyPlan(m.plan!)}
                             className="p-1.5 rounded-lg border transition cursor-pointer shadow-sm"
                             style={{
-                              backgroundColor: 'var(--color-card, #ffffff)',
-                              borderColor: 'var(--color-border, #e2e8f0)',
-                              color: 'var(--color-text-secondary, #64748b)'
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)'
                             }}
                             title="Copy Plan Summary"
                           >
@@ -1652,7 +1615,7 @@ export default function ChefChatPage() {
                           </button>
                           <span 
                             className="text-xs font-bold"
-                            style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                            style={{ color: 'var(--color-text-secondary)' }}
                           >
                             {m.plan.meals.length}/{m.plan.totalDays}
                           </span>
@@ -1670,13 +1633,13 @@ export default function ChefChatPage() {
                               key={meal.id} 
                               className="rounded-2xl overflow-hidden border shadow-sm transition"
                               style={{
-                                backgroundColor: 'var(--color-card, #ffffff)',
-                                borderColor: 'var(--color-border, #e2e8f0)'
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-border)'
                               }}
                             >
                               <div 
                                 className="text-white px-4 py-2.5 flex items-center justify-between font-bold text-sm"
-                                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                                style={{ backgroundColor: 'var(--color-primary)' }}
                               >
                                 <span>{meal.dayLabel}</span>
                                 <span className="text-xs opacity-90">{meal.dateStr}</span>
@@ -1689,23 +1652,23 @@ export default function ChefChatPage() {
                                       src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
                                       alt={meal.title}
                                       className="w-16 h-16 rounded-xl object-cover border shrink-0"
-                                      style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+                                      style={{ borderColor: 'var(--color-border)' }}
                                     />
                                     <div className="min-w-0 flex-1">
                                       <div className="flex items-center gap-2">
                                         <span 
                                           className="text-[11px] font-black tracking-wider uppercase"
-                                          style={{ color: 'var(--color-primary, #E05638)' }}
+                                          style={{ color: 'var(--color-primary)' }}
                                         >
-                                          {meal.mealType} {meal.isLeftover && <span style={{ color: 'var(--color-emerald, #10b981)' }} className="lowercase">(leftover)</span>}
+                                          {meal.mealType} {meal.isLeftover && <span style={{ color: 'var(--color-emerald)' }} className="lowercase">(leftover)</span>}
                                         </span>
                                         {matchedPantryCount > 0 && (
                                           <span 
                                             className="text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1"
                                             style={{
-                                              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                                              borderColor: 'var(--color-emerald, #10b981)',
-                                              color: 'var(--color-emerald, #10b981)'
+                                              backgroundColor: 'var(--color-inner-dark)',
+                                              borderColor: 'var(--color-emerald)',
+                                              color: 'var(--color-emerald)'
                                             }}
                                           >
                                             <Package className="h-3 w-3" /> {matchedPantryCount} in pantry
@@ -1713,10 +1676,10 @@ export default function ChefChatPage() {
                                         )}
                                       </div>
 
-                                      <h3 className="font-black text-base mt-0.5 leading-snug truncate" style={{ color: 'var(--color-text, #0f172a)' }}>{meal.title}</h3>
+                                      <h3 className="font-black text-base mt-0.5 leading-snug truncate" style={{ color: 'var(--color-text)' }}>{meal.title}</h3>
                                       <p 
                                         className="text-xs leading-relaxed font-normal mt-1 line-clamp-2"
-                                        style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                                        style={{ color: 'var(--color-text-secondary)' }}
                                       >
                                         {meal.description}
                                       </p>
@@ -1728,7 +1691,7 @@ export default function ChefChatPage() {
                                       type="button"
                                       onClick={() => handleInstantShuffleMeal(m.id, meal.id)}
                                       className="p-1 transition cursor-pointer hover:scale-110"
-                                      style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                                      style={{ color: 'var(--color-text-secondary)' }}
                                       title="Shuffle meal"
                                     >
                                       <Dices className="h-4 w-4" />
@@ -1737,7 +1700,7 @@ export default function ChefChatPage() {
                                       type="button"
                                       onClick={() => handleRemoveMeal(m.id, meal.id)}
                                       className="p-1 transition cursor-pointer hover:scale-110"
-                                      style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                                      style={{ color: 'var(--color-text-secondary)' }}
                                       title={t('removeMealTooltip') || 'Remove meal'}
                                     >
                                       <X className="h-4 w-4" />
@@ -1747,13 +1710,13 @@ export default function ChefChatPage() {
 
                                 <div 
                                   className="flex items-center gap-4 text-xs pt-1 font-medium"
-                                  style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                                  style={{ color: 'var(--color-text-secondary)' }}
                                 >
                                   <span className="flex items-center gap-1.5">
-                                    <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} /> {meal.prepMinutes} mins
+                                    <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} /> {meal.prepMinutes} mins
                                   </span>
                                   <span className="flex items-center gap-1.5">
-                                    <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {meal.cookMinutes} mins
+                                    <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {meal.cookMinutes} mins
                                   </span>
                                   <span className="flex items-center gap-1.5">
                                     <Users className="h-3.5 w-3.5" /> {meal.servings} {t('servings') || 'servings'}
@@ -1764,8 +1727,8 @@ export default function ChefChatPage() {
                               <div 
                                 className="grid grid-cols-2 border-t text-xs font-bold divide-x"
                                 style={{
-                                  backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                                  borderColor: 'var(--color-border, #e2e8f0)'
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)'
                                 }}
                               >
                                 {meal.isBatchCook ? (
@@ -1773,18 +1736,18 @@ export default function ChefChatPage() {
                                     type="button"
                                     onClick={() => openBatchCook(m.id, meal)}
                                     className="py-3 flex items-center justify-center gap-2 hover:opacity-80 transition cursor-pointer"
-                                    style={{ color: 'var(--color-text, #0f172a)' }}
+                                    style={{ color: 'var(--color-text)' }}
                                   >
-                                    <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('batchCookBtn') || 'Batch cook'}
+                                    <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('batchCookBtn') || 'Batch cook'}
                                   </button>
                                 ) : null}
                                 <button
                                   type="button"
                                   onClick={() => openSwapMeal(m.id, meal, m.plan!)}
                                   className={`py-3 flex items-center justify-center gap-2 hover:opacity-80 transition cursor-pointer ${!meal.isBatchCook ? 'col-span-2' : ''}`}
-                                  style={{ color: 'var(--color-text, #0f172a)' }}
+                                  style={{ color: 'var(--color-text)' }}
                                 >
-                                  <ArrowLeftRight className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('swapMealBtn') || 'Swap meal'}
+                                  <ArrowLeftRight className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('swapMealBtn') || 'Swap meal'}
                                 </button>
                               </div>
                             </div>
@@ -1797,17 +1760,17 @@ export default function ChefChatPage() {
                         onClick={() => setSyncToGrocery(!syncToGrocery)}
                         className="flex items-center justify-between p-3 rounded-2xl border cursor-pointer select-none"
                         style={{
-                          backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                          borderColor: 'var(--color-border, #e2e8f0)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
                         }}
                       >
-                        <span className="text-xs font-semibold flex items-center gap-2" style={{ color: 'var(--color-text, #0f172a)' }}>
-                          <ShoppingCart className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                        <span className="text-xs font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                          <ShoppingCart className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
                           Add ingredients to Grocery Shopping List
                         </span>
                         <div 
                           className="w-9 h-5 rounded-full p-0.5 transition"
-                          style={{ backgroundColor: syncToGrocery ? 'var(--color-emerald, #22c55e)' : '#94a3b8' }}
+                          style={{ backgroundColor: syncToGrocery ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}
                         >
                           <div className={`w-4 h-4 rounded-full bg-white transition transform ${syncToGrocery ? 'translate-x-4' : 'translate-x-0'}`} />
                         </div>
@@ -1820,18 +1783,18 @@ export default function ChefChatPage() {
                           onClick={() => handleRefreshAll(m.id)}
                           className="flex-1 py-3 px-4 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-2 transition cursor-pointer shadow-sm"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                            borderColor: 'var(--color-border, #e2e8f0)',
-                            color: 'var(--color-text, #0f172a)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                         >
-                          <RefreshCw className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('refreshAllMealsBtn') || 'Refresh all meals'}
+                          <RefreshCw className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('refreshAllMealsBtn') || 'Refresh all meals'}
                         </button>
                         <button
                           type="button"
                           onClick={() => handleCreatePlan(m.plan!)}
                           className="flex-1 py-3 px-4 rounded-xl text-white text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-lg hover:brightness-110"
-                          style={{ backgroundColor: 'var(--color-emerald, #22c55e)' }}
+                          style={{ backgroundColor: 'var(--color-emerald)' }}
                         >
                           <CalendarPlus className="h-4 w-4" /> {t('createPlanBtn') || 'Create plan'}
                         </button>
@@ -1844,14 +1807,14 @@ export default function ChefChatPage() {
                     <div 
                       className="p-4 rounded-2xl border space-y-3 shadow-sm"
                       style={{
-                        backgroundColor: 'var(--color-card, #ffffff)',
-                        borderColor: 'var(--color-border, #e2e8f0)'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
                       }}
                     >
                       <div className="flex items-center justify-between">
                         <span 
                           className="text-[10px] font-bold uppercase tracking-wider block"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
+                          style={{ color: 'var(--color-primary)' }}
                         >
                           AI Recipe Created
                         </span>
@@ -1860,18 +1823,18 @@ export default function ChefChatPage() {
                           onClick={() => handleSaveRecipeToBook(m.recipe)}
                           className="text-xs font-bold px-3 py-1 rounded-lg border flex items-center gap-1.5 transition cursor-pointer shadow-sm"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                            borderColor: 'var(--color-border, #e2e8f0)',
-                            color: 'var(--color-emerald, #10b981)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-emerald)'
                           }}
                         >
                           <Bookmark className="h-3.5 w-3.5" /> Save to Recipes
                         </button>
                       </div>
-                      <h3 className="text-lg font-extrabold" style={{ color: 'var(--color-text, #0f172a)' }}>{m.recipe.title}</h3>
+                      <h3 className="text-lg font-extrabold" style={{ color: 'var(--color-text)' }}>{m.recipe.title}</h3>
                       <p 
                         className="text-xs leading-relaxed"
-                        style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                        style={{ color: 'var(--color-text-secondary)' }}
                       >
                         {m.recipe.description}
                       </p>
@@ -1883,9 +1846,9 @@ export default function ChefChatPage() {
                   <div 
                     className="w-7 h-7 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                      borderColor: 'var(--color-border, #e2e8f0)',
-                      color: 'var(--color-text, #0f172a)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     <UserIcon className="h-4 w-4" />
@@ -1900,12 +1863,12 @@ export default function ChefChatPage() {
           <div 
             className="flex items-center gap-3 p-3.5 border rounded-2xl max-w-xs text-xs shadow-sm"
             style={{
-              backgroundColor: 'var(--color-card, #ffffff)',
-              borderColor: 'var(--color-border, #e2e8f0)',
-              color: 'var(--color-text-secondary, #64748b)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
             }}
           >
-            <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('chefThinking') || 'Chef Foodie is thinking...'}
+            <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} /> {t('chefThinking') || 'Chef Foodie is thinking...'}
           </div>
         )}
         <div ref={chatEndRef} />
@@ -1914,8 +1877,8 @@ export default function ChefChatPage() {
       {/* Suggested Topic Buttons Bar (Accessible even during ongoing chat) */}
       {wizardStep === null && activeQuestionnaireSections.length > 0 && (
         <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0">
-          <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary, #64748b)' }}>
-            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary, #E05638)' }} /> Topics:
+          <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> Topics:
           </span>
           {activeQuestionnaireSections.map((sec) => (
             <button
@@ -1924,14 +1887,14 @@ export default function ChefChatPage() {
               onClick={() => handleStartTopicWizard(sec)}
               className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
               style={{
-                backgroundColor: 'var(--color-card, #ffffff)',
-                borderColor: 'var(--color-border, #e2e8f0)',
-                color: 'var(--color-text, #0f172a)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
             >
-              <Layers className="h-3 w-3" style={{ color: 'var(--color-primary, #E05638)' }} />
+              <Layers className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
               <span>{sec.topicTitle}</span>
             </button>
           ))}
@@ -1942,8 +1905,8 @@ export default function ChefChatPage() {
       <div 
         className="border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
-          backgroundColor: 'var(--color-card, #ffffff)',
-          borderColor: 'var(--color-border, #e2e8f0)'
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
         }}
       >
         <input
@@ -1953,16 +1916,16 @@ export default function ChefChatPage() {
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder={t('askPromptPlaceholder') || 'Ask about recipes, cooking tips, ingredients...'}
           className="bg-transparent border-none text-sm px-3.5 flex-1 outline-none font-normal"
-          style={{ color: 'var(--color-text, #0f172a)' }}
+          style={{ color: 'var(--color-text)' }}
         />
         <button
           type="button"
           onClick={() => handleSend()}
           disabled={loading || !prompt.trim()}
           className="disabled:opacity-40 text-white p-2.5 rounded-xl transition cursor-pointer shadow-md"
-          style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+          style={{ backgroundColor: 'var(--color-primary)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
         >
           <Send className="h-4 w-4" />
         </button>
@@ -1974,15 +1937,15 @@ export default function ChefChatPage() {
           <div 
             className="border rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl relative text-xs animate-in fade-in"
             style={{
-              backgroundColor: 'var(--color-card, #ffffff)',
-              borderColor: 'var(--color-border, #e2e8f0)',
-              color: 'var(--color-text, #0f172a)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => setShowBatchModal(false)}
               className="absolute top-4 right-4 p-1 cursor-pointer transition"
-              style={{ color: 'var(--color-text-secondary, #64748b)' }}
+              style={{ color: 'var(--color-text-secondary)' }}
             >
               <X className="h-5 w-5" />
             </button>
@@ -1990,13 +1953,13 @@ export default function ChefChatPage() {
             <div className="space-y-1.5 pr-6">
               <h2 
                 className="text-base font-extrabold tracking-tight"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 {t('cookOnceEatAgain') || 'Cook once, eat again'}
               </h2>
               <p 
                 className="text-xs leading-relaxed"
-                style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                style={{ color: 'var(--color-text-secondary)' }}
               >
                 {(t('leftoversOfPrefix') || 'Leftovers of {title}.').replace('{title}', activeBatchMeal.title)} {t('leftoverSubText') || "Pick the days you'll eat this as leftovers."}
               </p>
@@ -2009,7 +1972,7 @@ export default function ChefChatPage() {
                   <div key={d.dayIndex} className="space-y-1.5">
                     <span 
                       className="text-[11px] font-bold uppercase tracking-wide block"
-                      style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       {d.dayLabel.toUpperCase()}
                     </span>
@@ -2023,15 +1986,15 @@ export default function ChefChatPage() {
                       }}
                       className="p-3 rounded-xl border flex items-center justify-between cursor-pointer transition"
                       style={{
-                        backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                        borderColor: isChecked ? 'var(--color-primary, #E05638)' : 'var(--color-border, #e2e8f0)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: isChecked ? 'var(--color-primary)' : 'var(--color-border)'
                       }}
                     >
                       <div className="space-y-0.5">
-                        <span className="text-xs font-bold block capitalize" style={{ color: 'var(--color-text, #0f172a)' }}>{d.mealType.toLowerCase()}</span>
+                        <span className="text-xs font-bold block capitalize" style={{ color: 'var(--color-text)' }}>{d.mealType.toLowerCase()}</span>
                         <p 
                           className="text-[11px]"
-                          style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                          style={{ color: 'var(--color-text-secondary)' }}
                         >
                           {d.title}
                         </p>
@@ -2039,8 +2002,8 @@ export default function ChefChatPage() {
                       <div 
                         className="w-5 h-5 rounded-md border flex items-center justify-center transition"
                         style={{
-                          backgroundColor: isChecked ? 'var(--color-primary, #E05638)' : 'transparent',
-                          borderColor: 'var(--color-primary, #E05638)'
+                          backgroundColor: isChecked ? 'var(--color-primary)' : 'transparent',
+                          borderColor: 'var(--color-primary)'
                         }}
                       >
                         {isChecked && <Check className="h-3.5 w-3.5 text-white" />}
@@ -2051,15 +2014,15 @@ export default function ChefChatPage() {
               })}
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #e2e8f0)' }}>
+            <div className="grid grid-cols-2 gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
                 onClick={() => setShowBatchModal(false)}
                 className="py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer shadow-sm"
                 style={{
-                  backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                  borderColor: 'var(--color-border, #e2e8f0)',
-                  color: 'var(--color-text, #0f172a)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
                 {t('cancel') || 'Cancel'}
@@ -2068,7 +2031,7 @@ export default function ChefChatPage() {
                 type="button"
                 onClick={handleSaveBatchCook}
                 className="py-2.5 rounded-xl text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
-                style={{ backgroundColor: 'var(--color-emerald, #22c55e)' }}
+                style={{ backgroundColor: 'var(--color-emerald)' }}
               >
                 <Check className="h-4 w-4" /> {t('saveBtn') || 'Save'}
               </button>
@@ -2087,15 +2050,15 @@ export default function ChefChatPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl relative text-xs max-h-[92vh] flex flex-col justify-between animate-in fade-in cursor-default"
             style={{
-              backgroundColor: 'var(--color-card, #ffffff)',
-              borderColor: 'var(--color-border, #e2e8f0)',
-              color: 'var(--color-text, #0f172a)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => setShowSwapModal(false)}
               className="absolute top-4 right-4 p-1 cursor-pointer transition"
-              style={{ color: 'var(--color-text-secondary, #64748b)' }}
+              style={{ color: 'var(--color-text-secondary)' }}
             >
               <X className="h-5 w-5" />
             </button>
@@ -2104,13 +2067,13 @@ export default function ChefChatPage() {
               <div>
                 <h2 
                   className="text-lg font-black tracking-tight"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {(t('chooseMealTypeHeading') || 'Choose {mealType}').replace('{mealType}', activeSwapMeal.mealType.charAt(0) + activeSwapMeal.mealType.slice(1).toLowerCase())}
                 </h2>
                 <p 
                   className="text-xs mt-0.5"
-                  style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                  style={{ color: 'var(--color-text-secondary)' }}
                 >
                   {activeSwapMeal.dayLabel}
                 </p>
@@ -2120,8 +2083,8 @@ export default function ChefChatPage() {
               <div 
                 className="grid grid-cols-3 gap-1 p-1 rounded-xl border"
                 style={{
-                  backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                  borderColor: 'var(--color-border, #e2e8f0)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
                 <button
@@ -2129,11 +2092,11 @@ export default function ChefChatPage() {
                   onClick={() => setSwapTab('ideas')}
                   className="py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                   style={{
-                    backgroundColor: swapTab === 'ideas' ? 'var(--color-card, #ffffff)' : 'transparent',
-                    color: swapTab === 'ideas' ? 'var(--color-text, #0f172a)' : 'var(--color-text-secondary, #64748b)'
+                    backgroundColor: swapTab === 'ideas' ? 'var(--color-card)' : 'transparent',
+                    color: swapTab === 'ideas' ? 'var(--color-text)' : 'var(--color-text-secondary)'
                   }}
                 >
-                  <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('newIdeasTab') || 'New Ideas'}
+                  <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('newIdeasTab') || 'New Ideas'}
                 </button>
                 <button
                   type="button"
@@ -2143,22 +2106,22 @@ export default function ChefChatPage() {
                   }}
                   className="py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                   style={{
-                    backgroundColor: swapTab === 'saved' ? 'var(--color-card, #ffffff)' : 'transparent',
-                    color: swapTab === 'saved' ? 'var(--color-text, #0f172a)' : 'var(--color-text-secondary, #64748b)'
+                    backgroundColor: swapTab === 'saved' ? 'var(--color-card)' : 'transparent',
+                    color: swapTab === 'saved' ? 'var(--color-text)' : 'var(--color-text-secondary)'
                   }}
                 >
-                  <Bookmark className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary, #64748b)' }} /> {t('savedTab') || 'Saved'}
+                  <Bookmark className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} /> {t('savedTab') || 'Saved'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setSwapTab('repeat')}
                   className="py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                   style={{
-                    backgroundColor: swapTab === 'repeat' ? 'var(--color-card, #ffffff)' : 'transparent',
-                    color: swapTab === 'repeat' ? 'var(--color-text, #0f172a)' : 'var(--color-text-secondary, #64748b)'
+                    backgroundColor: swapTab === 'repeat' ? 'var(--color-card)' : 'transparent',
+                    color: swapTab === 'repeat' ? 'var(--color-text)' : 'var(--color-text-secondary)'
                   }}
                 >
-                  <RotateCcw className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary, #64748b)' }} /> {(t('repeatTab') || 'Repeat ({count})').replace('{count}', String(repeatMealsInPlan.length))}
+                  <RotateCcw className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} /> {(t('repeatTab') || 'Repeat ({count})').replace('{count}', String(repeatMealsInPlan.length))}
                 </button>
               </div>
 
@@ -2168,7 +2131,7 @@ export default function ChefChatPage() {
                   <div className="space-y-1">
                     <label 
                       className="text-[11px] font-bold block"
-                      style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       {t('ideasForLabel') || 'Ideas for'}
                     </label>
@@ -2176,12 +2139,12 @@ export default function ChefChatPage() {
                       onClick={() => ideasInputRef.current?.focus()}
                       className="flex items-center gap-2 border rounded-xl px-3 py-2 text-xs cursor-text transition"
                       style={{
-                        backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                        borderColor: 'var(--color-border, #e2e8f0)',
-                        color: 'var(--color-text, #0f172a)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     >
-                      <Search className="h-4 w-4 shrink-0 pointer-events-none" style={{ color: 'var(--color-text-secondary, #64748b)' }} />
+                      <Search className="h-4 w-4 shrink-0 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                       <input
                         ref={ideasInputRef}
                         type="text"
@@ -2192,7 +2155,7 @@ export default function ChefChatPage() {
                         }}
                         placeholder={t('searchOrDescribeIdeas') || "Search or describe ideas..."}
                         className="bg-transparent flex-1 text-xs outline-none w-full"
-                        style={{ color: 'var(--color-text, #0f172a)' }}
+                        style={{ color: 'var(--color-text)' }}
                       />
                       <button 
                         type="button"
@@ -2202,7 +2165,7 @@ export default function ChefChatPage() {
                           ideasInputRef.current?.select();
                         }}
                         className="cursor-pointer p-0.5"
-                        style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                        style={{ color: 'var(--color-text-secondary)' }}
                         title={t('editQueryTooltip') || 'Click to edit query'}
                       >
                         <Edit3 className="h-3.5 w-3.5" />
@@ -2217,17 +2180,17 @@ export default function ChefChatPage() {
                     }}
                     className="flex items-center justify-between p-2.5 rounded-xl border cursor-pointer select-none"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                      borderColor: 'var(--color-border, #e2e8f0)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)'
                     }}
                   >
-                    <span className="text-xs font-semibold flex items-center gap-2" style={{ color: 'var(--color-text, #0f172a)' }}>
-                      <Package className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} /> {t('useMyPantryIngredients') || 'Use my pantry ingredients'}
-                      <span className="text-[10px]" style={{ color: 'var(--color-text-secondary, #64748b)' }}>({(t('inStockSuffix') || '{count} in stock').replace('{count}', String(pantryIngredientsList.length))})</span>
+                    <span className="text-xs font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                      <Package className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('useMyPantryIngredients') || 'Use my pantry ingredients'}
+                      <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>({(t('inStockSuffix') || '{count} in stock').replace('{count}', String(pantryIngredientsList.length))})</span>
                     </span>
                     <div 
                       className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: usePantryIngredients ? 'var(--color-emerald, #22c55e)' : '#94a3b8' }}
+                      style={{ backgroundColor: usePantryIngredients ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}
                     >
                       <div className={`w-4 h-4 rounded-full bg-white transition transform ${usePantryIngredients ? 'translate-x-4' : 'translate-x-0'}`} />
                     </div>
@@ -2235,7 +2198,7 @@ export default function ChefChatPage() {
 
                   <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
                     {paginatedSwapIdeas.length === 0 ? (
-                      <div className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary, #64748b)' }}>
+                      <div className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                         No recipe ideas from other users found.
                       </div>
                     ) : (
@@ -2249,30 +2212,30 @@ export default function ChefChatPage() {
                             key={rec.id || idx} 
                             className="p-3.5 rounded-2xl border space-y-2.5 shadow-sm"
                             style={{
-                              backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                              borderColor: 'var(--color-border, #e2e8f0)'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
                             }}
                           >
                             <div className="flex items-center justify-between">
                               <span 
                                 className="border text-[10px] font-extrabold px-2.5 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1"
                                 style={{
-                                  backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                                  borderColor: 'rgba(224, 86, 56, 0.3)',
-                                  color: 'var(--color-primary, #E05638)'
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-primary)'
                                 }}
                               >
                                 🍽 {activeSwapMeal.mealType}
                               </span>
                               <div className="flex items-center gap-2">
                                 {matchedCount > 0 && (
-                                  <span className="text-[10px] font-bold text-emerald-600">
+                                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-emerald)' }}>
                                     ✓ {matchedCount} in pantry
                                   </span>
                                 )}
                                 <span 
                                   className="text-xs flex items-center gap-1"
-                                  style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                                  style={{ color: 'var(--color-text-secondary)' }}
                                 >
                                   <Users className="h-3.5 w-3.5" /> {servings}
                                 </span>
@@ -2284,13 +2247,13 @@ export default function ChefChatPage() {
                                 src={rec.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
                                 alt={rec.title}
                                 className="w-16 h-16 rounded-xl object-cover border shrink-0"
-                                style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+                                style={{ borderColor: 'var(--color-border)' }}
                               />
                               <div className="space-y-1 min-w-0 flex-1">
-                                <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text, #0f172a)' }}>{rec.title}</h3>
+                                <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text)' }}>{rec.title}</h3>
                                 <p 
                                   className="text-xs leading-relaxed line-clamp-2"
-                                  style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                                  style={{ color: 'var(--color-text-secondary)' }}
                                 >
                                   {rec.description}
                                 </p>
@@ -2299,13 +2262,13 @@ export default function ChefChatPage() {
 
                             <div 
                               className="flex items-center gap-4 text-xs font-medium"
-                              style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                              style={{ color: 'var(--color-text-secondary)' }}
                             >
                               <span className="flex items-center gap-1.5">
                                 <Clock className="h-3.5 w-3.5" /> {rec.prep} mins
                               </span>
                               <span className="flex items-center gap-1.5">
-                                <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {rec.cook} mins
+                                <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {rec.cook} mins
                               </span>
                             </div>
 
@@ -2313,7 +2276,7 @@ export default function ChefChatPage() {
                               type="button"
                               onClick={() => handleConfirmSwap(rec)}
                               className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md mt-1"
-                              style={{ backgroundColor: '#29B6F6' }}
+                              style={{ backgroundColor: 'var(--color-emerald)' }}
                             >
                               {(t('addToMealTypeBtn') || '+ Add to {mealType}').replace('{mealType}', activeSwapMeal.mealType.charAt(0) + activeSwapMeal.mealType.slice(1).toLowerCase())}
                             </button>
@@ -2326,9 +2289,9 @@ export default function ChefChatPage() {
                   {filteredOtherUserIdeas.length > IDEAS_ITEMS_PER_PAGE && (
                     <div 
                       className="pt-2 border-t flex items-center justify-between text-xs"
-                      style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+                      style={{ borderColor: 'var(--color-border)' }}
                     >
-                      <span style={{ color: 'var(--color-text-secondary, #64748b)' }}>
+                      <span style={{ color: 'var(--color-text-secondary)' }}>
                         {t('showing') || 'Showing'} {ideasStartIndex + 1} - {Math.min(ideasStartIndex + IDEAS_ITEMS_PER_PAGE, filteredOtherUserIdeas.length)} {t('of') || 'of'} {filteredOtherUserIdeas.length}
                       </span>
                       <div className="flex items-center gap-1">
@@ -2338,9 +2301,9 @@ export default function ChefChatPage() {
                           onClick={() => setIdeasCurrentPage(p => Math.max(1, p - 1))}
                           className="p-1 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                            borderColor: 'var(--color-border, #e2e8f0)',
-                            color: 'var(--color-text, #0f172a)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                         >
                           <ChevronLeft className="h-3.5 w-3.5" />
@@ -2353,13 +2316,13 @@ export default function ChefChatPage() {
                             onClick={() => setIdeasCurrentPage(num)}
                             className="min-w-[26px] h-6 rounded-md text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-sm"
                             style={ideasCurrentPage === num ? {
-                              backgroundColor: 'var(--color-primary, #E05638)',
-                              borderColor: 'var(--color-primary, #E05638)',
+                              backgroundColor: 'var(--color-primary)',
+                              borderColor: 'var(--color-primary)',
                               color: '#ffffff'
                             } : {
-                              backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                              borderColor: 'var(--color-border, #e2e8f0)',
-                              color: 'var(--color-text, #0f172a)'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
                             }}
                           >
                             {num}
@@ -2372,9 +2335,9 @@ export default function ChefChatPage() {
                           onClick={() => setIdeasCurrentPage(p => Math.min(ideasTotalPages, p + 1))}
                           className="p-1 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                            borderColor: 'var(--color-border, #e2e8f0)',
-                            color: 'var(--color-text, #0f172a)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                         >
                           <ChevronRight className="h-3.5 w-3.5" />
@@ -2391,7 +2354,7 @@ export default function ChefChatPage() {
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <div className="relative flex-1">
-                        <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary, #64748b)' }} />
+                        <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                         <input
                           type="text"
                           placeholder={t('searchByNamePlaceholder') || 'Search by name'}
@@ -2402,9 +2365,9 @@ export default function ChefChatPage() {
                           }}
                           className="w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                            borderColor: 'var(--color-border, #e2e8f0)',
-                            color: 'var(--color-text, #0f172a)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                         />
                       </div>
@@ -2418,9 +2381,9 @@ export default function ChefChatPage() {
                           }}
                           className="border font-bold text-xs rounded-xl pl-3 pr-7 py-2 outline-none appearance-none cursor-pointer"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                            borderColor: 'var(--color-emerald, #10b981)',
-                            color: 'var(--color-primary, #E05638)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-primary)'
                           }}
                         >
                           <option value="All Books">{t('allBooksOption') || 'All Books'}</option>
@@ -2428,7 +2391,7 @@ export default function ChefChatPage() {
                             <option key={b.id} value={b.id}>{b.title}</option>
                           ))}
                         </select>
-                        <ChevronDown className="h-3.5 w-3.5 absolute right-2.5 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary, #64748b)' }} />
+                        <ChevronDown className="h-3.5 w-3.5 absolute right-2.5 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                       </div>
 
                       <button
@@ -2436,12 +2399,12 @@ export default function ChefChatPage() {
                         onClick={() => setShowSavedFilterOptions(!showSavedFilterOptions)}
                         className="border font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-sm"
                         style={{
-                          backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                          borderColor: 'var(--color-emerald, #10b981)',
-                          color: 'var(--color-primary, #E05638)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-emerald)',
+                          color: 'var(--color-primary)'
                         }}
                       >
-                        <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('filterBtn') || 'Filter'}
+                        <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('filterBtn') || 'Filter'}
                       </button>
                     </div>
 
@@ -2463,13 +2426,13 @@ export default function ChefChatPage() {
                             }}
                             className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shadow-sm"
                             style={selectedSavedTagFilter === tag.key ? {
-                              backgroundColor: 'var(--color-primary, #E05638)',
-                              borderColor: 'var(--color-primary, #E05638)',
+                              backgroundColor: 'var(--color-primary)',
+                              borderColor: 'var(--color-primary)',
                               color: '#ffffff'
                             } : {
-                              backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                              borderColor: 'var(--color-border, #e2e8f0)',
-                              color: 'var(--color-text-secondary, #64748b)'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)'
                             }}
                           >
                             {tag.label}
@@ -2481,7 +2444,7 @@ export default function ChefChatPage() {
 
                   <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
                     {paginatedSavedRecipes.length === 0 ? (
-                      <div className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary, #64748b)' }}>
+                      <div className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                         {t('noSavedRecipesProfile') || 'No saved recipes found for your current profile.'}
                       </div>
                     ) : (
@@ -2490,8 +2453,8 @@ export default function ChefChatPage() {
                           key={rec.id || idx} 
                           className="p-3.5 rounded-2xl border space-y-2.5 shadow-sm"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                            borderColor: 'var(--color-border, #e2e8f0)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
                           }}
                         >
                           <div className="flex items-start gap-3">
@@ -2499,24 +2462,24 @@ export default function ChefChatPage() {
                               src={rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=400&q=80'}
                               alt={rec.title || rec.name}
                               className="w-16 h-16 rounded-xl object-cover border shrink-0"
-                              style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+                              style={{ borderColor: 'var(--color-border)' }}
                             />
                             <div className="space-y-1 min-w-0 flex-1">
                               <div className="flex items-center gap-2">
                                 <span 
                                   className="text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full"
-                                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                                  style={{ backgroundColor: 'var(--color-primary)' }}
                                 >
                                   {rec.recipeType || rec.category || 'Main Dish'}
                                 </span>
-                                <Heart className="h-3.5 w-3.5 fill-[#E05638] text-[#E05638]" />
+                                <Heart className="h-3.5 w-3.5 fill-[var(--color-primary)] text-[var(--color-primary)]" />
                               </div>
 
-                              <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text, #0f172a)' }}>
+                              <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text)' }}>
                                 {rec.title || rec.name}
                               </h3>
 
-                              <div className="flex items-center gap-3 text-xs font-medium pt-0.5" style={{ color: 'var(--color-text-secondary, #64748b)' }}>
+                              <div className="flex items-center gap-3 text-xs font-medium pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                                 <span className="flex items-center gap-1">
                                   <Users className="h-3.5 w-3.5" /> {rec.servings || servings}
                                 </span>
@@ -2524,7 +2487,7 @@ export default function ChefChatPage() {
                                   <Clock className="h-3.5 w-3.5" /> {rec.prep || 15} mins
                                 </span>
                                 <span className="flex items-center gap-1">
-                                  <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {rec.cook || 10} mins
+                                  <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {rec.cook || 10} mins
                                 </span>
                               </div>
                             </div>
@@ -2541,7 +2504,7 @@ export default function ChefChatPage() {
                               ingredients: rec.ingredients || []
                             })}
                             className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
-                            style={{ backgroundColor: '#29B6F6' }}
+                            style={{ backgroundColor: 'var(--color-emerald)' }}
                           >
                             {(t('addToMealTypeBtn') || '+ Add to {mealType}').replace('{mealType}', activeSwapMeal.mealType.charAt(0) + activeSwapMeal.mealType.slice(1).toLowerCase())}
                           </button>
@@ -2553,9 +2516,9 @@ export default function ChefChatPage() {
                   {filteredUserSavedRecipes.length > SAVED_ITEMS_PER_PAGE && (
                     <div 
                       className="pt-2 border-t flex items-center justify-between text-xs"
-                      style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+                      style={{ borderColor: 'var(--color-border)' }}
                     >
-                      <span style={{ color: 'var(--color-text-secondary, #64748b)' }}>
+                      <span style={{ color: 'var(--color-text-secondary)' }}>
                         {t('showing') || 'Showing'} {savedStartIndex + 1} - {Math.min(savedStartIndex + SAVED_ITEMS_PER_PAGE, filteredUserSavedRecipes.length)} {t('of') || 'of'} {filteredUserSavedRecipes.length}
                       </span>
                       <div className="flex items-center gap-1">
@@ -2565,9 +2528,9 @@ export default function ChefChatPage() {
                           onClick={() => setSavedCurrentPage(p => Math.max(1, p - 1))}
                           className="p-1 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                            borderColor: 'var(--color-border, #e2e8f0)',
-                            color: 'var(--color-text, #0f172a)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                         >
                           <ChevronLeft className="h-3.5 w-3.5" />
@@ -2580,13 +2543,13 @@ export default function ChefChatPage() {
                             onClick={() => setSavedCurrentPage(num)}
                             className="min-w-[26px] h-6 rounded-md text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-sm"
                             style={savedCurrentPage === num ? {
-                              backgroundColor: 'var(--color-primary, #E05638)',
-                              borderColor: 'var(--color-primary, #E05638)',
+                              backgroundColor: 'var(--color-primary)',
+                              borderColor: 'var(--color-primary)',
                               color: '#ffffff'
                             } : {
-                              backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                              borderColor: 'var(--color-border, #e2e8f0)',
-                              color: 'var(--color-text, #0f172a)'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
                             }}
                           >
                             {num}
@@ -2599,9 +2562,9 @@ export default function ChefChatPage() {
                           onClick={() => setSavedCurrentPage(p => Math.min(savedTotalPages, p + 1))}
                           className="p-1 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                            borderColor: 'var(--color-border, #e2e8f0)',
-                            color: 'var(--color-text, #0f172a)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                         >
                           <ChevronRight className="h-3.5 w-3.5" />
@@ -2616,7 +2579,7 @@ export default function ChefChatPage() {
               {swapTab === 'repeat' && (
                 <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
                   {repeatMealsInPlan.length === 0 ? (
-                    <div className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary, #64748b)' }}>
+                    <div className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('noOtherMealsToRepeat') || 'No other meals in this plan available to repeat.'}
                     </div>
                   ) : (
@@ -2625,23 +2588,24 @@ export default function ChefChatPage() {
                         key={m.id} 
                         className="p-3.5 rounded-2xl border space-y-2.5 shadow-sm"
                         style={{
-                          backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                          borderColor: 'var(--color-border, #e2e8f0)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
                         }}
                       >
                         <div className="flex items-center justify-between">
                           <span 
-                            className="border text-[10px] font-extrabold px-2.5 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1 text-purple-700"
+                            className="border text-[10px] font-extrabold px-2.5 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1"
                             style={{
-                              backgroundColor: 'rgba(168, 85, 247, 0.15)',
-                              borderColor: 'rgba(168, 85, 247, 0.3)'
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-primary)'
                             }}
                           >
                             🔄 {m.dayLabel}
                           </span>
                           <span 
                             className="text-xs flex items-center gap-1"
-                            style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                            style={{ color: 'var(--color-text-secondary)' }}
                           >
                             <Clock className="h-3.5 w-3.5" /> {m.prepMinutes + m.cookMinutes} mins
                           </span>
@@ -2652,13 +2616,13 @@ export default function ChefChatPage() {
                             src={m.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
                             alt={m.title}
                             className="w-16 h-16 rounded-xl object-cover border shrink-0"
-                            style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+                            style={{ borderColor: 'var(--color-border)' }}
                           />
                           <div className="space-y-1 min-w-0 flex-1">
-                            <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text, #0f172a)' }}>{m.title}</h3>
+                            <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text)' }}>{m.title}</h3>
                             <p 
                               className="text-xs leading-relaxed line-clamp-2"
-                              style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                              style={{ color: 'var(--color-text-secondary)' }}
                             >
                               {m.description}
                             </p>
@@ -2676,7 +2640,7 @@ export default function ChefChatPage() {
                             ingredients: m.ingredients || []
                           })}
                           className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md mt-1"
-                          style={{ backgroundColor: '#29B6F6' }}
+                          style={{ backgroundColor: 'var(--color-emerald)' }}
                         >
                           {t('repeatThisMealBtn') || '+ Repeat this meal'}
                         </button>
@@ -2701,22 +2665,22 @@ export default function ChefChatPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-5 cursor-default animate-in fade-in"
             style={{
-              backgroundColor: 'var(--color-card, #ffffff)',
-              borderColor: 'var(--color-border, #e2e8f0)',
-              color: 'var(--color-text, #0f172a)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <div className="flex justify-between items-start">
               <div>
                 <h2 
                   className="text-xl font-black tracking-tight"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('recipePreferencesTitle') || 'Recipe Preferences'}
                 </h2>
                 <p 
                   className="text-xs mt-0.5"
-                  style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                  style={{ color: 'var(--color-text-secondary)' }}
                 >
                   {t('recipePreferencesSub') || 'Personalise your cooking experience'}
                 </p>
@@ -2727,9 +2691,9 @@ export default function ChefChatPage() {
                 onClick={() => setShowPreferences(false)}
                 className="p-2 rounded-xl border transition cursor-pointer shadow-sm"
                 style={{
-                  backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                  borderColor: 'var(--color-border, #e2e8f0)',
-                  color: 'var(--color-text, #0f172a)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
                 <X className="h-5 w-5" />
@@ -2740,7 +2704,7 @@ export default function ChefChatPage() {
               <div className="space-y-2">
                 <label 
                   className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('servingsTitle') || 'Servings'}
                 </label>
@@ -2750,14 +2714,14 @@ export default function ChefChatPage() {
                     onClick={() => setServings(Math.max(1, servings - 1))}
                     className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                      borderColor: 'var(--color-border, #e2e8f0)',
-                      color: 'var(--color-text, #0f172a)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     -
                   </button>
-                  <span className="font-bold text-sm" style={{ color: 'var(--color-text, #0f172a)' }}>
+                  <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
                     {(t('peopleSuffix') || '{count} people').replace('{count}', String(servings))}
                   </span>
                   <button
@@ -2765,9 +2729,9 @@ export default function ChefChatPage() {
                     onClick={() => setServings(servings + 1)}
                     className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                      borderColor: 'var(--color-border, #e2e8f0)',
-                      color: 'var(--color-text, #0f172a)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     +
@@ -2778,7 +2742,7 @@ export default function ChefChatPage() {
               <div className="space-y-2">
                 <label 
                   className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('countryTitle') || 'Country'}
                 </label>
@@ -2788,23 +2752,23 @@ export default function ChefChatPage() {
                     onChange={(e) => setCountry(e.target.value)}
                     className="w-full border rounded-xl px-4 py-2.5 text-xs outline-none cursor-pointer appearance-none shadow-sm"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                      borderColor: 'var(--color-border, #e2e8f0)',
-                      color: 'var(--color-text, #0f172a)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     {COUNTRIES.map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
-                  <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: 'var(--color-primary, #E05638)' }} />
+                  <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: 'var(--color-primary)' }} />
                 </div>
               </div>
 
               <div className="space-y-2">
                 <label 
                   className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('dietaryPreferencesTitle') || 'Dietary Preferences'}
                 </label>
@@ -2818,13 +2782,13 @@ export default function ChefChatPage() {
                         onClick={() => handleToggleDiet(item)}
                         className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
                         style={isSelected ? {
-                          backgroundColor: 'rgba(224, 86, 56, 0.2)',
-                          borderColor: 'var(--color-primary, #E05638)',
-                          color: 'var(--color-primary, #E05638)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
                         } : {
-                          backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                          borderColor: 'var(--color-border, #e2e8f0)',
-                          color: 'var(--color-text-secondary, #64748b)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
                         }}
                       >
                         {item}
@@ -2837,7 +2801,7 @@ export default function ChefChatPage() {
               <div className="space-y-2">
                 <label 
                   className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('allergiesTitle') || 'Allergies'}
                 </label>
@@ -2851,13 +2815,13 @@ export default function ChefChatPage() {
                         onClick={() => handleToggleAllergy(item)}
                         className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
                         style={isSelected ? {
-                          backgroundColor: 'rgba(224, 86, 56, 0.2)',
-                          borderColor: 'var(--color-primary, #E05638)',
-                          color: 'var(--color-primary, #E05638)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
                         } : {
-                          backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                          borderColor: 'var(--color-border, #e2e8f0)',
-                          color: 'var(--color-text-secondary, #64748b)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
                         }}
                       >
                         {item}
@@ -2870,7 +2834,7 @@ export default function ChefChatPage() {
               <div className="space-y-2">
                 <label 
                   className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('ingredientsToAvoidTitle') || 'Ingredients to Avoid'}
                 </label>
@@ -2882,15 +2846,15 @@ export default function ChefChatPage() {
                     onChange={(e) => setNewAvoidInput(e.target.value)}
                     className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                      borderColor: 'var(--color-border, #e2e8f0)',
-                      color: 'var(--color-text, #0f172a)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                   <button
                     type="submit"
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md"
-                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                    style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -2899,28 +2863,28 @@ export default function ChefChatPage() {
                 <div 
                   className="p-3 rounded-2xl border min-h-[50px] flex flex-wrap gap-2 items-center"
                   style={{
-                    backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                    borderColor: 'var(--color-border, #e2e8f0)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   {ingredientsToAvoid.length === 0 ? (
-                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary, #64748b)' }}>{t('noIngredientsAvoid') || 'No ingredients added to avoid list'}</span>
+                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>{t('noIngredientsAvoid') || 'No ingredients added to avoid list'}</span>
                   ) : (
                     ingredientsToAvoid.map((item) => (
                       <span 
                         key={item}
                         className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-sm"
                         style={{
-                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                          borderColor: 'var(--color-emerald, #10b981)',
-                          color: 'var(--color-emerald, #10b981)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-emerald)',
+                          color: 'var(--color-emerald)'
                         }}
                       >
                         {item}
                         <button 
                           type="button" 
                           onClick={() => handleRemoveAvoid(item)} 
-                          className="hover:text-red-500 cursor-pointer ml-0.5"
+                          className="hover:opacity-80 cursor-pointer ml-0.5"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
@@ -2933,13 +2897,13 @@ export default function ChefChatPage() {
               <div className="space-y-2">
                 <label 
                   className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('tastesTitle') || 'Tastes'}
                 </label>
                 <p 
                   className="text-[11px] leading-relaxed"
-                  style={{ color: 'var(--color-text-secondary, #64748b)' }}
+                  style={{ color: 'var(--color-text-secondary)' }}
                 >
                   {t('tastesDesc') || "Anything else about how you like to eat. We'll factor these into your recipes."}
                 </p>
@@ -2952,15 +2916,15 @@ export default function ChefChatPage() {
                     onChange={(e) => setNewTasteInput(e.target.value)}
                     className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                      borderColor: 'var(--color-border, #e2e8f0)',
-                      color: 'var(--color-text, #0f172a)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                   <button
                     type="submit"
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md"
-                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                    style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -2969,28 +2933,28 @@ export default function ChefChatPage() {
                 <div 
                   className="p-3 rounded-2xl border min-h-[50px] flex flex-wrap gap-2 items-center"
                   style={{
-                    backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                    borderColor: 'var(--color-border, #e2e8f0)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   {tastesList.length === 0 ? (
-                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary, #64748b)' }}>{t('noTastesSpecified') || 'No taste preferences specified'}</span>
+                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>{t('noTastesSpecified') || 'No taste preferences specified'}</span>
                   ) : (
                     tastesList.map((item) => (
                       <span 
                         key={item}
                         className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-sm"
                         style={{
-                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                          borderColor: 'var(--color-emerald, #10b981)',
-                          color: 'var(--color-emerald, #10b981)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-emerald)',
+                          color: 'var(--color-emerald)'
                         }}
                       >
                         {item}
                         <button 
                           type="button" 
                           onClick={() => handleRemoveTaste(item)} 
-                          className="hover:text-red-500 cursor-pointer ml-0.5"
+                          className="hover:opacity-80 cursor-pointer ml-0.5"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
@@ -3004,16 +2968,16 @@ export default function ChefChatPage() {
 
             <div 
               className="pt-4 border-t flex items-center justify-end gap-2.5"
-              style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+              style={{ borderColor: 'var(--color-border)' }}
             >
               <button
                 type="button"
                 onClick={() => setShowPreferences(false)}
                 className="px-5 py-2.5 border rounded-xl font-bold text-xs transition cursor-pointer shadow-sm"
                 style={{
-                  backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                  borderColor: 'var(--color-border, #e2e8f0)',
-                  color: 'var(--color-text, #0f172a)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
                 {t('cancel') || 'Cancel'}
@@ -3023,7 +2987,7 @@ export default function ChefChatPage() {
                 type="button"
                 onClick={handleClearAllPreferences}
                 className="px-4 py-2.5 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md"
-                style={{ backgroundColor: '#dc2626' }}
+                style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 <Trash2 className="h-3.5 w-3.5" /> {t('clearAllBtn') || 'Clear All'}
               </button>
@@ -3032,7 +2996,7 @@ export default function ChefChatPage() {
                 type="button"
                 onClick={handleSavePreferences}
                 className="px-6 py-2.5 text-white font-bold text-xs rounded-xl transition shadow-lg cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {t('saveBtn') || 'Save'}
               </button>

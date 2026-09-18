@@ -66,7 +66,6 @@ export default function SavedRecipesPage() {
   const [books, setBooks] = useState<any[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedRecipe, setSelectedRecipe] = useState<any | null>(null);
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   // Search & Filters
   const [search, setSearch] = useState('');
@@ -138,47 +137,7 @@ export default function SavedRecipesPage() {
 
   const applyGlobalTheme = useCallback(() => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light' || mode === 'day';
-      setIsDayMode(isDay);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-        }
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (_) {}
   }, []);
 
@@ -364,7 +323,6 @@ export default function SavedRecipesPage() {
     }
   };
 
-  // 1. FIX "ADD TO COOKBOOK"
   const handleAssignToBook = async (bookId: string) => {
     if (!selectedRecipe) return;
     const isRemoving = isRecipeInBook(selectedRecipe, bookId);
@@ -381,13 +339,11 @@ export default function SavedRecipesPage() {
     setRecipes(updatedRecipes);
 
     try {
-      // 1. Direct PostgreSQL commit
       await fetch('/api/recipes/saved', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedRecipe)
       });
-      // 2. Dispatch cross-view sync
       window.dispatchEvent(new Event('zecratary_recipes_updated'));
       window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
@@ -397,7 +353,6 @@ export default function SavedRecipesPage() {
     }
   };
 
-  // 2. FIX "ADD TO PLAN"
   const openAddToPlanModal = () => {
     const todayStr = new Date().toISOString().split('T')[0];
     setPlanDate(todayStr);
@@ -440,7 +395,6 @@ export default function SavedRecipesPage() {
       createdAt: new Date().toISOString()
     };
 
-    // Save across meal plan storage slots
     try {
       const planKeys = ['zecratary_meal_plan', 'zecratary_meal_plans'];
       for (const k of planKeys) {
@@ -451,7 +405,6 @@ export default function SavedRecipesPage() {
       }
     } catch (_) {}
 
-    // Post to API endpoints if available
     try {
       await Promise.allSettled([
         fetch('/api/planner', {
@@ -683,7 +636,6 @@ export default function SavedRecipesPage() {
     return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
   };
 
-  // 3. FIX "SHOPPING LIST"
   const parseIngredientString = (rawStr: string, defaultCat: string) => {
     const trimmed = String(rawStr || '').trim();
     if (!trimmed) return { amount: '1', unit: 'unit', item: '', category: defaultCat };
@@ -906,7 +858,7 @@ export default function SavedRecipesPage() {
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-16 px-4 font-sans transition-colors duration-200" 
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      style={{ color: 'var(--color-text)' }}
       onClick={() => setOpenDropdown(null)}
     >
       {/* Top Header */}
@@ -915,7 +867,7 @@ export default function SavedRecipesPage() {
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
             {t('savedRecipesTitle') || 'Saved Recipes'}
           </h1>
-          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {(t('savedRecipesSubtitle') || 'Your collection of favorite recipes ({count})').replace('{count}', String(recipes.length))}
           </p>
         </div>
@@ -924,8 +876,8 @@ export default function SavedRecipesPage() {
           <div 
             className="flex items-center p-1 rounded-xl border shadow-sm"
             style={{
-              backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
             }}
           >
             {(['3x3', '4x4', '5x5'] as GridMode[]).map((mode) => {
@@ -937,11 +889,11 @@ export default function SavedRecipesPage() {
                   onClick={() => setGridMode(mode)}
                   className="px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition cursor-pointer"
                   style={isActive ? {
-                    backgroundColor: 'var(--color-primary, #E05638)',
+                    backgroundColor: 'var(--color-primary)',
                     color: '#ffffff',
                     boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
                   } : {
-                    color: isDayMode ? '#64748b' : '#94a3b8',
+                    color: 'var(--color-text-secondary)',
                     backgroundColor: 'transparent'
                   }}
                   title={`Show ${GRID_CONFIG[mode].label} layout (${GRID_CONFIG[mode].perPage} per page)`}
@@ -958,9 +910,9 @@ export default function SavedRecipesPage() {
           <Link 
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg"
             href="/manual"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             <UploadCloud className="h-4 w-4"/> {t('createRecipe') || 'Create Recipe'}
           </Link>
@@ -971,7 +923,7 @@ export default function SavedRecipesPage() {
       <div className="space-y-3">
         <div className="flex gap-3">
           <div className="relative flex-1">
-            <Search className="h-4 w-4 absolute left-3.5 top-3.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}/>
+            <Search className="h-4 w-4 absolute left-3.5 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
             <input
               type="text"
               placeholder={t('searchByNamePlaceholder') || 'Search by name'}
@@ -979,12 +931,12 @@ export default function SavedRecipesPage() {
               onChange={(e) => setSearch(e.target.value)}
               className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none"
               style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
-              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-              onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
             />
           </div>
           <button 
@@ -992,16 +944,16 @@ export default function SavedRecipesPage() {
             onClick={() => setShowFilters(!showFilters)}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
             style={showFilters ? {
-              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-              borderColor: 'var(--color-emerald, #10b981)',
-              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
             } : {
-              backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#64748b' : '#94a3b8'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
             }}
           >
-            <SlidersHorizontal className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }}/> {t('filter') || 'Filter'}
+            <SlidersHorizontal className="h-4 w-4" style={{ color: 'var(--color-emerald)' }}/> {t('filter') || 'Filter'}
           </button>
         </div>
 
@@ -1013,16 +965,16 @@ export default function SavedRecipesPage() {
               onClick={() => setFilterFavorites(!filterFavorites)}
               className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
               style={filterFavorites ? {
-                backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                borderColor: isDayMode ? '#f87171' : 'rgba(239, 68, 68, 0.6)',
-                color: isDayMode ? '#b91c1c' : '#fca5a5'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
               } : {
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#334155' : '#cbd5e1'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
             >
-              <Heart className={`h-3.5 w-3.5 ${filterFavorites ? 'fill-red-500 text-red-500' : 'text-slate-400'}`}/>
+              <Heart className={`h-3.5 w-3.5 ${filterFavorites ? 'fill-current' : ''}`} style={{ color: filterFavorites ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
               <span>{t('favorites') || 'Favorites'}</span>
             </button>
 
@@ -1033,16 +985,16 @@ export default function SavedRecipesPage() {
                 onClick={() => setOpenDropdown(openDropdown === 'ingredients' ? null : 'ingredients')}
                 className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
                 style={selectedIngredientsList.length > 0 || openDropdown === 'ingredients' ? {
-                  backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                  borderColor: 'var(--color-primary, #E05638)',
-                  color: 'var(--color-primary, #E05638)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
                 } : {
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#334155' : '#cbd5e1'
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
-                <Carrot className="h-3.5 w-3.5" style={{ color: isDayMode ? '#ea580c' : '#94a3b8' }}/>
+                <Carrot className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
                 <span>{t('ingredientsFilter') || 'Ingredients'} {selectedIngredientsList.length > 0 ? `(${selectedIngredientsList.length})` : ''}</span>
                 <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
               </button>
@@ -1051,16 +1003,16 @@ export default function SavedRecipesPage() {
                 <div 
                   className="absolute left-0 top-full mt-2 w-72 border rounded-2xl shadow-2xl p-3 z-50 space-y-2.5 animate-in fade-in"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0e1015)',
-                    borderColor: 'var(--color-primary, #E05638)'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-primary)'
                   }}
                 >
                   <form onSubmit={handleAddIngredientFilter} className="flex items-center gap-2">
                     <div 
                       className="flex-1 border-2 rounded-xl overflow-hidden"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #080a0e)',
-                        borderColor: 'var(--color-primary, #E05638)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)'
                       }}
                     >
                       <input
@@ -1070,13 +1022,13 @@ export default function SavedRecipesPage() {
                         value={ingredientQuery}
                         onChange={(e) => setIngredientQuery(e.target.value)}
                         className="w-full bg-transparent px-3 py-2 text-xs outline-none"
-                        style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                        style={{ color: 'var(--color-text)' }}
                       />
                     </div>
                     <button
                       type="submit"
                       className="text-white p-2 rounded-xl transition flex items-center justify-center font-bold text-sm shadow-md cursor-pointer shrink-0"
-                      style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                      style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       <Plus className="h-4 w-4 stroke-[3]"/>
                     </button>
@@ -1089,9 +1041,9 @@ export default function SavedRecipesPage() {
                           key={ing}
                           className="text-[11px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 border"
                           style={{
-                            backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #171c26)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#0f172a' : '#ffffff'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                         >
                           <span className="capitalize">{ing}</span>
@@ -1107,7 +1059,7 @@ export default function SavedRecipesPage() {
                     </div>
                   )}
 
-                  <p className="text-[11px] leading-tight pt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px] leading-tight pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('recipesMustContainIngredients') || 'Recipes must contain all listed ingredients.'}
                   </p>
                 </div>
@@ -1121,13 +1073,13 @@ export default function SavedRecipesPage() {
                 onClick={() => setOpenDropdown(openDropdown === 'recipeType' ? null : 'recipeType')}
                 className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
                 style={selectedType !== 'All Types' ? {
-                  backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                  borderColor: 'var(--color-primary, #E05638)',
-                  color: 'var(--color-primary, #E05638)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
                 } : {
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#334155' : '#cbd5e1'
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
                 <Utensils className="h-3.5 w-3.5 opacity-70"/>
@@ -1139,8 +1091,8 @@ export default function SavedRecipesPage() {
                 <div 
                   className="absolute left-0 top-full mt-2 w-48 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1 animate-in fade-in"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a0d14)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   {RECIPE_TYPES.map((type) => (
@@ -1150,11 +1102,11 @@ export default function SavedRecipesPage() {
                       onClick={() => { setSelectedType(type); setOpenDropdown(null); }}
                       className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
                       style={selectedType === type ? {
-                        backgroundColor: isDayMode ? '#fee2e2' : 'var(--color-inner-dark, #111726)',
-                        color: isDayMode ? '#b91c1c' : '#ffffff',
-                        border: '1px solid var(--color-primary, #E05638)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-text)',
+                        border: '1px solid var(--color-primary)'
                       } : {
-                        color: isDayMode ? '#1e293b' : '#cbd5e1'
+                        color: 'var(--color-text-secondary)'
                       }}
                     >
                       {type}
@@ -1170,16 +1122,16 @@ export default function SavedRecipesPage() {
               onClick={() => setFilterCooked(!filterCooked)}
               className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
               style={filterCooked ? {
-                backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                borderColor: 'var(--color-emerald, #10b981)',
-                color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-emerald)',
+                color: 'var(--color-emerald)'
               } : {
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#334155' : '#cbd5e1'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
             >
-              <CheckCircle2 className="h-3.5 w-3.5" style={{ color: filterCooked ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#64748b' : '#94a3b8') }}/>
+              <CheckCircle2 className="h-3.5 w-3.5" style={{ color: filterCooked ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}/>
               <span>{t('cooked') || 'Cooked'}</span>
             </button>
 
@@ -1190,13 +1142,13 @@ export default function SavedRecipesPage() {
                 onClick={() => setOpenDropdown(openDropdown === 'rating' ? null : 'rating')}
                 className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
                 style={selectedRating !== 'All Ratings' ? {
-                  backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
-                  borderColor: isDayMode ? '#f59e0b' : 'rgba(245, 158, 11, 0.6)',
-                  color: isDayMode ? '#b45309' : '#fbbf24'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
                 } : {
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#334155' : '#cbd5e1'
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
                 <Star className="h-3.5 w-3.5 opacity-70"/>
@@ -1208,8 +1160,8 @@ export default function SavedRecipesPage() {
                 <div 
                   className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a0d14)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   {['All Ratings', '4+ Stars', '3+ Stars', '1+ Stars'].map((rat) => (
@@ -1219,11 +1171,11 @@ export default function SavedRecipesPage() {
                       onClick={() => { setSelectedRating(rat); setOpenDropdown(null); }}
                       className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
                       style={selectedRating === rat ? {
-                        backgroundColor: isDayMode ? '#fef3c7' : 'var(--color-inner-dark, #111726)',
-                        color: isDayMode ? '#b45309' : '#ffffff',
-                        border: '1px solid var(--color-border, #1e293b)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-text)',
+                        border: '1px solid var(--color-border)'
                       } : {
-                        color: isDayMode ? '#1e293b' : '#cbd5e1'
+                        color: 'var(--color-text-secondary)'
                       }}
                     >
                       {rat}
@@ -1240,13 +1192,13 @@ export default function SavedRecipesPage() {
                 onClick={() => setOpenDropdown(openDropdown === 'prepTime' ? null : 'prepTime')}
                 className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
                 style={selectedPrepTime !== 'All Prep Times' ? {
-                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                  borderColor: 'var(--color-emerald, #10b981)',
-                  color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
                 } : {
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#334155' : '#cbd5e1'
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
                 <Hourglass className="h-3.5 w-3.5 opacity-70"/>
@@ -1258,8 +1210,8 @@ export default function SavedRecipesPage() {
                 <div 
                   className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a0d14)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   {['All Prep Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
@@ -1269,11 +1221,11 @@ export default function SavedRecipesPage() {
                       onClick={() => { setSelectedPrepTime(time); setOpenDropdown(null); }}
                       className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
                       style={selectedPrepTime === time ? {
-                        backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
-                        color: isDayMode ? '#0f172a' : '#ffffff',
-                        border: '1px solid var(--color-border, #1e293b)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-text)',
+                        border: '1px solid var(--color-border)'
                       } : {
-                        color: isDayMode ? '#1e293b' : '#cbd5e1'
+                        color: 'var(--color-text-secondary)'
                       }}
                     >
                       {time}
@@ -1290,13 +1242,13 @@ export default function SavedRecipesPage() {
                 onClick={() => setOpenDropdown(openDropdown === 'cookTime' ? null : 'cookTime')}
                 className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
                 style={selectedCookTime !== 'All Cook Times' ? {
-                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                  borderColor: 'var(--color-emerald, #10b981)',
-                  color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
                 } : {
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#334155' : '#cbd5e1'
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
                 <Clock className="h-3.5 w-3.5 opacity-70"/>
@@ -1308,8 +1260,8 @@ export default function SavedRecipesPage() {
                 <div 
                   className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a0d14)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   {['All Cook Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
@@ -1319,11 +1271,11 @@ export default function SavedRecipesPage() {
                       onClick={() => { setSelectedCookTime(time); setOpenDropdown(null); }}
                       className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
                       style={selectedCookTime === time ? {
-                        backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
-                        color: isDayMode ? '#0f172a' : '#ffffff',
-                        border: '1px solid var(--color-border, #1e293b)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-text)',
+                        border: '1px solid var(--color-border)'
                       } : {
-                        color: isDayMode ? '#1e293b' : '#cbd5e1'
+                        color: 'var(--color-text-secondary)'
                       }}
                     >
                       {time}
@@ -1338,7 +1290,7 @@ export default function SavedRecipesPage() {
 
       {/* Grid */}
       {loading ? (
-        <div className="text-xs py-12 text-center" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+        <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
           {t('loadingRecipes') || 'Loading recipes...'}
         </div>
       ) : (
@@ -1361,12 +1313,12 @@ export default function SavedRecipesPage() {
                 }}
                 className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative flex flex-col justify-between"
                 style={{
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #070b13)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
                 <div>
-                  <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: isDayMode ? '#f1f5f9' : '#1e293b' }}>
+                  <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: 'var(--color-inner-dark)' }}>
                     <img
                       src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'}
                       alt={r.title || r.name}
@@ -1379,7 +1331,7 @@ export default function SavedRecipesPage() {
                         onClick={(e) => toggleCooked(e, r.id)}
                         className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer"
                         style={r.isCooked ? {
-                          backgroundColor: 'var(--color-emerald, #10b981)',
+                          backgroundColor: 'var(--color-emerald)',
                           color: '#ffffff'
                         } : {
                           backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -1398,7 +1350,7 @@ export default function SavedRecipesPage() {
                       >
                         <Heart 
                           className={`h-3.5 w-3.5 ${r.isFavorite ? 'fill-current' : ''}`}
-                          style={{ color: r.isFavorite ? 'var(--color-primary, #E05638)' : '#ffffff' }}
+                          style={{ color: r.isFavorite ? 'var(--color-primary)' : '#ffffff' }}
                         />
                       </button>
                     </div>
@@ -1413,7 +1365,7 @@ export default function SavedRecipesPage() {
                   <div className="p-3.5 space-y-1.5">
                     <h3 
                       className={`font-bold ${cfg.titleSize} leading-snug line-clamp-2`}
-                      style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                      style={{ color: 'var(--color-text)' }}
                     >
                       {r.title || r.name}
                     </h3>
@@ -1424,7 +1376,7 @@ export default function SavedRecipesPage() {
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span 
                       className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
-                      style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                      style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       {cardTypeBadge}
                     </span>
@@ -1436,7 +1388,7 @@ export default function SavedRecipesPage() {
                     ) : null}
                   </div>
 
-                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
                     <Clock className="h-3 w-3"/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
                   </span>
                 </div>
@@ -1450,9 +1402,9 @@ export default function SavedRecipesPage() {
       {filtered.length > 0 && (
         <div 
           className="pt-4 border-t flex flex-wrap items-center justify-between gap-3 text-xs"
-          style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+          style={{ borderColor: 'var(--color-border)' }}
         >
-          <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+          <span style={{ color: 'var(--color-text-secondary)' }}>
             {(t('showingRecipesRange') || 'Showing {start} - {end} of {total} recipes')
               .replace('{start}', String(startIndex + 1))
               .replace('{end}', String(Math.min(startIndex + itemsPerPage, filtered.length)))
@@ -1466,9 +1418,9 @@ export default function SavedRecipesPage() {
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
               className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-sm"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #07090e)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
               title="Previous Page"
             >
@@ -1483,20 +1435,20 @@ export default function SavedRecipesPage() {
 
                 return (
                   <div key={num} className="flex items-center gap-1">
-                    {showEllipsis && <span className="px-1 font-bold" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>...</span>}
+                    {showEllipsis && <span className="px-1 font-bold" style={{ color: 'var(--color-text-secondary)' }}>...</span>}
                     <button
                       type="button"
                       onClick={() => setCurrentPage(num)}
                       className="min-w-[32px] h-8 rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-sm"
                       style={safeCurrentPage === num ? {
-                        backgroundColor: 'var(--color-primary, #E05638)',
-                        borderColor: 'var(--color-primary, #E05638)',
+                        backgroundColor: 'var(--color-primary)',
+                        borderColor: 'var(--color-primary)',
                         color: '#ffffff',
                         boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
                       } : {
-                        backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #07090e)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#cbd5e1'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     >
                       {num}
@@ -1511,9 +1463,9 @@ export default function SavedRecipesPage() {
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
               className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-sm"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #07090e)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
               title="Next Page"
             >
@@ -1533,18 +1485,18 @@ export default function SavedRecipesPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button
               onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
               className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'rgba(0, 0, 0, 0.7)',
-                borderColor: isDayMode ? '#cbd5e1' : '#334155',
-                color: isDayMode ? '#0f172a' : '#ffffff'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-5 w-5"/>
@@ -1580,7 +1532,7 @@ export default function SavedRecipesPage() {
                         <button
                           onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
                           className="ml-auto w-8 h-8 bg-white/95 rounded-full flex items-center justify-center shadow cursor-pointer"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
+                          style={{ color: 'var(--color-primary)' }}
                         >
                           <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-current' : 'text-slate-400'}`}/>
                         </button>
@@ -1590,22 +1542,21 @@ export default function SavedRecipesPage() {
 
                   {/* 3 CORE ACTION BUTTONS */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
-                    {/* 1. ADD TO COOKBOOK BUTTON & DROPDOWN */}
                     <div className="relative">
                       <button
                         type="button"
                         onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
                         className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
                         style={assignedBook ? {
-                          backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                          borderColor: 'var(--color-primary, #E05638)',
-                          color: 'var(--color-primary, #E05638)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
                         } : {
-                          borderColor: 'var(--color-primary, #E05638)',
-                          color: 'var(--color-primary, #E05638)'
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
                         }}
                       >
-                        <BookmarkPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary, #E05638)' }}/>
+                        <BookmarkPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }}/>
                         <span className="truncate">
                           {assignedBook ? assignedBook.title : (t('addToCookbook') || t('addToBook') || 'Add to Cookbook')}
                         </span>
@@ -1619,16 +1570,16 @@ export default function SavedRecipesPage() {
                             className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in" 
                             onClick={(e) => e.stopPropagation()}
                             style={{
-                              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0d131f)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)'
                             }}
                           >
-                            <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                            <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                               <span>{t('selectCookbook') || 'Select Cookbook'}</span>
                               <Link 
                                 className="hover:underline font-bold" 
                                 href="/books"
-                                style={{ color: 'var(--color-emerald, #10b981)' }}
+                                style={{ color: 'var(--color-emerald)' }}
                               >
                                 {t('manage') || 'Manage'}
                               </Link>
@@ -1636,7 +1587,7 @@ export default function SavedRecipesPage() {
 
                             <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
                               {books.length === 0 ? (
-                                <div className="text-xs px-2.5 py-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
+                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
                               ) : (
                                 books.map((b) => {
                                   const isAssigned = (selectedRecipe.bookId || selectedRecipe.book_id) === b.id;
@@ -1650,15 +1601,15 @@ export default function SavedRecipesPage() {
                                       }}
                                       className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
                                       style={isAssigned ? {
-                                        backgroundColor: 'rgba(224, 86, 56, 0.15)',
-                                        color: 'var(--color-primary, #E05638)',
-                                        border: '1px solid var(--color-primary, #E05638)'
+                                        backgroundColor: 'var(--color-inner-dark)',
+                                        color: 'var(--color-primary)',
+                                        border: '1px solid var(--color-primary)'
                                       } : {
-                                        color: isDayMode ? '#0f172a' : '#cbd5e1'
+                                        color: 'var(--color-text)'
                                       }}
                                     >
                                       <span className="truncate flex-1 pr-2">{b.title}</span>
-                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary, #E05638)' }}/>}
+                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }}/>}
                                     </button>
                                   );
                                 })
@@ -1669,65 +1620,63 @@ export default function SavedRecipesPage() {
                       )}
                     </div>
 
-                    {/* 2. ADD TO PLAN BUTTON */}
                     <button
                       type="button"
                       onClick={openAddToPlanModal}
                       className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
                       style={{
-                        borderColor: 'var(--color-primary, #E05638)',
-                        color: 'var(--color-primary, #E05638)'
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
                       }}
                     >
-                      <CalendarPlus className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }}/> {t('addToPlan') || 'Add to Plan'}
+                      <CalendarPlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('addToPlan') || 'Add to Plan'}
                     </button>
 
-                    {/* 3. SHOPPING LIST BUTTON */}
                     <button
                       type="button"
                       onClick={handleOpenShoppingModal}
                       className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
                       style={{
-                        borderColor: 'var(--color-primary, #E05638)',
-                        color: 'var(--color-primary, #E05638)'
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
                       }}
                     >
-                      <ShoppingCart className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }}/> {t('shoppingList') || 'Shopping List'}
+                      <ShoppingCart className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('shoppingList') || 'Shopping List'}
                     </button>
                   </div>
 
-                  <div className="border-t mx-5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }} />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
                   {/* Servings Stepper */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <span 
                         className="text-xs font-bold flex items-center gap-1.5"
-                        style={{ color: 'var(--color-primary, #E05638)' }}
+                        style={{ color: 'var(--color-primary)' }}
                       >
                         <Users className="h-4 w-4"/> {t('servingsLabel') || 'Servings'}
                       </span>
                       <div 
                         className="flex items-center border rounded-lg overflow-hidden"
                         style={{
-                          backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
                         }}
                       >
                         <button
                           onClick={() => setServingsMultiplier(Math.max(1, servingsMultiplier - 1))}
                           className="px-2.5 py-1 font-bold cursor-pointer transition"
-                          style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                          style={{ color: 'var(--color-text-secondary)' }}
                         >
                           -
                         </button>
-                        <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                        <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center" style={{ color: 'var(--color-text)' }}>
                           {currentTotalServings}
                         </span>
                         <button
                           onClick={() => setServingsMultiplier(servingsMultiplier + 1)}
                           className="px-2.5 py-1 font-bold cursor-pointer transition"
-                          style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                          style={{ color: 'var(--color-text-secondary)' }}
                         >
                           +
                         </button>
@@ -1739,8 +1688,8 @@ export default function SavedRecipesPage() {
                         onClick={() => alert(t('timerSetAlert') || 'Kitchen Timer set for 15 minutes!')}
                         className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                         style={{
-                          borderColor: 'var(--color-primary, #E05638)',
-                          color: 'var(--color-primary, #E05638)'
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
                         }}
                       >
                         <Timer className="h-3.5 w-3.5"/> {t('timerBtn') || 'Timer'}
@@ -1749,8 +1698,8 @@ export default function SavedRecipesPage() {
                         onClick={handleOpenEdit}
                         className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                         style={{
-                          borderColor: 'var(--color-primary, #E05638)',
-                          color: 'var(--color-primary, #E05638)'
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
                         }}
                       >
                         <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
@@ -1762,8 +1711,8 @@ export default function SavedRecipesPage() {
                         }}
                         className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                         style={{
-                          borderColor: 'var(--color-primary, #E05638)',
-                          color: 'var(--color-primary, #E05638)'
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
                         }}
                       >
                         <Share2 className="h-3.5 w-3.5"/> {t('shareRecipeBtn') || 'Share Recipe'}
@@ -1772,11 +1721,11 @@ export default function SavedRecipesPage() {
                   </div>
 
                   {/* Description */}
-                  <div className="px-5 text-xs leading-relaxed" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>
+                  <div className="px-5 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
                     {selectedRecipe.description}
                   </div>
 
-                  <div className="border-t mx-5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }} />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
                   {/* Cooked Status / Star Rating / Note */}
                   <div className="px-5 space-y-3">
@@ -1785,7 +1734,7 @@ export default function SavedRecipesPage() {
                         type="button"
                         onClick={() => updateSelectedRecipeState('isCooked', !selectedRecipe.isCooked)}
                         className="flex items-center gap-2.5 text-base font-extrabold group cursor-pointer select-none transition"
-                        style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                        style={{ color: 'var(--color-text)' }}
                       >
                         <span className="font-extrabold tracking-tight">
                           {selectedRecipe.isCooked ? (t('cooked') || 'Cooked') : (t('markAsCooked') || 'Mark as Cooked')}
@@ -1794,10 +1743,10 @@ export default function SavedRecipesPage() {
                         <span 
                           className="w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm"
                           style={selectedRecipe.isCooked ? {
-                            backgroundColor: 'var(--color-emerald, #10b981)',
+                            backgroundColor: 'var(--color-emerald)',
                             color: '#ffffff'
                           } : {
-                            border: isDayMode ? '1px solid #cbd5e1' : '1px solid var(--color-border, #1e293b)',
+                            border: '1px solid var(--color-border)',
                             backgroundColor: 'transparent'
                           }}
                         >
@@ -1812,8 +1761,8 @@ export default function SavedRecipesPage() {
                             onClick={() => updateSelectedRecipeState('rating', star)}
                             className="h-5 w-5 cursor-pointer transition"
                             style={{
-                              color: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#334155'),
-                              fill: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary, #E05638)' : 'transparent'
+                              color: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'var(--color-border)',
+                              fill: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'transparent'
                             }}
                           />
                         ))}
@@ -1825,7 +1774,7 @@ export default function SavedRecipesPage() {
                         type="button"
                         onClick={() => setIsNoteOpen(!isNoteOpen)}
                         className="flex items-center gap-1.5 text-xs font-medium transition cursor-pointer"
-                        style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                        style={{ color: 'var(--color-text-secondary)' }}
                       >
                         <Edit3 className="h-3.5 w-3.5"/>
                         <span className="italic">{t('addANote') || 'Add a note'}</span>
@@ -1840,12 +1789,12 @@ export default function SavedRecipesPage() {
                             onChange={(e) => setNoteText(e.target.value)}
                             className="flex-1 border rounded-xl px-3 py-2 text-xs outline-none"
                             style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              color: isDayMode ? '#0f172a' : '#ffffff'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
                             }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                           />
                           <button
                             type="button"
@@ -1854,7 +1803,7 @@ export default function SavedRecipesPage() {
                               setIsNoteOpen(false);
                             }}
                             className="text-white font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer shadow-sm"
-                            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                            style={{ backgroundColor: 'var(--color-primary)' }}
                           >
                             {t('save') || 'Save'}
                           </button>
@@ -1863,7 +1812,7 @@ export default function SavedRecipesPage() {
                       {selectedRecipe.note && !isNoteOpen && (
                         <p 
                           className="text-xs italic"
-                          style={{ color: 'var(--color-emerald, #10b981)' }}
+                          style={{ color: 'var(--color-emerald)' }}
                         >
                           Note: "{selectedRecipe.note}"
                         </p>
@@ -1871,11 +1820,11 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
-                  <div className="border-t mx-5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }} />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
                   {/* SOURCE SECTION */}
                   <div className="px-5 space-y-1 text-xs">
-                    <h3 className="text-xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('source') || 'Source'}</h3>
+                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('source') || 'Source'}</h3>
                     <div className="pt-0.5">
                       {selectedRecipe.sourceUrl ? (
                         <a
@@ -1883,7 +1832,7 @@ export default function SavedRecipesPage() {
                           target="_blank"
                           rel="noreferrer"
                           className="font-bold text-sm hover:underline inline-flex items-center gap-1"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
+                          style={{ color: 'var(--color-primary)' }}
                         >
                           <span className="underline">
                             {(t('visitSource') || 'Visit {domain}').replace('{domain}', getSafeHostname(selectedRecipe.sourceUrl))}
@@ -1891,42 +1840,42 @@ export default function SavedRecipesPage() {
                           <ExternalLink className="h-3.5 w-3.5" />
                         </a>
                       ) : (
-                        <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('createdManually') || 'Created manually'}</span>
+                        <span style={{ color: 'var(--color-text-secondary)' }}>{t('createdManually') || 'Created manually'}</span>
                       )}
                     </div>
                   </div>
 
-                  <div className="border-t mx-5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }} />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
                   {/* INGREDIENTS SECTION */}
                   <div className="px-5 space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('ingredientsHeading') || 'Ingredients'}</h3>
+                      <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('ingredientsHeading') || 'Ingredients'}</h3>
                       
                       <div 
                         className="flex items-center border rounded-lg overflow-hidden text-xs"
                         style={{
-                          backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
                         }}
                       >
-                        <div className="px-2.5 py-1 border-r flex items-center justify-center" style={{ borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)' }}>
-                          <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }}/>
+                        <div className="px-2.5 py-1 border-r flex items-center justify-center" style={{ borderColor: 'var(--color-border)' }}>
+                          <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
                         </div>
                         <button
                           onClick={() => setFontSizeScale(Math.max(60, fontSizeScale - 10))}
                           className="px-2.5 py-1 font-bold cursor-pointer"
-                          style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                          style={{ color: 'var(--color-text-secondary)' }}
                         >
                           -
                         </button>
-                        <span className="px-2.5 py-1 font-bold min-w-[42px] text-center" style={{ color: isDayMode ? '#0f172a' : '#e2e8f0' }}>
+                        <span className="px-2.5 py-1 font-bold min-w-[42px] text-center" style={{ color: 'var(--color-text)' }}>
                           {fontSizeScale}%
                         </span>
                         <button
                           onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
                           className="px-2.5 py-1 font-bold cursor-pointer"
-                          style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                          style={{ color: 'var(--color-text-secondary)' }}
                         >
                           +
                         </button>
@@ -1943,11 +1892,11 @@ export default function SavedRecipesPage() {
                           <div key={idx} className="flex items-start gap-2.5 leading-snug">
                             <span 
                               className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5"
-                              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                              style={{ backgroundColor: 'var(--color-primary)' }}
                             />
-                            <span style={{ color: isDayMode ? '#334155' : '#e2e8f0' }}>
+                            <span style={{ color: 'var(--color-text)' }}>
                               {(scaledAmt !== '' || unit) && (
-                                <strong className="font-semibold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                                <strong className="font-semibold" style={{ color: 'var(--color-text)' }}>
                                   {scaledAmt} {unit && unit !== 'Unit' ? unit : ''}{' '}
                                 </strong>
                               )}
@@ -1959,11 +1908,11 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
-                  <div className="border-t mx-5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }} />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
                   {/* INSTRUCTIONS SECTION */}
                   <div className="px-5 space-y-4">
-                    <h3 className="text-xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('instructionsHeading') || 'Instructions'}</h3>
+                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('instructionsHeading') || 'Instructions'}</h3>
                     
                     <div className="space-y-3.5" style={{ fontSize: `${fontSizeScale}%` }}>
                       {Array.isArray(selectedRecipe.instructions) && selectedRecipe.instructions.map((step: string, idx: number) => {
@@ -1982,18 +1931,18 @@ export default function SavedRecipesPage() {
                               isDone ? 'opacity-50' : ''
                             }`}
                             style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
                             }}
                           >
                             <div 
                               className="w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition"
                               style={isDone ? {
-                                backgroundColor: 'var(--color-primary, #E05638)',
-                                borderColor: 'var(--color-primary, #E05638)',
+                                backgroundColor: 'var(--color-primary)',
+                                borderColor: 'var(--color-primary)',
                                 color: '#ffffff'
                               } : {
-                                borderColor: 'var(--color-primary, #E05638)',
+                                borderColor: 'var(--color-primary)',
                                 backgroundColor: 'transparent'
                               }}
                             >
@@ -2002,14 +1951,14 @@ export default function SavedRecipesPage() {
 
                             <span 
                               className="font-extrabold shrink-0 text-sm"
-                              style={{ color: 'var(--color-primary, #E05638)' }}
+                              style={{ color: 'var(--color-primary)' }}
                             >
                               {idx + 1}.
                             </span>
 
                             <span 
                               className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-50' : ''}`}
-                              style={{ color: isDayMode ? '#1e293b' : '#e2e8f0' }}
+                              style={{ color: 'var(--color-text)' }}
                             >
                               {step}
                             </span>
@@ -2019,21 +1968,17 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
-                  <div className="border-t mx-5" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }} />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
                   {/* Delete Option */}
                   <div className="px-5 flex items-center justify-end text-xs">
                     <button
                       onClick={() => handleDeleteRecipe(selectedRecipe.id)}
                       className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
-                      style={isDayMode ? {
-                        backgroundColor: '#fef2f2',
-                        borderColor: '#fca5a5',
-                        color: '#dc2626'
-                      } : {
-                        backgroundColor: 'rgba(127, 29, 29, 0.4)',
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'rgba(239, 68, 68, 0.4)',
-                        color: '#f87171'
+                        color: '#ef4444'
                       }}
                     >
                       <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
@@ -2043,14 +1988,14 @@ export default function SavedRecipesPage() {
               ) : (
                 /* EDIT RECIPE VIEW */
                 <div className="p-6 space-y-6">
-                  <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-                    <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }}/> {t('editRecipeTitle') || 'Edit Recipe'}
+                  <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                    <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipeTitle') || 'Edit Recipe'}
                     </h3>
                     <button
                       onClick={() => setIsEditing(false)}
                       className="p-1 rounded-lg transition cursor-pointer"
-                      style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       <X className="h-5 w-5"/>
                     </button>
@@ -2059,8 +2004,8 @@ export default function SavedRecipesPage() {
                   <div 
                     className="flex p-1.5 rounded-2xl border"
                     style={{
-                      backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)'
                     }}
                   >
                     {[
@@ -2074,12 +2019,12 @@ export default function SavedRecipesPage() {
                         onClick={() => setEditTab(tab.id as any)}
                         className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer"
                         style={editTab === tab.id ? {
-                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                          color: isDayMode ? '#0f172a' : '#ffffff',
-                          border: isDayMode ? '1px solid #cbd5e1' : '1px solid var(--color-border, #1e293b)',
+                          backgroundColor: 'var(--color-card)',
+                          color: 'var(--color-text)',
+                          border: '1px solid var(--color-border)',
                           boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
                         } : {
-                          color: isDayMode ? '#64748b' : '#94a3b8'
+                          color: 'var(--color-text-secondary)'
                         }}
                       >
                         {tab.label}
@@ -2093,15 +2038,15 @@ export default function SavedRecipesPage() {
                       <div className="space-y-1.5">
                         <label 
                           className="block font-bold uppercase tracking-wider text-[11px]"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
+                          style={{ color: 'var(--color-primary)' }}
                         >
                           {t('photoLabel') || 'Photo'}
                         </label>
                         <label 
                           className="border-2 border-dashed rounded-2xl h-44 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group"
                           style={{
-                            backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
                           }}
                         >
                           {editForm.imageUrl ? (
@@ -2115,11 +2060,11 @@ export default function SavedRecipesPage() {
                                 <span 
                                   className="border text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5"
                                   style={{
-                                    backgroundColor: 'rgba(17, 23, 38, 0.9)',
-                                    borderColor: 'var(--color-border, #1e293b)'
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)'
                                   }}
                                 >
-                                  <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }}/> {t('changePhoto') || 'Change Photo'}
+                                  <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('changePhoto') || 'Change Photo'}
                                 </span>
                                 <button
                                   type="button"
@@ -2136,8 +2081,8 @@ export default function SavedRecipesPage() {
                             </>
                           ) : (
                             <div className="text-center space-y-2">
-                              <ImagePlus className="h-8 w-8 mx-auto transition" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}/>
-                              <span className="text-xs font-bold block" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('addAPhoto') || 'Add a photo'}</span>
+                              <ImagePlus className="h-8 w-8 mx-auto transition" style={{ color: 'var(--color-text-secondary)' }}/>
+                              <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{t('addAPhoto') || 'Add a photo'}</span>
                             </div>
                           )}
                           <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
@@ -2147,7 +2092,7 @@ export default function SavedRecipesPage() {
                       <div>
                         <label 
                           className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
+                          style={{ color: 'var(--color-primary)' }}
                         >
                           {t('recipeTitle') || 'Recipe Title'}
                         </label>
@@ -2158,19 +2103,19 @@ export default function SavedRecipesPage() {
                           onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
                           className="w-full border rounded-xl p-3 text-sm outline-none"
                           style={{
-                            backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#0f172a' : '#ffffff'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
-                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                          onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                         />
                       </div>
 
                       <div>
                         <label 
                           className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
+                          style={{ color: 'var(--color-primary)' }}
                         >
                           {t('description') || 'Description'}
                         </label>
@@ -2180,12 +2125,12 @@ export default function SavedRecipesPage() {
                           onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                           className="w-full border rounded-xl p-3 text-xs outline-none resize-y leading-relaxed"
                           style={{
-                            backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#0f172a' : '#ffffff'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
-                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                          onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                         />
                       </div>
 
@@ -2193,7 +2138,7 @@ export default function SavedRecipesPage() {
                         <div>
                           <label 
                             className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary, #E05638)' }}
+                            style={{ color: 'var(--color-primary)' }}
                           >
                             {t('recipeTypeLabel') || 'Recipe Type'}
                           </label>
@@ -2202,13 +2147,13 @@ export default function SavedRecipesPage() {
                             onChange={(e) => setEditForm({ ...editForm, recipeType: e.target.value })}
                             className="w-full border rounded-xl p-3 text-xs outline-none cursor-pointer"
                             style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              color: isDayMode ? '#0f172a' : '#ffffff'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
                             }}
                           >
                             {RECIPE_TYPES.filter(t => t !== 'All Types').map((t) => (
-                              <option key={t} value={t} style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t}</option>
+                              <option key={t} value={t} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t}</option>
                             ))}
                           </select>
                         </div>
@@ -2216,7 +2161,7 @@ export default function SavedRecipesPage() {
                         <div>
                           <label 
                             className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary, #E05638)' }}
+                            style={{ color: 'var(--color-primary)' }}
                           >
                             {t('servingsLabel') || 'Servings'}
                           </label>
@@ -2226,24 +2171,24 @@ export default function SavedRecipesPage() {
                             onChange={(e) => setEditForm({ ...editForm, servings: parseInt(e.target.value) || 1 })}
                             className="w-full border rounded-xl p-3 text-xs outline-none"
                             style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              color: isDayMode ? '#0f172a' : '#ffffff'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
                             }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                           />
                         </div>
                       </div>
 
-                      <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                      <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: 'var(--color-border)' }}>
                         <button
                           type="button"
                           onClick={() => setIsEditing(false)}
                           className="px-5 py-2.5 rounded-xl font-bold transition text-xs cursor-pointer"
                           style={{
-                            backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                            color: isDayMode ? '#475569' : '#cbd5e1'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: 'var(--color-text-secondary)'
                           }}
                         >
                           {t('cancel') || 'Cancel'}
@@ -2252,9 +2197,9 @@ export default function SavedRecipesPage() {
                           type="submit"
                           onClick={handleSaveEdit}
                           className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer"
-                          style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                         >
                           <Save className="h-4 w-4"/> {t('saveChanges') || 'Save Changes'}
                         </button>
@@ -2267,14 +2212,14 @@ export default function SavedRecipesPage() {
                     <div 
                       className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                        borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)'
                       }}
                     >
                       <div className="flex justify-between items-center">
                         <h2 
                           className="text-sm font-bold uppercase tracking-wider"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
+                          style={{ color: 'var(--color-primary)' }}
                         >
                           {t('ingredientsHeading') || 'Ingredients'}
                         </h2>
@@ -2284,13 +2229,13 @@ export default function SavedRecipesPage() {
                             onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
                             className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
                             style={isReorderingIngredients ? {
-                              backgroundColor: 'var(--color-emerald, #10b981)',
+                              backgroundColor: 'var(--color-emerald)',
                               color: '#ffffff',
-                              borderColor: 'var(--color-emerald, #10b981)'
+                              borderColor: 'var(--color-emerald)'
                             } : {
-                              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                              color: isDayMode ? '#0f172a' : '#cbd5e1',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                              backgroundColor: 'var(--color-card)',
+                              color: 'var(--color-text)',
+                              borderColor: 'var(--color-border)'
                             }}
                           >
                             {isReorderingIngredients ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
@@ -2302,9 +2247,9 @@ export default function SavedRecipesPage() {
                               ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Produce' }]
                             })}
                             className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
-                            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                           >
                             <Plus className="h-3.5 w-3.5"/> {t('addIngredient') || 'Add Ingredient'}
                           </button>
@@ -2323,8 +2268,8 @@ export default function SavedRecipesPage() {
                               isReorderingIngredients ? 'cursor-grab' : ''
                             }`}
                             style={{
-                              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                              borderColor: isReorderingIngredients ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-border)'
                             }}
                           >
                             <input
@@ -2338,9 +2283,9 @@ export default function SavedRecipesPage() {
                               }}
                               className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
                               style={{
-                                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #090d16)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#0f172a' : '#ffffff'
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text)'
                               }}
                             />
                             <input
@@ -2354,9 +2299,9 @@ export default function SavedRecipesPage() {
                               }}
                               className="w-20 border rounded-lg p-2 text-center outline-none"
                               style={{
-                                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #090d16)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)'
                               }}
                             />
                             <input
@@ -2369,7 +2314,7 @@ export default function SavedRecipesPage() {
                                 setEditForm({ ...editForm, ingredients: list });
                               }}
                               className="flex-1 bg-transparent border-none outline-none px-2"
-                              style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                              style={{ color: 'var(--color-text)' }}
                             />
                             <select
                               value={ing.category}
@@ -2380,18 +2325,18 @@ export default function SavedRecipesPage() {
                               }}
                               className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
                               style={{
-                                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #090d16)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)'
                               }}
                             >
                               {categories.map((cat) => (
-                                <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{cat}</option>
+                                <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
                               ))}
                             </select>
 
                             {isReorderingIngredients ? (
-                              <div className="p-2 cursor-grab" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                              <div className="p-2 cursor-grab" style={{ color: 'var(--color-emerald)' }}>
                                 <GripVertical className="h-4 w-4"/>
                               </div>
                             ) : (
@@ -2416,8 +2361,8 @@ export default function SavedRecipesPage() {
                           onClick={() => setEditTab('info')}
                           className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
                           style={{
-                            backgroundColor: isDayMode ? '#e2e8f0' : 'var(--color-card, #111726)',
-                            color: isDayMode ? '#0f172a' : '#cbd5e1'
+                            backgroundColor: 'var(--color-card)',
+                            color: 'var(--color-text)'
                           }}
                         >
                           {t('backBtn') || '← Back'}
@@ -2426,9 +2371,9 @@ export default function SavedRecipesPage() {
                           type="button"
                           onClick={() => setEditTab('steps')}
                           className="text-white font-bold px-6 py-2 rounded-xl text-xs transition shadow-md cursor-pointer"
-                          style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                         >
                           {t('nextStepsBtn') || 'Next: Steps →'}
                         </button>
@@ -2441,14 +2386,14 @@ export default function SavedRecipesPage() {
                     <div 
                       className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                        borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)'
                       }}
                     >
                       <div className="flex justify-between items-center">
                         <h2 
                           className="text-sm font-bold uppercase tracking-wider"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
+                          style={{ color: 'var(--color-primary)' }}
                         >
                           {t('stepByStepInstructions') || 'Step-by-Step Instructions'}
                         </h2>
@@ -2458,13 +2403,13 @@ export default function SavedRecipesPage() {
                             onClick={() => setIsReorderingSteps(!isReorderingSteps)}
                             className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
                             style={isReorderingSteps ? {
-                              backgroundColor: 'var(--color-emerald, #10b981)',
+                              backgroundColor: 'var(--color-emerald)',
                               color: '#ffffff',
-                              borderColor: 'var(--color-emerald, #10b981)'
+                              borderColor: 'var(--color-emerald)'
                             } : {
-                              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                              color: isDayMode ? '#0f172a' : '#cbd5e1',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                              backgroundColor: 'var(--color-card)',
+                              color: 'var(--color-text-secondary)',
+                              borderColor: 'var(--color-border)'
                             }}
                           >
                             {isReorderingSteps ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
@@ -2476,9 +2421,9 @@ export default function SavedRecipesPage() {
                               instructions: [...editForm.instructions, '']
                             })}
                             className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
-                            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                           >
                             <Plus className="h-3.5 w-3.5"/> {t('addStep') || 'Add Step'}
                           </button>
@@ -2497,15 +2442,17 @@ export default function SavedRecipesPage() {
                               isReorderingSteps ? 'cursor-grab' : ''
                             }`}
                             style={{
-                              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                              borderColor: isReorderingSteps ? 'var(--color-emerald, #10b981)' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-border)'
                             }}
                           >
                             <span 
                               className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
                               style={{
-                                backgroundColor: 'rgba(224, 86, 56, 0.2)',
-                                color: 'var(--color-primary, #E05638)'
+                                backgroundColor: 'var(--color-inner-dark)',
+                                color: 'var(--color-primary)',
+                                borderColor: 'var(--color-primary)',
+                                borderWidth: '1px'
                               }}
                             >
                               {idx + 1}
@@ -2520,11 +2467,11 @@ export default function SavedRecipesPage() {
                                 setEditForm({ ...editForm, instructions: list });
                               }}
                               className="flex-1 bg-transparent border-none outline-none resize-y"
-                              style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                              style={{ color: 'var(--color-text)' }}
                             />
 
                             {isReorderingSteps ? (
-                              <div className="p-2 cursor-grab mt-1" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                              <div className="p-2 cursor-grab mt-1" style={{ color: 'var(--color-emerald)' }}>
                                 <GripVertical className="h-4 w-4"/>
                               </div>
                             ) : (
@@ -2549,8 +2496,8 @@ export default function SavedRecipesPage() {
                           onClick={() => setEditTab('ingredients')}
                           className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
                           style={{
-                            backgroundColor: isDayMode ? '#e2e8f0' : 'var(--color-card, #111726)',
-                            color: isDayMode ? '#0f172a' : '#cbd5e1'
+                            backgroundColor: 'var(--color-card)',
+                            color: 'var(--color-text)'
                           }}
                         >
                           {t('backBtn') || '← Back'}
@@ -2559,9 +2506,9 @@ export default function SavedRecipesPage() {
                           type="submit"
                           onClick={handleSaveEdit}
                           className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer"
-                          style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                         >
                           <Save className="h-4 w-4"/> {t('saveChanges') || 'Save Changes'}
                         </button>
@@ -2585,17 +2532,17 @@ export default function SavedRecipesPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0f1115)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => setShowAddToPlanModal(false)} 
               className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #1e2430)',
-                color: isDayMode ? '#0f172a' : '#ffffff'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4"/>
@@ -2604,11 +2551,11 @@ export default function SavedRecipesPage() {
             <div className="pr-6 space-y-1">
               <h2 
                 className="text-xl font-black tracking-tight"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 {t('addToCalendar') || 'Add to Calendar'}
               </h2>
-              <p className="text-xs leading-snug" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <p className="text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
                 {(t('scheduleRecipeInMealPlan') || 'Schedule {title} in your meal plan').replace('{title}', selectedRecipe.title || selectedRecipe.name)}
               </p>
             </div>
@@ -2617,12 +2564,12 @@ export default function SavedRecipesPage() {
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('date') || 'Date'}
                 </label>
                 <div className="relative flex items-center">
-                  <Calendar className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-primary, #E05638)' }}/>
+                  <Calendar className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
                   <input
                     type="date"
                     required
@@ -2630,12 +2577,12 @@ export default function SavedRecipesPage() {
                     onChange={(e) => setPlanDate(e.target.value)}
                     className="w-full border rounded-xl pl-10 pr-3 py-2.5 text-xs font-semibold outline-none cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: 'var(--color-primary, #E05638)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
@@ -2643,7 +2590,7 @@ export default function SavedRecipesPage() {
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('mealType') || 'Meal Type'}
                 </label>
@@ -2653,52 +2600,52 @@ export default function SavedRecipesPage() {
                     onChange={(e) => setPlanMealType(e.target.value)}
                     className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none cursor-pointer appearance-none"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#e2e8f0'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   >
-                    <option value="Breakfast" style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('breakfast') || 'Breakfast'}</option>
-                    <option value="Lunch" style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('lunch') || 'Lunch'}</option>
-                    <option value="Dinner" style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('dinner') || 'Dinner'}</option>
-                    <option value="Snack" style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('snack') || 'Snack'}</option>
+                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast') || 'Breakfast'}</option>
+                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch') || 'Lunch'}</option>
+                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner') || 'Dinner'}</option>
+                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack') || 'Snack'}</option>
                   </select>
-                  <ChevronDown className="h-4 w-4 absolute right-3 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}/>
+                  <ChevronDown className="h-4 w-4 absolute right-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
                 </div>
               </div>
 
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('time') || 'Time'}
                 </label>
                 <div className="relative flex items-center">
-                  <Clock className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}/>
+                  <Clock className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
                   <input
                     type="time"
                     value={planTime}
                     onChange={(e) => setPlanTime(e.target.value)}
                     className="w-full border rounded-xl px-10 py-2.5 text-xs outline-none"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#e2e8f0'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
-                  <Clock className="h-4 w-4 absolute right-3.5 pointer-events-none" style={{ color: 'var(--color-primary, #E05638)' }}/>
+                  <Clock className="h-4 w-4 absolute right-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
                 </div>
               </div>
 
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('notes') || 'Notes'}
                 </label>
@@ -2709,12 +2656,12 @@ export default function SavedRecipesPage() {
                   rows={3}
                   className="w-full border rounded-xl p-3 text-xs outline-none resize-none"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#e2e8f0'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
 
@@ -2724,9 +2671,9 @@ export default function SavedRecipesPage() {
                   onClick={() => setShowAddToPlanModal(false)}
                   className="px-5 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
                   style={{
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: 'var(--color-primary, #E05638)',
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #07090e)'
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)',
+                    backgroundColor: 'var(--color-inner-dark)'
                   }}
                 >
                   {t('cancel') || 'Cancel'}
@@ -2734,9 +2681,9 @@ export default function SavedRecipesPage() {
                 <button
                   type="submit"
                   className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
                   {t('addToCalendarBtn') || 'Add to Calendar'}
                 </button>
@@ -2756,22 +2703,22 @@ export default function SavedRecipesPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0c111d)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
               <div>
-                <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }}/> {t('addToShoppingListTitle') || 'Add to Shopping List'}
+                <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('addToShoppingListTitle') || 'Add to Shopping List'}
                 </h3>
-                <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('selectOrEditItemsShopping') || 'Select or edit items to add directly to your list'}</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('selectOrEditItemsShopping') || 'Select or edit items to add directly to your list'}</p>
               </div>
               <button 
                 onClick={() => setIsShoppingModalOpen(false)} 
                 className="cursor-pointer transition"
-                style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                style={{ color: 'var(--color-text-secondary)' }}
               >
                 <X className="h-5 w-5"/>
               </button>
@@ -2783,8 +2730,8 @@ export default function SavedRecipesPage() {
                   key={ing.id} 
                   className="flex items-center gap-2 p-2.5 rounded-xl border"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   <div
@@ -2795,12 +2742,12 @@ export default function SavedRecipesPage() {
                     }}
                     className="w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition shrink-0"
                     style={ing.selected ? {
-                      backgroundColor: 'var(--color-primary, #E05638)',
-                      borderColor: 'var(--color-primary, #E05638)',
+                      backgroundColor: 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)',
                       color: '#ffffff'
                     } : {
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)'
+                      borderColor: 'var(--color-border)',
+                      backgroundColor: 'var(--color-card)'
                     }}
                   >
                     {ing.selected && <CheckSquare className="h-3.5 w-3.5"/>}
@@ -2816,9 +2763,9 @@ export default function SavedRecipesPage() {
                     }}
                     className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
                     style={{
-                      backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                     placeholder={t('amt') || 'Amt'}
                   />
@@ -2832,9 +2779,9 @@ export default function SavedRecipesPage() {
                     }}
                     className="w-20 border rounded-lg p-2 text-center outline-none"
                     style={{
-                      backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#cbd5e1'
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
                     }}
                     placeholder={t('unit') || 'Unit'}
                   />
@@ -2847,7 +2794,7 @@ export default function SavedRecipesPage() {
                       setShoppingModalIngredients(updated);
                     }}
                     className="flex-1 bg-transparent border-none outline-none px-2"
-                    style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}
+                    style={{ color: 'var(--color-text)' }}
                     placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
                   />
                   <select
@@ -2859,27 +2806,27 @@ export default function SavedRecipesPage() {
                     }}
                     className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#cbd5e1'
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
                     }}
                   >
                     {categories.map((cat) => (
-                      <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#111726', color: isDayMode ? '#0f172a' : '#ffffff' }}>{cat}</option>
+                      <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
                     ))}
                   </select>
                 </div>
               ))}
             </div>
 
-            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
                 onClick={() => setIsShoppingModalOpen(false)}
                 className="px-4 py-2 rounded-xl font-bold text-xs cursor-pointer"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                  color: isDayMode ? '#475569' : '#cbd5e1'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  color: 'var(--color-text-secondary)'
                 }}
               >
                 {t('cancel') || 'Cancel'}
@@ -2888,9 +2835,9 @@ export default function SavedRecipesPage() {
                 type="button"
                 onClick={handleConfirmAddToShoppingList}
                 className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                style={{ backgroundColor: 'var(--color-primary)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
               >
                 <ShoppingCart className="h-3.5 w-3.5"/> {t('addSelectedToList') || 'Add Selected to List'}
               </button>

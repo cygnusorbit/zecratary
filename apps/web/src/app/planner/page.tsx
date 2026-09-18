@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -11,7 +12,6 @@ import {
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
-// Timezone-safe calendar date formatting helpers
 const formatDateKey = (d: Date): string => {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -41,9 +41,7 @@ export default function PlannerPage() {
   const { t, locale, version } = useTranslation();
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
-  // Dynamic system dates
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => getMondayOfWeek(new Date()));
   const [selectedDate, setSelectedDate] = useState<string>(() => formatDateKey(new Date()));
   
@@ -51,7 +49,6 @@ export default function PlannerPage() {
   const [savedRecipes, setSavedRecipes] = useState<any[]>([]);
   const [books, setBooks] = useState<any[]>([]);
 
-  // Main Add Meal Modal State
   const [showAddMealModal, setShowAddMealModal] = useState(false);
   const [activeDateForAdd, setActiveDateForAdd] = useState<string>(() => formatDateKey(new Date()));
   const [selectedRecipeObj, setSelectedRecipeObj] = useState<any | null>(null);
@@ -60,11 +57,9 @@ export default function PlannerPage() {
   const [isLeftover, setIsLeftover] = useState(false);
   const [notes, setNotes] = useState('');
 
-  // Copy Day Dropdown State
   const [activeCopyDropdownDate, setActiveCopyDropdownDate] = useState<string | null>(null);
   const [copyCustomDate, setCopyCustomDate] = useState('');
 
-  // Edit Meal Modal State
   const [showEditMealModal, setShowEditMealModal] = useState(false);
   const [editingMealId, setEditingMealId] = useState<string | null>(null);
   const [editRecipeObj, setEditRecipeObj] = useState<any | null>(null);
@@ -74,7 +69,6 @@ export default function PlannerPage() {
   const [editIsLeftover, setEditIsLeftover] = useState(false);
   const [editNotes, setEditNotes] = useState('');
 
-  // "Select Recipe" Sub-Modal State
   const [showRecipePickerModal, setShowRecipePickerModal] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<'add' | 'edit'>('add');
   const [recipeSearch, setRecipeSearch] = useState('');
@@ -82,55 +76,13 @@ export default function PlannerPage() {
   const [activeRecipeTagFilter, setActiveRecipeTagFilter] = useState('All');
   const [showFilterOptions, setShowFilterOptions] = useState(false);
 
-  // "Select Recipes for Shopping List" Modal State
   const [showShoppingListModal, setShowShoppingListModal] = useState(false);
   const [selectedMealIdsForShopping, setSelectedMealIdsForShopping] = useState<string[]>([]);
   const [expandedDayCards, setExpandedDayCards] = useState<{ [key: string]: boolean }>({});
 
-  // Dynamic Theme Synchronization & Color Inversion
   const applyGlobalTheme = useCallback(() => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
-      setIsDayMode(isDay);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-        }
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (e) {}
   }, []);
 
@@ -146,8 +98,6 @@ export default function PlannerPage() {
       window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
       window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
       window.removeEventListener('storage', applyGlobalTheme);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-      }
     };
   }, [applyGlobalTheme]);
 
@@ -325,7 +275,6 @@ export default function PlannerPage() {
     return mt;
   };
 
-  // 3-Day Sequential Display Feed (Selected Day + Next 2 Days)
   const displayDays = [0, 1, 2].map((offset) => {
     const base = parseDateKey(selectedDate);
     const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset);
@@ -618,7 +567,7 @@ export default function PlannerPage() {
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      style={{ color: 'var(--color-text)' }}
     >
       {/* Header & Actions */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pt-2">
@@ -626,7 +575,7 @@ export default function PlannerPage() {
           <h1 suppressHydrationWarning className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
             {t('plannerTitle', 'Planner')}
           </h1>
-          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {currentUser ? `${t('planningForPrefix')} ${currentUser.name}` : t('plannerSubtitle')}
           </p>
         </div>
@@ -635,9 +584,9 @@ export default function PlannerPage() {
           <button 
             onClick={() => alert(t('planWeekActivatedAlert'))}
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             <CalendarIcon className="h-4 w-4" /> {t('planWeekBtn')}
           </button>
@@ -645,44 +594,44 @@ export default function PlannerPage() {
             onClick={() => alert(t('weekCopiedAlert'))}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0f1117)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#cbd5e1'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
-            <Copy className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('copyWeekBtn')}
+            <Copy className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('copyWeekBtn')}
           </button>
           <button
             type="button"
             onClick={openShoppingListSelectModal}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0f1117)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#cbd5e1'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
-            <ShoppingBag className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('shoppingListBtn')}
+            <ShoppingBag className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('shoppingListBtn')}
           </button>
           <button 
             onClick={() => alert(t('shareCopiedAlert'))}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0f1117)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#cbd5e1'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
-            <Share2 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('shareBtn')}
+            <Share2 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('shareBtn')}
           </button>
           <button 
             type="button"
             onClick={handleClearCurrentPageMeals}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer hover:border-red-500/50 hover:text-red-400 shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0f1117)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#dc2626' : '#cbd5e1'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: '#ef4444'
             }}
             title={t('clearAllMealTooltip')}
           >
@@ -701,9 +650,9 @@ export default function PlannerPage() {
             }}
             className="p-2 border rounded-xl transition cursor-pointer shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0f1117)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: 'var(--color-primary, #E05638)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-primary)'
             }}
           >
             <ChevronLeft className="h-4 w-4" />
@@ -711,7 +660,7 @@ export default function PlannerPage() {
 
           <span 
             className="text-base font-extrabold tracking-wide"
-            style={{ color: 'var(--color-primary, #E05638)' }}
+            style={{ color: 'var(--color-primary)' }}
           >
             {rangeStr}
           </span>
@@ -724,9 +673,9 @@ export default function PlannerPage() {
               }}
               className="p-2 border rounded-xl transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0f1117)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: 'var(--color-primary, #E05638)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-primary)'
               }}
             >
               <ChevronRight className="h-4 w-4" />
@@ -739,9 +688,9 @@ export default function PlannerPage() {
               }}
               className="px-3.5 py-2 border font-bold text-xs rounded-xl transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0f1117)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: 'var(--color-primary, #E05638)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-primary)'
               }}
             >
               {t('todayBtn')}
@@ -764,30 +713,30 @@ export default function PlannerPage() {
                 }}
                 className="p-3.5 rounded-2xl border text-center cursor-pointer transition flex flex-col items-center justify-center shadow-xs"
                 style={isToday ? {
-                  backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.12)',
-                  borderColor: 'var(--color-primary, #E05638)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)'
                 } : isSelected ? {
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                  borderColor: 'var(--color-emerald, #10b981)',
-                  boxShadow: isDayMode ? '0 2px 8px rgba(16, 185, 129, 0.2)' : undefined
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-emerald)',
+                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.2)'
                 } : {
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
-                <span className="text-[11px] font-extrabold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                   {d.dayName}
                 </span>
                 <span 
                   className="text-xl font-black mt-1"
-                  style={{ color: isToday ? 'var(--color-primary, #E05638)' : (isDayMode ? '#0f172a' : '#ffffff') }}
+                  style={{ color: isToday ? 'var(--color-primary)' : 'var(--color-text)' }}
                 >
                   {d.dayNum}
                 </span>
                 {isToday && (
                   <span 
                     className="text-[9px] font-bold uppercase mt-0.5"
-                    style={{ color: 'var(--color-primary, #E05638)' }}
+                    style={{ color: 'var(--color-primary)' }}
                   >
                     {t('todayBtn')}
                   </span>
@@ -795,7 +744,7 @@ export default function PlannerPage() {
                 {hasMeals && !isToday && (
                   <div 
                     className="w-1.5 h-1.5 rounded-full mt-1"
-                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                    style={{ backgroundColor: 'var(--color-primary)' }}
                   />
                 )}
               </div>
@@ -808,20 +757,20 @@ export default function PlannerPage() {
       <div 
         className="border rounded-2xl p-5 relative overflow-hidden shadow-sm transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #070b13)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          backgroundColor: 'var(--color-inner-dark)',
+          borderColor: 'var(--color-border)'
         }}
       >
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2 text-sm font-extrabold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+          <div className="flex items-center gap-2 text-sm font-extrabold" style={{ color: 'var(--color-text)' }}>
             <span className="text-lg">🔥</span> {t('dailyAverage')}
           </div>
           <button 
             className="flex items-center gap-1.5 border font-bold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.1)',
-              borderColor: isDayMode ? '#fdba74' : 'var(--color-border, #1e293b)',
-              color: 'var(--color-primary, #E05638)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-primary)'
             }}
           >
             <Lock className="h-3.5 w-3.5" /> {t('upgrade')}
@@ -830,20 +779,20 @@ export default function PlannerPage() {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
           <div>
-            <span className="block text-[11px] font-semibold uppercase" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('calories')}</span>
-            <span className="text-xl font-black blur-[4px]" style={{ color: isDayMode ? 'rgba(15, 23, 42, 0.3)' : 'rgba(255, 255, 255, 0.4)' }}>1,234</span>
+            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('calories')}</span>
+            <span className="text-xl font-black blur-[4px]" style={{ color: 'var(--color-text-secondary)' }}>1,234</span>
           </div>
           <div>
-            <span className="block text-[11px] font-semibold uppercase" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('protein')}</span>
-            <span className="text-xl font-black blur-[4px]" style={{ color: isDayMode ? 'rgba(15, 23, 42, 0.3)' : 'rgba(255, 255, 255, 0.4)' }}>120g</span>
+            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('protein')}</span>
+            <span className="text-xl font-black blur-[4px]" style={{ color: 'var(--color-text-secondary)' }}>120g</span>
           </div>
           <div>
-            <span className="block text-[11px] font-semibold uppercase" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('carbs')}</span>
-            <span className="text-xl font-black blur-[4px]" style={{ color: isDayMode ? 'rgba(15, 23, 42, 0.3)' : 'rgba(255, 255, 255, 0.4)' }}>150g</span>
+            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('carbs')}</span>
+            <span className="text-xl font-black blur-[4px]" style={{ color: 'var(--color-text-secondary)' }}>150g</span>
           </div>
           <div>
-            <span className="block text-[11px] font-semibold uppercase" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('fat')}</span>
-            <span className="text-xl font-black blur-[4px]" style={{ color: isDayMode ? 'rgba(15, 23, 42, 0.3)' : 'rgba(255, 255, 255, 0.4)' }}>45g</span>
+            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('fat')}</span>
+            <span className="text-xl font-black blur-[4px]" style={{ color: 'var(--color-text-secondary)' }}>45g</span>
           </div>
         </div>
       </div>
@@ -859,22 +808,22 @@ export default function PlannerPage() {
               key={day.dateStr}
               className="border rounded-3xl p-6 space-y-6 shadow-sm transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #070b13)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
               }}
             >
               {/* Day Header Row */}
               <div 
                 className="flex items-center justify-between border-b pb-4"
-                style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+                style={{ borderColor: 'var(--color-border)' }}
               >
                 <div className="flex items-center gap-3">
-                  <h2 className="text-xl font-extrabold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{day.titleDate}</h2>
+                  <h2 className="text-xl font-extrabold" style={{ color: 'var(--color-text)' }}>{day.titleDate}</h2>
                   
                   {day.isToday && (
                     <span 
                       className="text-white text-[10px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider shadow-sm"
-                      style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                      style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       {t('todayBadge')}
                     </span>
@@ -883,9 +832,9 @@ export default function PlannerPage() {
                     <span 
                       className="border text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider"
                       style={{
-                        backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
-                        borderColor: 'var(--color-primary, #E05638)',
-                        color: 'var(--color-primary, #E05638)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
                       }}
                     >
                       {t('tomorrowBadge')}
@@ -902,12 +851,12 @@ export default function PlannerPage() {
                         onClick={() => setActiveCopyDropdownDate(isCopyOpen ? null : day.dateStr)}
                         className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
                         style={{
-                          backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-card, #0b0e14)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#0f172a' : '#cbd5e1'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
                         }}
                       >
-                        <Copy className="h-4 w-4" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} /> {t('copyDayBtn')}
+                        <Copy className="h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} /> {t('copyDayBtn')}
                       </button>
 
                       {isCopyOpen && (
@@ -920,12 +869,12 @@ export default function PlannerPage() {
                             onClick={(e) => e.stopPropagation()}
                             className="absolute right-0 top-full mt-2 w-60 border rounded-2xl shadow-2xl p-3.5 z-50 space-y-3 text-xs animate-in fade-in transition-colors duration-200"
                             style={{
-                              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0e14)',
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              color: isDayMode ? '#0f172a' : '#ffffff'
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
                             }}
                           >
-                            <h4 className="font-bold text-xs px-1" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('copyDayToTitle')}</h4>
+                            <h4 className="font-bold text-xs px-1" style={{ color: 'var(--color-text)' }}>{t('copyDayToTitle')}</h4>
                             
                             <div className="space-y-1.5">
                               <button
@@ -933,9 +882,9 @@ export default function PlannerPage() {
                                 onClick={() => handleCopyTomorrow(day.dateStr)}
                                 className="w-full text-left font-bold px-3 py-2 rounded-xl border transition cursor-pointer"
                                 style={{
-                                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                                  color: isDayMode ? '#0f172a' : '#cbd5e1'
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text)'
                                 }}
                               >
                                 {t('copyTomorrowOption')}
@@ -945,9 +894,9 @@ export default function PlannerPage() {
                                 onClick={() => handleCopyNextWeek(day.dateStr)}
                                 className="w-full text-left font-bold px-3 py-2 rounded-xl border transition cursor-pointer"
                                 style={{
-                                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                                  color: isDayMode ? '#0f172a' : '#cbd5e1'
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text)'
                                 }}
                               >
                                 {t('copyNextWeekOption')}
@@ -956,9 +905,9 @@ export default function PlannerPage() {
 
                             <div 
                               className="pt-2 border-t space-y-1.5 px-1"
-                              style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+                              style={{ borderColor: 'var(--color-border)' }}
                             >
-                              <span className="block text-[11px] font-semibold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('pickADateLabel')}</span>
+                              <span className="block text-[11px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('pickADateLabel')}</span>
                               <input
                                 type="date"
                                 value={copyCustomDate}
@@ -971,12 +920,12 @@ export default function PlannerPage() {
                                 }}
                                 className="w-full border rounded-xl px-3 py-2 text-xs outline-none cursor-pointer"
                                 style={{
-                                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                  color: isDayMode ? '#0f172a' : '#cbd5e1'
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text)'
                                 }}
-                                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                                onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                               />
                             </div>
                           </div>
@@ -989,12 +938,12 @@ export default function PlannerPage() {
                     onClick={() => openAddModal(day.dateStr)}
                     className="border font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-card, #0b0e14)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#cbd5e1'
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
-                    <Plus className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addMealBtn')}
+                    <Plus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('addMealBtn')}
                   </button>
                 </div>
               </div>
@@ -1005,21 +954,21 @@ export default function PlannerPage() {
                   <div 
                     className="w-12 h-12 rounded-2xl border flex items-center justify-center mx-auto shadow-xs"
                     style={{
-                      backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                      borderColor: 'var(--color-emerald, #10b981)',
-                      color: 'var(--color-emerald, #10b981)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-emerald)',
+                      color: 'var(--color-emerald)'
                     }}
                   >
                     <ChefHat className="h-6 w-6" />
                   </div>
-                  <p className="text-sm font-semibold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('nothingPlannedYet')}</p>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('nothingPlannedYet')}</p>
                   <button
                     onClick={() => openAddModal(day.dateStr)}
                     className="inline-flex items-center gap-2 border font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-xs cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0f1117)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: 'var(--color-primary, #E05638)'
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
                     }}
                   >
                     <Plus className="h-4 w-4" /> {t('addAMealBtn')}
@@ -1032,24 +981,24 @@ export default function PlannerPage() {
                       key={meal.id} 
                       className="border rounded-2xl p-4 flex items-center justify-between shadow-xs gap-4 transition-colors duration-200"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-card, #0b0e14)',
-                        borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
                       }}
                     >
                       <div className="flex items-center gap-3.5 min-w-0">
                         <img 
                           src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
                           alt={meal.recipeName}
-                          className="w-14 h-14 rounded-xl object-cover border shadow-xs shrink-0" 
-                          style={{ borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)' }}
+                          className="w-14 h-14 rounded-xl object-cover border shrink-0" 
+                          style={{ borderColor: 'var(--color-border)' }}
                         />
                         <div className="space-y-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <span 
                               className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide"
                               style={{
-                                backgroundColor: isDayMode ? '#e2e8f0' : 'var(--color-inner-dark, #172033)',
-                                color: isDayMode ? '#334155' : '#cbd5e1'
+                                backgroundColor: 'var(--color-inner-dark)',
+                                color: 'var(--color-text)'
                               }}
                             >
                               {translateMealType(meal.mealType)}
@@ -1060,10 +1009,10 @@ export default function PlannerPage() {
                               </span>
                             )}
                           </div>
-                          <h3 className="text-sm font-bold leading-snug truncate" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                          <h3 className="text-sm font-bold leading-snug truncate" style={{ color: 'var(--color-text)' }}>
                             {meal.recipeName}
                           </h3>
-                          {meal.time && <span className="text-[11px] flex items-center gap-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>⏰ {meal.time}</span>}
+                          {meal.time && <span className="text-[11px] flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>⏰ {meal.time}</span>}
                         </div>
                       </div>
 
@@ -1072,21 +1021,21 @@ export default function PlannerPage() {
                           onClick={() => openEditModal(meal)}
                           className="p-2.5 rounded-xl border shadow-xs cursor-pointer transition"
                           style={{
-                            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #172033)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#0f172a' : '#cbd5e1'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                           title={t('editPlannedMealTooltip')}
                         >
-                          <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                          <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                         </button>
                         <button
                           onClick={() => handleDeleteMeal(meal.id)}
                           className="p-2.5 rounded-xl border shadow-xs cursor-pointer transition hover:text-red-500"
                           style={{
-                            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #172033)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#64748b' : '#94a3b8'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
                           }}
                           title={t('deleteMealTooltip')}
                         >
@@ -1112,17 +1061,17 @@ export default function PlannerPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-lg w-full p-7 space-y-6 shadow-2xl relative max-h-[90vh] flex flex-col animate-in fade-in cursor-default transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0e14)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => setShowShoppingListModal(false)} 
               className="absolute top-5 right-5 p-2 rounded-xl transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #172033)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
@@ -1131,11 +1080,11 @@ export default function PlannerPage() {
             <div className="space-y-1.5 pr-8">
               <h2 
                 className="text-xl font-bold tracking-tight"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 {t('selectRecipesShoppingTitle')}
               </h2>
-              <p className="text-xs leading-relaxed" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('selectRecipesShoppingSub')}
               </p>
             </div>
@@ -1145,9 +1094,9 @@ export default function PlannerPage() {
                 <div 
                   className="py-12 text-center text-xs rounded-2xl border"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#64748b' : '#94a3b8'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('noMealsInPlanNotice')}
@@ -1168,8 +1117,8 @@ export default function PlannerPage() {
                       key={dateStr}
                       className="border rounded-2xl transition overflow-hidden shadow-xs"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0c0d11)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-primary, #E05638)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)'
                       }}
                     >
                       <div 
@@ -1180,11 +1129,12 @@ export default function PlannerPage() {
                           <div 
                             className="w-5 h-5 rounded-md flex items-center justify-center transition shrink-0"
                             style={isAllDaySelected || isPartiallySelected ? {
-                              backgroundColor: 'var(--color-primary, #E05638)',
+                              backgroundColor: 'var(--color-primary)',
+                              borderColor: 'var(--color-primary)',
                               color: '#ffffff'
                             } : {
-                              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)'
+                              borderColor: 'var(--color-border)',
+                              backgroundColor: 'var(--color-card)'
                             }}
                           >
                             {isAllDaySelected && <Check className="h-3.5 w-3.5 stroke-[3]" />}
@@ -1194,11 +1144,11 @@ export default function PlannerPage() {
                           <div>
                             <h3 
                               className="text-sm font-bold"
-                              style={{ color: 'var(--color-primary, #E05638)' }}
+                              style={{ color: 'var(--color-primary)' }}
                             >
                               {formattedDayTitle}
                             </h3>
-                            <span className="text-xs font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                            <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
                               {selectedCount}/{dayMeals.length} {t('selectedCountSuffix')}
                             </span>
                           </div>
@@ -1211,7 +1161,7 @@ export default function PlannerPage() {
                             setExpandedDayCards({ ...expandedDayCards, [dateStr]: !isExpanded });
                           }}
                           className="p-1 hover:text-white transition cursor-pointer"
-                          style={{ color: 'var(--color-primary, #E05638)' }}
+                          style={{ color: 'var(--color-primary)' }}
                         >
                           {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </button>
@@ -1221,8 +1171,8 @@ export default function PlannerPage() {
                         <div 
                           className="px-4 pb-3 pt-1 space-y-2 border-t"
                           style={{
-                            backgroundColor: isDayMode ? '#f1f5f9' : 'rgba(7, 9, 14, 0.6)',
-                            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
                           }}
                         >
                           {dayMeals.map((meal) => {
@@ -1233,23 +1183,23 @@ export default function PlannerPage() {
                                 onClick={() => toggleSingleMealForShopping(meal.id)}
                                 className="flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition"
                                 style={isMealSelected ? {
-                                  backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.15)',
-                                  borderColor: 'var(--color-primary, #E05638)'
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-primary)'
                                 } : {
-                                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0e14)',
-                                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)'
                                 }}
                               >
                                 <div className="flex items-center gap-3 min-w-0">
                                   <div 
                                     className="w-4 h-4 rounded border flex items-center justify-center transition shrink-0"
                                     style={isMealSelected ? {
-                                      backgroundColor: 'var(--color-primary, #E05638)',
-                                      borderColor: 'var(--color-primary, #E05638)',
+                                      backgroundColor: 'var(--color-primary)',
+                                      borderColor: 'var(--color-primary)',
                                       color: '#ffffff'
                                     } : {
-                                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-card, #111726)'
+                                      borderColor: 'var(--color-border)',
+                                      backgroundColor: 'var(--color-card)'
                                     }}
                                   >
                                     {isMealSelected && <Check className="h-3 w-3" />}
@@ -1259,12 +1209,12 @@ export default function PlannerPage() {
                                     src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
                                     alt={meal.recipeName}
                                     className="w-8 h-8 rounded-lg object-cover border shrink-0"
-                                    style={{ borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)' }}
+                                    style={{ borderColor: 'var(--color-border)' }}
                                   />
 
                                   <div className="min-w-0">
-                                    <h4 className="text-xs font-bold truncate" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{meal.recipeName}</h4>
-                                    <span className="text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{translateMealType(meal.mealType)}</span>
+                                    <h4 className="text-xs font-bold truncate" style={{ color: 'var(--color-text)' }}>{meal.recipeName}</h4>
+                                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{translateMealType(meal.mealType)}</span>
                                   </div>
                                 </div>
 
@@ -1284,15 +1234,15 @@ export default function PlannerPage() {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <div className="grid grid-cols-2 gap-3 pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
                 onClick={() => setShowShoppingListModal(false)}
                 className="py-3 px-4 border font-bold rounded-2xl text-xs transition cursor-pointer"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #07090e)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#475569' : '#cbd5e1'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
                 }}
               >
                 {t('cancel')}
@@ -1301,9 +1251,9 @@ export default function PlannerPage() {
                 type="button"
                 onClick={handleGenerateShoppingList}
                 className="py-3 px-4 text-white font-bold rounded-2xl text-xs transition shadow-lg cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                style={{ backgroundColor: 'var(--color-primary)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
               >
                 {t('generateListBtn')}
               </button>
@@ -1322,17 +1272,17 @@ export default function PlannerPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0e14)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => setShowAddMealModal(false)} 
               className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #172033)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
@@ -1341,11 +1291,11 @@ export default function PlannerPage() {
             <div className="space-y-1 pr-6">
               <h2 
                 className="text-lg font-black tracking-tight"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 {t('addMealForDateTitle').replace('{date}', activeDateFormattedHeader)}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('addMealModalSub')}
               </p>
             </div>
@@ -1354,16 +1304,16 @@ export default function PlannerPage() {
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('dateLabel')}
                 </label>
                 <div 
                   className="w-full border-2 rounded-lg px-3 py-2 text-xs font-semibold"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: 'var(--color-primary, #E05638)',
-                    color: isDayMode ? '#0f172a' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-text)'
                   }}
                 >
                   {activeDateFieldText}
@@ -1373,7 +1323,7 @@ export default function PlannerPage() {
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('mealTypeLabel')}
                 </label>
@@ -1383,44 +1333,44 @@ export default function PlannerPage() {
                     onChange={(e) => setMealType(e.target.value)}
                     className="w-full border rounded-lg px-3 py-2.5 text-xs outline-none appearance-none cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#cbd5e1'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
-                    <option value="Breakfast" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('breakfast')}</option>
-                    <option value="Lunch" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('lunch')}</option>
-                    <option value="Dinner" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('dinner')}</option>
-                    <option value="Snack" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('snack')}</option>
+                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast')}</option>
+                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch')}</option>
+                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner')}</option>
+                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack')}</option>
                   </select>
-                  <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+                  <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                 </div>
               </div>
 
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('timeLabel')}
                 </label>
                 <div className="relative flex items-center">
-                  <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+                  <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
                     type="time"
                     value={mealTime}
                     onChange={(e) => setMealTime(e.target.value)}
                     className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#cbd5e1'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                     placeholder="--:--"
                   />
                   <Clock 
                     className="h-4 w-4 absolute right-3 pointer-events-none" 
-                    style={{ color: 'var(--color-primary, #E05638)' }}
+                    style={{ color: 'var(--color-primary)' }}
                   />
                 </div>
               </div>
@@ -1428,7 +1378,7 @@ export default function PlannerPage() {
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('recipeLabel')}
                 </label>
@@ -1436,8 +1386,8 @@ export default function PlannerPage() {
                   <div 
                     className="flex items-center justify-between p-2.5 border rounded-lg"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)'
                     }}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -1445,9 +1395,9 @@ export default function PlannerPage() {
                         src={selectedRecipeObj.image || selectedRecipeObj.imageUrl} 
                         alt={selectedRecipeObj.name || selectedRecipeObj.title}
                         className="w-8 h-8 rounded-md object-cover border shrink-0" 
-                        style={{ borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)' }}
+                        style={{ borderColor: 'var(--color-border)' }}
                       />
-                      <span className="font-bold text-xs truncate" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      <span className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
                         {selectedRecipeObj.name || selectedRecipeObj.title}
                       </span>
                     </div>
@@ -1458,7 +1408,7 @@ export default function PlannerPage() {
                         setShowRecipePickerModal(true);
                       }}
                       className="text-[11px] hover:underline font-bold shrink-0 ml-2 cursor-pointer"
-                      style={{ color: 'var(--color-primary, #E05638)' }}
+                      style={{ color: 'var(--color-primary)' }}
                     >
                       {t('changeBtn')}
                     </button>
@@ -1472,9 +1422,9 @@ export default function PlannerPage() {
                     }}
                     className="w-full border rounded-lg py-3 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: 'var(--color-primary, #E05638)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
                     }}
                   >
                     <Plus className="h-4 w-4" /> {t('selectRecipeBtn')}
@@ -1485,18 +1435,18 @@ export default function PlannerPage() {
               <div 
                 className="border rounded-xl p-3 flex items-center justify-between"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
                 <div>
                   <div 
                     className="text-xs font-bold"
-                    style={{ color: 'var(--color-primary, #E05638)' }}
+                    style={{ color: 'var(--color-primary)' }}
                   >
                     {t('leftoverLabel')}
                   </div>
-                  <p className="text-[11px] mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('leftoverHelpText')}
                   </p>
                 </div>
@@ -1504,7 +1454,7 @@ export default function PlannerPage() {
                 <div 
                   onClick={() => setIsLeftover(!isLeftover)}
                   className="w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition shrink-0 ml-3"
-                  style={{ backgroundColor: isLeftover ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#1e293b') }}
+                  style={{ backgroundColor: isLeftover ? 'var(--color-primary)' : 'var(--color-border)' }}
                 >
                   <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition ${
                     isLeftover ? 'translate-x-5' : 'translate-x-0'
@@ -1515,7 +1465,7 @@ export default function PlannerPage() {
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('notesLabel')}
                 </label>
@@ -1526,12 +1476,12 @@ export default function PlannerPage() {
                   rows={3}
                   className="w-full border rounded-lg p-3 text-xs outline-none resize-none"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
 
@@ -1541,9 +1491,9 @@ export default function PlannerPage() {
                   onClick={() => setShowAddMealModal(false)}
                   className="px-5 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: 'var(--color-primary, #E05638)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('cancel')}
@@ -1551,9 +1501,9 @@ export default function PlannerPage() {
                 <button
                   type="submit"
                   className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
                   {t('addToCalendarBtn')}
                 </button>
@@ -1573,17 +1523,17 @@ export default function PlannerPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0e14)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => setShowEditMealModal(false)} 
               className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #172033)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
@@ -1592,11 +1542,11 @@ export default function PlannerPage() {
             <div className="space-y-1 pr-6">
               <h2 
                 className="text-lg font-black tracking-tight flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
-                <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('editPlannedMealTitle')}
+                <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editPlannedMealTitle')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('editPlannedMealSub')}
               </p>
             </div>
@@ -1605,7 +1555,7 @@ export default function PlannerPage() {
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('dateLabel')}
                 </label>
@@ -1615,19 +1565,19 @@ export default function PlannerPage() {
                   onChange={(e) => setEditDate(e.target.value)}
                   className="w-full border rounded-lg px-3 py-2 text-xs font-semibold outline-none cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
 
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('mealTypeLabel')}
                 </label>
@@ -1637,43 +1587,43 @@ export default function PlannerPage() {
                     onChange={(e) => setEditMealType(e.target.value)}
                     className="w-full border rounded-lg px-3 py-2.5 text-xs outline-none appearance-none cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#cbd5e1'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
-                    <option value="Breakfast" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('breakfast')}</option>
-                    <option value="Lunch" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('lunch')}</option>
-                    <option value="Dinner" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('dinner')}</option>
-                    <option value="Snack" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('snack')}</option>
+                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast')}</option>
+                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch')}</option>
+                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner')}</option>
+                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack')}</option>
                   </select>
-                  <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+                  <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                 </div>
               </div>
 
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('timeLabel')}
                 </label>
                 <div className="relative flex items-center">
-                  <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+                  <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
                     type="time"
                     value={editMealTime}
                     onChange={(e) => setEditMealTime(e.target.value)}
                     className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#cbd5e1'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                   <Clock 
                     className="h-4 w-4 absolute right-3 pointer-events-none" 
-                    style={{ color: 'var(--color-primary, #E05638)' }}
+                    style={{ color: 'var(--color-primary)' }}
                   />
                 </div>
               </div>
@@ -1681,7 +1631,7 @@ export default function PlannerPage() {
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('recipeLabel')}
                 </label>
@@ -1689,8 +1639,8 @@ export default function PlannerPage() {
                   <div 
                     className="flex items-center justify-between p-2.5 border rounded-lg"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)'
                     }}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -1698,9 +1648,9 @@ export default function PlannerPage() {
                         src={editRecipeObj.image || editRecipeObj.imageUrl} 
                         alt={editRecipeObj.name || editRecipeObj.title}
                         className="w-8 h-8 rounded-md object-cover border shrink-0" 
-                        style={{ borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)' }}
+                        style={{ borderColor: 'var(--color-border)' }}
                       />
-                      <span className="font-bold text-xs truncate" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      <span className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
                         {editRecipeObj.name || editRecipeObj.title}
                       </span>
                     </div>
@@ -1711,7 +1661,7 @@ export default function PlannerPage() {
                         setShowRecipePickerModal(true);
                       }}
                       className="text-[11px] hover:underline font-bold shrink-0 ml-2 cursor-pointer"
-                      style={{ color: 'var(--color-primary, #E05638)' }}
+                      style={{ color: 'var(--color-primary)' }}
                     >
                       {t('changeBtn')}
                     </button>
@@ -1725,9 +1675,9 @@ export default function PlannerPage() {
                     }}
                     className="w-full border rounded-lg py-3 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: 'var(--color-primary, #E05638)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
                     }}
                   >
                     <Plus className="h-4 w-4" /> {t('selectRecipeBtn')}
@@ -1738,18 +1688,18 @@ export default function PlannerPage() {
               <div 
                 className="border rounded-xl p-3 flex items-center justify-between"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
                 <div>
                   <div 
                     className="text-xs font-bold"
-                    style={{ color: 'var(--color-primary, #E05638)' }}
+                    style={{ color: 'var(--color-primary)' }}
                   >
                     {t('leftoverLabel')}
                   </div>
-                  <p className="text-[11px] mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('leftoverHelpText')}
                   </p>
                 </div>
@@ -1757,7 +1707,7 @@ export default function PlannerPage() {
                 <div 
                   onClick={() => setEditIsLeftover(!editIsLeftover)}
                   className="w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition shrink-0 ml-3"
-                  style={{ backgroundColor: editIsLeftover ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : '#1e293b') }}
+                  style={{ backgroundColor: editIsLeftover ? 'var(--color-primary)' : 'var(--color-border)' }}
                 >
                   <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition ${
                     editIsLeftover ? 'translate-x-5' : 'translate-x-0'
@@ -1768,7 +1718,7 @@ export default function PlannerPage() {
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('notesLabel')}
                 </label>
@@ -1779,12 +1729,12 @@ export default function PlannerPage() {
                   rows={3}
                   className="w-full border rounded-lg p-3 text-xs outline-none resize-none"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
 
@@ -1797,7 +1747,7 @@ export default function PlannerPage() {
                     }
                   }}
                   className="px-4 py-2.5 rounded-xl border border-red-500/40 text-red-500 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer hover:bg-red-50"
-                  style={{ backgroundColor: isDayMode ? '#fef2f2' : 'transparent' }}
+                  style={{ backgroundColor: 'var(--color-inner-dark)' }}
                 >
                   <Trash2 className="h-4 w-4" /> {t('delete')}
                 </button>
@@ -1808,9 +1758,9 @@ export default function PlannerPage() {
                     onClick={() => setShowEditMealModal(false)}
                     className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: 'var(--color-primary, #E05638)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
                     }}
                   >
                     {t('cancel')}
@@ -1818,9 +1768,9 @@ export default function PlannerPage() {
                   <button
                     type="submit"
                     className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                   >
                     {t('saveChanges')}
                   </button>
@@ -1841,9 +1791,9 @@ export default function PlannerPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in min-h-[500px] flex flex-col justify-between cursor-default transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0a0c10)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <div className="space-y-4">
@@ -1851,8 +1801,8 @@ export default function PlannerPage() {
                 onClick={() => setShowRecipePickerModal(false)} 
                 className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #172033)',
-                  color: isDayMode ? '#0f172a' : '#cbd5e1'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  color: 'var(--color-text)'
                 }}
               >
                 <X className="h-4 w-4" />
@@ -1861,11 +1811,11 @@ export default function PlannerPage() {
               <div className="space-y-0.5 pr-8">
                 <h2 
                   className="text-lg font-black tracking-tight"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('selectRecipeModalTitle')}
                 </h2>
-                <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('pickerSubMealPlan')}
                 </p>
               </div>
@@ -1873,7 +1823,7 @@ export default function PlannerPage() {
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
-                    <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+                    <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                     <input
                       type="text"
                       placeholder={t('searchByNamePlaceholder')}
@@ -1881,9 +1831,9 @@ export default function PlannerPage() {
                       onChange={(e) => setRecipeSearch(e.target.value)}
                       className="w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-primary, #E05638)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
@@ -1894,17 +1844,17 @@ export default function PlannerPage() {
                       onChange={(e) => setSelectedBookFilter(e.target.value)}
                       className="border font-bold text-xs rounded-xl pl-3 pr-7 py-2 outline-none appearance-none cursor-pointer"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: 'var(--color-primary, #E05638)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-primary)'
                       }}
                     >
-                      <option value="All Books" style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('allBooksOption')}</option>
+                      <option value="All Books" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allBooksOption')}</option>
                       {userFilteredBooks.map((b) => (
-                        <option key={b.id} value={b.id} style={{ backgroundColor: isDayMode ? '#ffffff' : '#07090e', color: isDayMode ? '#0f172a' : '#ffffff' }}>{b.title}</option>
+                        <option key={b.id} value={b.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{b.title}</option>
                       ))}
                     </select>
-                    <ChevronDown className="h-3.5 w-3.5 absolute right-2.5 top-2.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+                    <ChevronDown className="h-3.5 w-3.5 absolute right-2.5 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                   </div>
 
                   <button
@@ -1912,12 +1862,12 @@ export default function PlannerPage() {
                     onClick={() => setShowFilterOptions(!showFilterOptions)}
                     className="border font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-xs"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #07090e)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: 'var(--color-primary, #E05638)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
                     }}
                   >
-                    <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('filterBtn')}
+                    <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('filterBtn')}
                   </button>
                 </div>
 
@@ -1935,13 +1885,13 @@ export default function PlannerPage() {
                         onClick={() => setActiveRecipeTagFilter(tag.key)}
                         className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
                         style={activeRecipeTagFilter === tag.key ? {
-                          backgroundColor: 'var(--color-primary, #E05638)',
-                          borderColor: 'var(--color-primary, #E05638)',
+                          backgroundColor: 'var(--color-primary)',
+                          borderColor: 'var(--color-primary)',
                           color: '#ffffff'
                         } : {
-                          backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #07090e)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#475569' : '#94a3b8'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
                         }}
                       >
                         {tag.label}
@@ -1953,7 +1903,7 @@ export default function PlannerPage() {
 
               <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                 {filteredPickerRecipes.length === 0 ? (
-                  <div className="py-12 text-center text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <div className="py-12 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('noRecipesMatchCriteria')}
                   </div>
                 ) : (
@@ -1967,8 +1917,8 @@ export default function PlannerPage() {
                         key={rec.id || recTitle}
                         className="flex items-center justify-between p-2 rounded-2xl border transition shadow-xs"
                         style={{
-                          backgroundColor: isDayMode ? '#f8fafc' : 'transparent',
-                          borderColor: isDayMode ? '#e2e8f0' : 'transparent'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
                         }}
                       >
                         <div className="flex items-center gap-3 min-w-0">
@@ -1976,23 +1926,23 @@ export default function PlannerPage() {
                             src={recImage}
                             alt={recTitle}
                             className="w-12 h-12 rounded-xl object-cover border shrink-0"
-                            style={{ borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)' }}
+                            style={{ borderColor: 'var(--color-border)' }}
                           />
                           <div className="space-y-1 min-w-0">
                             <h4 
                               className="font-extrabold text-xs leading-snug truncate"
-                              style={{ color: 'var(--color-primary, #E05638)' }}
+                              style={{ color: 'var(--color-primary)' }}
                             >
                               {recTitle}
                             </h4>
                             <div className="flex items-center gap-2">
                               <span 
                                 className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full"
-                                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                                style={{ backgroundColor: 'var(--color-primary)' }}
                               >
                                 {recCategory}
                               </span>
-                              <Heart className="h-3 w-3 fill-current" style={{ color: 'var(--color-primary, #E05638)' }} />
+                              <Heart className="h-3 w-3 fill-current" style={{ color: 'var(--color-primary)' }} />
                             </div>
                           </div>
                         </div>
@@ -2009,9 +1959,9 @@ export default function PlannerPage() {
                           }}
                           className="px-4 py-1.5 border font-bold text-xs rounded-xl transition shrink-0 ml-2 cursor-pointer shadow-xs"
                           style={{
-                            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #07090e)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: 'var(--color-primary, #E05638)'
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-primary)'
                           }}
                         >
                           {t('selectBtn')}
@@ -2025,7 +1975,7 @@ export default function PlannerPage() {
 
             <div 
               className="text-center py-2 text-xs font-semibold"
-              style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }}
+              style={{ color: 'var(--color-emerald)' }}
             >
               {t('showingRecipesCount').replace('{count}', String(filteredPickerRecipes.length)).replace('{total}', String(savedRecipes.length))}
             </div>

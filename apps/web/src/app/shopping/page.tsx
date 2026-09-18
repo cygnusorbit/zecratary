@@ -66,7 +66,8 @@ export default function ShoppingListPage() {
         root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
         root.style.setProperty('--color-text', '#0f172a');
         root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.style.backgroundColor = '#f8fafc';
           document.body.style.color = '#0f172a';
         }
       } else {
@@ -518,7 +519,7 @@ export default function ShoppingListPage() {
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      style={{ color: 'var(--color-text)' }}
     >
       {/* PAGE HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
@@ -526,7 +527,7 @@ export default function ShoppingListPage() {
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
             {t('shoppingList') || 'Shopping List'}
           </h1>
-          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {(t('shoppingItemsCompleted') || '{completed} of {total} items completed')
               .replace('{completed}', String(completedCount))
               .replace('{total}', String(items.length))}
@@ -542,13 +543,13 @@ export default function ShoppingListPage() {
             disabled={items.length === 0}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
-              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
-              borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.35)',
-              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-emerald)'
             }}
             title={allCompleted ? (t('deselectAllItemsTooltip') || 'Deselect all items') : (t('selectAllItemsTooltip') || 'Select all items')}
           >
-            <Check className="h-4 w-4" style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }} />
+            <Check className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
             <span>{allCompleted ? (t('incompleteAll') || 'Incomplete All') : (t('completeAll') || 'Complete All')}</span>
           </button>
 
@@ -559,13 +560,13 @@ export default function ShoppingListPage() {
             disabled={completedItems.length === 0}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
-              backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.12)',
-              borderColor: isDayMode ? '#fecaca' : 'rgba(239, 68, 68, 0.35)',
-              color: isDayMode ? '#b91c1c' : '#f87171'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: '#ef4444'
             }}
             title={t('removeCompletedTooltip') || 'Remove completed items'}
           >
-            <Trash2 className="h-4 w-4" style={{ color: isDayMode ? '#b91c1c' : '#f87171' }} />
+            <Trash2 className="h-4 w-4 text-red-500" />
             <span>{t('removeCompleted') || 'Remove Completed'}</span>
           </button>
         </div>
@@ -577,7 +578,7 @@ export default function ShoppingListPage() {
         <div className="relative flex-1 w-full">
           <Search 
             className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" 
-            style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
+            style={{ color: 'var(--color-text-secondary)' }}
           />
           <input
             type="text"
@@ -586,12 +587,12 @@ export default function ShoppingListPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full border rounded-xl pl-11 pr-4 py-2.5 text-sm outline-none shadow-xs transition"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
-            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
           />
         </div>
 
@@ -602,12 +603,12 @@ export default function ShoppingListPage() {
             onClick={handleCopyList}
             className="flex-1 sm:flex-initial border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
-            <Copy className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} /> {t('copyList') || 'Copy List'}
+            <Copy className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('copyList') || 'Copy List'}
           </button>
           
           <button
@@ -615,18 +616,18 @@ export default function ShoppingListPage() {
             onClick={() => setShowStaplesOnly(!showStaplesOnly)}
             className="flex-1 sm:flex-initial border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
             style={showStaplesOnly ? {
-              backgroundColor: isDayMode ? 'rgba(224, 86, 56, 0.1)' : 'rgba(224, 86, 56, 0.18)',
-              borderColor: 'var(--color-primary, #E05638)',
-              color: 'var(--color-primary, #E05638)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-primary)',
+              color: 'var(--color-primary)'
             } : {
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <Star 
               className={`h-4 w-4 ${showStaplesOnly ? 'fill-current' : ''}`}
-              style={{ color: 'var(--color-primary, #E05638)' }} 
+              style={{ color: 'var(--color-primary)' }} 
             /> 
             {t('myStaples') || 'My Staples'}
           </button>
@@ -635,9 +636,9 @@ export default function ShoppingListPage() {
             type="button"
             onClick={() => setShowAddModal(true)}
             className="flex-1 sm:flex-initial text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-lg cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             <Plus className="h-4 w-4" /> {t('addItemBtn') || 'Add Item(s)'}
           </button>
@@ -655,13 +656,13 @@ export default function ShoppingListPage() {
               key={cat} 
               className="border rounded-2xl p-5 space-y-3 shadow-sm transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
               <h2 
                 className="text-base font-bold tracking-wide"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 {cat}
               </h2>
@@ -677,17 +678,17 @@ export default function ShoppingListPage() {
                       <div 
                         className="w-4 h-4 rounded mt-0.5 border flex items-center justify-center transition shrink-0"
                         style={{
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-primary, #E05638)',
-                          backgroundColor: isDayMode ? '#f8fafc' : 'transparent'
+                          borderColor: 'var(--color-primary)',
+                          backgroundColor: 'var(--color-inner-dark)'
                         }}
                       />
 
                       <div>
-                        <h4 className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                        <h4 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
                           {item.name}
                         </h4>
                         {(item.amount || item.unit) && (
-                          <span className="text-xs font-medium block" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+                          <span className="text-xs font-medium block" style={{ color: 'var(--color-text-secondary)' }}>
                             {item.amount} {item.unit}
                           </span>
                         )}
@@ -699,7 +700,7 @@ export default function ShoppingListPage() {
                         type="button"
                         onClick={() => toggleStaple(item.id)}
                         className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: item.staple ? 'var(--color-primary, #E05638)' : (isDayMode ? '#94a3b8' : '#64748b') }}
+                        style={{ color: item.staple ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
                         title={t('markAsStapleTooltip') || 'Mark as Staple'}
                       >
                         <Star className={`h-4 w-4 ${item.staple ? 'fill-current' : ''}`} />
@@ -708,7 +709,7 @@ export default function ShoppingListPage() {
                         type="button"
                         onClick={() => handleCopySingleItem(item)}
                         className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
+                        style={{ color: 'var(--color-text-secondary)' }}
                         title={t('copyItemTooltip') || 'Copy item'}
                       >
                         <Copy className="h-4 w-4" />
@@ -717,7 +718,7 @@ export default function ShoppingListPage() {
                         type="button"
                         onClick={() => setEditingItem(item)}
                         className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
+                        style={{ color: 'var(--color-text-secondary)' }}
                         title={t('editItemTooltip') || 'Edit item'}
                       >
                         <Edit3 className="h-4 w-4" />
@@ -726,7 +727,7 @@ export default function ShoppingListPage() {
                         type="button"
                         onClick={() => handleDeleteItem(item.id)}
                         className="transition hover:text-red-500 cursor-pointer"
-                        style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
+                        style={{ color: 'var(--color-text-secondary)' }}
                         title={t('deleteBtn') || 'Delete'}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -746,21 +747,21 @@ export default function ShoppingListPage() {
           <div className="flex items-center gap-3">
             <h2 
               className="text-base font-extrabold whitespace-nowrap"
-              style={{ color: 'var(--color-emerald, #10b981)' }}
+              style={{ color: 'var(--color-emerald)' }}
             >
               {t('completedItemsHeading') || 'Completed Items'}
             </h2>
             <div 
               className="h-px flex-1"
-              style={{ backgroundColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+              style={{ backgroundColor: 'var(--color-border)' }}
             />
           </div>
 
           <div 
             className="border rounded-2xl p-5 space-y-3 shadow-sm transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
             }}
           >
             {completedItems.map((item) => (
@@ -772,14 +773,14 @@ export default function ShoppingListPage() {
                 <div className="flex items-start gap-3 flex-1 pr-4">
                   <div 
                     className="w-4 h-4 rounded mt-0.5 flex items-center justify-center text-white transition shrink-0"
-                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                    style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Check className="h-3 w-3 stroke-[3]" />
                   </div>
 
                   <span 
                     className="text-sm font-semibold line-through leading-snug"
-                    style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
+                    style={{ color: 'var(--color-text-secondary)' }}
                   >
                     {item.name}
                   </span>
@@ -790,7 +791,7 @@ export default function ShoppingListPage() {
                     type="button"
                     onClick={() => toggleStaple(item.id)}
                     className="transition hover:opacity-80 cursor-pointer"
-                    style={{ color: item.staple ? 'var(--color-primary, #E05638)' : (isDayMode ? '#94a3b8' : '#64748b') }}
+                    style={{ color: item.staple ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
                     title={t('markAsStapleTooltip') || 'Mark as Staple'}
                   >
                     <Star className={`h-4 w-4 ${item.staple ? 'fill-current' : ''}`} />
@@ -799,7 +800,7 @@ export default function ShoppingListPage() {
                     type="button"
                     onClick={() => setEditingItem(item)}
                     className="transition hover:opacity-80 cursor-pointer"
-                    style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
+                    style={{ color: 'var(--color-text-secondary)' }}
                     title={t('editItemTooltip') || 'Edit item'}
                   >
                     <Edit3 className="h-4 w-4" />
@@ -808,7 +809,7 @@ export default function ShoppingListPage() {
                     type="button"
                     onClick={() => handleDeleteItem(item.id)}
                     className="transition hover:text-red-500 cursor-pointer"
-                    style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}
+                    style={{ color: 'var(--color-text-secondary)' }}
                     title={t('deleteBtn') || 'Delete'}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -830,9 +831,9 @@ export default function ShoppingListPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative text-xs cursor-default animate-in fade-in transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button
@@ -840,20 +841,20 @@ export default function ShoppingListPage() {
               onClick={() => setShowAddModal(false)}
               className="absolute top-4 right-4 p-2 rounded-full transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
             </button>
 
-            <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              <Plus className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addShoppingItemTitle') || 'Add Shopping Item'}
+            <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <Plus className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('addShoppingItemTitle') || 'Add Shopping Item'}
             </h2>
 
             <form onSubmit={handleAddItem} className="space-y-4 text-xs">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('itemNameLabel') || 'Item Name *'}
                 </label>
                 <input
@@ -864,18 +865,18 @@ export default function ShoppingListPage() {
                   onChange={(e) => setItemName(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('amountQtyLabel') || 'Amount / Qty'}
                   </label>
                   <input
@@ -885,16 +886,16 @@ export default function ShoppingListPage() {
                     onChange={(e) => setItemAmount(e.target.value)}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('unitLabel') || 'Unit'}
                   </label>
                   <input
@@ -904,18 +905,18 @@ export default function ShoppingListPage() {
                     onChange={(e) => setItemUnit(e.target.value)}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('categoryLabel') || 'Category'}
                 </label>
                 <select
@@ -923,29 +924,29 @@ export default function ShoppingListPage() {
                   onChange={(e) => setItemCategory(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 >
                   {availableCategories.map((cat: string) => (
-                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {cat}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
                   className="px-5 py-2.5 rounded-xl font-bold transition cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                    color: isDayMode ? '#475569' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('cancel') || 'Cancel'}
@@ -953,9 +954,9 @@ export default function ShoppingListPage() {
                 <button
                   type="submit"
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
                   {t('addItemSubmit') || 'Add Item'}
                 </button>
@@ -975,9 +976,9 @@ export default function ShoppingListPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative text-xs cursor-default animate-in fade-in transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button
@@ -985,20 +986,20 @@ export default function ShoppingListPage() {
               onClick={() => setEditingItem(null)}
               className="absolute top-4 right-4 p-2 rounded-full transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
             </button>
 
-            <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('editShoppingItemTitle') || 'Edit Shopping Item'}
+            <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editShoppingItemTitle') || 'Edit Shopping Item'}
             </h2>
 
             <form onSubmit={handleUpdateItem} className="space-y-4 text-xs">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('itemNameLabel') || 'Item Name *'}
                 </label>
                 <input
@@ -1008,18 +1009,18 @@ export default function ShoppingListPage() {
                   onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('amountLabel') || 'Amount'}
                   </label>
                   <input
@@ -1029,16 +1030,16 @@ export default function ShoppingListPage() {
                     onChange={(e) => setEditingItem({ ...editingItem, amount: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
+                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('unitLabel') || 'Unit'}
                   </label>
                   <input
@@ -1048,18 +1049,18 @@ export default function ShoppingListPage() {
                     onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : 'var(--color-text-secondary, #94a3b8)' }}>
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('categoryLabel') || 'Category'}
                 </label>
                 <select
@@ -1067,30 +1068,30 @@ export default function ShoppingListPage() {
                   onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
                   className="w-full border rounded-xl p-3 text-sm outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 >
                   {availableCategories.map((cat: string) => (
-                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {cat}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
                   onClick={() => handleDeleteItem(editingItem.id)}
                   className="px-4 py-2.5 rounded-xl font-bold border transition flex items-center gap-1.5 cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                    borderColor: isDayMode ? '#fca5a5' : 'rgba(239, 68, 68, 0.3)',
-                    color: isDayMode ? '#b91c1c' : '#f87171'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'rgba(239, 68, 68, 0.4)',
+                    color: '#ef4444'
                   }}
                 >
                   <Trash2 className="h-4 w-4" /> {t('deleteBtn') || 'Delete'}
@@ -1101,8 +1102,8 @@ export default function ShoppingListPage() {
                     onClick={() => setEditingItem(null)}
                     className="px-5 py-2.5 rounded-xl font-bold transition cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                      color: isDayMode ? '#475569' : '#cbd5e1'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      color: 'var(--color-text-secondary)'
                     }}
                   >
                     {t('cancel') || 'Cancel'}
@@ -1110,9 +1111,9 @@ export default function ShoppingListPage() {
                   <button
                     type="submit"
                     className="px-6 py-2.5 rounded-xl text-white font-bold transition flex items-center gap-1.5 shadow-lg cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                   >
                     <Save className="h-4 w-4" /> {t('saveChanges') || 'Save Changes'}
                   </button>

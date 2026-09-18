@@ -39,46 +39,7 @@ export default function DashboardPage() {
   // Apply and listen for global admin theme updates and Day / Night mode toggling
   const applyGlobalTheme = useCallback(() => {
     try {
-      const isDay = typeof window !== 'undefined' && (
-        localStorage.getItem('zecratary_theme_mode') === 'light' || 
-        !document.documentElement.classList.contains('dark')
-      );
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const cfg = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        // DAY MODE INVERTED PALETTE
-        root.style.setProperty('--color-primary', cfg.primary || cfg.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', cfg.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-      } else {
-        // NIGHT / DARK MODE PALETTE
-        root.style.setProperty('--color-primary', cfg.primary || cfg.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', cfg.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', cfg.backgroundDark || cfg.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', cfg.backgroundDark || cfg.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', cfg.backgroundDark || cfg.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', cfg.cardDark || cfg.cardBackground || '#111726');
-        root.style.setProperty('--color-card', cfg.cardDark || cfg.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', cfg.innerDark || cfg.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', cfg.borderColor || cfg.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-text', cfg.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', cfg.textSecondary || '#94a3b8');
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (_) {}
   }, []);
 
@@ -221,7 +182,6 @@ export default function DashboardPage() {
             const mealToDisplay = todayMeals.length > 0 ? todayMeals[0] : userPlan[0];
             const mealTitle = mealToDisplay.recipeName || mealToDisplay.title || 'Planned Dish';
 
-            // Find matching recipe for photo if available
             const matchingRecipe = userRecipes.find((r: any) => 
               (r.title || r.name)?.toLowerCase() === mealTitle.toLowerCase()
             );
@@ -258,7 +218,6 @@ export default function DashboardPage() {
     }
   }, [getExactSavedRecipes, t]);
 
-  // Comprehensive Live Refresh Handler
   const handleManualRefresh = () => {
     if (loading) return;
     setLoading(true);
@@ -339,7 +298,7 @@ export default function DashboardPage() {
       <div className="min-h-[70vh] flex items-center justify-center">
         <div 
           className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-          style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }}
+          style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}
         />
       </div>
     );
@@ -348,17 +307,17 @@ export default function DashboardPage() {
   return (
     <div 
       className="max-w-6xl mx-auto space-y-8 pb-16 px-2 sm:px-4 transition-colors duration-200"
-      style={{ color: 'var(--color-text, #0f172a)' }}
+      style={{ color: 'var(--color-text)' }}
     >
       {/* Top Heading */}
       <div className="flex items-center justify-between pt-2">
         <div className="space-y-1">
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
+          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
             {t('dashboard') || 'Dashboard'}
           </h1>
           <p 
             className="text-sm"
-            style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+            style={{ color: 'var(--color-text-secondary)' }}
           >
             {(t('dashboardWelcomePrefix') || 'Welcome back, {name}!').replace('{name}', currentUser.name)} {t('dashboardSubtitle') || 'Autonomous culinary planning and pantry tracking.'}
           </p>
@@ -369,7 +328,7 @@ export default function DashboardPage() {
           {refreshFeedback && (
             <span 
               className="text-xs font-bold flex items-center gap-1.5 animate-in fade-in transition duration-300"
-              style={{ color: 'var(--color-emerald, #10b981)' }}
+              style={{ color: 'var(--color-emerald)' }}
             >
               <CheckCircle2 className="h-3.5 w-3.5" /> {t('refreshed') || 'Refreshed'}
             </span>
@@ -381,15 +340,15 @@ export default function DashboardPage() {
             disabled={loading}
             className="p-2.5 px-4 rounded-xl border transition flex items-center gap-2 text-xs font-bold cursor-pointer disabled:opacity-70 shadow-sm"
             style={{
-              backgroundColor: 'var(--color-card, #ffffff)',
-              borderColor: 'var(--color-border, #e2e8f0)',
-              color: 'var(--color-text, #0f172a)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
             title="Reload live metrics from storage"
           >
             <RefreshCw 
               className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} 
-              style={{ color: 'var(--color-emerald, #10b981)' }}
+              style={{ color: 'var(--color-emerald)' }}
             />
             <span>{loading ? (t('refreshing') || 'Refreshing...') : (t('refresh') || 'Refresh')}</span>
           </button>
@@ -403,21 +362,21 @@ export default function DashboardPage() {
           href="/saved" 
           className="p-5 rounded-2xl block border transition shadow-sm group"
           style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
         >
           <span 
             className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+            style={{ color: 'var(--color-text-secondary)' }}
           >
             {t('savedRecipes') || 'Saved Recipes'}
           </span>
           <span 
             className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-primary, #E05638)' }}
+            style={{ color: 'var(--color-primary)' }}
           >
             {loading ? '...' : recipesCount}
           </span>
@@ -428,21 +387,21 @@ export default function DashboardPage() {
           href="/books" 
           className="p-5 rounded-2xl block border transition shadow-sm group"
           style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald, #10b981)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald)')}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
         >
           <span 
             className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+            style={{ color: 'var(--color-text-secondary)' }}
           >
             {t('books') || 'Recipe Books'}
           </span>
           <span 
             className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-emerald, #10b981)' }}
+            style={{ color: 'var(--color-emerald)' }}
           >
             {loading ? '...' : recipeBooksCount}
           </span>
@@ -453,21 +412,21 @@ export default function DashboardPage() {
           href="/pantry" 
           className="p-5 rounded-2xl block border transition shadow-sm group"
           style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
         >
           <span 
             className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+            style={{ color: 'var(--color-text-secondary)' }}
           >
             {t('pantryStock') || 'Pantry Stock'}
           </span>
           <span 
             className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-text, #0f172a)' }}
+            style={{ color: 'var(--color-text)' }}
           >
             {loading ? '...' : pantryStockCount}
           </span>
@@ -478,21 +437,21 @@ export default function DashboardPage() {
           href="/shopping" 
           className="p-5 rounded-2xl block border transition shadow-sm group"
           style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald, #10b981)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald)')}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
         >
           <span 
             className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+            style={{ color: 'var(--color-text-secondary)' }}
           >
             {t('groceryItems') || 'Grocery Items'}
           </span>
           <span 
             className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-text, #0f172a)' }}
+            style={{ color: 'var(--color-text)' }}
           >
             {loading ? '...' : groceryItemsCount}
           </span>
@@ -505,24 +464,24 @@ export default function DashboardPage() {
         <div 
           className="p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between border"
           style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
           }}
         >
           <div 
             className="flex items-center justify-between border-b pb-3"
-            style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+            style={{ borderColor: 'var(--color-border)' }}
           >
             <h2 
               className="text-base font-bold flex items-center gap-2"
-              style={{ color: 'var(--color-text, #0f172a)' }}
+              style={{ color: 'var(--color-text)' }}
             >
-              <Calendar className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('upcomingMeal') || 'Upcoming Meal'}
+              <Calendar className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('upcomingMeal') || 'Upcoming Meal'}
             </h2>
             <Link 
               href="/planner" 
               className="text-xs font-bold hover:underline flex items-center gap-1"
-              style={{ color: 'var(--color-primary, #E05638)' }}
+              style={{ color: 'var(--color-primary)' }}
             >
               {t('viewPlanner') || 'View Planner'} <ArrowRight className="h-3.5 w-3.5" />
             </Link>
@@ -533,47 +492,52 @@ export default function DashboardPage() {
               <div 
                 className="p-4 rounded-xl border flex items-center gap-4 shadow-inner"
                 style={{
-                  backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                  borderColor: 'var(--color-border, #e2e8f0)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
                 {upcomingMeal.imageUrl ? (
                   <img
                     src={upcomingMeal.imageUrl}
                     alt={upcomingMeal.title}
-                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border border-slate-700/80 shrink-0 shadow-md"
+                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border shrink-0 shadow-md"
+                    style={{ borderColor: 'var(--color-border)' }}
                   />
                 ) : (
                   <div 
-                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border border-slate-700/80 shrink-0 flex items-center justify-center bg-slate-800/40"
+                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border shrink-0 flex items-center justify-center opacity-70"
+                    style={{ 
+                      borderColor: 'var(--color-border)',
+                      backgroundColor: 'var(--color-inner-dark)'
+                    }}
                   >
-                    <Utensils className="h-6 w-6 opacity-50" />
+                    <Utensils className="h-6 w-6 opacity-70" />
                   </div>
                 )}
 
                 <div className="space-y-1 flex-1 min-w-0">
                   <span 
                     className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5"
-                    style={{ color: 'var(--color-emerald, #10b981)' }}
+                    style={{ color: 'var(--color-emerald)' }}
                   >
                     <Utensils className="h-3 w-3" /> {(t('todayMealPrefix') || 'Today • {mealType}').replace('{mealType}', upcomingMeal.mealType)}
                   </span>
                   <h3 
                     className="font-bold text-base leading-tight mt-1 truncate"
-                    style={{ color: 'var(--color-text, #0f172a)' }}
+                    style={{ color: 'var(--color-text)' }}
                   >
                     {upcomingMeal.title}
                   </h3>
                   <span 
                     className="text-xs flex items-center gap-1 pt-0.5"
-                    style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+                    style={{ color: 'var(--color-text-secondary)' }}
                   >
                     <Clock className="h-3.5 w-3.5" /> {upcomingMeal.timeOrTags}
                   </span>
                   {upcomingMeal.notes && (
                     <p 
                       className="text-xs italic mt-1 opacity-80 line-clamp-1"
-                      style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       "{upcomingMeal.notes}"
                     </p>
@@ -584,16 +548,16 @@ export default function DashboardPage() {
               <div 
                 className="p-4 rounded-xl border flex items-center justify-between text-xs"
                 style={{
-                  backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                  borderColor: 'var(--color-border, #e2e8f0)',
-                  color: 'var(--color-text-secondary, #94a3b8)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
                 }}
               >
                 <span>{t('noMealsScheduledToday') || 'No meals scheduled for today.'}</span>
                 <Link 
                   href="/planner" 
                   className="text-xs font-bold hover:underline"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   {t('planMeal') || 'Plan Meal'}
                 </Link>
@@ -606,19 +570,19 @@ export default function DashboardPage() {
         <div 
           className="p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between border"
           style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
           }}
         >
           <div 
             className="border-b pb-3"
-            style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
+            style={{ borderColor: 'var(--color-border)' }}
           >
             <h2 
               className="text-base font-bold flex items-center gap-2"
-              style={{ color: 'var(--color-text, #0f172a)' }}
+              style={{ color: 'var(--color-text)' }}
             >
-              <ChefHat className="h-5 w-5" style={{ color: 'var(--color-emerald, #10b981)' }} /> {t('quickActions') || 'Quick Actions'}
+              <ChefHat className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} /> {t('quickActions') || 'Quick Actions'}
             </h2>
           </div>
 
@@ -627,16 +591,16 @@ export default function DashboardPage() {
               href="/chef" 
               className="p-3.5 rounded-xl text-center flex items-center justify-center gap-2 transition group border"
               style={{
-                backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                borderColor: 'var(--color-border, #e2e8f0)',
-                color: 'var(--color-text, #0f172a)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald, #10b981)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald)')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
             >
               <ChefHat 
                 className="h-4 w-4 group-hover:scale-110 transition" 
-                style={{ color: 'var(--color-emerald, #10b981)' }}
+                style={{ color: 'var(--color-emerald)' }}
               /> 
               <span>{t('askChefAi') || 'Ask Chef AI'}</span>
             </Link>
@@ -645,16 +609,16 @@ export default function DashboardPage() {
               href="/manual" 
               className="p-3.5 rounded-xl text-center flex items-center justify-center gap-2 transition group border"
               style={{
-                backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                borderColor: 'var(--color-border, #e2e8f0)',
-                color: 'var(--color-text, #0f172a)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
             >
               <Sparkles 
                 className="h-4 w-4 group-hover:scale-110 transition" 
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               /> 
               <span>{t('createRecipe') || 'Create Recipe'}</span>
             </Link>

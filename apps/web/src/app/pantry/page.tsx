@@ -18,9 +18,7 @@ export default function PantryPage() {
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [sortAsc, setSortAsc] = useState(true);
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
   
-  // Safe default category fallback
   const safeDefaultCategory = (Array.isArray(CATEGORIES) && CATEGORIES.length > 0) ? CATEGORIES[0] : 'Produce';
 
   // Add Modal State
@@ -34,50 +32,9 @@ export default function PantryPage() {
   // Edit Modal State
   const [editingItem, setEditingItem] = useState<any | null>(null);
 
-  // Dynamic Theme Synchronization & Color Inversion
   const applyGlobalTheme = useCallback(() => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
-      setIsDayMode(isDay);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-        }
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (e) {}
   }, []);
 
@@ -93,8 +50,6 @@ export default function PantryPage() {
       window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
       window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
       window.removeEventListener('storage', applyGlobalTheme);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-      }
     };
   }, [applyGlobalTheme]);
 
@@ -301,10 +256,8 @@ export default function PantryPage() {
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      style={{ color: 'var(--color-text)' }}
     >
-      
-      {/* Dynamic Date Picker Accent Style */}
       <style dangerouslySetInnerHTML={{ __html: `
         input[type="date"]::-webkit-calendar-picker-indicator {
           filter: brightness(0) saturate(100%) invert(48%) sepia(85%) saturate(1638%) hue-rotate(340deg) brightness(95%) contrast(92%);
@@ -323,7 +276,7 @@ export default function PantryPage() {
         <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
           {t('pantryInventory') || 'Pantry Inventory'}
         </h1>
-        <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
           {currentUser ? `${currentUser.name}${t('userStockSuffix') || "'s private stock:"} ` : ''}
           {t('pantrySubtitle') || 'Manage available ingredients, track expiry dates, and discover matching recipes.'}
         </p>
@@ -334,7 +287,7 @@ export default function PantryPage() {
         <div className="relative flex-1 w-full">
           <Search 
             className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" 
-            style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+            style={{ color: 'var(--color-emerald)' }}
           />
           <input
             type="text"
@@ -343,12 +296,12 @@ export default function PantryPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
-            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-            onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
           />
         </div>
 
@@ -358,9 +311,9 @@ export default function PantryPage() {
             onClick={() => alert(t('photoScanActivated') || 'Camera photo scan activated!')}
             className="flex-1 sm:flex-initial border font-bold text-xs px-5 py-3 rounded-2xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-emerald)'
             }}
           >
             <Camera className="h-4 w-4" /> {t('takePhoto') || 'Take Photo'}
@@ -370,9 +323,9 @@ export default function PantryPage() {
             type="button"
             onClick={() => setShowAddModal(true)}
             className="flex-1 sm:flex-initial text-white font-bold text-xs px-5 py-3 rounded-2xl transition flex items-center justify-center gap-2 shadow-lg cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             <Plus className="h-4 w-4" /> {t('addIngredientBtn') || 'Add Ingredient(s)'}
           </button>
@@ -383,8 +336,8 @@ export default function PantryPage() {
       <div 
         className="border rounded-3xl p-5 space-y-4 shadow-sm border transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
         }}
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -396,11 +349,11 @@ export default function PantryPage() {
             }}
             className="font-bold text-xs px-5 py-3 rounded-2xl transition flex items-center gap-2 shadow-sm cursor-pointer"
             style={selectedIds.length > 0 ? {
-              backgroundColor: 'var(--color-primary, #E05638)',
+              backgroundColor: 'var(--color-primary)',
               color: '#ffffff'
             } : {
-              backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
-              color: isDayMode ? '#64748b' : '#94a3b8'
+              backgroundColor: 'var(--color-inner-dark)',
+              color: 'var(--color-text-secondary)'
             }}
           >
             <ChefHat className="h-4 w-4" /> 
@@ -412,7 +365,7 @@ export default function PantryPage() {
               type="button"
               onClick={() => setSortAsc(!sortAsc)}
               className="flex items-center gap-1.5 transition cursor-pointer"
-              style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+              style={{ color: 'var(--color-emerald)' }}
               title={t('toggleSortTooltip') || 'Toggle sorting direction'}
             >
               <ArrowUpDown className="h-3.5 w-3.5" /> {sortAsc ? 'A-Z' : 'Z-A'}
@@ -420,8 +373,7 @@ export default function PantryPage() {
             <button
               type="button"
               onClick={handleDeleteSelected}
-              className="flex items-center gap-1.5 transition cursor-pointer hover:underline"
-              style={{ color: isDayMode ? '#dc2626' : '#f87171' }}
+              className="flex items-center gap-1.5 transition cursor-pointer hover:underline text-red-500"
             >
               <Trash2 className="h-3.5 w-3.5" /> {t('deleteSelected') || 'Delete Selected'}
             </button>
@@ -429,7 +381,7 @@ export default function PantryPage() {
               type="button"
               onClick={toggleSelectAll}
               className="transition cursor-pointer"
-              style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
+              style={{ color: 'var(--color-text)' }}
             >
               {selectedIds.length === filteredItems.length && filteredItems.length > 0 
                 ? (t('deselectAll') || 'Deselect All') 
@@ -444,13 +396,13 @@ export default function PantryPage() {
             <div 
               className="p-12 text-center space-y-2 rounded-2xl border"
               style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <Package className="h-8 w-8 mx-auto" style={{ color: isDayMode ? '#94a3b8' : '#475569' }} />
-              <h4 className="text-sm font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('noPantryIngredientsFound') || 'No pantry ingredients found'}</h4>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{t('noPantryIngredientsSub') || 'Add ingredients to your stock or adjust your search filter.'}</p>
+              <Package className="h-8 w-8 mx-auto" style={{ color: 'var(--color-text-secondary)' }} />
+              <h4 className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{t('noPantryIngredientsFound') || 'No pantry ingredients found'}</h4>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('noPantryIngredientsSub') || 'Add ingredients to your stock or adjust your search filter.'}</p>
             </div>
           ) : (
             filteredItems.map((item) => {
@@ -462,47 +414,47 @@ export default function PantryPage() {
                   onClick={() => toggleSelectOne(item.id)}
                   className="flex items-center justify-between p-4 rounded-2xl border transition cursor-pointer select-none shadow-xs"
                   style={isSelected ? {
-                    backgroundColor: isDayMode ? '#fee2e2' : 'rgba(224, 86, 56, 0.1)',
-                    borderColor: 'var(--color-primary, #E05638)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-primary)'
                   } : {
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   <div className="flex items-center gap-3.5">
                     <div 
                       className="w-5 h-5 rounded-lg border flex items-center justify-center transition shadow-xs"
                       style={isSelected ? {
-                        backgroundColor: 'var(--color-primary, #E05638)',
-                        borderColor: 'var(--color-primary, #E05638)',
+                        backgroundColor: 'var(--color-primary)',
+                        borderColor: 'var(--color-primary)',
                         color: '#ffffff'
                       } : {
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)'
+                        borderColor: 'var(--color-border)',
+                        backgroundColor: 'var(--color-card)'
                       }}
                     >
                       {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
                     </div>
 
                     <div className="flex items-center gap-3">
-                      <span className="font-extrabold text-sm capitalize" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      <span className="font-extrabold text-sm capitalize" style={{ color: 'var(--color-text)' }}>
                         {item.name}
                       </span>
                       {daysLeft !== null && (
                         <span 
                           className="px-2.5 py-0.5 rounded-full font-bold text-[10px] border shadow-xs"
                           style={daysLeft < 0 ? {
-                            backgroundColor: isDayMode ? '#fee2e2' : 'rgba(239, 68, 68, 0.2)',
-                            color: isDayMode ? '#b91c1c' : '#f87171',
-                            borderColor: isDayMode ? '#fca5a5' : 'rgba(239, 68, 68, 0.3)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: '#ef4444',
+                            borderColor: 'rgba(239, 68, 68, 0.4)'
                           } : daysLeft <= 3 ? {
-                            backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.2)',
-                            color: isDayMode ? '#b45309' : '#fbbf24',
-                            borderColor: isDayMode ? '#fde68a' : 'rgba(245, 158, 11, 0.3)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: '#f59e0b',
+                            borderColor: 'rgba(245, 158, 11, 0.4)'
                           } : {
-                            backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
-                            color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
-                            borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.3)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: 'var(--color-emerald)',
+                            borderColor: 'var(--color-emerald)'
                           }}
                         >
                           {daysLeft < 0 
@@ -516,7 +468,7 @@ export default function PantryPage() {
                   </div>
 
                   <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-                    <span className="text-xs font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
                       {item.quantity} {item.unit}
                     </span>
                     <button
@@ -524,9 +476,9 @@ export default function PantryPage() {
                       onClick={() => setEditingItem(item)}
                       className="p-2 transition rounded-xl border cursor-pointer shadow-xs"
                       style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#64748b' : '#94a3b8'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
                       }}
                       title={t('editItemTooltip') || 'Edit item'}
                     >
@@ -537,9 +489,9 @@ export default function PantryPage() {
                       onClick={() => handleDeleteItem(item.id)}
                       className="p-2 hover:text-red-500 transition rounded-xl border cursor-pointer shadow-xs"
                       style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#64748b' : '#94a3b8'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
                       }}
                       title={t('deleteItemTooltip') || 'Delete item'}
                     >
@@ -563,9 +515,9 @@ export default function PantryPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button
@@ -573,20 +525,20 @@ export default function PantryPage() {
               onClick={() => setShowAddModal(false)}
               className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
             </button>
 
-            <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              <Plus className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('addPantryIngredientTitle') || 'Add Pantry Ingredient(s)'}
+            <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <Plus className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('addPantryIngredientTitle') || 'Add Pantry Ingredient(s)'}
             </h2>
 
             <form onSubmit={handleAddItem} className="space-y-4">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('ingredientNameLabel') || 'Ingredient Name *'}
                 </label>
                 <input
@@ -597,18 +549,18 @@ export default function PantryPage() {
                   onChange={(e) => setItemName(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('quantityLabel') || 'Quantity'}
                   </label>
                   <input
@@ -617,16 +569,16 @@ export default function PantryPage() {
                     onChange={(e) => setItemQuantity(e.target.value)}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('unitLabel') || 'Unit'}
                   </label>
                   <input
@@ -635,18 +587,18 @@ export default function PantryPage() {
                     onChange={(e) => setItemUnit(e.target.value)}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('categoryLabel') || 'Category'}
                 </label>
                 <select
@@ -654,15 +606,15 @@ export default function PantryPage() {
                   onChange={(e) => setItemCategory(e.target.value)}
                   className="w-full border rounded-xl p-3 text-sm outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 >
                   {(Array.isArray(CATEGORIES) ? CATEGORIES : ['Produce', 'Dairy', 'Other']).map((cat: string) => (
-                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {cat}
                     </option>
                   ))}
@@ -671,13 +623,13 @@ export default function PantryPage() {
 
               {/* Expiry Date with Bright Calendar Icon */}
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('expiryDateLabel') || 'Expiry Date'}
                 </label>
                 <div className="relative flex items-center">
                   <Calendar 
                     className="h-4 w-4 absolute left-3.5 pointer-events-none" 
-                    style={{ color: 'var(--color-primary, #E05638)' }} 
+                    style={{ color: 'var(--color-primary)' }} 
                   />
                   <input
                     type="date"
@@ -685,25 +637,24 @@ export default function PantryPage() {
                     onChange={(e) => setExpiryDate(e.target.value)}
                     className="w-full border rounded-xl pl-10 pr-3 py-3 text-sm outline-none cursor-pointer pantry-date-input transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff',
-                      colorScheme: isDayMode ? 'light' : 'dark'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
                   className="px-5 py-2.5 rounded-xl font-bold transition cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
-                    color: isDayMode ? '#475569' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('cancel') || 'Cancel'}
@@ -711,9 +662,9 @@ export default function PantryPage() {
                 <button
                   type="submit"
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
                   {t('addIngredientSubmit') || 'Add Ingredient'}
                 </button>
@@ -733,9 +684,9 @@ export default function PantryPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button
@@ -743,20 +694,20 @@ export default function PantryPage() {
               onClick={() => setEditingItem(null)}
               className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
             </button>
 
-            <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('editPantryIngredientTitle') || 'Edit Pantry Ingredient'}
+            <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editPantryIngredientTitle') || 'Edit Pantry Ingredient'}
             </h2>
 
             <form onSubmit={handleUpdateItem} className="space-y-4">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('ingredientNameLabel') || 'Ingredient Name *'}
                 </label>
                 <input
@@ -766,18 +717,18 @@ export default function PantryPage() {
                   onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('quantityLabel') || 'Quantity'}
                   </label>
                   <input
@@ -786,16 +737,16 @@ export default function PantryPage() {
                     onChange={(e) => setEditingItem({ ...editingItem, quantity: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('unitLabel') || 'Unit'}
                   </label>
                   <input
@@ -804,18 +755,18 @@ export default function PantryPage() {
                     onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('categoryLabel') || 'Category'}
                 </label>
                 <select
@@ -823,15 +774,15 @@ export default function PantryPage() {
                   onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
                   className="w-full border rounded-xl p-3 text-sm outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 >
                   {(Array.isArray(CATEGORIES) ? CATEGORIES : ['Produce', 'Dairy', 'Other']).map((cat: string) => (
-                    <option key={cat} value={cat} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {cat}
                     </option>
                   ))}
@@ -840,13 +791,13 @@ export default function PantryPage() {
 
               {/* Expiry Date with Bright Calendar Icon */}
               <div>
-                <label className="block font-semibold mb-1" style={{ color: isDayMode ? '#334155' : '#94a3b8' }}>
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('expiryDateLabel') || 'Expiry Date'}
                 </label>
                 <div className="relative flex items-center">
                   <Calendar 
                     className="h-4 w-4 absolute left-3.5 pointer-events-none" 
-                    style={{ color: 'var(--color-primary, #E05638)' }} 
+                    style={{ color: 'var(--color-primary)' }} 
                   />
                   <input
                     type="date"
@@ -854,25 +805,24 @@ export default function PantryPage() {
                     onChange={(e) => setEditingItem({ ...editingItem, expiryDate: e.target.value })}
                     className="w-full border rounded-xl pl-10 pr-3 py-3 text-sm outline-none cursor-pointer pantry-date-input transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff',
-                      colorScheme: isDayMode ? 'light' : 'dark'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
                   onClick={() => setEditingItem(null)}
                   className="px-5 py-2.5 rounded-xl font-bold transition cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
-                    color: isDayMode ? '#475569' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('cancel') || 'Cancel'}
@@ -880,9 +830,9 @@ export default function PantryPage() {
                 <button
                   type="submit"
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition flex items-center gap-1.5 shadow-lg cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
                   <Save className="h-4 w-4" /> {t('saveChanges') || 'Save Changes'}
                 </button>

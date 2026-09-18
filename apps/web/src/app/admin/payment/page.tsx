@@ -308,7 +308,7 @@ export default function AdminPaymentPage() {
       ...visibleColumns,
       [colKey]: !visibleColumns[colKey]
     };
-    if (!Object.values(nextState).some(Boolean)) return; // Keep at least one column visible
+    if (!Object.values(nextState).some(Boolean)) return;
 
     setVisibleColumns(nextState);
     try {
@@ -391,49 +391,7 @@ export default function AdminPaymentPage() {
 
   const applySavedTheme = useCallback(() => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light' || mode === 'day';
-      setIsDayMode(isDay);
-
-      const stored = typeof window !== 'undefined'
-        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
-        : null;
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-        }
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (_) {}
   }, []);
 
@@ -449,8 +407,6 @@ export default function AdminPaymentPage() {
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-      }
     };
   }, [applySavedTheme]);
 
@@ -1265,7 +1221,6 @@ export default function AdminPaymentPage() {
     const singlePlanSlug = sanitizeSinglePlan(editPlanSlug);
     const cleanEmail = editCustomerEmail.trim().toLowerCase();
 
-    // Require confirm payment amount transaction from gateway if advancing to succeeded
     if (isSucceeded(normalizedStatus) && !isSucceeded(editingTx.status) && !editGatewayConfirmed) {
       setModalError(t('requireGatewayConfirmToUpdateSucceeded', 'Confirmation required: You must confirm the transaction amount from the payment gateway to mark status as Succeeded.'));
       return;
@@ -1471,7 +1426,6 @@ export default function AdminPaymentPage() {
     const cleanAmount = parseAmount(paymentAmount);
     const normalizedStatus = paymentStatus.toLowerCase();
 
-    // Required confirm payment amount transaction from gateway before becoming succeeded
     if (isSucceeded(normalizedStatus) && !addGatewayConfirmed) {
       setModalError(t('requireGatewayConfirmToAddSucceeded', 'Confirmation required: Please verify and confirm the transaction amount from the payment gateway to record as Succeeded.'));
       return;
@@ -1828,17 +1782,17 @@ export default function AdminPaymentPage() {
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      style={{ color: 'var(--color-text)' }}
     >
       <style dangerouslySetInnerHTML={{ __html: `
         .payment-input:-webkit-autofill,
         .payment-input:-webkit-autofill:hover,
         .payment-input:-webkit-autofill:focus,
         .payment-input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)'} inset !important;
-          box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)'} inset !important;
-          -webkit-text-fill-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
-          caret-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
+          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          -webkit-text-fill-color: var(--color-text) !important;
+          caret-color: var(--color-text) !important;
           transition: background-color 50000s ease-in-out 0s !important;
         }
 
@@ -1885,7 +1839,7 @@ export default function AdminPaymentPage() {
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
             {t('paymentManagerTitle', 'Payment Manager')}
           </h1>
-          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {t('paymentManagerSubtitle', 'Manage payment transactions, recurring billing subscriptions, and gateways.')}
           </p>
         </div>
@@ -1895,9 +1849,9 @@ export default function AdminPaymentPage() {
             type="button"
             onClick={handleOpenAddModal}
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             <PlusCircle className="h-4 w-4" /> {t('addPaymentBtn', 'Add Payment')}
           </button>
@@ -1905,12 +1859,12 @@ export default function AdminPaymentPage() {
             href="/admin/plans"
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#cbd5e1'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
-            <Zap className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('managePlans', 'Manage Plans')}
+            <Zap className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('managePlans', 'Manage Plans')}
           </Link>
         </div>
       </div>
@@ -1919,8 +1873,8 @@ export default function AdminPaymentPage() {
       <div 
         className="flex items-center gap-2 p-1.5 rounded-2xl border w-fit shadow-xs transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
         }}
       >
         <button
@@ -1928,8 +1882,8 @@ export default function AdminPaymentPage() {
           onClick={() => setActiveTab('history')}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
           style={{
-            backgroundColor: activeTab === 'history' ? 'var(--color-primary, #E05638)' : 'transparent',
-            color: activeTab === 'history' ? '#ffffff' : (isDayMode ? '#64748b' : '#94a3b8')
+            backgroundColor: activeTab === 'history' ? 'var(--color-primary)' : 'transparent',
+            color: activeTab === 'history' ? '#ffffff' : 'var(--color-text-secondary)'
           }}
         >
           <History className="h-4 w-4" /> {t('paymentHistoryTab', 'Payment History')}
@@ -1939,8 +1893,8 @@ export default function AdminPaymentPage() {
           onClick={() => setActiveTab('settings')}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
           style={{
-            backgroundColor: activeTab === 'settings' ? 'var(--color-primary, #E05638)' : 'transparent',
-            color: activeTab === 'settings' ? '#ffffff' : (isDayMode ? '#64748b' : '#94a3b8')
+            backgroundColor: activeTab === 'settings' ? 'var(--color-primary)' : 'transparent',
+            color: activeTab === 'settings' ? '#ffffff' : 'var(--color-text-secondary)'
           }}
         >
           <Sliders className="h-4 w-4" /> {t('gatewaySettingsTab', 'Gateway Settings')}
@@ -1951,14 +1905,12 @@ export default function AdminPaymentPage() {
         <div
           className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 border shadow-xs animate-in fade-in"
           style={{
-            backgroundColor: feedback.type === 'success' 
-              ? (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)') 
-              : (isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)'),
-            borderColor: feedback.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444',
-            color: feedback.type === 'success' ? (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)') : (isDayMode ? '#b91c1c' : '#fca5a5')
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
+            color: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
           }}
         >
-          {feedback.type === 'success' ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+          {feedback.type === 'success' ? <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} /> : <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />}
           <span>{feedback.msg}</span>
         </div>
       )}
@@ -1969,20 +1921,20 @@ export default function AdminPaymentPage() {
           <div
             className="p-3 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'rgba(17, 23, 38, 0.7)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1.5 font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+              <span className="flex items-center gap-1.5 font-bold" style={{ color: 'var(--color-text)' }}>
                 <Activity className="h-4 w-4 text-emerald-500 animate-pulse" /> {t('gatewayEngine', 'Gateway Engine')}
               </span>
               <span 
                 className="font-extrabold uppercase px-2.5 py-0.5 rounded text-[11px] border"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : '#1e293b',
-                  color: isDayMode ? '#0f172a' : '#ffffff',
-                  borderColor: isDayMode ? '#cbd5e1' : '#334155'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
                 {config.activeGateway}
@@ -1990,24 +1942,22 @@ export default function AdminPaymentPage() {
               <span 
                 className="font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs"
                 style={{
-                  backgroundColor: config.testMode 
-                    ? (isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.12)') 
-                    : (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)'),
-                  borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald, #10b981)',
-                  color: config.testMode ? (isDayMode ? '#b45309' : '#fbbf24') : (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)')
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald)',
+                  color: config.testMode ? '#fbbf24' : 'var(--color-emerald)'
                 }}
               >
                 {config.testMode ? t('sandboxTest', 'Sandbox Test') : t('liveProduction', 'Live Production')}
               </span>
             </div>
 
-            <div className="flex items-center gap-4 font-semibold text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+            <div className="flex items-center gap-4 font-semibold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
               <div>
-                {t('currencyLabel', 'Currency:')} <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{config.currency} ({activeCurrencySymbol})</span>
+                {t('currencyLabel', 'Currency:')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{config.currency} ({activeCurrencySymbol})</span>
               </div>
               <div>
                 {t('stripeLabel', 'Stripe:')}{' '}
-                <span className={`font-bold ${config.stripeConnected ? (isDayMode ? 'text-emerald-600' : 'text-emerald-400') : (isDayMode ? 'text-slate-500' : 'text-slate-400')}`}>
+                <span className={`font-bold ${config.stripeConnected ? 'text-[var(--color-emerald)]' : ''}`} style={{ color: config.stripeConnected ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
                   {config.stripeConnected ? t('connectedStatus', 'Connected') : t('notConnectedStatus', 'Not Connected')}
                 </span>
               </div>
@@ -2015,7 +1965,7 @@ export default function AdminPaymentPage() {
                 type="button"
                 onClick={() => setActiveTab('settings')}
                 className="font-bold text-[11px] hover:underline transition cursor-pointer"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 {t('changeCurrencyKeys', 'Change currency & keys')}
               </button>
@@ -2027,49 +1977,49 @@ export default function AdminPaymentPage() {
             <div 
               className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('totalRevenueTitle', 'Total Revenue')}
               </div>
-              <div className="text-xl font-black flex items-baseline gap-1" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              <div className="text-xl font-black flex items-baseline gap-1" style={{ color: 'var(--color-text)' }}>
                 <span>{activeCurrencySymbol}{metrics.totalRevenue.toFixed(2)}</span>
-                <span className="text-[10px] font-semibold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{config.currency}</span>
+                <span className="text-[10px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{config.currency}</span>
               </div>
             </div>
 
             <div 
               className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('successfulPaymentsTitle', 'Successful')}
               </div>
               <div 
                 className="text-xl font-black flex items-center gap-1.5"
-                style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }}
+                style={{ color: 'var(--color-emerald)' }}
               >
                 {metrics.succeededCount}
-                <CheckCircle2 className="h-4 w-4" />
+                <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
               </div>
             </div>
 
             <div 
               className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('cancelledTitle', 'Cancelled')}
               </div>
-              <div className="text-xl font-black flex items-center gap-1.5" style={{ color: isDayMode ? '#c2410c' : '#fb923c' }}>
+              <div className="text-xl font-black flex items-center gap-1.5" style={{ color: '#fb923c' }}>
                 {metrics.canceledCount}
                 <Ban className="h-4 w-4 text-orange-500" />
               </div>
@@ -2078,14 +2028,14 @@ export default function AdminPaymentPage() {
             <div 
               className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('refundedTitle', 'Refunded')}
               </div>
-              <div className="text-xl font-black flex items-center gap-1.5" style={{ color: isDayMode ? '#b45309' : '#fbbf24' }}>
+              <div className="text-xl font-black flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
                 {metrics.refundedCount}
                 <ArrowDownLeft className="h-4 w-4" />
               </div>
@@ -2094,16 +2044,16 @@ export default function AdminPaymentPage() {
             <div 
               className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('failedPaymentsTitle', 'Failed')}
               </div>
-              <div className="text-xl font-black flex items-center gap-1.5" style={{ color: isDayMode ? '#b91c1c' : '#f87171' }}>
+              <div className="text-xl font-black flex items-center gap-1.5 text-red-500">
                 {metrics.failedCount}
-                <XCircle className="h-4 w-4" />
+                <XCircle className="h-4 w-4 text-red-500" />
               </div>
             </div>
           </div>
@@ -2112,12 +2062,12 @@ export default function AdminPaymentPage() {
           <div 
             className="border p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="relative w-full md:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} />
               <input
                 type="text"
                 placeholder={t('searchPaymentPlaceholder', 'Search by customer name, email, or plan...')}
@@ -2125,12 +2075,12 @@ export default function AdminPaymentPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="payment-input w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none transition font-medium"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
               />
             </div>
 
@@ -2147,23 +2097,23 @@ export default function AdminPaymentPage() {
               )}
 
               <div className="flex items-center gap-1.5">
-                <Filter className="h-3.5 w-3.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+                <Filter className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} />
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as any)}
                   className="border rounded-xl px-3 py-2 text-xs font-semibold outline-none cursor-pointer transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
-                  <option value="all">{t('allStatuses', 'All Statuses')}</option>
-                  <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
-                  <option value="canceled">{t('statusCanceled', 'Cancelled')}</option>
-                  <option value="failed">{t('statusFailed', 'Failed')}</option>
-                  <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
-                  <option value="pending">{t('statusPending', 'Pending')}</option>
+                  <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allStatuses', 'All Statuses')}</option>
+                  <option value="succeeded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusSucceeded', 'Succeeded')}</option>
+                  <option value="canceled" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusCanceled', 'Cancelled')}</option>
+                  <option value="failed" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusFailed', 'Failed')}</option>
+                  <option value="refunded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusRefunded', 'Refunded')}</option>
+                  <option value="pending" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusPending', 'Pending')}</option>
                 </select>
               </div>
 
@@ -2172,15 +2122,15 @@ export default function AdminPaymentPage() {
                 onChange={(e) => setGatewayFilter(e.target.value as any)}
                 className="border rounded-xl px-3 py-2 text-xs font-semibold outline-none cursor-pointer transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
-                <option value="all">{t('allGateways', 'All Gateways')}</option>
-                <option value="stripe">{t('gatewayStripe', 'Stripe')}</option>
-                <option value="paypal">{t('gatewayPaypal', 'PayPal')}</option>
-                <option value="manual">{t('gatewayManual', 'Manual')}</option>
+                <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allGateways', 'All Gateways')}</option>
+                <option value="stripe" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayStripe', 'Stripe')}</option>
+                <option value="paypal" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayPaypal', 'PayPal')}</option>
+                <option value="manual" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayManual', 'Manual')}</option>
               </select>
 
               <select
@@ -2188,15 +2138,15 @@ export default function AdminPaymentPage() {
                 onChange={(e) => setPageSize(Number(e.target.value))}
                 className="border rounded-xl px-2.5 py-2 text-xs font-semibold outline-none cursor-pointer transition"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#334155' : '#cbd5e1'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
                 }}
               >
-                <option value={5}>{t('perPage5', '5 per page')}</option>
-                <option value={10}>{t('perPage10', '10 per page')}</option>
-                <option value={20}>{t('perPage20', '20 per page')}</option>
-                <option value={50}>{t('perPage50', '50 per page')}</option>
+                <option value={5} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage5', '5 per page')}</option>
+                <option value={10} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage10', '10 per page')}</option>
+                <option value={20} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage20', '20 per page')}</option>
+                <option value={50} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage50', '50 per page')}</option>
               </select>
 
               {/* TABLE COLUMN SHOW / HIDE POPUP TOGGLE */}
@@ -2206,13 +2156,13 @@ export default function AdminPaymentPage() {
                   onClick={() => setShowColumnPopup(!showColumnPopup)}
                   className="border rounded-xl px-3 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                    borderColor: showColumnPopup ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'),
-                    color: showColumnPopup ? 'var(--color-primary, #E05638)' : (isDayMode ? '#334155' : '#cbd5e1')
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: showColumnPopup ? 'var(--color-primary)' : 'var(--color-border)',
+                    color: showColumnPopup ? 'var(--color-primary)' : 'var(--color-text-secondary)'
                   }}
                   title={t('customizeColumnsTooltip', 'Show / Hide Table Columns')}
                 >
-                  <Columns3 className="h-3.5 w-3.5" style={{ color: showColumnPopup ? 'var(--color-primary, #E05638)' : undefined }} />
+                  <Columns3 className="h-3.5 w-3.5" style={{ color: showColumnPopup ? 'var(--color-primary)' : undefined }} />
                   <span className="hidden sm:inline">{t('columnsBtn', 'Columns')}</span>
                 </button>
 
@@ -2220,14 +2170,14 @@ export default function AdminPaymentPage() {
                   <div
                     className="absolute right-0 mt-2 w-56 rounded-2xl border shadow-2xl p-3.5 z-50 text-xs animate-in fade-in transition-colors duration-200"
                     style={{
-                      backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     <div 
                       className="flex items-center justify-between pb-2.5 border-b mb-2"
-                      style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+                      style={{ borderColor: 'var(--color-border)' }}
                     >
                       <div className="flex items-center gap-1.5 font-bold text-xs">
                         <Columns3 className="h-3.5 w-3.5 text-[var(--color-primary)]" />
@@ -2258,7 +2208,7 @@ export default function AdminPaymentPage() {
                             key={col.key}
                             className="flex items-center justify-between px-2.5 py-1.5 rounded-xl cursor-pointer transition select-none hover:bg-emerald-500/10"
                           >
-                            <span className="font-medium text-xs" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                            <span className="font-medium text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                               {col.label}
                             </span>
                             <input
@@ -2282,9 +2232,9 @@ export default function AdminPaymentPage() {
             <div
               className="p-3 px-4 rounded-2xl border flex items-center justify-between text-xs animate-in fade-in"
               style={{
-                backgroundColor: isDayMode ? '#fee2e2' : 'rgba(239, 68, 68, 0.12)',
-                borderColor: isDayMode ? '#fca5a5' : 'rgba(239, 68, 68, 0.35)',
-                color: isDayMode ? '#991b1b' : '#fca5a5',
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'rgba(239, 68, 68, 0.4)',
+                color: '#ef4444'
               }}
             >
               <div className="flex items-center gap-2">
@@ -2299,9 +2249,9 @@ export default function AdminPaymentPage() {
                   onClick={() => setSelectedTxIds([])}
                   className="px-3 py-1 rounded-lg border transition font-medium cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#334155' : '#cbd5e1'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('clearSelection', 'Clear')}
@@ -2321,8 +2271,8 @@ export default function AdminPaymentPage() {
           <div 
             className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="overflow-x-auto">
@@ -2330,9 +2280,9 @@ export default function AdminPaymentPage() {
                 <thead 
                   className="font-bold uppercase tracking-wider border-b transition-colors duration-200"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'rgba(11, 16, 29, 0.7)',
-                    borderColor: isDayMode ? '#e2e8f0' : '#1e293b',
-                    color: isDayMode ? '#64748b' : '#94a3b8'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   <tr>
@@ -2356,11 +2306,11 @@ export default function AdminPaymentPage() {
                 </thead>
                 <tbody 
                   className="divide-y transition-colors duration-200"
-                  style={{ borderColor: isDayMode ? '#e2e8f0' : 'rgba(30, 41, 59, 0.6)' }}
+                  style={{ borderColor: 'var(--color-border)' }}
                 >
                   {paginatedTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={activeColumnCount} className="text-center py-10 font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      <td colSpan={activeColumnCount} className="text-center py-10 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
                         {t('noTransactionsFound', 'No payment transactions found matching your criteria.')}
                       </td>
                     </tr>
@@ -2376,11 +2326,10 @@ export default function AdminPaymentPage() {
                       return (
                         <tr 
                           key={tx.id} 
-                          className={`transition ${
-                            isRowSelected 
-                              ? (isDayMode ? 'bg-red-50' : 'bg-red-950/20') 
-                              : (isDayMode ? 'hover:bg-slate-50' : 'hover:bg-slate-900/40')
-                          }`}
+                          className="transition"
+                          style={{
+                            backgroundColor: isRowSelected ? 'var(--color-inner-dark)' : 'transparent'
+                          }}
                         >
                           <td className="px-4 py-3.5 text-center">
                             <input
@@ -2393,21 +2342,21 @@ export default function AdminPaymentPage() {
 
                           {visibleColumns.customer && (
                             <td className="px-5 py-3.5">
-                              <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.customerName || 'Customer'}</div>
-                              <div className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.customerEmail || ''}</div>
+                              <div className="font-bold" style={{ color: 'var(--color-text)' }}>{tx.customerName || 'Customer'}</div>
+                              <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{tx.customerEmail || ''}</div>
                             </td>
                           )}
 
                           {visibleColumns.plan && (
-                            <td className="px-5 py-3.5 font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                            <td className="px-5 py-3.5 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                               {tx.planName || tx.planSlug || 'Plan'}
                             </td>
                           )}
 
                           {visibleColumns.amount && (
-                            <td className="px-5 py-3.5 font-bold whitespace-nowrap" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                            <td className="px-5 py-3.5 font-bold whitespace-nowrap" style={{ color: 'var(--color-text)' }}>
                               {txSymbol}{parseAmount(tx.amount).toFixed(2)}{' '}
-                              <span className="text-[10px] font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.currency || config.currency}</span>
+                              <span className="text-[10px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>{tx.currency || config.currency}</span>
                             </td>
                           )}
 
@@ -2417,59 +2366,59 @@ export default function AdminPaymentPage() {
                                 <span 
                                   className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
                                   style={{
-                                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                                    borderColor: 'var(--color-emerald, #10b981)',
-                                    color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                                    backgroundColor: 'var(--color-inner-dark)',
+                                    borderColor: 'var(--color-emerald)',
+                                    color: 'var(--color-emerald)'
                                   }}
                                   title={tx.gatewayTransactionId ? `Gateway Ref: ${tx.gatewayTransactionId}` : 'Confirmed Payment'}
                                 >
-                                  <CheckCircle2 className="h-3 w-3" /> {t('statusSucceeded', 'Succeeded')}
+                                  <CheckCircle2 className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {t('statusSucceeded', 'Succeeded')}
                                 </span>
                               )}
                               {isCanceled(tx.status) && (
                                 <span 
                                   className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
                                   style={{
-                                    backgroundColor: isDayMode ? '#fff7ed' : 'rgba(249, 115, 22, 0.15)',
+                                    backgroundColor: 'var(--color-inner-dark)',
                                     borderColor: '#f97316',
-                                    color: isDayMode ? '#c2410c' : '#fb923c'
+                                    color: '#f97316'
                                   }}
                                 >
-                                  <Ban className="h-3 w-3" /> {t('statusCanceled', 'Cancelled')}
+                                  <Ban className="h-3 w-3 text-orange-500" /> {t('statusCanceled', 'Cancelled')}
                                 </span>
                               )}
                               {isFailed(tx.status) && (
                                 <span 
                                   className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs cursor-help"
                                   style={{
-                                    backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                                    borderColor: '#ef4444',
-                                    color: isDayMode ? '#b91c1c' : '#f87171'
+                                    backgroundColor: 'var(--color-inner-dark)',
+                                    borderColor: 'rgba(239, 68, 68, 0.4)',
+                                    color: '#ef4444'
                                   }}
                                   title={tx.failureReason || 'Declined by payment processor'}
                                 >
-                                  <XCircle className="h-3 w-3" /> {t('statusFailed', 'Failed')}
+                                  <XCircle className="h-3 w-3 text-red-500" /> {t('statusFailed', 'Failed')}
                                 </span>
                               )}
                               {isRefunded(tx.status) && (
                                 <span 
                                   className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
                                   style={{
-                                    backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
+                                    backgroundColor: 'var(--color-inner-dark)',
                                     borderColor: '#f59e0b',
-                                    color: isDayMode ? '#b45309' : '#fbbf24'
+                                    color: '#f59e0b'
                                   }}
                                 >
-                                  <ArrowDownLeft className="h-3 w-3" /> {t('statusRefunded', 'Refunded')}
+                                  <ArrowDownLeft className="h-3 w-3 text-amber-500" /> {t('statusRefunded', 'Refunded')}
                                 </span>
                               )}
                               {isPending(tx.status) && (
                                 <span 
                                   className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
                                   style={{
-                                    backgroundColor: isDayMode ? '#f1f5f9' : '#1e293b',
-                                    borderColor: isDayMode ? '#cbd5e1' : '#334155',
-                                    color: isDayMode ? '#334155' : '#cbd5e1'
+                                    backgroundColor: 'var(--color-inner-dark)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text-secondary)'
                                   }}
                                 >
                                   <RefreshCw className="h-3 w-3 animate-spin" /> {t('statusPending', 'Pending')}
@@ -2479,13 +2428,13 @@ export default function AdminPaymentPage() {
                           )}
                           
                           {visibleColumns.date && (
-                            <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                            <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
                               {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '-'}
                             </td>
                           )}
                           
                           {visibleColumns.expiryDate && (
-                            <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                            <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
                               {tx.expiryDate ? (() => {
                                 const exp = new Date(tx.expiryDate);
                                 const now = new Date();
@@ -2493,25 +2442,32 @@ export default function AdminPaymentPage() {
                                 const expMidnight = new Date(exp.getFullYear(), exp.getMonth(), exp.getDate());
                                 const diffDays = Math.ceil((expMidnight.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
 
-                                let badgeStyle = isDayMode 
-                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
-                                  : 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400';
+                                let badgeStyle = {
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-emerald)',
+                                  color: 'var(--color-emerald)'
+                                };
                                 let badgeNotice = '';
 
                                 if (diffDays < 0) {
-                                  badgeStyle = isDayMode
-                                    ? 'bg-red-50 border-red-300 text-red-800'
-                                    : 'bg-red-950/50 border-red-600/70 text-red-400';
+                                  badgeStyle = {
+                                    backgroundColor: 'var(--color-inner-dark)',
+                                    borderColor: 'rgba(239, 68, 68, 0.4)',
+                                    color: '#ef4444'
+                                  };
                                   badgeNotice = t('expiredBadge', 'EXPIRED');
                                 } else if (diffDays <= 7) {
-                                  badgeStyle = isDayMode
-                                    ? 'bg-orange-50 border-orange-300 text-orange-800'
-                                    : 'bg-orange-950/50 border-orange-500/70 text-orange-400';
+                                  badgeStyle = {
+                                    backgroundColor: 'var(--color-inner-dark)',
+                                    borderColor: 'rgba(245, 158, 11, 0.4)',
+                                    color: '#f59e0b'
+                                  };
                                 }
 
                                 return (
                                   <span
-                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold text-[11px] transition shadow-xs ${badgeStyle}`}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold text-[11px] transition shadow-xs"
+                                    style={badgeStyle}
                                     title={badgeNotice ? `${exp.toLocaleDateString()} (${badgeNotice})` : exp.toLocaleDateString()}
                                   >
                                     <Calendar className="h-3 w-3 shrink-0" />
@@ -2524,7 +2480,7 @@ export default function AdminPaymentPage() {
                                   </span>
                                 );
                               })() : (
-                                <span className="text-[11px] italic font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                                <span className="text-[11px] italic font-normal" style={{ color: 'var(--color-text-secondary)' }}>
                                   {t('lifetimeNone', 'Lifetime / None')}
                                 </span>
                               )}
@@ -2534,58 +2490,57 @@ export default function AdminPaymentPage() {
                           {visibleColumns.actions && (
                             <td className="px-5 py-3.5 text-right whitespace-nowrap">
                               <div className="flex items-center justify-end gap-1.5">
-                                {/* CONFIRM PAYMENT FROM GATEWAY BUTTON */}
                                 {!isTxSucceeded && !isTxRefunded && (
                                   <button
                                     type="button"
                                     onClick={() => handleOpenConfirmModal(tx)}
-                                    className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer text-emerald-600 hover:text-emerald-700 hover:border-emerald-500"
+                                    className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer"
                                     style={{
-                                      backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
-                                      borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.35)',
+                                      backgroundColor: 'var(--color-inner-dark)',
+                                      borderColor: 'var(--color-emerald)',
+                                      color: 'var(--color-emerald)'
                                     }}
                                     title={t('confirmPaymentTooltip', 'Confirm payment amount from gateway to mark Succeeded')}
                                   >
-                                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                                    <ShieldCheck className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
                                   </button>
                                 )}
 
-                                {/* EDIT BUTTON */}
                                 <button
                                   type="button"
                                   disabled={isTxRefunded}
                                   onClick={() => handleOpenEditModal(tx)}
                                   className={`p-1.5 rounded-lg border transition shadow-xs ${
                                     isTxRefunded
-                                      ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                      ? 'opacity-30 cursor-not-allowed'
                                       : 'cursor-pointer'
                                   }`}
                                   style={{
-                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                    color: isDayMode ? '#0f172a' : '#cbd5e1'
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
                                   }}
                                   title={isTxRefunded ? t('cannotModifyRefundedTooltip', 'Cannot modify refunded payment') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
                                 >
                                   <Pencil 
                                     className="h-3.5 w-3.5" 
-                                    style={{ color: isTxRefunded ? (isDayMode ? '#94a3b8' : '#64748b') : 'var(--color-primary, #E05638)' }} 
+                                    style={{ color: isTxRefunded ? 'var(--color-text-secondary)' : 'var(--color-primary)' }} 
                                   />
                                 </button>
 
-                                {/* GATEWAY REFUND BUTTON */}
                                 <button
                                   type="button"
                                   disabled={isTxRefunded || isTxRefunding || isFailed(tx.status)}
                                   onClick={() => handleRefundTransaction(tx)}
                                   className={`p-1.5 rounded-lg border transition shadow-xs ${
                                     isTxRefunded || isFailed(tx.status)
-                                      ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                      : 'text-amber-600 hover:text-amber-700 cursor-pointer hover:border-amber-400'
+                                      ? 'opacity-30 cursor-not-allowed'
+                                      : 'cursor-pointer'
                                   }`}
                                   style={{
-                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: '#f59e0b'
                                   }}
                                   title={
                                     isTxRefunded
@@ -2596,38 +2551,37 @@ export default function AdminPaymentPage() {
                                   {isTxRefunding ? (
                                     <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-500" />
                                   ) : (
-                                    <RotateCcw className="h-3.5 w-3.5" />
+                                    <RotateCcw className="h-3.5 w-3.5 text-amber-500" />
                                   )}
                                 </button>
 
-                                {/* CANCEL RENEWAL BUTTON */}
                                 <button
                                   type="button"
                                   disabled={isTxCanceled || isTxRefunded}
                                   onClick={() => handleCancelPlan(tx)}
                                   className={`p-1.5 rounded-lg border transition shadow-xs ${
                                     isTxCanceled || isTxRefunded
-                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                    : 'text-orange-500 hover:text-orange-600 cursor-pointer'
+                                    ? 'opacity-30 cursor-not-allowed'
+                                    : 'cursor-pointer'
                                   }`}
                                   style={{
-                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: '#f97316'
                                   }}
                                   title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan renewal & keep active until expiry')}
                                 >
-                                  <XCircle className="h-3.5 w-3.5" />
+                                  <XCircle className="h-3.5 w-3.5 text-orange-500" />
                                 </button>
 
-                                {/* DELETE BUTTON */}
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteTransaction(tx.id, tx.customerName)}
                                   className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
                                   style={{
-                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                    color: isDayMode ? '#64748b' : '#94a3b8'
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text-secondary)'
                                   }}
                                   title={t('deletePaymentTooltip', 'Delete payment record permanently')}
                                 >
@@ -2648,20 +2602,20 @@ export default function AdminPaymentPage() {
             <div 
               className="px-5 py-3.5 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'rgba(11, 16, 29, 0.6)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <div className="font-semibold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <div className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('showing', 'Showing')}{' '}
-                <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                <span className="font-bold" style={{ color: 'var(--color-text)' }}>
                   {filteredTransactions.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
                 </span>{' '}
                 {t('to', 'to')}{' '}
-                <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                <span className="font-bold" style={{ color: 'var(--color-text)' }}>
                   {Math.min(currentPage * pageSize, filteredTransactions.length)}
                 </span>{' '}
-                {t('of', 'of')} <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{filteredTransactions.length}</span> {t('resultsSuffix', 'results')}
+                {t('of', 'of')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{filteredTransactions.length}</span> {t('resultsSuffix', 'results')}
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -2671,9 +2625,9 @@ export default function AdminPaymentPage() {
                   onClick={() => setCurrentPage(1)}
                   className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#cbd5e1'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                   title={t('firstPageTooltip', 'First Page')}
                 >
@@ -2685,16 +2639,16 @@ export default function AdminPaymentPage() {
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#cbd5e1'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                   title={t('previousPageTooltip', 'Previous Page')}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
 
-                <div className="px-3 py-1 font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                <div className="px-3 py-1 font-bold text-xs" style={{ color: 'var(--color-text)' }}>
                   {t('page', 'Page')} {currentPage} {t('of', 'of')} {totalPages}
                 </div>
 
@@ -2704,9 +2658,9 @@ export default function AdminPaymentPage() {
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                   className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#cbd5e1'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                   title={t('nextPageTooltip', 'Next Page')}
                 >
@@ -2718,9 +2672,9 @@ export default function AdminPaymentPage() {
                   onClick={() => setCurrentPage(totalPages)}
                   className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#cbd5e1'
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                   title={t('lastPageTooltip', 'Last Page')}
                 >
@@ -2736,16 +2690,16 @@ export default function AdminPaymentPage() {
           <div 
             className="border p-6 rounded-3xl shadow-sm transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="space-y-1">
-                <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                  <Globe className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('processingCurrencyTitle', 'Processing Currency')}
+                <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('processingCurrencyTitle', 'Processing Currency')}
                 </h2>
-                <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('processingCurrencySub', 'Select the default currency for processing subscriptions and recording transactions.')}
                 </p>
               </div>
@@ -2756,15 +2710,15 @@ export default function AdminPaymentPage() {
                   onChange={(e) => handleCurrencyChange(e.target.value)}
                   className="payment-input w-full border rounded-xl p-3 text-xs font-bold outline-none transition cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 >
                   {SUPPORTED_CURRENCIES.map((curr) => (
-                    <option key={curr.code} value={curr.code} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={curr.code} value={curr.code} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {curr.label}
                     </option>
                   ))}
@@ -2776,26 +2730,24 @@ export default function AdminPaymentPage() {
           <div 
             className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                <Shield className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('defaultGatewayTitle', 'Default Payment Gateway')}
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Shield className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('defaultGatewayTitle', 'Default Payment Gateway')}
               </h2>
               <div className="flex items-center gap-2">
-                <label className="text-xs font-bold" style={{ color: isDayMode ? '#475569' : '#cbd5e1' }}>{t('environmentLabel', 'Environment:')}</label>
+                <label className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>{t('environmentLabel', 'Environment:')}</label>
                 <button
                   type="button"
                   onClick={() => setConfig({ ...config, testMode: !config.testMode })}
                   className="text-xs font-bold px-3 py-1 rounded-full border transition cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: config.testMode 
-                      ? (isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)') 
-                      : (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)'),
-                    borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald, #10b981)',
-                    color: config.testMode ? (isDayMode ? '#b45309' : '#fbbf24') : (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)')
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald)',
+                    color: config.testMode ? '#fbbf24' : 'var(--color-emerald)'
                   }}
                 >
                   {config.testMode ? t('sandboxTestMode', 'Sandbox (Test Mode)') : t('liveProduction', 'Live Production')}
@@ -2810,20 +2762,20 @@ export default function AdminPaymentPage() {
                   config.activeGateway === 'stripe' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
                 }`}
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                  borderColor: config.activeGateway === 'stripe' ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)')
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: config.activeGateway === 'stripe' ? 'var(--color-primary)' : 'var(--color-border)'
                 }}
               >
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-base font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Stripe</span>
+                    <span className="text-base font-black" style={{ color: 'var(--color-text)' }}>Stripe</span>
                     {config.activeGateway === 'stripe' && (
-                      <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
+                      <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
                         <Check className="h-3.5 w-3.5" />
                       </div>
                     )}
                   </div>
-                  <p className="text-xs mt-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('stripeCardDesc', 'Accept credit cards securely via Stripe Checkout and webhooks.')}
                   </p>
                 </div>
@@ -2835,20 +2787,20 @@ export default function AdminPaymentPage() {
                   config.activeGateway === 'paypal' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
                 }`}
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                  borderColor: config.activeGateway === 'paypal' ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)')
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: config.activeGateway === 'paypal' ? 'var(--color-primary)' : 'var(--color-border)'
                 }}
               >
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-base font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>PayPal</span>
+                    <span className="text-base font-black" style={{ color: 'var(--color-text)' }}>PayPal</span>
                     {config.activeGateway === 'paypal' && (
-                      <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
+                      <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
                         <Check className="h-3.5 w-3.5" />
                       </div>
                     )}
                   </div>
-                  <p className="text-xs mt-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('paypalCardDesc', 'Accept digital wallet and PayPal account balance payments.')}
                   </p>
                 </div>
@@ -2860,22 +2812,22 @@ export default function AdminPaymentPage() {
                   config.activeGateway === 'both' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
                 }`}
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                  borderColor: config.activeGateway === 'both' ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)')
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: config.activeGateway === 'both' ? 'var(--color-primary)' : 'var(--color-border)'
                 }}
               >
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-base font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <span className="text-base font-black" style={{ color: 'var(--color-text)' }}>
                       {t('multiGatewayCardTitle', 'Both Gateways')}
                     </span>
                     {config.activeGateway === 'both' && (
-                      <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
+                      <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
                         <Check className="h-3.5 w-3.5" />
                       </div>
                     )}
                   </div>
-                  <p className="text-xs mt-2" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('multiGatewayCardDesc', 'Enable both Stripe and PayPal checkout options simultaneously.')}
                   </p>
                 </div>
@@ -2888,14 +2840,14 @@ export default function AdminPaymentPage() {
             <div 
               className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
-                  <h3 className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('stripeApiConfig', 'Stripe API Configuration')}</h3>
+                  <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('stripeApiConfig', 'Stripe API Configuration')}</h3>
                 </div>
                 <input
                   type="checkbox"
@@ -2906,7 +2858,7 @@ export default function AdminPaymentPage() {
               </div>
 
               <div className="space-y-1.5 pb-2">
-                <label className="text-xs font-bold block" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('connectStripeBtn', 'Connect Stripe Account')}
                 </label>
                 <div className="flex items-center gap-3">
@@ -2930,20 +2882,20 @@ export default function AdminPaymentPage() {
                     <span 
                       className="text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 border shadow-xs"
                       style={{
-                        backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                        borderColor: 'var(--color-emerald, #10b981)',
-                        color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
                       }}
                     >
-                      <Check className="h-3.5 w-3.5" /> {t('connectedStatus', 'Connected')}
+                      <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} /> {t('connectedStatus', 'Connected')}
                     </span>
                   )}
                 </div>
               </div>
 
-              <div className="space-y-3 pt-1 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'rgba(30, 41, 59, 0.6)' }}>
+              <div className="space-y-3 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('publishableKeyLabel', 'Publishable Key')}
                   </label>
                   <div className="relative">
@@ -2954,18 +2906,18 @@ export default function AdminPaymentPage() {
                       placeholder="pk_test_... / pk_live_..."
                       className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
                       onClick={() => toggleVisibility('stripePublishable')}
                       className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       {visibleFields['stripePublishable'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -2973,7 +2925,7 @@ export default function AdminPaymentPage() {
                 </div>
 
                 <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('secretKeyLabel', 'Secret Key')}
                   </label>
                   <div className="relative">
@@ -2984,18 +2936,18 @@ export default function AdminPaymentPage() {
                       placeholder="sk_test_... / sk_live_..."
                       className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
                       onClick={() => toggleVisibility('stripeSecret')}
                       className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       {visibleFields['stripeSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -3003,7 +2955,7 @@ export default function AdminPaymentPage() {
                 </div>
 
                 <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('webhookSecretLabel', 'Webhook Secret')}
                   </label>
                   <div className="relative">
@@ -3014,18 +2966,18 @@ export default function AdminPaymentPage() {
                       placeholder="whsec_..."
                       className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
                       onClick={() => toggleVisibility('stripeWebhook')}
                       className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       {visibleFields['stripeWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -3037,14 +2989,14 @@ export default function AdminPaymentPage() {
             <div 
               className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
-                  <h3 className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('paypalApiConfig', 'PayPal API Configuration')}</h3>
+                  <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('paypalApiConfig', 'PayPal API Configuration')}</h3>
                 </div>
                 <input
                   type="checkbox"
@@ -3056,7 +3008,7 @@ export default function AdminPaymentPage() {
 
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('clientIdLabel', 'Client ID')}
                   </label>
                   <div className="relative">
@@ -3067,18 +3019,18 @@ export default function AdminPaymentPage() {
                       placeholder="PayPal Client ID"
                       className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
                       onClick={() => toggleVisibility('paypalClientId')}
                       className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       {visibleFields['paypalClientId'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -3086,7 +3038,7 @@ export default function AdminPaymentPage() {
                 </div>
 
                 <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('clientSecretLabel', 'Client Secret')}
                   </label>
                   <div className="relative">
@@ -3097,18 +3049,18 @@ export default function AdminPaymentPage() {
                       placeholder="PayPal Client Secret"
                       className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
                       onClick={() => toggleVisibility('paypalSecret')}
                       className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       {visibleFields['paypalSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -3116,7 +3068,7 @@ export default function AdminPaymentPage() {
                 </div>
 
                 <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('webhookIdLabel', 'Webhook ID')}
                   </label>
                   <div className="relative">
@@ -3127,18 +3079,18 @@ export default function AdminPaymentPage() {
                       placeholder="PayPal Webhook ID"
                       className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
                       onClick={() => toggleVisibility('paypalWebhook')}
                       className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       {visibleFields['paypalWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -3154,9 +3106,9 @@ export default function AdminPaymentPage() {
               onClick={fetchData}
               className="px-4 py-3 border font-bold text-xs rounded-2xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#334155' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)'
               }}
             >
               <RefreshCw className="h-4 w-4" /> {t('resetConfigBtn', 'Reset Config')}
@@ -3165,9 +3117,9 @@ export default function AdminPaymentPage() {
               type="submit"
               disabled={loading}
               className="px-8 py-3 text-white font-bold rounded-2xl transition text-xs shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
             >
               <Save className="h-4 w-4" />
               {loading ? t('savingSettings', 'Saving Settings...') : t('saveConfigBtn', 'Save Gateway Settings')}
@@ -3186,17 +3138,17 @@ export default function AdminPaymentPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => !isSubmittingConfirm && setConfirmingTx(null)}
               className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-bg, #0B101D)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
@@ -3205,11 +3157,11 @@ export default function AdminPaymentPage() {
             <div className="space-y-1 pr-6">
               <h2 
                 className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-emerald, #10b981)' }}
+                style={{ color: 'var(--color-emerald)' }}
               >
-                <ShieldCheck className="h-5 w-5 text-emerald-500" /> {t('confirmGatewayPaymentTitle', 'Confirm Gateway Payment')}
+                <ShieldCheck className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} /> {t('confirmGatewayPaymentTitle', 'Confirm Gateway Payment')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('confirmGatewayPaymentSub', 'Confirm payment amount transaction from payment gateway to become status "Succeeded".')}
               </p>
             </div>
@@ -3218,30 +3170,30 @@ export default function AdminPaymentPage() {
             <div 
               className="p-3.5 rounded-2xl border space-y-2 transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'rgba(11, 16, 29, 0.6)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
               }}
             >
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-400">{t('customerCol', 'Customer')}:</span>
-                <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('customerCol', 'Customer')}:</span>
+                <span className="font-bold" style={{ color: 'var(--color-text)' }}>
                   {confirmingTx.customerName} ({confirmingTx.customerEmail})
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-400">{t('planCol', 'Plan')}:</span>
+                <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('planCol', 'Plan')}:</span>
                 <span className="font-bold text-[var(--color-primary)]">
                   {confirmingTx.planName}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-400">{t('gatewayLabel', 'Gateway')}:</span>
-                <span className="font-extrabold uppercase px-2 py-0.5 rounded text-[10px] bg-slate-700/50 text-white">
+                <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('gatewayLabel', 'Gateway')}:</span>
+                <span className="font-extrabold uppercase px-2 py-0.5 rounded text-[10px]" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                   {confirmingTx.gateway}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-400">{t('currentStatusLabel', 'Current Status')}:</span>
+                <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('currentStatusLabel', 'Current Status')}:</span>
                 <span className="font-extrabold uppercase text-[11px] text-amber-500">
                   {confirmingTx.status}
                 </span>
@@ -3257,12 +3209,12 @@ export default function AdminPaymentPage() {
 
             <form onSubmit={handleConfirmPaymentSubmit} className="space-y-4 pt-1">
               <div>
-                <label className="block font-bold mb-1 flex items-center justify-between" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="block font-bold mb-1 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                   <span>{t('confirmedPaymentAmountLabel', 'Confirmed Payment Amount')} ({confirmingTx.currency || config.currency}) *</span>
-                  <span className="text-[10px] text-emerald-500 font-bold">{t('matchesGatewayNote', 'Must match gateway settlement')}</span>
+                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-emerald)' }}>{t('matchesGatewayNote', 'Must match gateway settlement')}</span>
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {getCurrencySymbol(confirmingTx.currency || config.currency)}
                   </span>
                   <input
@@ -3273,16 +3225,16 @@ export default function AdminPaymentPage() {
                     onChange={(e) => setConfirmAmount(parseFloat(e.target.value) || 0)}
                     className="payment-input w-full border rounded-xl pl-8 pr-3 py-2.5 text-xs outline-none font-black transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('gatewayTransactionIdLabel', 'Gateway Transaction ID / Payment Intent ID')}
                 </label>
                 <input
@@ -3292,9 +3244,9 @@ export default function AdminPaymentPage() {
                   onChange={(e) => setConfirmGatewayTxId(e.target.value)}
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 />
               </div>
@@ -3302,8 +3254,8 @@ export default function AdminPaymentPage() {
               <div 
                 className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.08)',
-                  borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.3)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)'
                 }}
               >
                 <div className="flex items-start gap-2">
@@ -3314,12 +3266,12 @@ export default function AdminPaymentPage() {
                     onChange={(e) => setConfirmCheckbox(e.target.checked)}
                     className="mt-0.5 rounded w-4 h-4 cursor-pointer accent-[#10b981]"
                   />
-                  <label htmlFor="confirmGatewayAmountCheckbox" className="font-semibold text-xs leading-relaxed cursor-pointer select-none" style={{ color: isDayMode ? '#047857' : '#6ee7b7' }}>
+                  <label htmlFor="confirmGatewayAmountCheckbox" className="font-semibold text-xs leading-relaxed cursor-pointer select-none" style={{ color: 'var(--color-emerald)' }}>
                     {t('confirmPaymentGatewayNotice', 'I verify and confirm that the payment transaction amount has been settled by the payment gateway, and confirm updating status to "Succeeded".')}
                   </label>
                 </div>
 
-                <div className="flex items-center gap-2 pt-1 border-t border-emerald-500/20">
+                <div className="flex items-center gap-2 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
                   <input
                     type="checkbox"
                     id="confirmSyncPlanBox"
@@ -3327,22 +3279,22 @@ export default function AdminPaymentPage() {
                     onChange={(e) => setConfirmSyncPlan(e.target.checked)}
                     className="rounded w-4 h-4 cursor-pointer accent-[#E05638]"
                   />
-                  <label htmlFor="confirmSyncPlanBox" className="font-medium text-[11px] cursor-pointer select-none" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label htmlFor="confirmSyncPlanBox" className="font-medium text-[11px] cursor-pointer select-none" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('syncUserPlanOnConfirm', 'Update user subscription entitlement in PostgreSQL immediately upon confirmation')}
                   </label>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
                   disabled={isSubmittingConfirm}
                   onClick={() => setConfirmingTx(null)}
                   className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs disabled:opacity-50"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#334155' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('cancel', 'Cancel')}
@@ -3350,7 +3302,8 @@ export default function AdminPaymentPage() {
                 <button
                   type="submit"
                   disabled={!confirmCheckbox || isSubmittingConfirm}
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-emerald-600 hover:bg-emerald-700"
+                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: 'var(--color-emerald)' }}
                 >
                   {isSubmittingConfirm ? (
                     <>
@@ -3358,7 +3311,7 @@ export default function AdminPaymentPage() {
                     </>
                   ) : (
                     <>
-                      <ShieldCheck className="h-4 w-4" /> {t('confirmPaymentAmountBtn', 'Confirm Payment & Set Succeeded')}
+                      <ShieldCheck className="h-4 w-4" style={{ color: '#ffffff' }} /> {t('confirmPaymentAmountBtn', 'Confirm Payment & Set Succeeded')}
                     </>
                   )}
                 </button>
@@ -3378,17 +3331,17 @@ export default function AdminPaymentPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => setShowAddModal(false)}
               className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-bg, #0B101D)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
@@ -3397,11 +3350,11 @@ export default function AdminPaymentPage() {
             <div className="space-y-1 pr-6">
               <h2 
                 className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 <PlusCircle className="h-5 w-5" /> {t('addPaymentModalTitle', 'Record Payment & Assign Plan')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('addPaymentModalSub', 'Manually record a payment transaction and immediately activate the subscription for a user.')}
               </p>
             </div>
@@ -3410,9 +3363,9 @@ export default function AdminPaymentPage() {
               <div 
                 className="p-3.5 rounded-xl border flex items-start gap-2.5 animate-in fade-in shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.12)',
-                  borderColor: isDayMode ? '#bfdbfe' : 'rgba(59, 130, 246, 0.4)',
-                  color: isDayMode ? '#1e40af' : '#93c5fd'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'rgba(59, 130, 246, 0.4)',
+                  color: '#3b82f6'
                 }}
               >
                 <AlertTriangle className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
@@ -3429,9 +3382,9 @@ export default function AdminPaymentPage() {
               <div 
                 className="p-3.5 rounded-xl border flex items-start gap-2.5 animate-in fade-in shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                  borderColor: '#ef4444',
-                  color: isDayMode ? '#b91c1c' : '#fca5a5'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'rgba(239, 68, 68, 0.4)',
+                  color: '#ef4444'
                 }}
               >
                 <Ban className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
@@ -3453,8 +3406,8 @@ export default function AdminPaymentPage() {
 
             <form onSubmit={handleAddPaymentSubmit} className="space-y-4 pt-1">
               <div>
-                <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  <UserIcon className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  <UserIcon className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                   {t('selectUserLabel', 'Select User Account')} ({registeredUsers.length})
                 </label>
                 {registeredUsers.length > 0 ? (
@@ -3463,31 +3416,31 @@ export default function AdminPaymentPage() {
                     onChange={(e) => handleUserSelectChange(e.target.value)}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold transition cursor-pointer"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     {registeredUsers.map((user) => (
-                      <option key={user.id} value={user.id} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      <option key={user.id} value={user.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                         {user.name} — {user.email} ({user.role}) [Active: {user.subscriptionPlan || 'taster'}]
                       </option>
                     ))}
                   </select>
                 ) : (
-                  <div className="p-2.5 rounded-xl border text-slate-400 text-center" style={{ backgroundColor: isDayMode ? '#f8fafc' : '#070b13', borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
+                  <div className="p-2.5 rounded-xl border text-center" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
                     {t('noRegisteredUsersAvailable', 'No registered users available')}
                   </div>
                 )}
               </div>
 
               <div>
-                <label className="block font-bold mb-1 flex items-center justify-between" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="block font-bold mb-1 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                   <span className="flex items-center gap-1.5">
-                    <Zap className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                    <Zap className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                     {t('selectPlanLabel', 'Select Subscription Plan')}
                   </span>
-                  <span className="text-[10px] font-bold" style={{ color: isDayMode ? '#059669' : '#34d399' }}>
+                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-emerald)' }}>
                     {t('onePlanPerEmailEnforced', 'Strictly 1 active plan per email enforced')}
                   </span>
                 </label>
@@ -3496,36 +3449,36 @@ export default function AdminPaymentPage() {
                   onChange={(e) => handlePlanSelectChange(e.target.value)}
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold transition cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                    borderColor: planTransitionInfo?.isDuplicate ? '#ef4444' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'),
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: planTransitionInfo?.isDuplicate ? '#ef4444' : 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
                   {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {plan.name} — {plan.priceFormatted}
                     </option>
                   ))}
                 </select>
-                <p className="text-[10px] mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('planChangeRuleNote', 'Selecting an upgraded or downgraded plan will automatically cancel and refund any previous active paid subscription.')}
                 </p>
               </div>
 
-              {/* RECURRING SLIDE BUTTON CONTROLLER IN ADD MODAL */}
+              {/* RECURRING SLIDE BUTTON */}
               <div 
                 className="p-3.5 rounded-2xl border flex items-center justify-between transition-colors shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'rgba(11, 16, 29, 0.6)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
                 <div className="space-y-0.5">
-                  <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
                     <Repeat className="h-3.5 w-3.5 text-[var(--color-primary)]" />
                     {t('recurringSubscriptionOption', 'Recurring Subscription (Auto-Renew)')}
                   </span>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {isPaymentRecurring 
                       ? t('recurringOnDesc', 'Auto-renews subscription at each billing cycle until canceled.') 
                       : t('recurringOffDesc', 'One-time payment cycle. Subscription will expire at term end.')}
@@ -3538,9 +3491,7 @@ export default function AdminPaymentPage() {
                   aria-checked={isPaymentRecurring}
                   onClick={() => setIsPaymentRecurring(!isPaymentRecurring)}
                   className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
-                    isPaymentRecurring 
-                      ? (isDayMode ? 'bg-emerald-600' : 'bg-[var(--color-emerald,#10b981)]') 
-                      : (isDayMode ? 'bg-slate-300' : 'bg-slate-700')
+                    isPaymentRecurring ? 'bg-[var(--color-emerald)]' : 'bg-slate-700'
                   }`}
                 >
                   <span
@@ -3554,8 +3505,8 @@ export default function AdminPaymentPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                     {t('paymentDateLabel', 'Payment Date')}
                   </label>
                   <input
@@ -3565,15 +3516,15 @@ export default function AdminPaymentPage() {
                     onChange={(e) => handlePaymentDateChange(e.target.value)}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-medium transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                     <Calendar className="h-3.5 w-3.5 text-emerald-500" />
                     {t('expiryDateCol', 'Expiry Date')}
                   </label>
@@ -3583,9 +3534,9 @@ export default function AdminPaymentPage() {
                     onChange={(e) => setPaymentExpiryDate(e.target.value)}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-medium transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
@@ -3593,11 +3544,11 @@ export default function AdminPaymentPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('paymentAmountLabel', 'Payment Amount')} ({config.currency}) *
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {activeCurrencySymbol}
                     </span>
                     <input
@@ -3608,28 +3559,28 @@ export default function AdminPaymentPage() {
                       onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
                       className="payment-input w-full border rounded-xl pl-8 pr-3 py-2.5 text-xs outline-none font-bold transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentGatewayLabel', 'Gateway')}</label>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('paymentGatewayLabel', 'Gateway')}</label>
                   <select
                     value={paymentGateway}
                     onChange={(e) => setPaymentGateway(e.target.value as any)}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
                     {allowedGateways.map((g) => (
-                      <option key={g.id} value={g.id} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                      <option key={g.id} value={g.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                         {g.label}
                       </option>
                     ))}
@@ -3639,7 +3590,7 @@ export default function AdminPaymentPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentStatusLabel', 'Status')}</label>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('paymentStatusLabel', 'Status')}</label>
                   <select
                     value={paymentStatus}
                     onChange={(e) => {
@@ -3651,22 +3602,22 @@ export default function AdminPaymentPage() {
                     }}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
-                    <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
-                    <option value="pending">{t('statusPending', 'Pending')}</option>
-                    <option value="canceled">{t('statusCanceled', 'Cancelled')}</option>
-                    <option value="failed">{t('statusFailed', 'Failed')}</option>
-                    <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
+                    <option value="succeeded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusSucceeded', 'Succeeded')}</option>
+                    <option value="pending" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusPending', 'Pending')}</option>
+                    <option value="canceled" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusCanceled', 'Cancelled')}</option>
+                    <option value="failed" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusFailed', 'Failed')}</option>
+                    <option value="refunded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusRefunded', 'Refunded')}</option>
                   </select>
                 </div>
 
                 {isFailed(paymentStatus) && (
                   <div>
-                    <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('declineFailureReasonLabel', 'Decline / Failure Reason')}</label>
+                    <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('declineFailureReasonLabel', 'Decline / Failure Reason')}</label>
                     <input
                       type="text"
                       placeholder="e.g. Card expired or declined"
@@ -3674,9 +3625,9 @@ export default function AdminPaymentPage() {
                       onChange={(e) => setFailureReason(e.target.value)}
                       className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
@@ -3688,15 +3639,15 @@ export default function AdminPaymentPage() {
                 <div 
                   className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.08)',
-                    borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.3)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-emerald)'
                   }}
                 >
-                  <div className="flex items-center gap-1.5 font-bold text-xs" style={{ color: isDayMode ? '#047857' : '#34d399' }}>
-                    <ShieldCheck className="h-4 w-4" /> {t('gatewayVerificationRequired', 'Required Gateway Amount Confirmation')}
+                  <div className="flex items-center gap-1.5 font-bold text-xs" style={{ color: 'var(--color-emerald)' }}>
+                    <ShieldCheck className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('gatewayVerificationRequired', 'Required Gateway Amount Confirmation')}
                   </div>
                   <div>
-                    <label className="block font-semibold text-[11px] mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    <label className="block font-semibold text-[11px] mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('gatewayTransactionIdLabel', 'Gateway Transaction ID / Payment Intent ID')}
                     </label>
                     <input
@@ -3706,9 +3657,9 @@ export default function AdminPaymentPage() {
                       onChange={(e) => setAddGatewayTxId(e.target.value)}
                       className="payment-input w-full border rounded-xl p-2 text-xs outline-none font-mono"
                       style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
@@ -3720,7 +3671,7 @@ export default function AdminPaymentPage() {
                       onChange={(e) => setAddGatewayConfirmed(e.target.checked)}
                       className="mt-0.5 rounded w-4 h-4 cursor-pointer accent-[#10b981]"
                     />
-                    <label htmlFor="addGatewayConfirmedBox" className="text-xs font-semibold leading-tight cursor-pointer select-none" style={{ color: isDayMode ? '#047857' : '#6ee7b7' }}>
+                    <label htmlFor="addGatewayConfirmedBox" className="text-xs font-semibold leading-tight cursor-pointer select-none" style={{ color: 'var(--color-emerald)' }}>
                       {t('confirmAmountFromGatewayLabel', 'I confirm the payment amount transaction from payment gateway is verified to become "Succeeded".')}
                     </label>
                   </div>
@@ -3736,21 +3687,21 @@ export default function AdminPaymentPage() {
                     onChange={(e) => setSyncUserPlan(e.target.checked)}
                     className="rounded w-4 h-4 cursor-pointer accent-[#E05638]"
                   />
-                  <label htmlFor="syncUserPlanBox" className="text-xs font-semibold cursor-pointer select-none" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label htmlFor="syncUserPlanBox" className="text-xs font-semibold cursor-pointer select-none" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('autoSyncPlanLabel', 'Automatically update user account to this plan and set active expiry')}
                   </label>
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
                   className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#334155' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('cancel', 'Cancel')}
@@ -3760,7 +3711,7 @@ export default function AdminPaymentPage() {
                   disabled={registeredUsers.length === 0 || Boolean(planTransitionInfo?.isDuplicate)}
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{
-                    backgroundColor: planTransitionInfo?.isDuplicate ? '#991b1b' : 'var(--color-primary, #E05638)'
+                    backgroundColor: planTransitionInfo?.isDuplicate ? '#991b1b' : 'var(--color-primary)'
                   }}
                 >
                   {planTransitionInfo?.isDuplicate ? (
@@ -3793,17 +3744,17 @@ export default function AdminPaymentPage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => setEditingTx(null)}
               className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-bg, #0B101D)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
@@ -3812,12 +3763,12 @@ export default function AdminPaymentPage() {
             <div className="space-y-1 pr-6">
               <h2 
                 className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 <Pencil className="h-5 w-5" /> {t('editPaymentModalTitle', 'Edit Payment & Subscription Record')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                {t('editPaymentModalSub', 'Update transaction details, recurring status, or expiration date for')} <span className="font-mono font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{editingTx.customerName}</span>.
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('editPaymentModalSub', 'Update transaction details, recurring status, or expiration date for')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>{editingTx.customerName}</span>.
               </p>
             </div>
 
@@ -3831,7 +3782,7 @@ export default function AdminPaymentPage() {
             <form onSubmit={handleUpdatePaymentSubmit} className="space-y-4 pt-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('customerNameLabel', 'Customer Name')}</label>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('customerNameLabel', 'Customer Name')}</label>
                   <input
                     type="text"
                     required
@@ -3839,14 +3790,14 @@ export default function AdminPaymentPage() {
                     onChange={(e) => setEditCustomerName(e.target.value)}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('customerEmailLabel', 'Customer Email')}</label>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('customerEmailLabel', 'Customer Email')}</label>
                   <input
                     type="email"
                     required
@@ -3854,49 +3805,49 @@ export default function AdminPaymentPage() {
                     onChange={(e) => setEditCustomerEmail(e.target.value)}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('planCol', 'Plan')}</label>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('planCol', 'Plan')}</label>
                 <select
                   value={editPlanSlug}
                   onChange={(e) => handleEditPlanSelectChange(e.target.value)}
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold transition cursor-pointer"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
-                  <option value="">Custom: {editPlanName}</option>
+                  <option value="" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Custom: {editPlanName}</option>
                   {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: isDayMode ? '#ffffff' : '#0B101D', color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {plan.name} — {plan.priceFormatted}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* RECURRING SLIDE BUTTON IN EDIT MODAL */}
+              {/* RECURRING SLIDE BUTTON */}
               <div 
                 className="p-3.5 rounded-2xl border flex items-center justify-between transition-colors shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'rgba(11, 16, 29, 0.6)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
                 <div className="space-y-0.5">
-                  <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
                     <Repeat className="h-3.5 w-3.5 text-[var(--color-primary)]" />
                     {t('recurringSubscriptionOption', 'Recurring Subscription (Auto-Renew)')}
                   </span>
-                  <p className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {editIsRecurring 
                       ? t('recurringOnDesc', 'Auto-renews subscription at each billing cycle until canceled.') 
                       : t('recurringOffDesc', 'One-time payment cycle. Subscription will expire at term end.')}
@@ -3909,9 +3860,7 @@ export default function AdminPaymentPage() {
                   aria-checked={editIsRecurring}
                   onClick={() => setEditIsRecurring(!editIsRecurring)}
                   className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
-                    editIsRecurring 
-                      ? (isDayMode ? 'bg-emerald-600' : 'bg-[var(--color-emerald,#10b981)]') 
-                      : (isDayMode ? 'bg-slate-300' : 'bg-slate-700')
+                    editIsRecurring ? 'bg-[var(--color-emerald)]' : 'bg-slate-700'
                   }`}
                 >
                   <span
@@ -3925,8 +3874,8 @@ export default function AdminPaymentPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                    <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                     {t('dateCol', 'Date')}
                   </label>
                   <input
@@ -3935,15 +3884,15 @@ export default function AdminPaymentPage() {
                     onChange={(e) => setEditDate(e.target.value)}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-medium transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                     <Calendar className="h-3.5 w-3.5 text-emerald-500" />
                     {t('expiryDateCol', 'Expiry Date')}
                   </label>
@@ -3953,9 +3902,9 @@ export default function AdminPaymentPage() {
                     onChange={(e) => setEditExpiryDate(e.target.value)}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-medium transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
@@ -3963,11 +3912,11 @@ export default function AdminPaymentPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('paymentAmountLabel', 'Payment Amount')} ({editingTx.currency || config.currency}) *
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {getCurrencySymbol(editingTx.currency || config.currency)}
                     </span>
                     <input
@@ -3978,36 +3927,36 @@ export default function AdminPaymentPage() {
                       onChange={(e) => setEditAmount(parseFloat(e.target.value) || 0)}
                       className="payment-input w-full border rounded-xl pl-8 pr-3 py-2.5 text-xs outline-none font-bold transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentGatewayLabel', 'Gateway')}</label>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('paymentGatewayLabel', 'Gateway')}</label>
                   <select
                     value={editGateway}
                     onChange={(e) => setEditGateway(e.target.value as any)}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
-                    <option value="stripe">{t('gatewayStripe', 'Stripe')}</option>
-                    <option value="paypal">{t('gatewayPaypal', 'PayPal')}</option>
-                    <option value="manual">{t('gatewayManual', 'Manual')}</option>
+                    <option value="stripe" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayStripe', 'Stripe')}</option>
+                    <option value="paypal" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayPaypal', 'PayPal')}</option>
+                    <option value="manual" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayManual', 'Manual')}</option>
                   </select>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('paymentStatusLabel', 'Status')}</label>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('paymentStatusLabel', 'Status')}</label>
                   <select
                     value={editStatus}
                     onChange={(e) => {
@@ -4019,22 +3968,22 @@ export default function AdminPaymentPage() {
                     }}
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
-                    <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
-                    <option value="pending">{t('statusPending', 'Pending')}</option>
-                    <option value="canceled">{t('statusCanceled', 'Cancelled')}</option>
-                    <option value="failed">{t('statusFailed', 'Failed')}</option>
-                    <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
+                    <option value="succeeded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusSucceeded', 'Succeeded')}</option>
+                    <option value="pending" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusPending', 'Pending')}</option>
+                    <option value="canceled" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusCanceled', 'Cancelled')}</option>
+                    <option value="failed" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusFailed', 'Failed')}</option>
+                    <option value="refunded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusRefunded', 'Refunded')}</option>
                   </select>
                 </div>
 
                 {isFailed(editStatus) && (
                   <div>
-                    <label className="block font-bold mb-1" style={{ color: isDayMode ? '#475569' : '#94a3b8' }}>{t('declineFailureReasonLabel', 'Decline / Failure Reason')}</label>
+                    <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('declineFailureReasonLabel', 'Decline / Failure Reason')}</label>
                     <input
                       type="text"
                       placeholder="e.g. Card expired or declined"
@@ -4042,9 +3991,9 @@ export default function AdminPaymentPage() {
                       onChange={(e) => setEditFailureReason(e.target.value)}
                       className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
@@ -4056,15 +4005,15 @@ export default function AdminPaymentPage() {
                 <div 
                   className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.08)',
-                    borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.3)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-emerald)'
                   }}
                 >
-                  <div className="flex items-center gap-1.5 font-bold text-xs" style={{ color: isDayMode ? '#047857' : '#34d399' }}>
-                    <ShieldCheck className="h-4 w-4" /> {t('gatewayVerificationRequired', 'Required Gateway Amount Confirmation')}
+                  <div className="flex items-center gap-1.5 font-bold text-xs" style={{ color: 'var(--color-emerald)' }}>
+                    <ShieldCheck className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('gatewayVerificationRequired', 'Required Gateway Amount Confirmation')}
                   </div>
                   <div>
-                    <label className="block font-semibold text-[11px] mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    <label className="block font-semibold text-[11px] mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('gatewayTransactionIdLabel', 'Gateway Transaction ID / Payment Intent ID')}
                     </label>
                     <input
@@ -4074,9 +4023,9 @@ export default function AdminPaymentPage() {
                       onChange={(e) => setEditGatewayTxId(e.target.value)}
                       className="payment-input w-full border rounded-xl p-2 text-xs outline-none font-mono"
                       style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
@@ -4088,7 +4037,7 @@ export default function AdminPaymentPage() {
                       onChange={(e) => setEditGatewayConfirmed(e.target.checked)}
                       className="mt-0.5 rounded w-4 h-4 cursor-pointer accent-[#10b981]"
                     />
-                    <label htmlFor="editGatewayConfirmedBox" className="text-xs font-semibold leading-tight cursor-pointer select-none" style={{ color: isDayMode ? '#047857' : '#6ee7b7' }}>
+                    <label htmlFor="editGatewayConfirmedBox" className="text-xs font-semibold leading-tight cursor-pointer select-none" style={{ color: 'var(--color-emerald)' }}>
                       {t('confirmAmountFromGatewayLabel', 'I confirm the payment amount transaction from payment gateway is verified to become "Succeeded".')}
                     </label>
                   </div>
@@ -4104,21 +4053,21 @@ export default function AdminPaymentPage() {
                     onChange={(e) => setEditSyncUserPlan(e.target.checked)}
                     className="rounded w-4 h-4 cursor-pointer accent-[#E05638]"
                   />
-                  <label htmlFor="editSyncUserPlanBox" className="text-xs font-semibold cursor-pointer select-none" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label htmlFor="editSyncUserPlanBox" className="text-xs font-semibold cursor-pointer select-none" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('updateUserPlanToLabel', 'Update user account plan to')} {editPlanName} {t('onePlanMaxSuffix', '(Enforces 1 plan maximum per email)')}
                   </label>
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
                   onClick={() => setEditingTx(null)}
                   className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-bg, #0B101D)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#334155' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('cancel', 'Cancel')}
@@ -4126,9 +4075,9 @@ export default function AdminPaymentPage() {
                 <button
                   type="submit"
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
                   <Save className="h-4 w-4" /> {t('saveChanges', 'Save Changes')}
                 </button>
