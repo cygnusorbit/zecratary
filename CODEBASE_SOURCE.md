@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.4.2",
+  "version": "7.4.4",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.4.2",
+  "version": "7.4.4",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -1225,6 +1225,7 @@ export default function DashboardPage() {
 
 ## File: `apps/web/src/app/globals.css`
 ```text
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&family=Roboto:wght@400;500;700;900&display=swap');
 
 :root {
   --color-primary: #E05638;
@@ -1395,6 +1396,18 @@ body:has(#register-page-root) [class*="h-screen"] {
 /* Dynamic Sidebar Navigation Icon Token */
 :root {
   --color-sidebar-icon: #10b981;
+}
+
+:root {
+  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family-base: var(--font-family, system-ui, -apple-system, sans-serif);
+  --font-size-base: 16px;
+  --font-letter-spacing: 0em;
+}
+
+html, body {
+  font-family: var(--font-family-base) !important;
+  letter-spacing: var(--font-letter-spacing, normal);
 }
 
 ```
@@ -2448,7 +2461,7 @@ export default function SavedRecipesPage() {
           </button>
         </div>
 
-        {/* Filter Pills */}
+        {/* Filter Pills with Full Day Mode Contrast */}
         {showFilters && (
           <div className="flex flex-wrap items-center gap-2 pt-1 animate-in fade-in text-xs font-semibold select-none">
             <button
@@ -2557,7 +2570,7 @@ export default function SavedRecipesPage() {
               )}
             </div>
 
-            {/* Recipe Type Dropdown */}
+            {/* Recipe Type ("Main Dish") Dropdown */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2573,9 +2586,9 @@ export default function SavedRecipesPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                <Utensils className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedType === 'All Types' ? (t('recipeTypeLabel') || 'Recipe Type') : selectedType}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+                <Utensils className="h-3.5 w-3.5" style={{ color: selectedType !== 'All Types' ? 'var(--color-primary)' : 'var(--color-primary)' }}/>
+                <span className="font-bold">{selectedType === 'All Types' ? (t('recipeTypeLabel') || 'Recipe Type') : selectedType}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
               </button>
 
               {openDropdown === 'recipeType' && (
@@ -2591,13 +2604,13 @@ export default function SavedRecipesPage() {
                       key={type}
                       type="button"
                       onClick={() => { setSelectedType(type); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
                       style={selectedType === type ? {
                         backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
+                        color: 'var(--color-primary)',
                         border: '1px solid var(--color-primary)'
                       } : {
-                        color: 'var(--color-text-secondary)'
+                        color: 'var(--color-text)'
                       }}
                     >
                       {type}
@@ -2642,9 +2655,9 @@ export default function SavedRecipesPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                <Star className="h-3.5 w-3.5 opacity-70"/>
+                <Star className="h-3.5 w-3.5" style={{ color: selectedRating !== 'All Ratings' ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
                 <span>{selectedRating === 'All Ratings' ? (t('rating') || 'Rating') : selectedRating}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
               </button>
 
               {openDropdown === 'rating' && (
@@ -2660,13 +2673,13 @@ export default function SavedRecipesPage() {
                       key={rat}
                       type="button"
                       onClick={() => { setSelectedRating(rat); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
                       style={selectedRating === rat ? {
                         backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
+                        color: 'var(--color-primary)',
                         border: '1px solid var(--color-border)'
                       } : {
-                        color: 'var(--color-text-secondary)'
+                        color: 'var(--color-text)'
                       }}
                     >
                       {rat}
@@ -2676,7 +2689,7 @@ export default function SavedRecipesPage() {
               )}
             </div>
 
-            {/* Prep Time Dropdown */}
+            {/* Prep Time Dropdown (Day Mode Visible) */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2692,9 +2705,9 @@ export default function SavedRecipesPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                <Hourglass className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedPrepTime === 'All Prep Times' ? (t('prepTime') || 'Prep Time') : selectedPrepTime}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+                <Hourglass className="h-3.5 w-3.5" style={{ color: selectedPrepTime !== 'All Prep Times' ? 'var(--color-emerald)' : 'var(--color-emerald)' }}/>
+                <span className="font-bold">{selectedPrepTime === 'All Prep Times' ? (t('prepTime') || 'Prep Time') : selectedPrepTime}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
               </button>
 
               {openDropdown === 'prepTime' && (
@@ -2710,13 +2723,13 @@ export default function SavedRecipesPage() {
                       key={time}
                       type="button"
                       onClick={() => { setSelectedPrepTime(time); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
                       style={selectedPrepTime === time ? {
                         backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
+                        color: 'var(--color-emerald)',
                         border: '1px solid var(--color-border)'
                       } : {
-                        color: 'var(--color-text-secondary)'
+                        color: 'var(--color-text)'
                       }}
                     >
                       {time}
@@ -2726,7 +2739,7 @@ export default function SavedRecipesPage() {
               )}
             </div>
 
-            {/* Cook Time Dropdown */}
+            {/* Cook Time Dropdown (Day Mode Visible) */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2742,9 +2755,9 @@ export default function SavedRecipesPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                <Clock className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedCookTime === 'All Cook Times' ? (t('cookTime') || 'Cook Time') : selectedCookTime}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+                <Clock className="h-3.5 w-3.5" style={{ color: selectedCookTime !== 'All Cook Times' ? 'var(--color-emerald)' : 'var(--color-primary)' }}/>
+                <span className="font-bold">{selectedCookTime === 'All Cook Times' ? (t('cookTime') || 'Cook Time') : selectedCookTime}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
               </button>
 
               {openDropdown === 'cookTime' && (
@@ -2760,13 +2773,13 @@ export default function SavedRecipesPage() {
                       key={time}
                       type="button"
                       onClick={() => { setSelectedCookTime(time); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
                       style={selectedCookTime === time ? {
                         backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
+                        color: 'var(--color-emerald)',
                         border: '1px solid var(--color-border)'
                       } : {
-                        color: 'var(--color-text-secondary)'
+                        color: 'var(--color-text)'
                       }}
                     >
                       {time}
@@ -2878,7 +2891,7 @@ export default function SavedRecipesPage() {
                 <div className="px-3.5 pb-3 pt-0 flex items-center justify-between gap-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span 
-                      className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                      className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 shadow-xs"
                       style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       {cardTypeBadge}
@@ -2891,8 +2904,8 @@ export default function SavedRecipesPage() {
                     ) : null}
                   </div>
 
-                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                    <Clock className="h-3 w-3"/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
+                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-semibold" style={{ color: 'var(--color-text)' }}>
+                    <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }}/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
                   </span>
                 </div>
               </div>
@@ -3014,22 +3027,49 @@ export default function SavedRecipesPage() {
                       alt={selectedRecipe.title || selectedRecipe.name}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
 
                     <div className="relative z-10 space-y-3">
                       <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
                         {selectedRecipe.title || selectedRecipe.name}
                       </h2>
 
+                      {/* Modal Badges: Cook Time, Prep Time, Main Dish - Full Day/Dark Mode Contrast */}
                       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Clock className="h-3.5 w-3.5"/> {(t('cookTimePrefix') || 'Cook: {time} minutes').replace('{time}', String(selectedRecipe.cookTimeMinutes || 10))}
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/> 
+                          <span className="font-bold">{(t('cookTimePrefix') || 'Cook: {time} minutes').replace('{time}', String(selectedRecipe.cookTimeMinutes || 10))}</span>
                         </span>
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Clock className="h-3.5 w-3.5"/> {(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}
+
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">{(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}</span>
                         </span>
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Utensils className="h-3.5 w-3.5"/> {recipeCategoryBadge}
+
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">{recipeCategoryBadge}</span>
                         </span>
                         
                         {/* Modal Header Favorite Button */}
@@ -13014,20 +13054,9 @@ import {
   CheckCircle2, 
   RefreshCw, 
   Palette,
-  Image as ImageIcon, 
-  Smile, 
-  Globe, 
-  Cpu, 
-  CreditCard, 
-  Wallet, 
-  Users, 
-  Utensils, 
-  Tag, 
-  Key,
-  Languages,
-  LayoutGrid,
-  BookOpen,
-  AlertCircle
+  AlertCircle,
+  Utensils,
+  Type
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { 
@@ -13043,7 +13072,9 @@ import {
   applyThemeToDocument, 
   saveThemeColors, 
   setMemoryThemeColors,
-  getMemoryThemeColors
+  getMemoryThemeColors,
+  applyGlobalFont,
+  AVAILABLE_FONTS
 } from '@/lib/themeConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -13121,6 +13152,27 @@ const PRESET_PALETTES = [
   },
 ];
 
+const FONT_OPTIONS = [
+  { id: 'Inter', name: 'Inter', family: "'Inter', system-ui, -apple-system, sans-serif", description: 'Clean, modern, optimized for screens' },
+  { id: 'Plus Jakarta Sans', name: 'Plus Jakarta Sans', family: "'Plus Jakarta Sans', system-ui, sans-serif", description: 'Geometric, stylish, high legibility' },
+  { id: 'Outfit', name: 'Outfit', family: "'Outfit', system-ui, sans-serif", description: 'Contemporary, smooth, elegant curves' },
+  { id: 'Poppins', name: 'Poppins', family: "'Poppins', system-ui, sans-serif", description: 'Friendly, geometric, distinctive accents' },
+  { id: 'Roboto', name: 'Roboto', family: "'Roboto', system-ui, sans-serif", description: 'Neutral, neo-grotesque, highly versatile' },
+  { id: 'System Default', name: 'System Default', family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", description: 'Native operating system typography' },
+];
+
+const FONT_SIZES = [
+  { id: '14px', label: 'Compact', scaleDesc: 'High information density' },
+  { id: '16px', label: 'Standard', scaleDesc: 'Default balanced readability' },
+  { id: '18px', label: 'Comfortable', scaleDesc: 'Relaxed, enhanced legibility' },
+];
+
+const LETTER_SPACINGS = [
+  { id: '-0.025em', label: 'Tight' },
+  { id: '0em', label: 'Normal' },
+  { id: '0.025em', label: 'Wide' },
+];
+
 export default function AdminSettingsPage() {
   const langContext = useTranslation();
   const translate = langContext?.t;
@@ -13132,7 +13184,7 @@ export default function AdminSettingsPage() {
     return fallback;
   }, [translate]);
 
-  const [activeTab, setActiveTab] = useState<'branding' | 'theme'>('branding');
+  const [activeTab, setActiveTab] = useState<'branding' | 'theme' | 'font'>('branding');
   const [user, setUser] = useState<User | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [saved, setSaved] = useState<boolean>(false);
@@ -13158,6 +13210,11 @@ export default function AdminSettingsPage() {
   const [cardBackgroundColor, setCardBackgroundColor] = useState<string>('#0b0f17');
   const [cardBorderColor, setCardBorderColor] = useState<string>('#1e293b');
   const [secondaryTextColor, setSecondaryTextColor] = useState<string>('#94a3b8');
+
+  // Font Setting State
+  const [fontFamily, setFontFamily] = useState<string>('Inter');
+  const [fontSize, setFontSize] = useState<string>('16px');
+  const [fontLetterSpacing, setFontLetterSpacing] = useState<string>('0em');
 
   const titlebarFileRef = useRef<HTMLInputElement>(null);
   const faviconFileRef = useRef<HTMLInputElement>(null);
@@ -13213,6 +13270,10 @@ export default function AdminSettingsPage() {
     });
   };
 
+  const applyFontLocally = (fontName: string, sz: string = fontSize, spacing: string = fontLetterSpacing) => {
+    applyGlobalFont(fontName, sz, spacing);
+  };
+
   const loadSettingsFromServer = useCallback(async () => {
     if (isSavingRef.current) return;
     setIsLoading(true);
@@ -13247,7 +13308,16 @@ export default function AdminSettingsPage() {
         setCardBorderColor(border);
         setSecondaryTextColor(textSec);
 
+        const ff = payload.fontFamily || payload.font_family || 'Inter';
+        const fs = payload.fontSize || payload.font_size || '16px';
+        const fls = payload.fontLetterSpacing || payload.letter_spacing || '0em';
+
+        setFontFamily(ff);
+        setFontSize(fs);
+        setFontLetterSpacing(fls);
+
         applyColorsLocally(p, ph, ac, sbi, bg, card, border, textSec);
+        applyFontLocally(ff, fs, fls);
       }
     } catch (err) {
       console.error('[AdminSettingsPage] Error loading settings from server:', err);
@@ -13351,6 +13421,21 @@ export default function AdminSettingsPage() {
     );
   };
 
+  const handleFontSelect = (selectedId: string) => {
+    setFontFamily(selectedId);
+    applyFontLocally(selectedId, fontSize, fontLetterSpacing);
+  };
+
+  const handleFontSizeSelect = (selectedSize: string) => {
+    setFontSize(selectedSize);
+    applyFontLocally(fontFamily, selectedSize, fontLetterSpacing);
+  };
+
+  const handleLetterSpacingSelect = (selectedSpacing: string) => {
+    setFontLetterSpacing(selectedSpacing);
+    applyFontLocally(fontFamily, fontSize, selectedSpacing);
+  };
+
   const handleSave = async (e?: React.SyntheticEvent) => {
     if (e && typeof e.preventDefault === 'function') {
       e.preventDefault();
@@ -13403,8 +13488,15 @@ export default function AdminSettingsPage() {
         cardBorderColor,
         secondaryTextColor
       );
+      applyFontLocally(fontFamily, fontSize, fontLetterSpacing);
 
       await saveThemeColors(themeColors);
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_font_family', fontFamily);
+        localStorage.setItem('zecratary_font_size', fontSize);
+        localStorage.setItem('zecratary_font_spacing', fontLetterSpacing);
+      }
 
       const success = await persistServerAdminSettings({
         siteName: updatedBranding.siteName,
@@ -13412,7 +13504,13 @@ export default function AdminSettingsPage() {
         titlebarImage: updatedBranding.titlebarImage || '',
         faviconEmoji: updatedBranding.faviconEmoji,
         faviconImage: updatedBranding.faviconImage || '',
-        themeColors
+        themeColors,
+        fontFamily,
+        font_family: fontFamily,
+        fontSize,
+        font_size: fontSize,
+        fontLetterSpacing,
+        letter_spacing: fontLetterSpacing
       });
 
       if (!success) {
@@ -13422,6 +13520,7 @@ export default function AdminSettingsPage() {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: updatedBranding }));
         window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
+        window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily, fontSize, fontLetterSpacing } }));
         window.dispatchEvent(new Event('zecratary_theme_changed'));
       }
 
@@ -13450,7 +13549,7 @@ export default function AdminSettingsPage() {
   };
 
   const handleResetDefaults = async () => {
-    if (!confirm(t('admin.confirmReset', 'Reset branding and theme settings to defaults?'))) return;
+    if (!confirm(t('admin.confirmReset', 'Reset branding, theme, and font settings to defaults?'))) return;
     setIsSaving(true);
     isSavingRef.current = true;
     setSaveError('');
@@ -13466,6 +13565,9 @@ export default function AdminSettingsPage() {
       const defaultCard = '#0b0f17';
       const defaultBorder = '#1e293b';
       const defaultTextSec = '#94a3b8';
+      const defaultFont = 'Inter';
+      const defaultSize = '16px';
+      const defaultSpacing = '0em';
 
       setSiteName(defaultName);
       setTitlebarEmoji(defaultIcon);
@@ -13481,6 +13583,10 @@ export default function AdminSettingsPage() {
       setCardBackgroundColor(defaultCard);
       setCardBorderColor(defaultBorder);
       setSecondaryTextColor(defaultTextSec);
+
+      setFontFamily(defaultFont);
+      setFontSize(defaultSize);
+      setFontLetterSpacing(defaultSpacing);
 
       const defaultBranding = {
         siteName: defaultName,
@@ -13519,19 +13625,33 @@ export default function AdminSettingsPage() {
         defaultBorder,
         defaultTextSec
       );
+      applyFontLocally(defaultFont, defaultSize, defaultSpacing);
 
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
       updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
 
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_font_family', defaultFont);
+        localStorage.setItem('zecratary_font_size', defaultSize);
+        localStorage.setItem('zecratary_font_spacing', defaultSpacing);
+      }
+
       await saveThemeColors(defaultColors);
       await persistServerAdminSettings({
         ...defaultBranding,
-        themeColors: defaultColors
+        themeColors: defaultColors,
+        fontFamily: defaultFont,
+        font_family: defaultFont,
+        fontSize: defaultSize,
+        font_size: defaultSize,
+        fontLetterSpacing: defaultSpacing,
+        letter_spacing: defaultSpacing
       });
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
         window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
+        window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily: defaultFont, fontSize: defaultSize, fontLetterSpacing: defaultSpacing } }));
         window.dispatchEvent(new Event('zecratary_theme_changed'));
       }
 
@@ -13568,7 +13688,7 @@ export default function AdminSettingsPage() {
             </h1>
           </div>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('admin.siteIdentityDesc', 'Configure application name, comprehensive color themes, backgrounds, titlebar logo, and browser tab favicon.')}
+            {t('admin.siteIdentityDesc', 'Configure application name, comprehensive color themes, typography fonts, titlebar logo, and browser tab favicon.')}
           </p>
         </div>
 
@@ -13619,7 +13739,7 @@ export default function AdminSettingsPage() {
 
       {/* TABS NAVIGATION */}
       <div 
-        className="flex items-center gap-2 border-b pb-3" 
+        className="flex items-center gap-2 border-b pb-3 flex-wrap" 
         style={{ borderColor: 'var(--color-border)' }}
       >
         <button
@@ -13661,13 +13781,32 @@ export default function AdminSettingsPage() {
           <Palette className="h-4 w-4" />
           <span>{t('admin.tabTheme', 'Theme')}</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('font')}
+          className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer border shadow-xs"
+          style={{
+            backgroundColor: activeTab === 'font' 
+              ? 'var(--color-card)' 
+              : 'transparent',
+            borderColor: activeTab === 'font' 
+              ? 'var(--color-border)' 
+              : 'transparent',
+            color: activeTab === 'font' 
+              ? 'var(--color-primary)' 
+              : 'var(--color-text-secondary)'
+          }}
+        >
+          <Type className="h-4 w-4" />
+          <span>{t('admin.tabFont', 'Font Setting')}</span>
+        </button>
       </div>
 
-      {/* SETTINGS CONTAINER (Decoupled from Form Autofill Heuristics) */}
+      {/* SETTINGS CONTAINER */}
       <div onKeyDown={handleKeyDown} className="space-y-6">
         {/* TAB 1: BRANDING */}
         <div className={activeTab === 'branding' ? 'space-y-6' : 'hidden'}>
-          {/* APPLICATION NAME */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
             style={{ 
@@ -13705,7 +13844,6 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
-          {/* TITLEBAR BRAND ICON */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
             style={{ 
@@ -13826,7 +13964,6 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
-          {/* FAVICON */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
             style={{ 
@@ -13954,7 +14091,6 @@ export default function AdminSettingsPage() {
 
         {/* TAB 2: THEME */}
         <div className={activeTab === 'theme' ? 'space-y-6' : 'hidden'}>
-          {/* THEME COLOR & PALETTE SETTINGS */}
           <div 
             className="border rounded-3xl p-6 shadow-xl space-y-6 text-xs" 
             style={{ 
@@ -14034,13 +14170,12 @@ export default function AdminSettingsPage() {
               </div>
             </div>
 
-            {/* Brand & Interaction Colors */}
+            {/* Brand Colors */}
             <div className="space-y-3 pt-2">
               <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('admin.brandColors', 'Brand & Interaction Colors')}
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                {/* Primary Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.primaryBrandColor', 'Primary Brand Color')}
@@ -14061,9 +14196,6 @@ export default function AdminSettingsPage() {
                       type="text" 
                       id="theme_primary_color"
                       name="theme_primary_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={primaryColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14072,7 +14204,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(val, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#E05638"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -14081,12 +14212,8 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.primaryBrandColorDesc', 'Brand highlights, buttons, and headers.')}
-                  </span>
                 </div>
 
-                {/* Primary Hover Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.primaryHoverColor', 'Primary Hover Color')}
@@ -14107,9 +14234,6 @@ export default function AdminSettingsPage() {
                       type="text" 
                       id="theme_primary_hover_color"
                       name="theme_primary_hover_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={primaryHoverColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14118,7 +14242,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, val, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#c94529"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -14127,12 +14250,8 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.primaryHoverColorDesc', 'Hover and focus states for buttons.')}
-                  </span>
                 </div>
 
-                {/* Accent Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.accentColor', 'Accent / Success Color')}
@@ -14153,9 +14272,6 @@ export default function AdminSettingsPage() {
                       type="text" 
                       id="theme_accent_color"
                       name="theme_accent_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={accentColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14164,7 +14280,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, val, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#10b981"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -14173,12 +14288,8 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.accentColorDesc', 'Badges, success alerts, and secondary accents.')}
-                  </span>
                 </div>
 
-                {/* Sidebar & Nav Icon Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.sidebarIconColor', 'Sidebar Icon Color')}
@@ -14199,9 +14310,6 @@ export default function AdminSettingsPage() {
                       type="text" 
                       id="theme_sidebar_icon_color"
                       name="theme_sidebar_icon_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={sidebarIconColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14210,7 +14318,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#10b981"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -14219,20 +14326,16 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.sidebarIconColorDesc', 'Icons for navigation and categories in the sidebar.')}
-                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Surfaces & Container Colors Group */}
+            {/* Surfaces & Container Colors */}
             <div className="space-y-3 pt-2">
               <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('admin.surfacesBordersTypography', 'Surfaces, Borders & Typography')}
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                {/* Background Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.pageBackground', 'Page Background')}
@@ -14251,11 +14354,6 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_page_bg_color"
-                      name="theme_page_bg_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={backgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14264,7 +14362,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#070b13"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -14273,15 +14370,11 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.pageBackgroundDesc', 'Root viewport background in night mode.')}
-                  </span>
                 </div>
 
-                {/* Card / Surface Background */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.cardBackground', 'Card / Surface Background')}
+                    {t('admin.cardBackground', 'Card Background')}
                   </label>
                   <div className="flex items-center gap-2">
                     <input 
@@ -14297,11 +14390,6 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_card_bg_color"
-                      name="theme_card_bg_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={cardBackgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14310,7 +14398,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      placeholder="#0b0f17"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -14319,15 +14406,11 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.cardBackgroundDesc', 'Cards, modals, and container panels.')}
-                  </span>
                 </div>
 
-                {/* Card / Container Border Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.containerBorderColor', 'Container Border Color')}
+                    {t('admin.containerBorderColor', 'Container Border')}
                   </label>
                   <div className="flex items-center gap-2">
                     <input 
@@ -14343,11 +14426,6 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_card_border_color"
-                      name="theme_card_border_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={cardBorderColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14356,7 +14434,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
                         }
                       }}
-                      placeholder="#1e293b"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -14365,12 +14442,8 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.containerBorderColorDesc', 'Borders, dividers, and outlines.')}
-                  </span>
                 </div>
 
-                {/* Secondary Subtitle Text Color */}
                 <div className="space-y-1.5">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('admin.mutedSubtitleText', 'Muted / Subtitle Text')}
@@ -14389,11 +14462,6 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_muted_text_color"
-                      name="theme_muted_text_color"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
                       value={secondaryTextColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14402,7 +14470,6 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
                         }
                       }}
-                      placeholder="#94a3b8"
                       className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -14411,102 +14478,235 @@ export default function AdminSettingsPage() {
                       }}
                     />
                   </div>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.mutedSubtitleTextDesc', 'Descriptions and helper captions.')}
-                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* TAB 3: FONT SETTING */}
+        <div className={activeTab === 'font' ? 'space-y-6' : 'hidden'}>
+          <div 
+            className="border rounded-3xl p-6 shadow-xl space-y-6 text-xs" 
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)' 
+            }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Type className="h-4 w-4 text-[var(--color-primary)]" />
+                  <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                    {t('admin.globalTypographySettings', 'Global Typography & Font Settings')}
+                  </h2>
+                </div>
+                <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('admin.globalTypographyDesc', 'Select your site-wide typography font family, base scaling, and heading tracking. Changes apply across the entire project.')}
+                </p>
+              </div>
+              <div 
+                className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5"
+                style={{ 
+                  backgroundColor: 'var(--color-inner-dark)', 
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-primary)'
+                }}
+              >
+                <span>{t('admin.activeFont', 'Active Font')}:</span>
+                <span className="font-extrabold">{fontFamily}</span>
+              </div>
+            </div>
+
+            {/* Font Family Selection Cards */}
+            <div className="space-y-2.5">
+              <label className="block font-bold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('admin.fontFamilyOptions', 'Font Family Selection')}
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {FONT_OPTIONS.map((font) => {
+                  const isSelected = fontFamily.toLowerCase() === font.id.toLowerCase();
+                  return (
+                    <button
+                      key={font.id}
+                      type="button"
+                      onClick={() => handleFontSelect(font.id)}
+                      className={`p-4 rounded-2xl border text-left transition cursor-pointer relative flex flex-col justify-between ${
+                        isSelected ? 'ring-2 ring-[var(--color-primary)] shadow-md' : 'hover:opacity-90'
+                      }`}
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)',
+                        fontFamily: font.family
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
+                          {font.name}
+                        </span>
+                        {isSelected && (
+                          <span 
+                            className="px-2 py-0.5 rounded-full text-[9px] font-extrabold flex items-center gap-1"
+                            style={{ 
+                              backgroundColor: 'rgba(16, 185, 129, 0.15)', 
+                              color: 'var(--color-emerald)',
+                              border: '1px solid var(--color-emerald)'
+                            }}
+                          >
+                            <CheckCircle2 className="h-3 w-3" /> {t('common.selected', 'Selected')}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] mb-3 opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
+                        {font.description}
+                      </p>
+                      <div 
+                        className="text-xs font-medium truncate pt-2 border-t"
+                        style={{ 
+                          borderColor: 'var(--color-border)', 
+                          color: 'var(--color-text)' 
+                        }}
+                      >
+                        ABCDEFGHIJKLM 1234567890
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Sizing & Letter Spacing Controls */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              {/* Base Font Size */}
+              <div className="space-y-2">
+                <label className="block font-bold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('admin.baseFontSize', 'Base Font Size Scaling')}
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {FONT_SIZES.map((size) => {
+                    const isSelected = fontSize === size.id;
+                    return (
+                      <button
+                        key={size.id}
+                        type="button"
+                        onClick={() => handleFontSizeSelect(size.id)}
+                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition cursor-pointer ${
+                          isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
+                        }`}
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)'
+                        }}
+                      >
+                        <span className="font-extrabold text-xs" style={{ color: isSelected ? 'var(--color-primary)' : 'var(--color-text)' }}>
+                          {size.label}
+                        </span>
+                        <span className="text-[10px] opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
+                          {size.id}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Letter Spacing */}
+              <div className="space-y-2">
+                <label className="block font-bold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('admin.letterSpacing', 'Heading Letter Spacing (Tracking)')}
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {LETTER_SPACINGS.map((spacing) => {
+                    const isSelected = fontLetterSpacing === spacing.id;
+                    return (
+                      <button
+                        key={spacing.id}
+                        type="button"
+                        onClick={() => handleLetterSpacingSelect(spacing.id)}
+                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition cursor-pointer ${
+                          isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
+                        }`}
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)'
+                        }}
+                      >
+                        <span className="font-extrabold text-xs" style={{ color: isSelected ? 'var(--color-primary)' : 'var(--color-text)' }}>
+                          {spacing.label}
+                        </span>
+                        <span className="text-[10px] opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
+                          {spacing.id}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
-            {/* Interactive Live Component Preview */}
+            {/* Live Interactive Typography Preview */}
             <div className="pt-3 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
               <span className="font-bold text-[11px] block" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.previewTitle', 'Full Interactive Component Preview:')}
+                {t('admin.liveFontPreview', 'Live Typography Sandbox Preview:')}
               </span>
               <div 
-                className="p-5 rounded-3xl border transition-colors space-y-3" 
+                className="p-5 rounded-3xl border transition-colors space-y-4 shadow-inner"
                 style={{ 
                   backgroundColor: 'var(--color-inner-dark)', 
                   borderColor: 'var(--color-border)' 
                 }}
               >
-                {/* Surface Card Preview */}
-                <div 
-                  className="p-4 rounded-2xl border transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md"
-                  style={{ 
-                    backgroundColor: 'var(--color-card)', 
-                    borderColor: 'var(--color-border)' 
-                  }}
-                >
-                  <div className="space-y-0.5">
-                    <div className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                      {t('admin.surfaceCardPreview', 'Surface Card Preview')}
-                    </div>
-                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('admin.surfaceCardPreviewDesc', 'This demonstrates your secondary text color, card surface, and card border.')}
-                    </p>
+                <div className="space-y-1">
+                  <div 
+                    className="text-2xl font-black tracking-tight"
+                    style={{ 
+                      color: 'var(--color-primary)',
+                      letterSpacing: fontLetterSpacing
+                    }}
+                  >
+                    Heading 1: Culinary Innovation Powered by AI
                   </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div 
-                      className="px-2.5 py-1 rounded-xl border text-[10px] font-extrabold flex items-center gap-1"
-                      style={{ 
-                        backgroundColor: 'var(--color-inner-dark)', 
-                        borderColor: 'var(--color-border)', 
-                        color: accentColor 
-                      }}
-                    >
-                      <CheckCircle2 className="h-3 w-3" /> {t('common.active', 'Active')}
-                    </div>
-                    <button 
-                      type="button" 
-                      className="px-3.5 py-1.5 rounded-xl text-white font-extrabold text-xs shadow-md transition cursor-pointer"
-                      style={{ backgroundColor: primaryColor }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = primaryHoverColor)}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = primaryColor)}
-                    >
-                      {t('common.actionButton', 'Action Button')}
-                    </button>
+                  <div 
+                    className="text-lg font-bold"
+                    style={{ 
+                      color: 'var(--color-text)',
+                      letterSpacing: fontLetterSpacing
+                    }}
+                  >
+                    Heading 2: Tailored Weekly Meal Plans & Automated Nutrition
                   </div>
                 </div>
 
-                {/* Sidebar Navigation Item Live Preview */}
-                <div 
-                  className="p-3.5 rounded-2xl border transition-colors flex items-center justify-between gap-3 shadow-sm"
+                <p 
+                  className="leading-relaxed"
                   style={{ 
-                    backgroundColor: 'var(--color-card)', 
-                    borderColor: 'var(--color-border)' 
+                    color: 'var(--color-text-secondary)',
+                    fontSize: fontSize 
                   }}
                 >
-                  <div className="flex items-center gap-3">
-                    <div 
-                      className="p-2 rounded-xl flex items-center justify-center transition-colors shadow-xs"
-                      style={{ 
-                        backgroundColor: 'var(--color-inner-dark)',
-                        border: '1px solid var(--color-border)',
-                        color: sidebarIconColor 
-                      }}
-                    >
-                      <Utensils className="h-4 w-4" style={{ color: sidebarIconColor }} />
-                    </div>
-                    <div>
-                      <div className="text-xs font-black" style={{ color: 'var(--color-text)' }}>
-                        {t('admin.sidebarIconPreview', 'Sidebar Icon Color Preview')}
-                      </div>
-                      <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('admin.sidebarIconPreviewDesc', 'Reflects live on Dashboard, Chef, Pantry, and Plan icons.')}
-                      </p>
-                    </div>
-                  </div>
-                  <span 
-                    className="text-[10px] px-2.5 py-1 rounded-lg font-mono font-bold"
+                  This live preview box demonstrates paragraph text rendered using your chosen font ({fontFamily}), base size ({fontSize}), and heading tracking ({fontLetterSpacing}). All buttons, badges, tables, and navigation drawers across the application immediately inherit these font rules.
+                </p>
+
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <button 
+                    type="button" 
+                    className="px-4 py-2 rounded-xl text-white font-extrabold text-xs shadow-md transition"
+                    style={{ backgroundColor: primaryColor }}
+                  >
+                    {t('admin.samplePrimaryBtn', 'Primary Action')}
+                  </button>
+                  <div 
+                    className="px-3 py-1.5 rounded-xl border text-xs font-bold"
                     style={{ 
-                      backgroundColor: 'var(--color-inner-dark)', 
-                      color: sidebarIconColor,
-                      border: '1px solid var(--color-border)' 
+                      backgroundColor: 'var(--color-card)', 
+                      borderColor: 'var(--color-border)', 
+                      color: accentColor 
                     }}
                   >
-                    {sidebarIconColor}
+                    <CheckCircle2 className="h-3.5 w-3.5 inline mr-1" /> {t('admin.sampleBadge', 'Active Preset Badge')}
+                  </div>
+                  <span className="text-xs font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    $1,249.00 / mo
                   </span>
                 </div>
               </div>
@@ -14545,7 +14745,13 @@ export default function AdminSettingsPage() {
             ) : (
               <>
                 <CheckCircle2 className="h-4 w-4" />
-                <span>{activeTab === 'theme' ? t('admin.saveThemeSettings', 'Save Theme Settings') : t('admin.saveBrandingSettings', 'Save Branding Settings')}</span>
+                <span>
+                  {activeTab === 'theme' 
+                    ? t('admin.saveThemeSettings', 'Save Theme Settings') 
+                    : activeTab === 'font'
+                    ? t('admin.saveFontSettings', 'Save Font Settings')
+                    : t('admin.saveBrandingSettings', 'Save Branding Settings')}
+                </span>
               </>
             )}
           </button>
@@ -34009,284 +34215,208 @@ export async function GET(
 ## File: `apps/web/src/app/api/admin/settings/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-function getStorePaths(): string[] {
-  const cwd = process.cwd();
-  return [
-    path.join(cwd, 'apps/web/data/admin_settings.json'),
-    path.join(cwd, 'data/admin_settings.json')
-  ];
-}
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  'Pragma': 'no-cache',
+  'Expires': '0',
+};
 
-let cachedPool: any = null;
-
-async function getPostgresPool() {
-  if (cachedPool) return cachedPool;
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
-  if (!connStr) return null;
+async function ensureAdminSettingsSchema() {
   try {
-    const { Pool } = await import('pg');
-    const requiresSsl = connStr.includes('sslmode=require') || 
-                        connStr.includes('neon.tech') || 
-                        connStr.includes('supabase.co') || 
-                        process.env.NODE_ENV === 'production';
-    cachedPool = new Pool({
-      connectionString: connStr,
-      ssl: requiresSsl ? { rejectUnauthorized: false } : false
-    });
-    return cachedPool;
-  } catch (err) {
-    console.error('[PostgreSQL] Failed to initialize connection pool:', err);
-    return null;
-  }
-}
-
-async function initPostgresTables(pool: any) {
-  if (!pool) return;
-  try {
-    await pool.query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS admin_settings (
-        id SERIAL PRIMARY KEY,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        id VARCHAR(64) PRIMARY KEY DEFAULT 'primary_settings',
+        site_name VARCHAR(255) DEFAULT 'Zecratary',
+        titlebar_emoji VARCHAR(32) DEFAULT '🍳',
+        titlebar_image TEXT DEFAULT '',
+        favicon_emoji VARCHAR(32) DEFAULT '🍳',
+        favicon_image TEXT DEFAULT '',
+        currency VARCHAR(10) DEFAULT 'USD',
+        ai_provider VARCHAR(64) DEFAULT 'gemini',
+        ai_model VARCHAR(128) DEFAULT 'gemini-3.5-flash-lite',
+        theme_colors JSONB DEFAULT '{}'::jsonb,
+        font_family VARCHAR(255) DEFAULT 'Inter',
+        font_size VARCHAR(50) DEFAULT '16px',
+        letter_spacing VARCHAR(50) DEFAULT '0em',
+        payment_settings JSONB DEFAULT '{}'::jsonb,
+        social_login JSONB DEFAULT '{}'::jsonb,
+        chef_ai_settings JSONB DEFAULT '{}'::jsonb,
+        recipe_types JSONB DEFAULT '[]'::jsonb,
+        ingredient_categories JSONB DEFAULT '[]'::jsonb,
+        supported_languages JSONB DEFAULT '[]'::jsonb,
+        subscription_plans JSONB DEFAULT '[]'::jsonb,
+        value JSONB DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(100);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name VARCHAR(255);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_emoji VARCHAR(50);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_image TEXT;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_emoji VARCHAR(50);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_image TEXT;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS recipe_types JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ingredient_categories JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS social_login JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS subscription_plans JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-
-      CREATE TABLE IF NOT EXISTS user_theme (
-        user_id VARCHAR(100) PRIMARY KEY,
-        theme_colors JSONB NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-      ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);
-      ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS theme_colors JSONB;
-      ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-    `);
-  } catch (err) {
-    console.error('[PostgreSQL] Table alteration error:', err);
-  }
-}
-
-async function readFromPostgres(pool: any): Promise<Record<string, any> | null> {
-  if (!pool) return null;
-  try {
-    await initPostgresTables(pool);
-
-    // Query with SELECT * so undefined column errors can never occur
-    const res = await pool.query(`
-      SELECT * FROM admin_settings 
-      ORDER BY CASE WHEN key = 'current' THEN 0 ELSE 1 END, updated_at DESC NULLS LAST 
-      LIMIT 1;
     `);
 
-    if (res.rows && res.rows.length > 0) {
-      const row = res.rows[0];
-      let settings: Record<string, any> = {};
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_image TEXT DEFAULT '';`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_image TEXT DEFAULT '';`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB DEFAULT '{}'::jsonb;`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS font_family VARCHAR(255) DEFAULT 'Inter';`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS font_size VARCHAR(50) DEFAULT '16px';`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS letter_spacing VARCHAR(50) DEFAULT '0em';`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS subscription_plans JSONB DEFAULT '[]'::jsonb;`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB DEFAULT '{}'::jsonb;`);
+    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(100);`);
 
-      if (row.value) {
-        settings = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
-      } else if (row.settings) {
-        settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings;
-      } else if (row.data) {
-        settings = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-      }
-
-      // Merge discrete columns if value JSON was partial or empty
-      if (row.theme_colors && !settings.themeColors) {
-        settings.themeColors = typeof row.theme_colors === 'string' ? JSON.parse(row.theme_colors) : row.theme_colors;
-      }
-      if (row.themeColors && !settings.themeColors) {
-        settings.themeColors = typeof row.themeColors === 'string' ? JSON.parse(row.themeColors) : row.themeColors;
-      }
-      if (row.site_name && !settings.siteName) settings.siteName = row.site_name;
-      if (row.siteName && !settings.siteName) settings.siteName = row.siteName;
-      if (row.titlebar_emoji && !settings.titlebarEmoji) settings.titlebarEmoji = row.titlebar_emoji;
-      if (row.titlebar_image && !settings.titlebarImage) settings.titlebarImage = row.titlebar_image;
-      if (row.favicon_emoji && !settings.faviconEmoji) settings.faviconEmoji = row.favicon_emoji;
-      if (row.favicon_image && !settings.faviconImage) settings.faviconImage = row.favicon_image;
-      if (row.recipe_types && !settings.recipeTypes) settings.recipeTypes = row.recipe_types;
-      if (row.ingredient_categories && !settings.ingredientCategories) settings.ingredientCategories = row.ingredient_categories;
-      if (row.supported_languages && !settings.supportedLanguages) settings.supportedLanguages = row.supported_languages;
-      if (row.social_login && !settings.socialLogin) settings.socialLogin = row.social_login;
-      if (row.subscription_plans && !settings.subscriptionPlans) settings.subscriptionPlans = row.subscription_plans;
-
-      if (Object.keys(settings).length > 0) {
-        return settings;
-      }
+    const existing = await query(`SELECT id FROM admin_settings LIMIT 1;`);
+    if (existing.length === 0) {
+      await query(`
+        INSERT INTO admin_settings (id, site_name, titlebar_emoji, favicon_emoji, font_family, font_size, letter_spacing)
+        VALUES ('primary_settings', 'Zecratary', '🍳', '🍳', 'Inter', '16px', '0em')
+        ON CONFLICT DO NOTHING;
+      `);
     }
   } catch (err) {
-    console.error('[PostgreSQL] Read error:', err);
+    console.error('[AdminSettings API] Error ensuring schema:', err);
   }
-  return null;
-}
-
-async function saveToPostgres(pool: any, data: Record<string, any>): Promise<boolean> {
-  if (!pool) return false;
-  try {
-    await initPostgresTables(pool);
-    const jsonStr = JSON.stringify(data);
-    const themeJson = data.themeColors ? JSON.stringify(data.themeColors) : null;
-    const siteName = data.siteName || null;
-    const titlebarEmoji = data.titlebarEmoji || null;
-    const titlebarImage = data.titlebarImage || null;
-    const faviconEmoji = data.faviconEmoji || null;
-    const faviconImage = data.faviconImage || null;
-
-    const existing = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
-
-    if (existing.rows && existing.rows.length > 0) {
-      const firstRow = existing.rows[0];
-      const matchKey = firstRow.key !== undefined && firstRow.key !== null;
-      const whereCond = matchKey ? "key = COALESCE(key, 'current')" : `id = ${firstRow.id || 1}`;
-
-      await pool.query(
-        `UPDATE admin_settings 
-         SET value = $1::jsonb,
-             key = COALESCE(key, 'current'),
-             theme_colors = COALESCE($2::jsonb, theme_colors),
-             site_name = COALESCE($3, site_name),
-             titlebar_emoji = COALESCE($4, titlebar_emoji),
-             titlebar_image = COALESCE($5, titlebar_image),
-             favicon_emoji = COALESCE($6, favicon_emoji),
-             favicon_image = COALESCE($7, favicon_image),
-             updated_at = NOW()
-         WHERE ${whereCond};`,
-        [jsonStr, themeJson, siteName, titlebarEmoji, titlebarImage, faviconEmoji, faviconImage]
-      );
-    } else {
-      await pool.query(
-        `INSERT INTO admin_settings (key, value, theme_colors, site_name, titlebar_emoji, titlebar_image, favicon_emoji, favicon_image, updated_at)
-         VALUES ('current', $1::jsonb, $2::jsonb, $3, $4, $5, $6, $7, NOW());`,
-        [jsonStr, themeJson, siteName, titlebarEmoji, titlebarImage, faviconEmoji, faviconImage]
-      );
-    }
-
-    if (data.themeColors) {
-      const checkUserTheme = await pool.query("SELECT user_id FROM user_theme WHERE user_id = 'default' LIMIT 1;");
-      if (checkUserTheme.rows && checkUserTheme.rows.length > 0) {
-        await pool.query(
-          "UPDATE user_theme SET theme_colors = $1::jsonb, updated_at = NOW() WHERE user_id = 'default';",
-          [themeJson]
-        );
-      } else {
-        await pool.query(
-          "INSERT INTO user_theme (user_id, theme_colors, updated_at) VALUES ('default', $1::jsonb, NOW());",
-          [themeJson]
-        );
-      }
-    }
-    return true;
-  } catch (err) {
-    console.error('[PostgreSQL] Save error:', err);
-    return false;
-  }
-}
-
-function readServerSettings(): Record<string, any> {
-  const filePaths = getStorePaths();
-  for (const fp of filePaths) {
-    if (fs.existsSync(fp)) {
-      try {
-        const raw = fs.readFileSync(fp, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') return parsed;
-      } catch (_) {}
-    }
-  }
-  return {};
-}
-
-function writeServerSettings(data: Record<string, any>): boolean {
-  const filePaths = getStorePaths();
-  let wrote = false;
-  const payload = {
-    ...data,
-    updatedAt: new Date().toISOString()
-  };
-  for (const fp of filePaths) {
-    try {
-      const dir = path.dirname(fp);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(fp, JSON.stringify(payload, null, 2), 'utf-8');
-      wrote = true;
-    } catch (_) {}
-  }
-  return wrote;
 }
 
 export async function GET() {
   try {
-    const pool = await getPostgresPool();
-    const pgData = await readFromPostgres(pool);
-    const diskData = readServerSettings();
-    const settings = { ...diskData, ...(pgData || {}) };
+    await ensureAdminSettingsSchema();
+    const rows = await query('SELECT * FROM admin_settings LIMIT 1');
+    const data = rows[0] || {};
+    const themeColors = data.theme_colors || {};
 
-    return NextResponse.json(
-      { success: true, settings, themeColors: settings.themeColors },
-      {
-        headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
-        }
-      }
-    );
+    const settings = {
+      siteName: data.site_name || 'Zecratary',
+      titlebarEmoji: data.titlebar_emoji || '🍳',
+      titlebarImage: data.titlebar_image || '',
+      faviconEmoji: data.favicon_emoji || '🍳',
+      faviconImage: data.favicon_image || '',
+      themeColors: themeColors,
+      theme_colors: themeColors,
+      fontFamily: data.font_family || 'Inter',
+      font_family: data.font_family || 'Inter',
+      fontSize: data.font_size || '16px',
+      font_size: data.font_size || '16px',
+      fontLetterSpacing: data.letter_spacing || '0em',
+      letter_spacing: data.letter_spacing || '0em',
+      currency: data.currency || 'USD',
+      aiProvider: data.ai_provider || 'gemini',
+      aiModel: data.ai_model || 'gemini-3.5-flash-lite',
+      chefAiSettings: data.chef_ai_settings || {},
+      recipeTypes: data.recipe_types || [],
+      ingredientCategories: data.ingredient_categories || [],
+      supportedLanguages: data.supported_languages || [],
+      subscriptionPlans: data.subscription_plans || [],
+      updatedAt: data.updated_at
+    };
+
+    return NextResponse.json({
+      success: true,
+      settings,
+      ...settings
+    }, { headers: NO_CACHE_HEADERS });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Failed to read settings' }, { status: 500 });
+    console.error('[AdminSettings API GET] Error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureAdminSettingsSchema();
+
     const body = await req.json();
-    const pool = await getPostgresPool();
-    const pgData = await readFromPostgres(pool);
-    const current = { ...readServerSettings(), ...(pgData || {}) };
+    const existing = await query('SELECT * FROM admin_settings LIMIT 1');
+    const targetId = existing.length > 0 && existing[0].id !== undefined ? existing[0].id : 'primary_settings';
+    const current = existing[0] || {};
 
-    const merged = {
-      ...current,
-      ...body,
-      themeColors: {
-        ...(current.themeColors || {}),
-        ...(body.themeColors || {})
-      },
-      socialLogin: {
-        ...(current.socialLogin || {}),
-        ...(body.socialLogin || {})
-      },
-      subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || []
-    };
+    const siteName = body.siteName !== undefined ? body.siteName : (current.site_name || 'Zecratary');
+    const titlebarEmoji = body.titlebarEmoji !== undefined ? body.titlebarEmoji : (current.titlebar_emoji || '🍳');
+    const titlebarImage = body.titlebarImage !== undefined ? body.titlebarImage : (current.titlebar_image || '');
+    const faviconEmoji = body.faviconEmoji !== undefined ? body.faviconEmoji : (current.favicon_emoji || '🍳');
+    const faviconImage = body.faviconImage !== undefined ? body.faviconImage : (current.favicon_image || '');
+    
+    const themeColors = body.themeColors || body.theme_colors || current.theme_colors || {};
+    const fontFamily = body.fontFamily || body.font_family || current.font_family || 'Inter';
+    const fontSize = body.fontSize || body.font_size || current.font_size || '16px';
+    const letterSpacing = body.fontLetterSpacing || body.letter_spacing || current.letter_spacing || '0em';
 
-    const pgSaved = await saveToPostgres(pool, merged);
-    const diskSaved = writeServerSettings(merged);
+    const updateRes = await query(`
+      UPDATE admin_settings SET
+        site_name = $1,
+        titlebar_emoji = $2,
+        titlebar_image = $3,
+        favicon_emoji = $4,
+        favicon_image = $5,
+        theme_colors = $6::jsonb,
+        font_family = $7,
+        font_size = $8,
+        letter_spacing = $9,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $10
+      RETURNING *;
+    `, [
+      siteName,
+      titlebarEmoji,
+      titlebarImage,
+      faviconEmoji,
+      faviconImage,
+      JSON.stringify(themeColors),
+      fontFamily,
+      fontSize,
+      letterSpacing,
+      targetId
+    ]);
 
-    if (!pgSaved && !diskSaved) {
-      return NextResponse.json({ error: 'Failed to write settings to storage' }, { status: 500 });
+    let updatedRow = updateRes[0];
+
+    if (!updatedRow) {
+      const insertRes = await query(`
+        INSERT INTO admin_settings (
+          id, site_name, titlebar_emoji, titlebar_image, favicon_emoji, favicon_image,
+          theme_colors, font_family, font_size, letter_spacing, updated_at
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, CURRENT_TIMESTAMP
+        )
+        RETURNING *;
+      `, [
+        targetId,
+        siteName,
+        titlebarEmoji,
+        titlebarImage,
+        faviconEmoji,
+        faviconImage,
+        JSON.stringify(themeColors),
+        fontFamily,
+        fontSize,
+        letterSpacing
+      ]);
+      updatedRow = insertRes[0] || {};
     }
 
-    return NextResponse.json(
-      { success: true, settings: merged, themeColors: merged.themeColors },
-      {
-        headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
-        }
-      }
-    );
+    const responsePayload = {
+      siteName: updatedRow.site_name,
+      titlebarEmoji: updatedRow.titlebar_emoji,
+      titlebarImage: updatedRow.titlebar_image,
+      faviconEmoji: updatedRow.favicon_emoji,
+      faviconImage: updatedRow.favicon_image,
+      themeColors: updatedRow.theme_colors,
+      fontFamily: updatedRow.font_family,
+      fontSize: updatedRow.font_size,
+      fontLetterSpacing: updatedRow.letter_spacing,
+      updatedAt: updatedRow.updated_at
+    };
+
+    return NextResponse.json({
+      success: true,
+      message: 'Settings saved successfully to PostgreSQL',
+      settings: responsePayload,
+      data: responsePayload
+    }, { headers: NO_CACHE_HEADERS });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Failed to persist settings' }, { status: 500 });
+    console.error('[AdminSettings API POST] Error saving settings:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }
 
@@ -36717,7 +36847,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    const rows = await query('SELECT * FROM admin_settings LIMIT 1');
     if (rows.length === 0) {
       return NextResponse.json({
         success: true,
@@ -36728,6 +36858,9 @@ export async function GET() {
         faviconImage: '',
         currency: 'USD',
         themeColors: {},
+        fontFamily: 'Inter',
+        fontSize: '16px',
+        fontLetterSpacing: '0em',
         supportedLanguages: []
       }, { headers: { 'Cache-Control': 'no-store' } });
     }
@@ -36742,6 +36875,9 @@ export async function GET() {
       faviconImage: r.favicon_image || '',
       currency: r.currency || 'USD',
       themeColors: r.theme_colors || {},
+      fontFamily: r.font_family || 'Inter',
+      fontSize: r.font_size || '16px',
+      fontLetterSpacing: r.letter_spacing || '0em',
       supportedLanguages: r.supported_languages || []
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
@@ -45591,7 +45727,7 @@ export default function ThemeSync() {
 'use client';
 
 import { useEffect } from 'react';
-import { applyThemeToDocument, fetchAndApplyServerTheme } from '@/lib/themeConfig';
+import { applyThemeToDocument, fetchAndApplyServerTheme, applyGlobalFont } from '@/lib/themeConfig';
 
 export default function GlobalThemeSync() {
   useEffect(() => {
@@ -45599,27 +45735,32 @@ export default function GlobalThemeSync() {
 
     const handleThemeUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      if (detail && typeof detail === 'object' && !('mode' in detail)) {
+      if (detail) {
         applyThemeToDocument(detail);
       } else {
         fetchAndApplyServerTheme();
       }
     };
 
-    const handleModeUpdate = () => {
-      applyThemeToDocument();
+    const handleFontUpdate = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail) {
+        applyGlobalFont(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
+      } else {
+        applyGlobalFont();
+      }
     };
 
     window.addEventListener('zecratary_theme_updated', handleThemeUpdate);
-    window.addEventListener('zecratary_theme_changed', handleThemeUpdate);
-    window.addEventListener('zecratary_theme_mode_changed', handleModeUpdate);
-    window.addEventListener('storage', handleThemeUpdate);
+    window.addEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
+    window.addEventListener('zecratary_admin_settings_updated', handleThemeUpdate);
+    window.addEventListener('zecratary_font_updated', handleFontUpdate);
 
     return () => {
       window.removeEventListener('zecratary_theme_updated', handleThemeUpdate);
-      window.removeEventListener('zecratary_theme_changed', handleThemeUpdate);
-      window.removeEventListener('zecratary_theme_mode_changed', handleModeUpdate);
-      window.removeEventListener('storage', handleThemeUpdate);
+      window.removeEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
+      window.removeEventListener('zecratary_admin_settings_updated', handleThemeUpdate);
+      window.removeEventListener('zecratary_font_updated', handleFontUpdate);
     };
   }, []);
 
@@ -45630,7 +45771,8 @@ export default function GlobalThemeSync() {
 
 ## File: `apps/web/src/lib/themeConfig.ts`
 ```typescript
-// Global Server-Backed Theme Engine & Memory Store
+'use client';
+
 export interface ThemeColors {
   primary?: string;
   primaryColor?: string;
@@ -45643,176 +45785,115 @@ export interface ThemeColors {
   backgroundColor?: string;
   backgroundDark?: string;
   cardBackground?: string;
-  cardDark?: string;
   cardBorder?: string;
-  borderColor?: string;
   textSecondary?: string;
-  textColor?: string;
-  [key: string]: any;
 }
 
-let memoryThemeColors: ThemeColors | null = null;
+export const AVAILABLE_FONTS = [
+  { id: 'Inter', name: 'Inter', family: "'Inter', system-ui, -apple-system, sans-serif" },
+  { id: 'Plus Jakarta Sans', name: 'Plus Jakarta Sans', family: "'Plus Jakarta Sans', system-ui, sans-serif" },
+  { id: 'Outfit', name: 'Outfit', family: "'Outfit', system-ui, sans-serif" },
+  { id: 'Poppins', name: 'Poppins', family: "'Poppins', system-ui, sans-serif" },
+  { id: 'Roboto', name: 'Roboto', family: "'Roboto', system-ui, sans-serif" },
+  { id: 'System Default', name: 'System Default', family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }
+];
 
-export function setMemoryThemeColors(colors: ThemeColors | null | undefined): void {
-  if (colors && Object.keys(colors).length > 0) {
-    memoryThemeColors = { ...(memoryThemeColors || {}), ...colors };
-  }
+let inMemoryThemeColors: ThemeColors | null = null;
+
+export function setMemoryThemeColors(colors: ThemeColors): void {
+  inMemoryThemeColors = { ...colors };
 }
 
 export function getMemoryThemeColors(): ThemeColors | null {
-  return memoryThemeColors;
+  return inMemoryThemeColors;
 }
 
-export function getEffectiveThemeMode(): 'light' | 'dark' {
-  if (typeof window === 'undefined') return 'dark';
-  try {
-    const mode = localStorage.getItem('zecratary_theme_mode');
-    if (mode === 'light' || mode === 'day') return 'light';
-    if (mode === 'dark') return 'dark';
-  } catch (_) {}
-  if (typeof document !== 'undefined') {
-    if (document.documentElement.classList.contains('light')) return 'light';
-    if (document.documentElement.classList.contains('dark')) return 'dark';
+export function applyGlobalFont(fontName?: string, fontSize?: string, letterSpacing?: string): void {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  
+  let targetFont = fontName || (typeof localStorage !== 'undefined' ? localStorage.getItem('zecratary_font_family') : null) || 'Inter';
+  let targetSize = fontSize || (typeof localStorage !== 'undefined' ? localStorage.getItem('zecratary_font_size') : null) || '16px';
+  let targetSpacing = letterSpacing || (typeof localStorage !== 'undefined' ? localStorage.getItem('zecratary_font_spacing') : null) || '0em';
+
+  const matched = AVAILABLE_FONTS.find(f => f.id.toLowerCase() === targetFont.toLowerCase() || f.name.toLowerCase() === targetFont.toLowerCase());
+  const familyValue = matched ? matched.family : targetFont;
+
+  root.style.setProperty('--font-family', familyValue);
+  root.style.setProperty('--font-family-base', familyValue);
+  root.style.setProperty('--font-size-base', targetSize);
+  root.style.setProperty('--font-letter-spacing', targetSpacing);
+
+  if (document.body) {
+    document.body.style.fontFamily = familyValue;
   }
-  return 'dark';
+}
+
+export function saveThemeColors(colors: ThemeColors): void {
+  setMemoryThemeColors(colors);
+  applyThemeToDocument(colors);
 }
 
 export function applyThemeToDocument(colors?: ThemeColors | null): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const isDayMode = getEffectiveThemeMode() === 'light';
+  
+  let isDayMode = false;
+  try {
+    const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+    isDayMode = mode === 'light' || mode === 'day';
+  } catch (_) {}
 
-  let activeColors = (colors && Object.keys(colors).length > 0) ? colors : memoryThemeColors;
-  if (!activeColors && typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      if (stored) activeColors = JSON.parse(stored);
-    } catch (_) {}
-  }
+  const active = colors || inMemoryThemeColors;
 
-  if (activeColors) {
-    setMemoryThemeColors(activeColors);
-    const p = activeColors.primary || activeColors.primaryColor || '#E05638';
-    const ph = activeColors.primaryHover || '#c94529';
-    const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
-    const sbi = activeColors.sidebarIconColor || activeColors.sidebarIcon || ac || '#10b981';
-    const bg = activeColors.backgroundColor || activeColors.backgroundDark || '#070b13';
-    const card = activeColors.cardBackground || activeColors.cardDark || '#0b0f17';
-    const border = activeColors.cardBorder || activeColors.borderColor || '#1e293b';
-    const textSec = activeColors.textSecondary || '#94a3b8';
-    const txt = activeColors.textColor || '#ffffff';
+  const p = active?.primary || active?.primaryColor || '#E05638';
+  const ph = active?.primaryHover || '#c94529';
+  const ac = active?.accentEmerald || active?.accentColor || active?.accent || '#10b981';
+  const sbi = active?.sidebarIconColor || active?.sidebarIcon || ac;
+  const bg = active?.backgroundColor || active?.backgroundDark || '#070b13';
+  const card = active?.cardBackground || '#0b0f17';
+  const border = active?.cardBorder || '#1e293b';
+  const textSec = active?.textSecondary || '#94a3b8';
 
-    root.style.setProperty('--color-primary', p);
-    root.style.setProperty('--color-primary-hover', ph);
-    root.style.setProperty('--color-accent', ac);
-    root.style.setProperty('--color-emerald', ac);
-    root.style.setProperty('--color-sidebar-icon', sbi);
+  root.style.setProperty('--color-primary', p);
+  root.style.setProperty('--color-primary-hover', ph);
+  root.style.setProperty('--color-accent', ac);
+  root.style.setProperty('--color-emerald', ac);
+  root.style.setProperty('--color-sidebar-icon', sbi);
 
-    if (isDayMode) {
-      root.classList.remove('dark');
-      root.classList.add('light');
-      root.style.setProperty('--color-bg', '#f8fafc');
-      root.style.setProperty('--color-background', '#f8fafc');
-      root.style.setProperty('--color-bg-dark', '#f8fafc');
-      root.style.setProperty('--color-card', '#ffffff');
-      root.style.setProperty('--color-card-dark', '#ffffff');
-      root.style.setProperty('--color-inner-dark', '#f1f5f9');
-      root.style.setProperty('--color-border', '#e2e8f0');
-      root.style.setProperty('--color-border-dark', '#e2e8f0');
-      root.style.setProperty('--color-text', '#0f172a');
-      root.style.setProperty('--color-text-secondary', '#64748b');
-      if (document.body) {
-        document.body.style.backgroundColor = '#f8fafc';
-        document.body.style.color = '#0f172a';
-        document.body.style.transition = 'background-color 200ms ease, color 200ms ease, border-color 200ms ease';
-      }
-    } else {
-      root.classList.remove('light');
-      root.classList.add('dark');
-      root.style.setProperty('--color-bg', bg);
-      root.style.setProperty('--color-background', bg);
-      root.style.setProperty('--color-bg-dark', bg);
-      root.style.setProperty('--color-card', card);
-      root.style.setProperty('--color-card-dark', card);
-      root.style.setProperty('--color-inner-dark', '#070b13');
-      root.style.setProperty('--color-border', border);
-      root.style.setProperty('--color-border-dark', border);
-      root.style.setProperty('--color-text', txt);
-      root.style.setProperty('--color-text-secondary', textSec);
-      if (document.body) {
-        document.body.style.backgroundColor = bg;
-        document.body.style.color = txt;
-        document.body.style.transition = 'background-color 200ms ease, color 200ms ease, border-color 200ms ease';
-      }
+  if (isDayMode) {
+    root.classList.remove('dark');
+    root.classList.add('light');
+    root.style.setProperty('--color-bg', '#f8fafc');
+    root.style.setProperty('--color-bg-dark', '#f8fafc');
+    root.style.setProperty('--color-card', '#ffffff');
+    root.style.setProperty('--color-card-dark', '#ffffff');
+    root.style.setProperty('--color-border', '#e2e8f0');
+    root.style.setProperty('--color-border-dark', '#e2e8f0');
+    root.style.setProperty('--color-text', '#0f172a');
+    root.style.setProperty('--color-text-secondary', '#64748b');
+    if (document.body) {
+      document.body.style.backgroundColor = '#f8fafc';
+      document.body.style.color = '#0f172a';
+      document.body.style.transition = 'background-color 200ms ease, color 200ms ease';
     }
   } else {
-    if (isDayMode) {
-      root.classList.remove('dark');
-      root.classList.add('light');
-      root.style.setProperty('--color-bg', '#f8fafc');
-      root.style.setProperty('--color-card', '#ffffff');
-      root.style.setProperty('--color-border', '#e2e8f0');
-      root.style.setProperty('--color-text', '#0f172a');
-      if (document.body) {
-        document.body.style.backgroundColor = '#f8fafc';
-        document.body.style.color = '#0f172a';
-      }
-    } else {
-      root.classList.remove('light');
-      root.classList.add('dark');
-      if (document.body) {
-        document.body.style.backgroundColor = '#070b13';
-        document.body.style.color = '#ffffff';
-      }
+    root.classList.remove('light');
+    root.classList.add('dark');
+    root.style.setProperty('--color-bg', bg);
+    root.style.setProperty('--color-bg-dark', bg);
+    root.style.setProperty('--color-card', card);
+    root.style.setProperty('--color-card-dark', card);
+    root.style.setProperty('--color-border', border);
+    root.style.setProperty('--color-border-dark', border);
+    root.style.setProperty('--color-text', '#ffffff');
+    root.style.setProperty('--color-text-secondary', textSec);
+    if (document.body) {
+      document.body.style.backgroundColor = bg;
+      document.body.style.color = '#ffffff';
+      document.body.style.transition = 'background-color 200ms ease, color 200ms ease';
     }
   }
-}
-
-export function setThemeMode(mode: 'light' | 'dark'): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem('zecratary_theme_mode', mode);
-  } catch (_) {}
-  applyThemeToDocument();
-  window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode } }));
-  window.dispatchEvent(new Event('zecratary_theme_changed'));
-  window.dispatchEvent(new Event('storage'));
-}
-
-export function toggleThemeMode(): 'light' | 'dark' {
-  const current = getEffectiveThemeMode();
-  const next = current === 'light' ? 'dark' : 'light';
-  setThemeMode(next);
-  return next;
-}
-
-export async function saveThemeColors(colors: ThemeColors): Promise<void> {
-  setMemoryThemeColors(colors);
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
-    } catch (_) {}
-    applyThemeToDocument(colors);
-    window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
-    window.dispatchEvent(new Event('zecratary_theme_changed'));
-    window.dispatchEvent(new Event('storage'));
-  }
-
-  try {
-    await fetch('/api/admin/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ themeColors: colors })
-    });
-  } catch (_) {}
-
-  try {
-    await fetch('/api/user/theme', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ themeColors: colors })
-    });
-  } catch (_) {}
 }
 
 export async function fetchAndApplyServerTheme(): Promise<void> {
@@ -45821,22 +45902,18 @@ export async function fetchAndApplyServerTheme(): Promise<void> {
     const res = await fetch('/api/admin/settings', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      const theme = data?.themeColors || data?.settings?.themeColors;
-      if (theme && Object.keys(theme).length > 0) {
-        setMemoryThemeColors(theme);
-        applyThemeToDocument(theme);
-        return;
+      const settings = data?.settings || data;
+      const tc = settings?.themeColors || settings?.theme_colors;
+      if (tc) {
+        setMemoryThemeColors(tc);
+        applyThemeToDocument(tc);
       }
-    }
-  } catch (_) {}
-
-  try {
-    const uRes = await fetch('/api/user/theme', { cache: 'no-store' });
-    if (uRes.ok) {
-      const uData = await uRes.json();
-      if (uData?.themeColors && Object.keys(uData.themeColors).length > 0) {
-        setMemoryThemeColors(uData.themeColors);
-        applyThemeToDocument(uData.themeColors);
+      if (settings?.fontFamily || settings?.font_family) {
+        applyGlobalFont(
+          settings.fontFamily || settings.font_family,
+          settings.fontSize || settings.font_size,
+          settings.fontLetterSpacing || settings.letter_spacing
+        );
       }
     }
   } catch (_) {}
@@ -46601,60 +46678,57 @@ export function getLocalRecipes(userId: string): any[] {
 
 ## File: `apps/web/src/lib/adminSync.ts`
 ```typescript
-export interface AdminSettingsPayload {
-  siteName?: string;
-  titlebarEmoji?: string;
-  titlebarImage?: string;
-  faviconEmoji?: string;
-  faviconImage?: string;
-  themeColors?: Record<string, any>;
-  [key: string]: any;
-}
-
-export async function fetchServerAdminSettings(): Promise<AdminSettingsPayload | null> {
-  try {
-    const res = await fetch('/api/admin/settings', {
-      cache: 'no-store',
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache'
-      }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return (data && data.settings) ? data.settings : data;
-    }
-  } catch (err) {
-    console.error('[adminSync] fetchServerAdminSettings error:', err);
-  }
-  return null;
-}
-
-export async function persistServerAdminSettings(payload: AdminSettingsPayload): Promise<boolean> {
-  try {
-    const res = await fetch('/api/admin/settings', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache'
-      },
-      body: JSON.stringify(payload)
-    });
-    return res.ok;
-  } catch (err) {
-    console.error('[adminSync] persistServerAdminSettings error:', err);
-    return false;
-  }
-}
+'use client';
 
 export function purgeLegacyBrowserAdminStorage(): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.removeItem('zecratary_theme_colors');
-    localStorage.removeItem('zecratary_site_config');
-    localStorage.removeItem('zecratary_theme_config');
-    localStorage.removeItem('zecratary_admin_settings');
+    const keysToRemove = [
+      'admin_site_name',
+      'admin_titlebar_emoji',
+      'admin_titlebar_image',
+      'admin_favicon_emoji',
+      'admin_favicon_image',
+      'admin_theme_colors',
+      'admin_font_family',
+      'admin_font_size',
+      'admin_font_spacing'
+    ];
+    keysToRemove.forEach(k => localStorage.removeItem(k));
   } catch (_) {}
+}
+
+export async function fetchServerAdminSettings(): Promise<any> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const res = await fetch('/api/admin/settings', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.settings || data;
+  } catch (err) {
+    console.error('[adminSync] fetchServerAdminSettings error:', err);
+    return null;
+  }
+}
+
+export async function persistServerAdminSettings(settings: any): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  try {
+    const res = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+    if (!res.ok) {
+      console.error('[adminSync] Server rejected settings with status:', res.status);
+      return false;
+    }
+    const data = await res.json();
+    return Boolean(data.success);
+  } catch (err) {
+    console.error('[adminSync] persistServerAdminSettings error:', err);
+    return false;
+  }
 }
 
 ```
@@ -46766,67 +46840,28 @@ if (typeof window !== 'undefined') {
 
 ## File: `apps/web/src/lib/db.ts`
 ```typescript
-// Strict PostgreSQL Database Client
-// 100% Database Persistence - No JSON Fallback
+import { Pool } from 'pg';
 
-import { Pool, types } from 'pg';
+const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL || 'postgresql://postgres:postgres@localhost:5432/zecratary?schema=public';
 
-let pgPool: Pool | null = null;
+export const pool = new Pool({
+  connectionString,
+  ssl: connectionString.includes('sslmode=require') || connectionString.includes('neon.tech') || connectionString.includes('supabase')
+    ? { rejectUnauthorized: false }
+    : undefined,
+});
 
-export function getConnectionString(): string {
-  const connUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!connUrl) {
-    throw new Error('[DB FATAL] DATABASE_URL environment variable is missing. A valid PostgreSQL connection is required.');
-  }
-  return connUrl;
-}
-
-export async function getDbPool(): Promise<Pool> {
-  if (pgPool) return pgPool;
-  const connectionString = getConnectionString();
-
-  pgPool = new Pool({
-    connectionString,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
-  });
-
-  return pgPool;
-}
-
-export async function query(sql: string, params: any[] = []): Promise<any[]> {
-  const pool = await getDbPool();
+export async function query(text: string, params?: any[]): Promise<any[]> {
   const client = await pool.connect();
   try {
-    const res = await client.query(sql, params);
+    const res = await client.query(text, params);
     return res.rows;
   } finally {
     client.release();
   }
 }
 
-export async function transaction<T>(callback: (client: any) => Promise<T>): Promise<T> {
-  const pool = await getDbPool();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await callback(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-// Parse PostgreSQL NUMERIC (OID 1700) directly into JavaScript numbers
-if (typeof types !== 'undefined' && types.setTypeParser) {
-  types.setTypeParser(1700, (val: string) => (val === null ? 0 : parseFloat(val)));
-}
+export default pool;
 
 ```
 
