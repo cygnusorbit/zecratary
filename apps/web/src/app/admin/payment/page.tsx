@@ -9,7 +9,8 @@ import {
   Check, Eye, EyeOff, Globe, Zap, History, Sliders, Filter,
   PlusCircle, X, User as UserIcon, Activity, Calendar,
   Pencil, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  ShieldAlert, Ban, ArrowUpRight, AlertTriangle, Repeat, RotateCcw
+  ShieldAlert, Ban, ArrowUpRight, AlertTriangle, Repeat, RotateCcw,
+  ShieldCheck, CheckCheck
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -35,6 +36,9 @@ interface PaymentTransaction {
   isRecurring?: boolean;
   recurringInterval?: 'MONTH' | 'YEAR';
   autoRenew?: boolean;
+  gatewayTransactionId?: string;
+  confirmedAmount?: number;
+  confirmedAt?: string;
 }
 
 interface GatewayConfig {
@@ -182,6 +186,9 @@ const normalizeTransaction = (raw: any, defaultCurrency: string): PaymentTransac
     isRecurring,
     recurringInterval: raw.recurringInterval || raw.recurring_interval || (String(raw.planSlug || raw.plan_slug || '').includes('annual') ? 'YEAR' : 'MONTH'),
     autoRenew,
+    gatewayTransactionId: raw.gatewayTransactionId || raw.gateway_transaction_id || raw.transaction_id || undefined,
+    confirmedAmount: raw.confirmedAmount !== undefined ? parseAmount(raw.confirmedAmount) : (raw.confirmed_amount !== undefined ? parseAmount(raw.confirmed_amount) : undefined),
+    confirmedAt: raw.confirmedAt || raw.confirmed_at || undefined,
   };
 };
 
@@ -260,6 +267,8 @@ export default function AdminPaymentPage() {
   const [failureReason, setFailureReason] = useState('');
   const [syncUserPlan, setSyncUserPlan] = useState(true);
   const [modalError, setModalError] = useState('');
+  const [addGatewayTxId, setAddGatewayTxId] = useState('');
+  const [addGatewayConfirmed, setAddGatewayConfirmed] = useState(false);
 
   // Modify (Edit) Modal States
   const [editingTx, setEditingTx] = useState<PaymentTransaction | null>(null);
@@ -275,6 +284,16 @@ export default function AdminPaymentPage() {
   const [editIsRecurring, setEditIsRecurring] = useState<boolean>(true);
   const [editFailureReason, setEditFailureReason] = useState('');
   const [editSyncUserPlan, setEditSyncUserPlan] = useState(false);
+  const [editGatewayTxId, setEditGatewayTxId] = useState('');
+  const [editGatewayConfirmed, setEditGatewayConfirmed] = useState(false);
+
+  // Confirm Gateway Payment Modal States
+  const [confirmingTx, setConfirmingTx] = useState<PaymentTransaction | null>(null);
+  const [confirmGatewayTxId, setConfirmGatewayTxId] = useState('');
+  const [confirmAmount, setConfirmAmount] = useState<number>(0);
+  const [confirmCheckbox, setConfirmCheckbox] = useState(false);
+  const [confirmSyncPlan, setConfirmSyncPlan] = useState(true);
+  const [isSubmittingConfirm, setIsSubmittingConfirm] = useState(false);
 
   useEffect(() => {
     if (feedback) {
@@ -854,6 +873,113 @@ export default function AdminPaymentPage() {
     }
   };
 
+  // OPEN CONFIRM PAYMENT FROM GATEWAY MODAL
+  const handleOpenConfirmModal = (tx: PaymentTransaction) => {
+    setModalError('');
+    setConfirmingTx(tx);
+    setConfirmGatewayTxId(tx.gatewayTransactionId || '');
+    setConfirmAmount(parseAmount(tx.amount));
+    setConfirmCheckbox(false);
+    setConfirmSyncPlan(true);
+  };
+
+  // SUBMIT CONFIRM PAYMENT FROM GATEWAY
+  const handleConfirmPaymentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!confirmingTx) return;
+    setModalError('');
+
+    if (!confirmCheckbox) {
+      setModalError(t('mustConfirmGatewayAmountError', 'Please check the box confirming you have verified the transaction amount from the payment gateway.'));
+      return;
+    }
+
+    const cleanAmount = parseAmount(confirmAmount);
+    if (cleanAmount <= 0) {
+      setModalError(t('amountMustBePositive', 'Confirmed payment amount must be greater than zero.'));
+      return;
+    }
+
+    setIsSubmittingConfirm(true);
+    const nowIso = new Date().toISOString();
+    const cleanEmail = (confirmingTx.customerEmail || '').toLowerCase().trim();
+    const singlePlanSlug = sanitizeSinglePlan(confirmingTx.planSlug);
+
+    const existingExpiry = confirmingTx.expiryDate;
+    const fallbackExpiry = calculateDefaultExpiry(nowIso.slice(0, 10), confirmingTx.recurringInterval || 'MONTH');
+    const finalExpiryDate = existingExpiry || (fallbackExpiry ? new Date(`${fallbackExpiry}T23:59:59Z`).toISOString() : undefined);
+
+    const updatedTx: PaymentTransaction = {
+      ...confirmingTx,
+      amount: cleanAmount,
+      status: 'succeeded',
+      gatewayTransactionId: confirmGatewayTxId.trim() || confirmingTx.gatewayTransactionId,
+      confirmedAmount: cleanAmount,
+      confirmedAt: nowIso,
+      expiryDate: finalExpiryDate,
+      isRecurring: confirmingTx.isRecurring !== undefined ? confirmingTx.isRecurring : true,
+      autoRenew: confirmingTx.autoRenew !== undefined ? confirmingTx.autoRenew : true,
+    };
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          action: 'confirm_payment', 
+          id: confirmingTx.id,
+          transaction: updatedTx 
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        const fallbackRes = await fetch('/api/admin/payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update_transaction', id: confirmingTx.id, transaction: updatedTx }),
+        });
+        const fallbackData = await fallbackRes.json();
+        if (!fallbackRes.ok || !fallbackData.success) {
+          throw new Error(fallbackData.error || data.error || 'Failed to confirm transaction with gateway.');
+        }
+      }
+
+      if (confirmSyncPlan && singlePlanSlug) {
+        const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
+        if (targetUser) {
+          await fetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              ...targetUser, 
+              subscriptionPlan: singlePlanSlug,
+              planExpiryDate: finalExpiryDate,
+              expiryDate: finalExpiryDate
+            }),
+          }).catch(() => {});
+        }
+      }
+
+      await fetchData();
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+
+      setConfirmingTx(null);
+      setFeedback({
+        type: 'success',
+        msg: t('paymentConfirmedSuccess', `Payment amount of ${getCurrencySymbol(updatedTx.currency)}${cleanAmount.toFixed(2)} confirmed via ${updatedTx.gateway.toUpperCase()}! Status set to Succeeded.`),
+      });
+    } catch (err: any) {
+      setModalError(err.message || 'Failed to confirm gateway payment');
+    } finally {
+      setIsSubmittingConfirm(false);
+    }
+  };
+
   const handleCurrencyChange = async (newCurrency: string) => {
     const updatedConfig: GatewayConfig = {
       ...config,
@@ -998,6 +1124,8 @@ export default function AdminPaymentPage() {
     setPaymentStatus('succeeded');
     setFailureReason('');
     setSyncUserPlan(true);
+    setAddGatewayTxId('');
+    setAddGatewayConfirmed(false);
     setShowAddModal(true);
   };
 
@@ -1017,6 +1145,8 @@ export default function AdminPaymentPage() {
     setEditExpiryDate(tx.expiryDate ? new Date(tx.expiryDate).toISOString().slice(0, 10) : '');
     setEditIsRecurring(tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true);
     setEditSyncUserPlan(false);
+    setEditGatewayTxId(tx.gatewayTransactionId || '');
+    setEditGatewayConfirmed(isSucceeded(tx.status));
   };
 
   const handleEditPlanSelectChange = (slug: string) => {
@@ -1120,6 +1250,12 @@ export default function AdminPaymentPage() {
     const singlePlanSlug = sanitizeSinglePlan(editPlanSlug);
     const cleanEmail = editCustomerEmail.trim().toLowerCase();
 
+    // Require confirm payment amount transaction from gateway if advancing to succeeded
+    if (isSucceeded(normalizedStatus) && !isSucceeded(editingTx.status) && !editGatewayConfirmed) {
+      setModalError(t('requireGatewayConfirmToUpdateSucceeded', 'Confirmation required: You must confirm the transaction amount from the payment gateway to mark status as Succeeded.'));
+      return;
+    }
+
     const formattedCreatedAt = editDate 
       ? new Date(`${editDate}T12:00:00Z`).toISOString() 
       : editingTx.createdAt;
@@ -1148,6 +1284,9 @@ export default function AdminPaymentPage() {
       autoRenew: finalRecurring,
       createdAt: formattedCreatedAt,
       expiryDate: formattedExpiryDate,
+      gatewayTransactionId: editGatewayTxId.trim() || editingTx.gatewayTransactionId,
+      confirmedAmount: isSucceeded(normalizedStatus) ? cleanAmount : editingTx.confirmedAmount,
+      confirmedAt: isSucceeded(normalizedStatus) ? (editingTx.confirmedAt || new Date().toISOString()) : undefined,
     };
 
     try {
@@ -1317,6 +1456,12 @@ export default function AdminPaymentPage() {
     const cleanAmount = parseAmount(paymentAmount);
     const normalizedStatus = paymentStatus.toLowerCase();
 
+    // Required confirm payment amount transaction from gateway before becoming succeeded
+    if (isSucceeded(normalizedStatus) && !addGatewayConfirmed) {
+      setModalError(t('requireGatewayConfirmToAddSucceeded', 'Confirmation required: Please verify and confirm the transaction amount from the payment gateway to record as Succeeded.'));
+      return;
+    }
+
     const isDowngradingToFree = Boolean(
       singlePlanSlug === 'taster' || singlePlanSlug === 'free' || matchedPlan?.isFree
     );
@@ -1434,6 +1579,9 @@ export default function AdminPaymentPage() {
       autoRenew: isPaymentRecurring,
       createdAt: formattedCreatedAt,
       expiryDate: formattedExpiryDate,
+      gatewayTransactionId: addGatewayTxId.trim() || undefined,
+      confirmedAmount: isSucceeded(normalizedStatus) ? cleanAmount : undefined,
+      confirmedAt: isSucceeded(normalizedStatus) ? new Date().toISOString() : undefined,
     };
 
     try {
@@ -1896,7 +2044,6 @@ export default function AdminPaymentPage() {
               </div>
             </div>
 
-            {/* SEPARATED: CANCELLED TILE */}
             <div 
               className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
               style={{
@@ -1913,7 +2060,6 @@ export default function AdminPaymentPage() {
               </div>
             </div>
 
-            {/* SEPARATED: REFUNDED TILE */}
             <div 
               className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
               style={{
@@ -2137,6 +2283,7 @@ export default function AdminPaymentPage() {
                       const isRecurringActive = Boolean(tx.isRecurring ?? true);
                       const isTxCanceled = isCanceled(tx.status);
                       const isTxRefunded = isRefunded(tx.status);
+                      const isTxSucceeded = isSucceeded(tx.status);
 
                       return (
                         <tr 
@@ -2175,6 +2322,7 @@ export default function AdminPaymentPage() {
                                   borderColor: 'var(--color-emerald, #10b981)',
                                   color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
                                 }}
+                                title={tx.gatewayTransactionId ? `Gateway Ref: ${tx.gatewayTransactionId}` : 'Confirmed Payment'}
                               >
                                 <CheckCircle2 className="h-3 w-3" /> {t('statusSucceeded', 'Succeeded')}
                               </span>
@@ -2327,6 +2475,22 @@ export default function AdminPaymentPage() {
                           {/* ACTIONS */}
                           <td className="px-5 py-3.5 text-right whitespace-nowrap">
                             <div className="flex items-center justify-end gap-1.5">
+                              {/* 0. CONFIRM PAYMENT FROM GATEWAY BUTTON (FOR PENDING / UNCONFIRMED) */}
+                              {!isTxSucceeded && !isTxRefunded && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenConfirmModal(tx)}
+                                  className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer text-emerald-600 hover:text-emerald-700 hover:border-emerald-500"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
+                                    borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.35)',
+                                  }}
+                                  title={t('confirmPaymentTooltip', 'Confirm payment amount from gateway to mark Succeeded')}
+                                >
+                                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                                </button>
+                              )}
+
                               {/* 1. EDIT BUTTON */}
                               <button
                                 type="button"
@@ -2952,6 +3116,198 @@ export default function AdminPaymentPage() {
         </form>
       )}
 
+      {/* 0. CONFIRM PAYMENT FROM GATEWAY MODAL */}
+      {confirmingTx && (
+        <div 
+          onClick={() => !isSubmittingConfirm && setConfirmingTx(null)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
+            style={{
+              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+              color: isDayMode ? '#0f172a' : '#ffffff'
+            }}
+          >
+            <button 
+              onClick={() => !isSubmittingConfirm && setConfirmingTx(null)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-bg, #0B101D)',
+                color: isDayMode ? '#0f172a' : '#cbd5e1'
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="space-y-1 pr-6">
+              <h2 
+                className="text-xl font-black flex items-center gap-2"
+                style={{ color: 'var(--color-emerald, #10b981)' }}
+              >
+                <ShieldCheck className="h-5 w-5 text-emerald-500" /> {t('confirmGatewayPaymentTitle', 'Confirm Gateway Payment')}
+              </h2>
+              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                {t('confirmGatewayPaymentSub', 'Confirm payment amount transaction from payment gateway to become status "Succeeded".')}
+              </p>
+            </div>
+
+            {/* Summary Details Box */}
+            <div 
+              className="p-3.5 rounded-2xl border space-y-2 transition-colors duration-200"
+              style={{
+                backgroundColor: isDayMode ? '#f8fafc' : 'rgba(11, 16, 29, 0.6)',
+                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-400">{t('customerCol', 'Customer')}:</span>
+                <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                  {confirmingTx.customerName} ({confirmingTx.customerEmail})
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-400">{t('planCol', 'Plan')}:</span>
+                <span className="font-bold text-[var(--color-primary)]">
+                  {confirmingTx.planName}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-400">{t('gatewayLabel', 'Gateway')}:</span>
+                <span className="font-extrabold uppercase px-2 py-0.5 rounded text-[10px] bg-slate-700/50 text-white">
+                  {confirmingTx.gateway}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-400">{t('currentStatusLabel', 'Current Status')}:</span>
+                <span className="font-extrabold uppercase text-[11px] text-amber-500">
+                  {confirmingTx.status}
+                </span>
+              </div>
+            </div>
+
+            {modalError && (
+              <div className="p-3 bg-red-50 border border-red-300 text-red-900 rounded-xl font-semibold flex items-center gap-2 shadow-xs">
+                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                <span>{modalError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleConfirmPaymentSubmit} className="space-y-4 pt-1">
+              <div>
+                <label className="block font-bold mb-1 flex items-center justify-between" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <span>{t('confirmedPaymentAmountLabel', 'Confirmed Payment Amount')} ({confirmingTx.currency || config.currency}) *</span>
+                  <span className="text-[10px] text-emerald-500 font-bold">{t('matchesGatewayNote', 'Must match gateway settlement')}</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    {getCurrencySymbol(confirmingTx.currency || config.currency)}
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={confirmAmount}
+                    onChange={(e) => setConfirmAmount(parseFloat(e.target.value) || 0)}
+                    className="payment-input w-full border rounded-xl pl-8 pr-3 py-2.5 text-xs outline-none font-black transition"
+                    style={{
+                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  {t('gatewayTransactionIdLabel', 'Gateway Transaction ID / Payment Intent ID')}
+                </label>
+                <input
+                  type="text"
+                  placeholder={t('gatewayTxIdPlaceholder', 'e.g. pi_3N... / PAYID-... / ch_...')}
+                  value={confirmGatewayTxId}
+                  onChange={(e) => setConfirmGatewayTxId(e.target.value)}
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#0f172a' : '#ffffff'
+                  }}
+                />
+              </div>
+
+              <div 
+                className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
+                style={{
+                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.08)',
+                  borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.3)'
+                }}
+              >
+                <div className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    id="confirmGatewayAmountCheckbox"
+                    checked={confirmCheckbox}
+                    onChange={(e) => setConfirmCheckbox(e.target.checked)}
+                    className="mt-0.5 rounded w-4 h-4 cursor-pointer accent-[#10b981]"
+                  />
+                  <label htmlFor="confirmGatewayAmountCheckbox" className="font-semibold text-xs leading-relaxed cursor-pointer select-none" style={{ color: isDayMode ? '#047857' : '#6ee7b7' }}>
+                    {t('confirmPaymentGatewayNotice', 'I verify and confirm that the payment transaction amount has been settled by the payment gateway, and confirm updating status to "Succeeded".')}
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1 border-t border-emerald-500/20">
+                  <input
+                    type="checkbox"
+                    id="confirmSyncPlanBox"
+                    checked={confirmSyncPlan}
+                    onChange={(e) => setConfirmSyncPlan(e.target.checked)}
+                    className="rounded w-4 h-4 cursor-pointer accent-[#E05638]"
+                  />
+                  <label htmlFor="confirmSyncPlanBox" className="font-medium text-[11px] cursor-pointer select-none" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    {t('syncUserPlanOnConfirm', 'Update user subscription entitlement in PostgreSQL immediately upon confirmation')}
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                <button
+                  type="button"
+                  disabled={isSubmittingConfirm}
+                  onClick={() => setConfirmingTx(null)}
+                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs disabled:opacity-50"
+                  style={{
+                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-bg, #0B101D)',
+                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                    color: isDayMode ? '#334155' : '#cbd5e1'
+                  }}
+                >
+                  {t('cancel', 'Cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={!confirmCheckbox || isSubmittingConfirm}
+                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-emerald-600 hover:bg-emerald-700"
+                >
+                  {isSubmittingConfirm ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin" /> {t('confirmingPaymentStatus', 'Confirming Status...')}
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="h-4 w-4" /> {t('confirmPaymentAmountBtn', 'Confirm Payment & Set Succeeded')}
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* 1. ADD PAYMENT MODAL */}
       {showAddModal && (
         <div 
@@ -3241,9 +3597,9 @@ export default function AdminPaymentPage() {
                     }}
                   >
                     <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
+                    <option value="pending">{t('statusPending', 'Pending')}</option>
                     <option value="canceled">{t('statusCanceled', 'Cancelled')}</option>
                     <option value="failed">{t('statusFailed', 'Failed')}</option>
-                    <option value="pending">{t('statusPending', 'Pending')}</option>
                     <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
                   </select>
                 </div>
@@ -3266,6 +3622,50 @@ export default function AdminPaymentPage() {
                   </div>
                 )}
               </div>
+
+              {/* GATEWAY PAYMENT AMOUNT CONFIRMATION SECTION */}
+              {isSucceeded(paymentStatus) && (
+                <div 
+                  className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.08)',
+                    borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.3)'
+                  }}
+                >
+                  <div className="flex items-center gap-1.5 font-bold text-xs" style={{ color: isDayMode ? '#047857' : '#34d399' }}>
+                    <ShieldCheck className="h-4 w-4" /> {t('gatewayVerificationRequired', 'Required Gateway Amount Confirmation')}
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[11px] mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      {t('gatewayTransactionIdLabel', 'Gateway Transaction ID / Payment Intent ID')}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. pi_3N... or PAYID-..."
+                      value={addGatewayTxId}
+                      onChange={(e) => setAddGatewayTxId(e.target.value)}
+                      className="payment-input w-full border rounded-xl p-2 text-xs outline-none font-mono"
+                      style={{
+                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-start gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="addGatewayConfirmedBox"
+                      checked={addGatewayConfirmed}
+                      onChange={(e) => setAddGatewayConfirmed(e.target.checked)}
+                      className="mt-0.5 rounded w-4 h-4 cursor-pointer accent-[#10b981]"
+                    />
+                    <label htmlFor="addGatewayConfirmedBox" className="text-xs font-semibold leading-tight cursor-pointer select-none" style={{ color: isDayMode ? '#047857' : '#6ee7b7' }}>
+                      {t('confirmAmountFromGatewayLabel', 'I confirm the payment amount transaction from payment gateway is verified to become "Succeeded".')}
+                    </label>
+                  </div>
+                </div>
+              )}
 
               {isSucceeded(paymentStatus) && (
                 <div className="flex items-center gap-2 pt-1">
@@ -3305,7 +3705,7 @@ export default function AdminPaymentPage() {
                 >
                   {planTransitionInfo?.isDuplicate ? (
                     <>
-                      <Ban className="h-4 w-4" /> {t('duplicatePlanBtn', 'Duplicate Plan Exists')}
+                      <Ban className="h-4 w-4" /> {t('duplicatePlanBtn', 'Duplicate Plan ExExists')}
                     </>
                   ) : planTransitionInfo?.isTransition ? (
                     <>
@@ -3565,9 +3965,9 @@ export default function AdminPaymentPage() {
                     }}
                   >
                     <option value="succeeded">{t('statusSucceeded', 'Succeeded')}</option>
+                    <option value="pending">{t('statusPending', 'Pending')}</option>
                     <option value="canceled">{t('statusCanceled', 'Cancelled')}</option>
                     <option value="failed">{t('statusFailed', 'Failed')}</option>
-                    <option value="pending">{t('statusPending', 'Pending')}</option>
                     <option value="refunded">{t('statusRefunded', 'Refunded')}</option>
                   </select>
                 </div>
@@ -3590,6 +3990,50 @@ export default function AdminPaymentPage() {
                   </div>
                 )}
               </div>
+
+              {/* CONFIRMATION CHECK FOR ADVANCING TO SUCCEEDED */}
+              {isSucceeded(editStatus) && !isSucceeded(editingTx.status) && (
+                <div 
+                  className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.08)',
+                    borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.3)'
+                  }}
+                >
+                  <div className="flex items-center gap-1.5 font-bold text-xs" style={{ color: isDayMode ? '#047857' : '#34d399' }}>
+                    <ShieldCheck className="h-4 w-4" /> {t('gatewayVerificationRequired', 'Required Gateway Amount Confirmation')}
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[11px] mb-1" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                      {t('gatewayTransactionIdLabel', 'Gateway Transaction ID / Payment Intent ID')}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. pi_3N... or PAYID-..."
+                      value={editGatewayTxId}
+                      onChange={(e) => setEditGatewayTxId(e.target.value)}
+                      className="payment-input w-full border rounded-xl p-2 text-xs outline-none font-mono"
+                      style={{
+                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                        color: isDayMode ? '#0f172a' : '#ffffff'
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-start gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="editGatewayConfirmedBox"
+                      checked={editGatewayConfirmed}
+                      onChange={(e) => setEditGatewayConfirmed(e.target.checked)}
+                      className="mt-0.5 rounded w-4 h-4 cursor-pointer accent-[#10b981]"
+                    />
+                    <label htmlFor="editGatewayConfirmedBox" className="text-xs font-semibold leading-tight cursor-pointer select-none" style={{ color: isDayMode ? '#047857' : '#6ee7b7' }}>
+                      {t('confirmAmountFromGatewayLabel', 'I confirm the payment amount transaction from payment gateway is verified to become "Succeeded".')}
+                    </label>
+                  </div>
+                </div>
+              )}
 
               {isSucceeded(editStatus) && editPlanSlug && (
                 <div className="flex items-center gap-2 pt-1">

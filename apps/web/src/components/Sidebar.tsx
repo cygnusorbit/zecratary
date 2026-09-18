@@ -556,9 +556,14 @@ export default function Sidebar() {
             </div>
           )}
 
-          <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
+                    <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
             <Settings className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('profile')}</span>}
+          </Link>
+
+          <Link href="/billing" className={navClass('/billing')} title={t('billing') || 'Billing'}>
+            <CreditCard className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`} />
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing') || 'Billing'}</span>}
           </Link>
 
           <Link
