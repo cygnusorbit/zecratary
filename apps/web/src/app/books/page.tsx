@@ -160,8 +160,7 @@ export default function BooksPage() {
         root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
         root.style.setProperty('--color-text', '#0f172a');
         root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
+        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
         }
       } else {
         root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
@@ -177,8 +176,7 @@ export default function BooksPage() {
         root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
         root.style.setProperty('--color-text', c.textColor || '#ffffff');
         root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
+        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
         }
       }
     } catch (_) {}
@@ -196,8 +194,7 @@ export default function BooksPage() {
       window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
       window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
       window.removeEventListener('storage', applyGlobalTheme);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
+      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
       }
     };
   }, [applyGlobalTheme]);

@@ -230,8 +230,7 @@ export default function ProfilePage() {
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_payment_updated', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
+      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
       }
     };
   }, [applySavedTheme]);

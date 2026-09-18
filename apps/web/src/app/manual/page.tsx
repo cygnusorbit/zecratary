@@ -74,8 +74,7 @@ export default function ManualRecipePage() {
         root.classList.remove('dark');
         root.classList.add('light');
 
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
+        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
           document.body.style.color = '#0f172a';
         }
       } else {
@@ -97,8 +96,7 @@ export default function ManualRecipePage() {
         root.classList.remove('light');
         root.classList.add('dark');
 
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
+        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
           document.body.style.color = '';
         }
       }
@@ -126,8 +124,7 @@ export default function ManualRecipePage() {
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
+      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
         document.body.style.color = '';
       }
     };

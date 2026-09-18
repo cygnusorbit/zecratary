@@ -66,8 +66,7 @@ export default function ShoppingListPage() {
         root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
         root.style.setProperty('--color-text', '#0f172a');
         root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
+        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
           document.body.style.color = '#0f172a';
         }
       } else {

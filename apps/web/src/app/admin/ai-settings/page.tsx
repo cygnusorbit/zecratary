@@ -128,8 +128,7 @@ export default function ChefAISettingsPage() {
       if (isDay) {
         root.classList.remove('dark');
         root.classList.add('light');
-        if (document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
+        if (document.body) { // preserved by global theme#f8fafc';
           document.body.style.color = '#0f172a';
         }
       } else {

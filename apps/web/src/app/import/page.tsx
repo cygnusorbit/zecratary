@@ -191,8 +191,7 @@ export default function ImportPage() {
         root.style.setProperty('--color-accent', cfg.accentEmerald || cfg.accentColor || '#10b981');
         root.style.setProperty('--color-text', '#0f172a');
         root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
+        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
         }
       } else {
         root.style.setProperty('--color-primary', cfg.primary || cfg.primaryColor || '#E05638');
@@ -208,8 +207,7 @@ export default function ImportPage() {
         root.style.setProperty('--color-accent', cfg.accentEmerald || cfg.accentColor || '#10b981');
         root.style.setProperty('--color-text', cfg.textColor || '#ffffff');
         root.style.setProperty('--color-text-secondary', cfg.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '';
+        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
         }
       }
     } catch (_) {}
@@ -237,8 +235,7 @@ export default function ImportPage() {
       window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
       window.removeEventListener('zecratary_recipe_types_changed', syncRecipeTypes);
       window.removeEventListener('storage', handleStorageUpdate);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.style.backgroundColor = '';
+      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
       }
     };
   }, [applyGlobalTheme, t]);
