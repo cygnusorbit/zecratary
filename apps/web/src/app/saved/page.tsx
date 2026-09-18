@@ -1016,7 +1016,7 @@ export default function SavedRecipesPage() {
           </button>
         </div>
 
-        {/* Filter Pills */}
+        {/* Filter Pills with Full Day Mode Contrast */}
         {showFilters && (
           <div className="flex flex-wrap items-center gap-2 pt-1 animate-in fade-in text-xs font-semibold select-none">
             <button
@@ -1125,7 +1125,7 @@ export default function SavedRecipesPage() {
               )}
             </div>
 
-            {/* Recipe Type Dropdown */}
+            {/* Recipe Type ("Main Dish") Dropdown */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -1141,9 +1141,9 @@ export default function SavedRecipesPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                <Utensils className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedType === 'All Types' ? (t('recipeTypeLabel') || 'Recipe Type') : selectedType}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+                <Utensils className="h-3.5 w-3.5" style={{ color: selectedType !== 'All Types' ? 'var(--color-primary)' : 'var(--color-primary)' }}/>
+                <span className="font-bold">{selectedType === 'All Types' ? (t('recipeTypeLabel') || 'Recipe Type') : selectedType}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
               </button>
 
               {openDropdown === 'recipeType' && (
@@ -1159,13 +1159,13 @@ export default function SavedRecipesPage() {
                       key={type}
                       type="button"
                       onClick={() => { setSelectedType(type); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
                       style={selectedType === type ? {
                         backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
+                        color: 'var(--color-primary)',
                         border: '1px solid var(--color-primary)'
                       } : {
-                        color: 'var(--color-text-secondary)'
+                        color: 'var(--color-text)'
                       }}
                     >
                       {type}
@@ -1210,9 +1210,9 @@ export default function SavedRecipesPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                <Star className="h-3.5 w-3.5 opacity-70"/>
+                <Star className="h-3.5 w-3.5" style={{ color: selectedRating !== 'All Ratings' ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
                 <span>{selectedRating === 'All Ratings' ? (t('rating') || 'Rating') : selectedRating}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
               </button>
 
               {openDropdown === 'rating' && (
@@ -1228,13 +1228,13 @@ export default function SavedRecipesPage() {
                       key={rat}
                       type="button"
                       onClick={() => { setSelectedRating(rat); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
                       style={selectedRating === rat ? {
                         backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
+                        color: 'var(--color-primary)',
                         border: '1px solid var(--color-border)'
                       } : {
-                        color: 'var(--color-text-secondary)'
+                        color: 'var(--color-text)'
                       }}
                     >
                       {rat}
@@ -1244,7 +1244,7 @@ export default function SavedRecipesPage() {
               )}
             </div>
 
-            {/* Prep Time Dropdown */}
+            {/* Prep Time Dropdown (Day Mode Visible) */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -1260,9 +1260,9 @@ export default function SavedRecipesPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                <Hourglass className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedPrepTime === 'All Prep Times' ? (t('prepTime') || 'Prep Time') : selectedPrepTime}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+                <Hourglass className="h-3.5 w-3.5" style={{ color: selectedPrepTime !== 'All Prep Times' ? 'var(--color-emerald)' : 'var(--color-emerald)' }}/>
+                <span className="font-bold">{selectedPrepTime === 'All Prep Times' ? (t('prepTime') || 'Prep Time') : selectedPrepTime}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
               </button>
 
               {openDropdown === 'prepTime' && (
@@ -1278,13 +1278,13 @@ export default function SavedRecipesPage() {
                       key={time}
                       type="button"
                       onClick={() => { setSelectedPrepTime(time); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
                       style={selectedPrepTime === time ? {
                         backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
+                        color: 'var(--color-emerald)',
                         border: '1px solid var(--color-border)'
                       } : {
-                        color: 'var(--color-text-secondary)'
+                        color: 'var(--color-text)'
                       }}
                     >
                       {time}
@@ -1294,7 +1294,7 @@ export default function SavedRecipesPage() {
               )}
             </div>
 
-            {/* Cook Time Dropdown */}
+            {/* Cook Time Dropdown (Day Mode Visible) */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -1310,9 +1310,9 @@ export default function SavedRecipesPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                <Clock className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedCookTime === 'All Cook Times' ? (t('cookTime') || 'Cook Time') : selectedCookTime}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+                <Clock className="h-3.5 w-3.5" style={{ color: selectedCookTime !== 'All Cook Times' ? 'var(--color-emerald)' : 'var(--color-primary)' }}/>
+                <span className="font-bold">{selectedCookTime === 'All Cook Times' ? (t('cookTime') || 'Cook Time') : selectedCookTime}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
               </button>
 
               {openDropdown === 'cookTime' && (
@@ -1328,13 +1328,13 @@ export default function SavedRecipesPage() {
                       key={time}
                       type="button"
                       onClick={() => { setSelectedCookTime(time); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
                       style={selectedCookTime === time ? {
                         backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
+                        color: 'var(--color-emerald)',
                         border: '1px solid var(--color-border)'
                       } : {
-                        color: 'var(--color-text-secondary)'
+                        color: 'var(--color-text)'
                       }}
                     >
                       {time}
@@ -1446,7 +1446,7 @@ export default function SavedRecipesPage() {
                 <div className="px-3.5 pb-3 pt-0 flex items-center justify-between gap-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span 
-                      className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                      className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 shadow-xs"
                       style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       {cardTypeBadge}
@@ -1459,8 +1459,8 @@ export default function SavedRecipesPage() {
                     ) : null}
                   </div>
 
-                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                    <Clock className="h-3 w-3"/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
+                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-semibold" style={{ color: 'var(--color-text)' }}>
+                    <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }}/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
                   </span>
                 </div>
               </div>
@@ -1582,22 +1582,49 @@ export default function SavedRecipesPage() {
                       alt={selectedRecipe.title || selectedRecipe.name}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
 
                     <div className="relative z-10 space-y-3">
                       <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
                         {selectedRecipe.title || selectedRecipe.name}
                       </h2>
 
+                      {/* Modal Badges: Cook Time, Prep Time, Main Dish - Full Day/Dark Mode Contrast */}
                       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Clock className="h-3.5 w-3.5"/> {(t('cookTimePrefix') || 'Cook: {time} minutes').replace('{time}', String(selectedRecipe.cookTimeMinutes || 10))}
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/> 
+                          <span className="font-bold">{(t('cookTimePrefix') || 'Cook: {time} minutes').replace('{time}', String(selectedRecipe.cookTimeMinutes || 10))}</span>
                         </span>
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Clock className="h-3.5 w-3.5"/> {(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}
+
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">{(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}</span>
                         </span>
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Utensils className="h-3.5 w-3.5"/> {recipeCategoryBadge}
+
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">{recipeCategoryBadge}</span>
                         </span>
                         
                         {/* Modal Header Favorite Button */}
