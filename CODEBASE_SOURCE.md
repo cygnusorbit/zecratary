@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.4.0",
+  "version": "7.4.1",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.4.0",
+  "version": "7.4.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -13258,8 +13258,10 @@ export default function AdminSettingsPage() {
     );
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
     setIsSaving(true);
     isSavingRef.current = true;
     setSaveError('');
@@ -13341,6 +13343,16 @@ export default function AdminSettingsPage() {
       setTimeout(() => {
         isSavingRef.current = false;
       }, 600);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+      const target = e.target as HTMLInputElement;
+      if (target.type !== 'file') {
+        e.preventDefault();
+        handleSave();
+      }
     }
   };
 
@@ -13558,7 +13570,8 @@ export default function AdminSettingsPage() {
         </button>
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6">
+      {/* SETTINGS CONTAINER (Decoupled from Form Autofill Heuristics) */}
+      <div onKeyDown={handleKeyDown} className="space-y-6">
         {/* TAB 1: BRANDING */}
         <div className={activeTab === 'branding' ? 'space-y-6' : 'hidden'}>
           {/* APPLICATION NAME */}
@@ -13578,6 +13591,14 @@ export default function AdminSettingsPage() {
               </label>
               <input 
                 type="text" 
+                id="site_display_name_setting"
+                name="site_display_name_setting"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck="false"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-form-type="other"
                 value={siteName} 
                 onChange={(e) => setSiteName(e.target.value)} 
                 placeholder="e.g. Zecratary" 
@@ -13664,6 +13685,14 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center gap-3">
                   <input 
                     type="text" 
+                    id="site_titlebar_emoji_setting"
+                    name="site_titlebar_emoji_setting"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     value={titlebarEmoji} 
                     onChange={(e) => setTitlebarEmoji(e.target.value)} 
                     maxLength={4} 
@@ -13777,6 +13806,14 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center gap-3">
                   <input 
                     type="text" 
+                    id="site_favicon_emoji_setting"
+                    name="site_favicon_emoji_setting"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     value={faviconEmoji} 
                     onChange={(e) => setFaviconEmoji(e.target.value)} 
                     maxLength={4} 
@@ -13929,6 +13966,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_primary_color"
+                      name="theme_primary_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={primaryColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -13970,6 +14012,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_primary_hover_color"
+                      name="theme_primary_hover_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={primaryHoverColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14011,6 +14058,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_accent_color"
+                      name="theme_accent_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={accentColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14052,6 +14104,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_sidebar_icon_color"
+                      name="theme_sidebar_icon_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={sidebarIconColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14101,6 +14158,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_page_bg_color"
+                      name="theme_page_bg_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={backgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14142,6 +14204,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_card_bg_color"
+                      name="theme_card_bg_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={cardBackgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14183,6 +14250,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_card_border_color"
+                      name="theme_card_border_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={cardBorderColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14224,6 +14296,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_muted_text_color"
+                      name="theme_muted_text_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={secondaryTextColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14361,7 +14438,8 @@ export default function AdminSettingsPage() {
           </button>
 
           <button
-            type="submit"
+            type="button"
+            onClick={handleSave}
             disabled={isSaving}
             className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary)' }}
@@ -14379,7 +14457,7 @@ export default function AdminSettingsPage() {
             )}
           </button>
         </div>
-      </form>
+      </div>
     </div>
   );
 }
@@ -44790,7 +44868,7 @@ export default function Sidebar() {
 
   const showCollapsed = isCollapsed && !isOpen;
 
-  // Active styles harmonize with dynamic primary color
+  // Harmonized active & hover navigation styles
   const navClass = (href: string) => `
     w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 select-none
     ${isActive(href)
@@ -44805,6 +44883,9 @@ export default function Sidebar() {
 
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
+
+  // Standard icon style matching theme setting with primary fallback
+  const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
 
   return (
     <>
@@ -44907,7 +44988,7 @@ export default function Sidebar() {
           <nav className="space-y-1">
             {/* DASHBOARD */}
             <Link href="/dashboard" className={navClass('/dashboard')} title={t('dashboard')}>
-              <Home className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+              <Home className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('dashboard')}</span>}
             </Link>
 
@@ -44922,15 +45003,15 @@ export default function Sidebar() {
               </div>
             )}
             <Link href="/chef" className={navClass('/chef')} title={t('chefAi')}>
-              <MessageSquare className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+              <MessageSquare className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('chefAi')}</span>}
             </Link>
             <Link href="/import" className={navClass('/import')} title={t('import')}>
-              <UploadCloud className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+              <UploadCloud className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('import')}</span>}
             </Link>
             <Link href="/manual" className={navClass('/manual')} title={t('manual')}>
-              <SquarePen className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+              <SquarePen className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
             </Link>
 
@@ -44945,15 +45026,15 @@ export default function Sidebar() {
               </div>
             )}
             <Link href="/saved" className={navClass('/saved')} title={t('savedRecipes')}>
-              <BookOpen className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+              <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
             </Link>
             <Link href="/books" className={navClass('/books')} title={t('books')}>
-              <Book className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+              <Book className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('books')}</span>}
             </Link>
             <Link href="/pantry" className={navClass('/pantry')}>
-              <Package className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+              <Package className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
             </Link>
 
@@ -44968,15 +45049,15 @@ export default function Sidebar() {
               </div>
             )}
             <Link href="/shopping" className={navClass('/shopping')} title={t('shoppingList')}>
-              <ShoppingCart className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+              <ShoppingCart className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('shoppingList')}</span>}
             </Link>
             <Link href="/planner" className={navClass('/planner')}>
-              <Calendar className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+              <Calendar className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('planner')}</span>}
             </Link>
             <Link href="/templates" className={navClass('/templates')}>
-              <LayoutTemplate className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+              <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
             </Link>
 
@@ -44991,19 +45072,19 @@ export default function Sidebar() {
                   </span>
                 )}
                 <Link href="/admin" className={navClass('/admin')} title={t('adminSetting') || 'Admin Setting'}>
-                  <ShieldCheck className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">{t('adminSetting') || 'Admin Setting'}</span>}
                 </Link>
                 <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
-                  <Cpu className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
                 </Link>
                 <Link href="/admin/plans" className={navClass('/admin/plans')} title={t('subscriptionPlans') || 'Subscription Plans'}>
-                  <CreditCard className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptionPlans') || 'Subscription Plans'}</span>}
                 </Link>
                 <Link href="/admin/payment" className={navClass('/admin/payment')} title={t('paymentGateway') || 'Payment Gateway'}>
-                  <Wallet className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">{t('paymentGateway') || 'Payment Gateway'}</span>}
                 </Link>
                 <Link 
@@ -45011,23 +45092,23 @@ export default function Sidebar() {
                   className={navClass('/admin/social-login-setting')} 
                   title="Social Login"
                 >
-                  <Key className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  <Key className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
                 </Link>
                 <Link href="/admin/users" className={navClass('/admin/users')} title={t('users') || 'Users'}>
-                  <UserPlus className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">{t('users') || 'Users'}</span>}
                 </Link>
                 <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title={t('recipeType') || 'Recipe Type'}>
-                  <Utensils className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">{t('recipeType') || 'Recipe Type'}</span>}
                 </Link>
                 <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title={t('ingredientCategory') || 'Ingredient Category'}>
-                  <Tag className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">{t('ingredientCategory') || 'Ingredient Category'}</span>}
                 </Link>
                 <Link href="/admin/language" className={navClass('/admin/language')} title={t('language') || 'Language'}>
-                  <Languages className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                  <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">{t('language') || 'Language'}</span>}
                 </Link>
               </div>
@@ -45066,7 +45147,7 @@ export default function Sidebar() {
                 title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                 aria-label="Toggle Theme Mode"
               >
-                {isDarkMode ? <Moon className="h-4 w-4 text-[var(--color-primary)]" /> : <Sun className="h-4 w-4 text-amber-500" />}
+                {isDarkMode ? <Moon className="h-4 w-4 shrink-0" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500 shrink-0" />}
               </button>
             </div>
           ) : (
@@ -45097,18 +45178,18 @@ export default function Sidebar() {
                 title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                 aria-label="Toggle Theme Mode"
               >
-                {isDarkMode ? <Moon className="h-4 w-4 text-[var(--color-primary)]" /> : <Sun className="h-4 w-4 text-amber-500" />}
+                {isDarkMode ? <Moon className="h-4 w-4 shrink-0" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500 shrink-0" />}
               </button>
             </div>
           )}
 
-                    <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
-            <Settings className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`} />
+          <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
+            <Settings className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('profile')}</span>}
           </Link>
 
           <Link href="/billing" className={navClass('/billing')} title={t('billing') || 'Billing'}>
-            <CreditCard className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`} />
+            <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing') || 'Billing'}</span>}
           </Link>
 
@@ -45121,7 +45202,7 @@ export default function Sidebar() {
             }`}
             title={t('contactUs')}
           >
-            <Mail className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-800'}`} />
+            <Mail className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('contactUs')}</span>}
           </Link>
 
@@ -45137,7 +45218,7 @@ export default function Sidebar() {
             }`}
             title={t('logout')}
           >
-            <LogOut className={`h-4 w-4 shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-800'}`} />
+            <LogOut className="h-4 w-4 shrink-0" />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('logout')}</span>}
           </button>
           {/* DYNAMIC VERSION BADGE */}
