@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.3.4",
+  "version": "7.3.6",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.3.4",
+  "version": "7.3.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -13129,13 +13129,14 @@ import {
   Key,
   Languages,
   LayoutGrid,
-  BookOpen
+  BookOpen,
+  AlertCircle
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { 
   getSiteConfig, 
   saveSiteConfig, 
-  setMemorySiteConfig,
+  setMemorySiteConfig, 
   updateFavicon, 
   SiteIdentityConfig, 
   DEFAULT_SITE_NAME, 
@@ -13144,7 +13145,8 @@ import {
 import { 
   applyThemeToDocument, 
   saveThemeColors, 
-  setMemoryThemeColors 
+  setMemoryThemeColors,
+  getMemoryThemeColors
 } from '@/lib/themeConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -13237,7 +13239,12 @@ export default function AdminSettingsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [saved, setSaved] = useState<boolean>(false);
+  const [saveError, setSaveError] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // Lock to avoid self-dispatched server updates clobbering the form during save
+  const isSavingRef = useRef<boolean>(false);
 
   // Site Identity State
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
@@ -13311,20 +13318,23 @@ export default function AdminSettingsPage() {
     });
   };
 
-  // Load Settings Exclusively from Server Storage (Zero LocalStorage)
+  // Load Settings Exclusively from Server & PostgreSQL Storage
   const loadSettingsFromServer = useCallback(async () => {
+    if (isSavingRef.current) return;
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
       const serverData = await fetchServerAdminSettings();
       if (serverData) {
-        if (serverData.siteName) setSiteName(serverData.siteName);
-        if (serverData.titlebarEmoji) setTitlebarEmoji(serverData.titlebarEmoji);
-        if (serverData.titlebarImage !== undefined) setTitlebarImage(serverData.titlebarImage);
-        if (serverData.faviconEmoji) setFaviconEmoji(serverData.faviconEmoji);
-        if (serverData.faviconImage !== undefined) setFaviconImage(serverData.faviconImage);
+        const payload: any = serverData.settings || serverData;
 
-        const tc = serverData.themeColors || {};
+        if (payload.siteName) setSiteName(payload.siteName);
+        if (payload.titlebarEmoji) setTitlebarEmoji(payload.titlebarEmoji);
+        if (payload.titlebarImage !== undefined) setTitlebarImage(payload.titlebarImage);
+        if (payload.faviconEmoji) setFaviconEmoji(payload.faviconEmoji);
+        if (payload.faviconImage !== undefined) setFaviconImage(payload.faviconImage);
+
+        const tc = payload.themeColors || serverData.themeColors || getMemoryThemeColors() || {};
         const p = tc.primary || tc.primaryColor || '#E05638';
         const ph = tc.primaryHover || '#c94529';
         const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
@@ -13360,7 +13370,9 @@ export default function AdminSettingsPage() {
     loadSettingsFromServer();
 
     const handleServerUpdate = () => {
-      loadSettingsFromServer();
+      if (!isSavingRef.current) {
+        loadSettingsFromServer();
+      }
     };
 
     window.addEventListener('zecratary_admin_settings_updated', handleServerUpdate);
@@ -13448,155 +13460,188 @@ export default function AdminSettingsPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
+    isSavingRef.current = true;
+    setSaveError('');
 
-    const updatedBranding: SiteIdentityConfig = {
-      siteName: siteName.trim() || DEFAULT_SITE_NAME,
-      titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
-      titlebarImage,
-      faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
-      faviconImage
-    };
+    try {
+      const updatedBranding: SiteIdentityConfig = {
+        siteName: siteName.trim() || DEFAULT_SITE_NAME,
+        titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
+        titlebarImage,
+        faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
+        faviconImage
+      };
 
-    setMemorySiteConfig(updatedBranding);
-    if (faviconImage) {
-      updateFavicon(faviconImage);
-    } else if (faviconEmoji) {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${faviconEmoji}</text></svg>`;
-      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+      setMemorySiteConfig(updatedBranding);
+      if (faviconImage) {
+        updateFavicon(faviconImage);
+      } else if (faviconEmoji) {
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${faviconEmoji}</text></svg>`;
+        updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+      }
+
+      const themeColors = {
+        primary: primaryColor,
+        primaryColor: primaryColor,
+        primaryHover: primaryHoverColor,
+        accentEmerald: accentColor,
+        accentColor: accentColor,
+        accent: accentColor,
+        sidebarIconColor: sidebarIconColor,
+        sidebarIcon: sidebarIconColor,
+        backgroundColor: backgroundColor,
+        backgroundDark: backgroundColor,
+        cardBackground: cardBackgroundColor,
+        cardBorder: cardBorderColor,
+        textSecondary: secondaryTextColor,
+      };
+
+      setMemoryThemeColors(themeColors);
+      applyColorsLocally(
+        primaryColor,
+        primaryHoverColor,
+        accentColor,
+        sidebarIconColor,
+        backgroundColor,
+        cardBackgroundColor,
+        cardBorderColor,
+        secondaryTextColor
+      );
+
+      // 1. Persist directly to PostgreSQL user theme storage
+      await saveThemeColors(themeColors);
+
+      // 2. Persist to PostgreSQL admin settings table
+      const success = await persistServerAdminSettings({
+        siteName: updatedBranding.siteName,
+        titlebarEmoji: updatedBranding.titlebarEmoji,
+        titlebarImage: updatedBranding.titlebarImage || '',
+        faviconEmoji: updatedBranding.faviconEmoji,
+        faviconImage: updatedBranding.faviconImage || '',
+        themeColors
+      });
+
+      if (!success) {
+        throw new Error(t('admin.saveFailed', 'Failed to commit settings to database endpoint.'));
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: updatedBranding }));
+        window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
+        window.dispatchEvent(new Event('zecratary_theme_changed'));
+      }
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err: any) {
+      console.error('[AdminSettingsPage] Save failure:', err);
+      setSaveError(err?.message || 'Failed to save settings to server store');
+      setTimeout(() => setSaveError(''), 5000);
+    } finally {
+      setIsSaving(false);
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 600);
     }
-
-    const themeColors = {
-      primary: primaryColor,
-      primaryColor: primaryColor,
-      primaryHover: primaryHoverColor,
-      accentEmerald: accentColor,
-      accentColor: accentColor,
-      accent: accentColor,
-      sidebarIconColor: sidebarIconColor,
-      sidebarIcon: sidebarIconColor,
-      backgroundColor: backgroundColor,
-      backgroundDark: backgroundColor,
-      cardBackground: cardBackgroundColor,
-      cardBorder: cardBorderColor,
-      textSecondary: secondaryTextColor,
-    };
-
-    setMemoryThemeColors(themeColors);
-    applyColorsLocally(
-      primaryColor,
-      primaryHoverColor,
-      accentColor,
-      sidebarIconColor,
-      backgroundColor,
-      cardBackgroundColor,
-      cardBorderColor,
-      secondaryTextColor
-    );
-
-    // Save directly to server API with Zero LocalStorage writes
-    await persistServerAdminSettings({
-      siteName: updatedBranding.siteName,
-      titlebarEmoji: updatedBranding.titlebarEmoji,
-      titlebarImage: updatedBranding.titlebarImage || '',
-      faviconEmoji: updatedBranding.faviconEmoji,
-      faviconImage: updatedBranding.faviconImage || '',
-      themeColors
-    });
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: updatedBranding }));
-      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-    }
-
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const handleResetDefaults = async () => {
     if (!confirm(t('admin.confirmReset', 'Reset branding and theme settings to defaults?'))) return;
+    setIsSaving(true);
+    isSavingRef.current = true;
+    setSaveError('');
 
-    const defaultName = DEFAULT_SITE_NAME;
-    const defaultIcon = DEFAULT_SITE_ICON;
-    const defaultPrimary = '#E05638';
-    const defaultPrimaryHover = '#c94529';
-    const defaultAccent = '#10b981';
-    const defaultSidebarIcon = '#10b981';
-    const defaultBg = '#070b13';
-    const defaultCard = '#0b0f17';
-    const defaultBorder = '#1e293b';
-    const defaultTextSec = '#94a3b8';
+    try {
+      const defaultName = DEFAULT_SITE_NAME;
+      const defaultIcon = DEFAULT_SITE_ICON;
+      const defaultPrimary = '#E05638';
+      const defaultPrimaryHover = '#c94529';
+      const defaultAccent = '#10b981';
+      const defaultSidebarIcon = '#10b981';
+      const defaultBg = '#070b13';
+      const defaultCard = '#0b0f17';
+      const defaultBorder = '#1e293b';
+      const defaultTextSec = '#94a3b8';
 
-    setSiteName(defaultName);
-    setTitlebarEmoji(defaultIcon);
-    setTitlebarImage('');
-    setFaviconEmoji(defaultIcon);
-    setFaviconImage('');
+      setSiteName(defaultName);
+      setTitlebarEmoji(defaultIcon);
+      setTitlebarImage('');
+      setFaviconEmoji(defaultIcon);
+      setFaviconImage('');
 
-    setPrimaryColor(defaultPrimary);
-    setPrimaryHoverColor(defaultPrimaryHover);
-    setAccentColor(defaultAccent);
-    setSidebarIconColor(defaultSidebarIcon);
-    setBackgroundColor(defaultBg);
-    setCardBackgroundColor(defaultCard);
-    setCardBorderColor(defaultBorder);
-    setSecondaryTextColor(defaultTextSec);
+      setPrimaryColor(defaultPrimary);
+      setPrimaryHoverColor(defaultPrimaryHover);
+      setAccentColor(defaultAccent);
+      setSidebarIconColor(defaultSidebarIcon);
+      setBackgroundColor(defaultBg);
+      setCardBackgroundColor(defaultCard);
+      setCardBorderColor(defaultBorder);
+      setSecondaryTextColor(defaultTextSec);
 
-    const defaultBranding = {
-      siteName: defaultName,
-      titlebarEmoji: defaultIcon,
-      titlebarImage: '',
-      faviconEmoji: defaultIcon,
-      faviconImage: ''
-    };
+      const defaultBranding = {
+        siteName: defaultName,
+        titlebarEmoji: defaultIcon,
+        titlebarImage: '',
+        faviconEmoji: defaultIcon,
+        faviconImage: ''
+      };
 
-    const defaultColors = {
-      primary: defaultPrimary,
-      primaryColor: defaultPrimary,
-      primaryHover: defaultPrimaryHover,
-      accentEmerald: defaultAccent,
-      accentColor: defaultAccent,
-      accent: defaultAccent,
-      sidebarIconColor: defaultSidebarIcon,
-      sidebarIcon: defaultSidebarIcon,
-      backgroundColor: defaultBg,
-      backgroundDark: defaultBg,
-      cardBackground: defaultCard,
-      cardBorder: defaultBorder,
-      textSecondary: defaultTextSec
-    };
+      const defaultColors = {
+        primary: defaultPrimary,
+        primaryColor: defaultPrimary,
+        primaryHover: defaultPrimaryHover,
+        accentEmerald: defaultAccent,
+        accentColor: defaultAccent,
+        accent: defaultAccent,
+        sidebarIconColor: defaultSidebarIcon,
+        sidebarIcon: defaultSidebarIcon,
+        backgroundColor: defaultBg,
+        backgroundDark: defaultBg,
+        cardBackground: defaultCard,
+        cardBorder: defaultBorder,
+        textSecondary: defaultTextSec
+      };
 
-    setMemorySiteConfig(defaultBranding);
-    setMemoryThemeColors(defaultColors);
+      setMemorySiteConfig(defaultBranding);
+      setMemoryThemeColors(defaultColors);
 
-    applyColorsLocally(
-      defaultPrimary,
-      defaultPrimaryHover,
-      defaultAccent,
-      defaultSidebarIcon,
-      defaultBg,
-      defaultCard,
-      defaultBorder,
-      defaultTextSec
-    );
+      applyColorsLocally(
+        defaultPrimary,
+        defaultPrimaryHover,
+        defaultAccent,
+        defaultSidebarIcon,
+        defaultBg,
+        defaultCard,
+        defaultBorder,
+        defaultTextSec
+      );
 
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
-    updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
+      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
 
-    // Persist directly to server storage
-    await persistServerAdminSettings({
-      ...defaultBranding,
-      themeColors: defaultColors
-    });
+      await saveThemeColors(defaultColors);
+      await persistServerAdminSettings({
+        ...defaultBranding,
+        themeColors: defaultColors
+      });
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
-      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
+        window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
+        window.dispatchEvent(new Event('zecratary_theme_changed'));
+      }
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err: any) {
+      setSaveError(err?.message || 'Failed to reset settings');
+    } finally {
+      setIsSaving(false);
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 600);
     }
-
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const isTitlebarImageActive = !!titlebarImage;
@@ -13628,17 +13673,17 @@ export default function AdminSettingsPage() {
           <button
             type="button"
             onClick={loadSettingsFromServer}
-            disabled={isLoading}
+            disabled={isLoading || isSaving}
             className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
             style={{
               backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
               borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#334155' : '#cbd5e1'
             }}
-            title="Reload settings from server store"
+            title={t('admin.reloadTitle', 'Reload settings from server store')}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
-            <span>Reload</span>
+            <span>{t('admin.reloadBtn', 'Reload')}</span>
           </button>
 
           {saved && (
@@ -13648,6 +13693,16 @@ export default function AdminSettingsPage() {
                 : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
             }`}>
               <CheckCircle2 className="h-4 w-4" /> {t('admin.settingsSaved', 'Settings Saved & Broadcasted')}
+            </div>
+          )}
+
+          {saveError && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
+              isDayMode 
+                ? 'bg-red-100 border-red-300 text-red-700' 
+                : 'bg-red-500/10 border-red-500/30 text-red-400'
+            }`}>
+              <AlertCircle className="h-4 w-4" /> {saveError}
             </div>
           )}
         </div>
@@ -14492,7 +14547,8 @@ export default function AdminSettingsPage() {
           <button
             type="button"
             onClick={handleResetDefaults}
-            className="px-4 py-2.5 border rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition hover:opacity-80 shadow-xs"
+            disabled={isSaving}
+            className="px-4 py-2.5 border rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition hover:opacity-80 shadow-xs disabled:opacity-50"
             style={{ 
               backgroundColor: isDayMode ? '#ffffff' : '#0b0f17',
               borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
@@ -14504,10 +14560,21 @@ export default function AdminSettingsPage() {
 
           <button
             type="submit"
-            className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+            disabled={isSaving}
+            className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            <CheckCircle2 className="h-4 w-4" /> {activeTab === 'theme' ? t('admin.saveThemeSettings', 'Save Theme Settings') : t('admin.saveBrandingSettings', 'Save Branding Settings')}
+            {isSaving ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                <span>{t('admin.saving', 'Saving...')}</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-4 w-4" />
+                <span>{activeTab === 'theme' ? t('admin.saveThemeSettings', 'Save Theme Settings') : t('admin.saveBrandingSettings', 'Save Branding Settings')}</span>
+              </>
+            )}
           </button>
         </div>
       </form>
@@ -19064,7 +19131,7 @@ export default function RecipeTypeAdminPage() {
 
 ## File: `apps/web/src/app/admin/payment/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
+// Generated / Cleaned by AI Collaborator
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -19076,7 +19143,7 @@ import {
   PlusCircle, X, User as UserIcon, Activity, Calendar,
   Pencil, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   ShieldAlert, Ban, ArrowUpRight, AlertTriangle, Repeat, RotateCcw,
-  ShieldCheck, CheckCheck
+  ShieldCheck, CheckCheck, Columns3
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -19157,6 +19224,16 @@ const SUPPORTED_CURRENCIES = [
   { code: 'NZD', label: 'NZD - New Zealand Dollar ($)', symbol: 'NZ$' },
   { code: 'THB', label: 'THB - Thai Baht (฿)', symbol: '฿' },
 ];
+
+const DEFAULT_COLUMNS = {
+  customer: true,
+  plan: true,
+  amount: true,
+  status: true,
+  date: true,
+  expiryDate: true,
+  actions: true,
+};
 
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
   if (!planInput) return 'taster';
@@ -19272,8 +19349,12 @@ export default function AdminPaymentPage() {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
-  const [togglingTxId, setTogglingTxId] = useState<string | null>(null);
   const [refundingTxId, setRefundingTxId] = useState<string | null>(null);
+
+  // Table Column Visibility State
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(DEFAULT_COLUMNS);
+  const [showColumnPopup, setShowColumnPopup] = useState<boolean>(false);
+  const columnPopupRef = useRef<HTMLDivElement>(null);
 
   // Selection state
   const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
@@ -19319,6 +19400,79 @@ export default function AdminPaymentPage() {
   useEffect(() => {
     configRef.current = config;
   }, [config]);
+
+  // Load Saved Column Visibility Preferences
+  useEffect(() => {
+    try {
+      const savedLocal = typeof window !== 'undefined' ? localStorage.getItem('zecratary_payment_columns') : null;
+      if (savedLocal) {
+        const parsed = JSON.parse(savedLocal);
+        setVisibleColumns((prev) => ({ ...prev, ...parsed }));
+      }
+      fetchServerAdminSettings().then((serverData) => {
+        const remoteCols = serverData?.settings?.paymentTableColumns || serverData?.paymentTableColumns;
+        if (remoteCols && typeof remoteCols === 'object') {
+          setVisibleColumns((prev) => ({ ...prev, ...remoteCols }));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_payment_columns', JSON.stringify(remoteCols));
+          }
+        }
+      }).catch(() => {});
+    } catch (_) {}
+  }, []);
+
+  // Click outside to dismiss column popup
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (columnPopupRef.current && !columnPopupRef.current.contains(event.target as Node)) {
+        setShowColumnPopup(false);
+      }
+    };
+    if (showColumnPopup) {
+      document.addEventListener('mousedown', handlePointerDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [showColumnPopup]);
+
+  const toggleColumnVisibility = async (colKey: string) => {
+    const nextState = {
+      ...visibleColumns,
+      [colKey]: !visibleColumns[colKey]
+    };
+    if (!Object.values(nextState).some(Boolean)) return; // Keep at least one column visible
+
+    setVisibleColumns(nextState);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_payment_columns', JSON.stringify(nextState));
+      }
+      await persistServerAdminSettings({ paymentTableColumns: nextState });
+    } catch (_) {}
+  };
+
+  const resetColumnVisibility = async () => {
+    setVisibleColumns(DEFAULT_COLUMNS);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_payment_columns', JSON.stringify(DEFAULT_COLUMNS));
+      }
+      await persistServerAdminSettings({ paymentTableColumns: DEFAULT_COLUMNS });
+    } catch (_) {}
+  };
+
+  const activeColumnCount = useMemo(() => {
+    let count = 1; // Checkbox column is always present
+    if (visibleColumns.customer) count++;
+    if (visibleColumns.plan) count++;
+    if (visibleColumns.amount) count++;
+    if (visibleColumns.status) count++;
+    if (visibleColumns.date) count++;
+    if (visibleColumns.expiryDate) count++;
+    if (visibleColumns.actions) count++;
+    return count;
+  }, [visibleColumns]);
 
   // Add Payment Modal States
   const [showAddModal, setShowAddModal] = useState(false);
@@ -19812,75 +19966,6 @@ export default function AdminPaymentPage() {
     );
     return paid.length > 0 ? paid : availablePlans;
   }, [availablePlans]);
-
-  // TOGGLE RECURRING HANDLER
-  const handleToggleRecurring = async (tx: PaymentTransaction) => {
-    const isCurrentlyActive = tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : (tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true);
-    const nextState = !isCurrentlyActive;
-    setTogglingTxId(tx.id);
-
-    const updatedTx: PaymentTransaction = {
-      ...tx,
-      isRecurring: nextState,
-      autoRenew: nextState,
-    };
-
-    setTransactions((prev) =>
-      prev.map((tItem) => (tItem.id === tx.id ? updatedTx : tItem))
-    );
-    transactionsRef.current = transactionsRef.current.map((tItem) =>
-      tItem.id === tx.id ? updatedTx : tItem
-    );
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          action: 'update_transaction',
-          id: tx.id,
-          transaction: {
-            ...updatedTx,
-            is_recurring: nextState,
-            auto_renew: nextState,
-          }
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to update recurring setting');
-      }
-
-      setFeedback({
-        type: 'success',
-        msg: nextState
-          ? t('recurringTurnedOnMsg', `Recurring renewal turned ON for ${tx.customerName} (${tx.planName})`)
-          : t('recurringTurnedOffMsg', `Recurring renewal turned OFF for ${tx.customerName} (${tx.planName})`),
-      });
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
-    } catch (err: any) {
-      const revertedTx: PaymentTransaction = {
-        ...tx,
-        isRecurring: isCurrentlyActive,
-        autoRenew: isCurrentlyActive,
-      };
-      setTransactions((prev) =>
-        prev.map((tItem) => (tItem.id === tx.id ? revertedTx : tItem))
-      );
-      transactionsRef.current = transactionsRef.current.map((tItem) =>
-        tItem.id === tx.id ? revertedTx : tItem
-      );
-      setFeedback({
-        type: 'error',
-        msg: err.message || 'Failed to update recurring status.',
-      });
-    } finally {
-      setTogglingTxId(null);
-    }
-  };
 
   // TRIGGER GATEWAY REFUND HANDLER
   const handleRefundTransaction = async (tx: PaymentTransaction) => {
@@ -21159,7 +21244,7 @@ export default function AdminPaymentPage() {
             </div>
           </div>
 
-          {/* SEARCH, FILTERS & BULK ACTIONS BAR */}
+          {/* SEARCH, FILTERS, TABLE COLUMNS & BULK ACTIONS BAR */}
           <div 
             className="border p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm transition-colors duration-200"
             style={{
@@ -21249,6 +21334,82 @@ export default function AdminPaymentPage() {
                 <option value={20}>{t('perPage20', '20 per page')}</option>
                 <option value={50}>{t('perPage50', '50 per page')}</option>
               </select>
+
+              {/* TABLE COLUMN SHOW / HIDE POPUP TOGGLE */}
+              <div className="relative" ref={columnPopupRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowColumnPopup(!showColumnPopup)}
+                  className="border rounded-xl px-3 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
+                  style={{
+                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #0B101D)',
+                    borderColor: showColumnPopup ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'),
+                    color: showColumnPopup ? 'var(--color-primary, #E05638)' : (isDayMode ? '#334155' : '#cbd5e1')
+                  }}
+                  title={t('customizeColumnsTooltip', 'Show / Hide Table Columns')}
+                >
+                  <Columns3 className="h-3.5 w-3.5" style={{ color: showColumnPopup ? 'var(--color-primary, #E05638)' : undefined }} />
+                  <span className="hidden sm:inline">{t('columnsBtn', 'Columns')}</span>
+                </button>
+
+                {showColumnPopup && (
+                  <div
+                    className="absolute right-0 mt-2 w-56 rounded-2xl border shadow-2xl p-3.5 z-50 text-xs animate-in fade-in transition-colors duration-200"
+                    style={{
+                      backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
+                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                      color: isDayMode ? '#0f172a' : '#ffffff'
+                    }}
+                  >
+                    <div 
+                      className="flex items-center justify-between pb-2.5 border-b mb-2"
+                      style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs">
+                        <Columns3 className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                        <span>{t('tableColumnsTitle', 'Table Columns')}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={resetColumnVisibility}
+                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
+                      >
+                        {t('resetColumnsBtn', 'Reset')}
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {[
+                        { key: 'customer', label: t('customerCol', 'Customer') },
+                        { key: 'plan', label: t('planCol', 'Plan') },
+                        { key: 'amount', label: t('amountCol', 'Amount') },
+                        { key: 'status', label: t('statusCol', 'Status') },
+                        { key: 'date', label: t('dateCol', 'Date') },
+                        { key: 'expiryDate', label: t('expiryDateCol', 'Expiry Date') },
+                        { key: 'actions', label: t('actionsCol', 'Actions') },
+                      ].map((col) => {
+                        const isChecked = visibleColumns[col.key] !== false;
+                        return (
+                          <label
+                            key={col.key}
+                            className="flex items-center justify-between px-2.5 py-1.5 rounded-xl cursor-pointer transition select-none hover:bg-emerald-500/10"
+                          >
+                            <span className="font-medium text-xs" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                              {col.label}
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleColumnVisibility(col.key)}
+                              className="w-3.5 h-3.5 rounded cursor-pointer accent-[#E05638]"
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -21292,7 +21453,7 @@ export default function AdminPaymentPage() {
             </div>
           )}
 
-          {/* TRANSACTIONS TABLE */}
+          {/* TRANSACTIONS TABLE WITH DYNAMIC VISIBLE COLUMNS */}
           <div 
             className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
             style={{
@@ -21320,14 +21481,13 @@ export default function AdminPaymentPage() {
                         title="Select All On Current Page"
                       />
                     </th>
-                    <th className="px-5 py-3.5">{t('customerCol', 'Customer')}</th>
-                    <th className="px-5 py-3.5">{t('planCol', 'Plan')}</th>
-                    <th className="px-5 py-3.5">{t('amountCol', 'Amount')}</th>
-                    <th className="px-5 py-3.5">{t('statusCol', 'Status')}</th>
-                    <th className="px-5 py-3.5">{t('recurringCol', 'Recurring')}</th>
-                    <th className="px-5 py-3.5">{t('dateCol', 'Date')}</th>
-                    <th className="px-5 py-3.5">{t('expiryDateCol', 'Expiry Date')}</th>
-                    <th className="px-5 py-3.5 text-right">{t('actionsCol', 'Actions')}</th>
+                    {visibleColumns.customer && <th className="px-5 py-3.5">{t('customerCol', 'Customer')}</th>}
+                    {visibleColumns.plan && <th className="px-5 py-3.5">{t('planCol', 'Plan')}</th>}
+                    {visibleColumns.amount && <th className="px-5 py-3.5">{t('amountCol', 'Amount')}</th>}
+                    {visibleColumns.status && <th className="px-5 py-3.5">{t('statusCol', 'Status')}</th>}
+                    {visibleColumns.date && <th className="px-5 py-3.5">{t('dateCol', 'Date')}</th>}
+                    {visibleColumns.expiryDate && <th className="px-5 py-3.5">{t('expiryDateCol', 'Expiry Date')}</th>}
+                    {visibleColumns.actions && <th className="px-5 py-3.5 text-right">{t('actionsCol', 'Actions')}</th>}
                   </tr>
                 </thead>
                 <tbody 
@@ -21336,7 +21496,7 @@ export default function AdminPaymentPage() {
                 >
                   {paginatedTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="text-center py-10 font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      <td colSpan={activeColumnCount} className="text-center py-10 font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
                         {t('noTransactionsFound', 'No payment transactions found matching your criteria.')}
                       </td>
                     </tr>
@@ -21344,9 +21504,7 @@ export default function AdminPaymentPage() {
                     paginatedTransactions.map((tx) => {
                       const txSymbol = getCurrencySymbol(tx.currency || config.currency);
                       const isRowSelected = selectedTxIds.includes(tx.id);
-                      const isTxToggling = togglingTxId === tx.id;
                       const isTxRefunding = refundingTxId === tx.id;
-                      const isRecurringActive = Boolean(tx.isRecurring ?? true);
                       const isTxCanceled = isCanceled(tx.status);
                       const isTxRefunded = isRefunded(tx.status);
                       const isTxSucceeded = isSucceeded(tx.status);
@@ -21368,280 +21526,252 @@ export default function AdminPaymentPage() {
                               className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
                             />
                           </td>
-                          <td className="px-5 py-3.5">
-                            <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.customerName || 'Customer'}</div>
-                            <div className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.customerEmail || ''}</div>
-                          </td>
-                          <td className="px-5 py-3.5 font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                            {tx.planName || tx.planSlug || 'Plan'}
-                          </td>
-                          <td className="px-5 py-3.5 font-bold whitespace-nowrap" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-                            {txSymbol}{parseAmount(tx.amount).toFixed(2)}{' '}
-                            <span className="text-[10px] font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.currency || config.currency}</span>
-                          </td>
-                          <td className="px-5 py-3.5 whitespace-nowrap">
-                            {isSucceeded(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                                  borderColor: 'var(--color-emerald, #10b981)',
-                                  color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-                                }}
-                                title={tx.gatewayTransactionId ? `Gateway Ref: ${tx.gatewayTransactionId}` : 'Confirmed Payment'}
-                              >
-                                <CheckCircle2 className="h-3 w-3" /> {t('statusSucceeded', 'Succeeded')}
-                              </span>
-                            )}
-                            {isCanceled(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#fff7ed' : 'rgba(249, 115, 22, 0.15)',
-                                  borderColor: '#f97316',
-                                  color: isDayMode ? '#c2410c' : '#fb923c'
-                                }}
-                              >
-                                <Ban className="h-3 w-3" /> {t('statusCanceled', 'Cancelled')}
-                              </span>
-                            )}
-                            {isFailed(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs cursor-help"
-                                style={{
-                                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                                  borderColor: '#ef4444',
-                                  color: isDayMode ? '#b91c1c' : '#f87171'
-                                }}
-                                title={tx.failureReason || 'Declined by payment processor'}
-                              >
-                                <XCircle className="h-3 w-3" /> {t('statusFailed', 'Failed')}
-                              </span>
-                            )}
-                            {isRefunded(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
-                                  borderColor: '#f59e0b',
-                                  color: isDayMode ? '#b45309' : '#fbbf24'
-                                }}
-                              >
-                                <ArrowDownLeft className="h-3 w-3" /> {t('statusRefunded', 'Refunded')}
-                              </span>
-                            )}
-                            {isPending(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#f1f5f9' : '#1e293b',
-                                  borderColor: isDayMode ? '#cbd5e1' : '#334155',
-                                  color: isDayMode ? '#334155' : '#cbd5e1'
-                                }}
-                              >
-                                <RefreshCw className="h-3 w-3 animate-spin" /> {t('statusPending', 'Pending')}
-                              </span>
-                            )}
-                          </td>
 
-                          {/* RECURRING SLIDE BUTTON */}
-                          <td className="px-5 py-3.5 whitespace-nowrap">
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={isRecurringActive}
-                                disabled={isTxToggling || isTxRefunded}
-                                onClick={() => handleToggleRecurring(tx)}
-                                title={
-                                  isTxRefunded 
-                                    ? t('refundedNoRecurring', 'Plan is refunded/voided') 
-                                    : isRecurringActive 
-                                    ? t('clickTurnRecurringOff', 'Click to turn recurring OFF') 
-                                    : t('clickTurnRecurringOn', 'Click to turn recurring ON')
-                                }
-                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-xs disabled:opacity-40 disabled:cursor-not-allowed ${
-                                  isRecurringActive 
-                                    ? (isDayMode ? 'bg-emerald-600' : 'bg-[var(--color-emerald,#10b981)]') 
-                                    : (isDayMode ? 'bg-slate-300' : 'bg-slate-700')
-                                }`}
-                              >
-                                <span
-                                  aria-hidden="true"
-                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                                    isRecurringActive ? 'translate-x-4' : 'translate-x-0'
-                                  }`}
-                                />
-                              </button>
+                          {visibleColumns.customer && (
+                            <td className="px-5 py-3.5">
+                              <div className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tx.customerName || 'Customer'}</div>
+                              <div className="text-[11px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.customerEmail || ''}</div>
+                            </td>
+                          )}
 
-                              <span 
-                                className="text-[10px] font-black uppercase tracking-wider"
-                                style={{
-                                  color: isRecurringActive 
-                                    ? (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)') 
-                                    : (isDayMode ? '#64748b' : '#94a3b8')
-                                }}
-                              >
-                                {isRecurringActive 
-                                  ? (tx.recurringInterval === 'YEAR' ? t('annualRecurring', 'Annual') : t('monthlyRecurring', 'Monthly'))
-                                  : t('offLabel', 'OFF')}
-                              </span>
-                            </div>
-                          </td>
-                          
-                          <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                            {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '-'}
-                          </td>
-                          
-                          <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                            {tx.expiryDate ? (() => {
-                              const exp = new Date(tx.expiryDate);
-                              const now = new Date();
-                              const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                              const expMidnight = new Date(exp.getFullYear(), exp.getMonth(), exp.getDate());
-                              const diffDays = Math.ceil((expMidnight.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
+                          {visibleColumns.plan && (
+                            <td className="px-5 py-3.5 font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                              {tx.planName || tx.planSlug || 'Plan'}
+                            </td>
+                          )}
 
-                              let badgeStyle = isDayMode 
-                                ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
-                                : 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400';
-                              let badgeNotice = '';
+                          {visibleColumns.amount && (
+                            <td className="px-5 py-3.5 font-bold whitespace-nowrap" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                              {txSymbol}{parseAmount(tx.amount).toFixed(2)}{' '}
+                              <span className="text-[10px] font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{tx.currency || config.currency}</span>
+                            </td>
+                          )}
 
-                              if (diffDays < 0) {
-                                badgeStyle = isDayMode
-                                  ? 'bg-red-50 border-red-300 text-red-800'
-                                  : 'bg-red-950/50 border-red-600/70 text-red-400';
-                                badgeNotice = t('expiredBadge', 'EXPIRED');
-                              } else if (diffDays <= 7) {
-                                badgeStyle = isDayMode
-                                  ? 'bg-orange-50 border-orange-300 text-orange-800'
-                                  : 'bg-orange-950/50 border-orange-500/70 text-orange-400';
-                              }
-
-                              return (
-                                <span
-                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold text-[11px] transition shadow-xs ${badgeStyle}`}
-                                  title={badgeNotice ? `${exp.toLocaleDateString()} (${badgeNotice})` : exp.toLocaleDateString()}
+                          {visibleColumns.status && (
+                            <td className="px-5 py-3.5 whitespace-nowrap">
+                              {isSucceeded(tx.status) && (
+                                <span 
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
+                                    borderColor: 'var(--color-emerald, #10b981)',
+                                    color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                                  }}
+                                  title={tx.gatewayTransactionId ? `Gateway Ref: ${tx.gatewayTransactionId}` : 'Confirmed Payment'}
                                 >
-                                  <Calendar className="h-3 w-3 shrink-0" />
-                                  {exp.toLocaleDateString()}
-                                  {badgeNotice && (
-                                    <span className="text-[9px] font-extrabold uppercase px-1 py-0.2 rounded border border-current/30 leading-none">
-                                      {badgeNotice}
-                                    </span>
-                                  )}
+                                  <CheckCircle2 className="h-3 w-3" /> {t('statusSucceeded', 'Succeeded')}
                                 </span>
-                              );
-                            })() : (
-                              <span className="text-[11px] italic font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
-                                {t('lifetimeNone', 'Lifetime / None')}
-                              </span>
-                            )}
-                          </td>
+                              )}
+                              {isCanceled(tx.status) && (
+                                <span 
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#fff7ed' : 'rgba(249, 115, 22, 0.15)',
+                                    borderColor: '#f97316',
+                                    color: isDayMode ? '#c2410c' : '#fb923c'
+                                  }}
+                                >
+                                  <Ban className="h-3 w-3" /> {t('statusCanceled', 'Cancelled')}
+                                </span>
+                              )}
+                              {isFailed(tx.status) && (
+                                <span 
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs cursor-help"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
+                                    borderColor: '#ef4444',
+                                    color: isDayMode ? '#b91c1c' : '#f87171'
+                                  }}
+                                  title={tx.failureReason || 'Declined by payment processor'}
+                                >
+                                  <XCircle className="h-3 w-3" /> {t('statusFailed', 'Failed')}
+                                </span>
+                              )}
+                              {isRefunded(tx.status) && (
+                                <span 
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
+                                    borderColor: '#f59e0b',
+                                    color: isDayMode ? '#b45309' : '#fbbf24'
+                                  }}
+                                >
+                                  <ArrowDownLeft className="h-3 w-3" /> {t('statusRefunded', 'Refunded')}
+                                </span>
+                              )}
+                              {isPending(tx.status) && (
+                                <span 
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#f1f5f9' : '#1e293b',
+                                    borderColor: isDayMode ? '#cbd5e1' : '#334155',
+                                    color: isDayMode ? '#334155' : '#cbd5e1'
+                                  }}
+                                >
+                                  <RefreshCw className="h-3 w-3 animate-spin" /> {t('statusPending', 'Pending')}
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          
+                          {visibleColumns.date && (
+                            <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                              {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '-'}
+                            </td>
+                          )}
+                          
+                          {visibleColumns.expiryDate && (
+                            <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                              {tx.expiryDate ? (() => {
+                                const exp = new Date(tx.expiryDate);
+                                const now = new Date();
+                                const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                                const expMidnight = new Date(exp.getFullYear(), exp.getMonth(), exp.getDate());
+                                const diffDays = Math.ceil((expMidnight.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
 
-                          {/* ACTIONS */}
-                          <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1.5">
-                              {/* 0. CONFIRM PAYMENT FROM GATEWAY BUTTON (FOR PENDING / UNCONFIRMED) */}
-                              {!isTxSucceeded && !isTxRefunded && (
+                                let badgeStyle = isDayMode 
+                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
+                                  : 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400';
+                                let badgeNotice = '';
+
+                                if (diffDays < 0) {
+                                  badgeStyle = isDayMode
+                                    ? 'bg-red-50 border-red-300 text-red-800'
+                                    : 'bg-red-950/50 border-red-600/70 text-red-400';
+                                  badgeNotice = t('expiredBadge', 'EXPIRED');
+                                } else if (diffDays <= 7) {
+                                  badgeStyle = isDayMode
+                                    ? 'bg-orange-50 border-orange-300 text-orange-800'
+                                    : 'bg-orange-950/50 border-orange-500/70 text-orange-400';
+                                }
+
+                                return (
+                                  <span
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold text-[11px] transition shadow-xs ${badgeStyle}`}
+                                    title={badgeNotice ? `${exp.toLocaleDateString()} (${badgeNotice})` : exp.toLocaleDateString()}
+                                  >
+                                    <Calendar className="h-3 w-3 shrink-0" />
+                                    {exp.toLocaleDateString()}
+                                    {badgeNotice && (
+                                      <span className="text-[9px] font-extrabold uppercase px-1 py-0.2 rounded border border-current/30 leading-none">
+                                        {badgeNotice}
+                                      </span>
+                                    )}
+                                  </span>
+                                );
+                              })() : (
+                                <span className="text-[11px] italic font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                                  {t('lifetimeNone', 'Lifetime / None')}
+                                </span>
+                              )}
+                            </td>
+                          )}
+
+                          {visibleColumns.actions && (
+                            <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {/* CONFIRM PAYMENT FROM GATEWAY BUTTON */}
+                                {!isTxSucceeded && !isTxRefunded && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenConfirmModal(tx)}
+                                    className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer text-emerald-600 hover:text-emerald-700 hover:border-emerald-500"
+                                    style={{
+                                      backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
+                                      borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.35)',
+                                    }}
+                                    title={t('confirmPaymentTooltip', 'Confirm payment amount from gateway to mark Succeeded')}
+                                  >
+                                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                                  </button>
+                                )}
+
+                                {/* EDIT BUTTON */}
                                 <button
                                   type="button"
-                                  onClick={() => handleOpenConfirmModal(tx)}
-                                  className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer text-emerald-600 hover:text-emerald-700 hover:border-emerald-500"
+                                  disabled={isTxRefunded}
+                                  onClick={() => handleOpenEditModal(tx)}
+                                  className={`p-1.5 rounded-lg border transition shadow-xs ${
+                                    isTxRefunded
+                                      ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                      : 'cursor-pointer'
+                                  }`}
                                   style={{
-                                    backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
-                                    borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.35)',
+                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                                    color: isDayMode ? '#0f172a' : '#cbd5e1'
                                   }}
-                                  title={t('confirmPaymentTooltip', 'Confirm payment amount from gateway to mark Succeeded')}
+                                  title={isTxRefunded ? t('cannotModifyRefundedTooltip', 'Cannot modify refunded payment') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
                                 >
-                                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                                  <Pencil 
+                                    className="h-3.5 w-3.5" 
+                                    style={{ color: isTxRefunded ? (isDayMode ? '#94a3b8' : '#64748b') : 'var(--color-primary, #E05638)' }} 
+                                  />
                                 </button>
-                              )}
 
-                              {/* 1. EDIT BUTTON */}
-                              <button
-                                type="button"
-                                disabled={isTxRefunded}
-                                onClick={() => handleOpenEditModal(tx)}
-                                className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxRefunded
-                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                    : 'cursor-pointer'
-                                }`}
-                                style={{
-                                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                  color: isDayMode ? '#0f172a' : '#cbd5e1'
-                                }}
-                                title={isTxRefunded ? t('cannotModifyRefundedTooltip', 'Cannot modify refunded payment') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
-                              >
-                                <Pencil 
-                                  className="h-3.5 w-3.5" 
-                                  style={{ color: isTxRefunded ? (isDayMode ? '#94a3b8' : '#64748b') : 'var(--color-primary, #E05638)' }} 
-                                />
-                              </button>
-
-                              {/* 2. GATEWAY REFUND BUTTON */}
-                              <button
-                                type="button"
-                                disabled={isTxRefunded || isTxRefunding || isFailed(tx.status)}
-                                onClick={() => handleRefundTransaction(tx)}
-                                className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxRefunded || isFailed(tx.status)
-                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                    : 'text-amber-600 hover:text-amber-700 cursor-pointer hover:border-amber-400'
-                                }`}
-                                style={{
-                                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                                }}
-                                title={
-                                  isTxRefunded
-                                    ? t('alreadyRefundedTooltip', 'Payment already refunded')
-                                    : t('refundPaymentTooltip', 'Trigger payment gateway refund')
+                                {/* GATEWAY REFUND BUTTON */}
+                                <button
+                                  type="button"
+                                  disabled={isTxRefunded || isTxRefunding || isFailed(tx.status)}
+                                  onClick={() => handleRefundTransaction(tx)}
+                                  className={`p-1.5 rounded-lg border transition shadow-xs ${
+                                    isTxRefunded || isFailed(tx.status)
+                                      ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                      : 'text-amber-600 hover:text-amber-700 cursor-pointer hover:border-amber-400'
+                                  }`}
+                                  style={{
+                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                                  }}
+                                  title={
+                                    isTxRefunded
+                                      ? t('alreadyRefundedTooltip', 'Payment already refunded')
+                                      : t('refundPaymentTooltip', 'Trigger payment gateway refund')
                                 }
-                              >
-                                {isTxRefunding ? (
-                                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-500" />
-                                ) : (
-                                  <RotateCcw className="h-3.5 w-3.5" />
-                                )}
-                              </button>
+                                >
+                                  {isTxRefunding ? (
+                                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-500" />
+                                  ) : (
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
 
-                              {/* 3. CANCEL RENEWAL BUTTON */}
-                              <button
-                                type="button"
-                                disabled={isTxCanceled || isTxRefunded}
-                                onClick={() => handleCancelPlan(tx)}
-                                className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxCanceled || isTxRefunded
+                                {/* CANCEL RENEWAL BUTTON */}
+                                <button
+                                  type="button"
+                                  disabled={isTxCanceled || isTxRefunded}
+                                  onClick={() => handleCancelPlan(tx)}
+                                  className={`p-1.5 rounded-lg border transition shadow-xs ${
+                                    isTxCanceled || isTxRefunded
                                     ? 'opacity-30 cursor-not-allowed text-slate-400'
                                     : 'text-orange-500 hover:text-orange-600 cursor-pointer'
-                                }`}
-                                style={{
-                                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
-                                }}
-                                title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan renewal & keep active until expiry')}
-                              >
-                                <XCircle className="h-3.5 w-3.5" />
-                              </button>
+                                  }`}
+                                  style={{
+                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                                  }}
+                                  title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan renewal & keep active until expiry')}
+                                >
+                                  <XCircle className="h-3.5 w-3.5" />
+                                </button>
 
-                              {/* 4. DELETE BUTTON */}
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteTransaction(tx.id, tx.customerName)}
-                                className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
-                                style={{
-                                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
-                                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                  color: isDayMode ? '#64748b' : '#94a3b8'
-                                }}
-                                title={t('deletePaymentTooltip', 'Delete payment record permanently')}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </td>
+                                {/* DELETE BUTTON */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteTransaction(tx.id, tx.customerName)}
+                                  className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
+                                  style={{
+                                    backgroundColor: isDayMode ? '#ffffff' : 'var(--color-bg, #0B101D)',
+                                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
+                                    color: isDayMode ? '#64748b' : '#94a3b8'
+                                  }}
+                                  title={t('deletePaymentTooltip', 'Delete payment record permanently')}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       );
                     })
@@ -22182,7 +22312,7 @@ export default function AdminPaymentPage() {
         </form>
       )}
 
-      {/* 0. CONFIRM PAYMENT FROM GATEWAY MODAL */}
+      {/* CONFIRM PAYMENT FROM GATEWAY MODAL */}
       {confirmingTx && (
         <div 
           onClick={() => !isSubmittingConfirm && setConfirmingTx(null)}
@@ -22374,7 +22504,7 @@ export default function AdminPaymentPage() {
         </div>
       )}
 
-      {/* 1. ADD PAYMENT MODAL */}
+      {/* ADD PAYMENT MODAL */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
@@ -22518,7 +22648,7 @@ export default function AdminPaymentPage() {
                 </p>
               </div>
 
-              {/* RECURRING SLIDE BUTTON CONTROLLER */}
+              {/* RECURRING SLIDE BUTTON CONTROLLER IN ADD MODAL */}
               <div 
                 className="p-3.5 rounded-2xl border flex items-center justify-between transition-colors shadow-xs"
                 style={{
@@ -22771,7 +22901,7 @@ export default function AdminPaymentPage() {
                 >
                   {planTransitionInfo?.isDuplicate ? (
                     <>
-                      <Ban className="h-4 w-4" /> {t('duplicatePlanBtn', 'Duplicate Plan ExExists')}
+                      <Ban className="h-4 w-4" /> {t('duplicatePlanBtn', 'Duplicate Plan Exists')}
                     </>
                   ) : planTransitionInfo?.isTransition ? (
                     <>
@@ -22789,7 +22919,7 @@ export default function AdminPaymentPage() {
         </div>
       )}
 
-      {/* 2. MODIFY (EDIT) PAYMENT MODAL */}
+      {/* MODIFY (EDIT) PAYMENT MODAL */}
       {editingTx && (
         <div 
           onClick={() => setEditingTx(null)}
@@ -34851,117 +34981,284 @@ export async function GET(
 ## File: `apps/web/src/app/api/admin/settings/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-function getLocalJsonPath() {
-  const candidates = [
-    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-    path.join(process.cwd(), 'data', 'admin_settings.json')
+function getStorePaths(): string[] {
+  const cwd = process.cwd();
+  return [
+    path.join(cwd, 'apps/web/data/admin_settings.json'),
+    path.join(cwd, 'data/admin_settings.json')
   ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
+}
+
+let cachedPool: any = null;
+
+async function getPostgresPool() {
+  if (cachedPool) return cachedPool;
+  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  if (!connStr) return null;
+  try {
+    const { Pool } = await import('pg');
+    const requiresSsl = connStr.includes('sslmode=require') || 
+                        connStr.includes('neon.tech') || 
+                        connStr.includes('supabase.co') || 
+                        process.env.NODE_ENV === 'production';
+    cachedPool = new Pool({
+      connectionString: connStr,
+      ssl: requiresSsl ? { rejectUnauthorized: false } : false
+    });
+    return cachedPool;
+  } catch (err) {
+    console.error('[PostgreSQL] Failed to initialize connection pool:', err);
+    return null;
   }
-  return candidates[0];
+}
+
+async function initPostgresTables(pool: any) {
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id SERIAL PRIMARY KEY,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(100);
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name VARCHAR(255);
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_emoji VARCHAR(50);
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_image TEXT;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_emoji VARCHAR(50);
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_image TEXT;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS recipe_types JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ingredient_categories JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS social_login JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS subscription_plans JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+      CREATE TABLE IF NOT EXISTS user_theme (
+        user_id VARCHAR(100) PRIMARY KEY,
+        theme_colors JSONB NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);
+      ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS theme_colors JSONB;
+      ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+    `);
+  } catch (err) {
+    console.error('[PostgreSQL] Table alteration error:', err);
+  }
+}
+
+async function readFromPostgres(pool: any): Promise<Record<string, any> | null> {
+  if (!pool) return null;
+  try {
+    await initPostgresTables(pool);
+
+    // Query with SELECT * so undefined column errors can never occur
+    const res = await pool.query(`
+      SELECT * FROM admin_settings 
+      ORDER BY CASE WHEN key = 'current' THEN 0 ELSE 1 END, updated_at DESC NULLS LAST 
+      LIMIT 1;
+    `);
+
+    if (res.rows && res.rows.length > 0) {
+      const row = res.rows[0];
+      let settings: Record<string, any> = {};
+
+      if (row.value) {
+        settings = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+      } else if (row.settings) {
+        settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings;
+      } else if (row.data) {
+        settings = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      }
+
+      // Merge discrete columns if value JSON was partial or empty
+      if (row.theme_colors && !settings.themeColors) {
+        settings.themeColors = typeof row.theme_colors === 'string' ? JSON.parse(row.theme_colors) : row.theme_colors;
+      }
+      if (row.themeColors && !settings.themeColors) {
+        settings.themeColors = typeof row.themeColors === 'string' ? JSON.parse(row.themeColors) : row.themeColors;
+      }
+      if (row.site_name && !settings.siteName) settings.siteName = row.site_name;
+      if (row.siteName && !settings.siteName) settings.siteName = row.siteName;
+      if (row.titlebar_emoji && !settings.titlebarEmoji) settings.titlebarEmoji = row.titlebar_emoji;
+      if (row.titlebar_image && !settings.titlebarImage) settings.titlebarImage = row.titlebar_image;
+      if (row.favicon_emoji && !settings.faviconEmoji) settings.faviconEmoji = row.favicon_emoji;
+      if (row.favicon_image && !settings.faviconImage) settings.faviconImage = row.favicon_image;
+      if (row.recipe_types && !settings.recipeTypes) settings.recipeTypes = row.recipe_types;
+      if (row.ingredient_categories && !settings.ingredientCategories) settings.ingredientCategories = row.ingredient_categories;
+      if (row.supported_languages && !settings.supportedLanguages) settings.supportedLanguages = row.supported_languages;
+      if (row.social_login && !settings.socialLogin) settings.socialLogin = row.social_login;
+      if (row.subscription_plans && !settings.subscriptionPlans) settings.subscriptionPlans = row.subscription_plans;
+
+      if (Object.keys(settings).length > 0) {
+        return settings;
+      }
+    }
+  } catch (err) {
+    console.error('[PostgreSQL] Read error:', err);
+  }
+  return null;
+}
+
+async function saveToPostgres(pool: any, data: Record<string, any>): Promise<boolean> {
+  if (!pool) return false;
+  try {
+    await initPostgresTables(pool);
+    const jsonStr = JSON.stringify(data);
+    const themeJson = data.themeColors ? JSON.stringify(data.themeColors) : null;
+    const siteName = data.siteName || null;
+    const titlebarEmoji = data.titlebarEmoji || null;
+    const titlebarImage = data.titlebarImage || null;
+    const faviconEmoji = data.faviconEmoji || null;
+    const faviconImage = data.faviconImage || null;
+
+    const existing = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
+
+    if (existing.rows && existing.rows.length > 0) {
+      const firstRow = existing.rows[0];
+      const matchKey = firstRow.key !== undefined && firstRow.key !== null;
+      const whereCond = matchKey ? "key = COALESCE(key, 'current')" : `id = ${firstRow.id || 1}`;
+
+      await pool.query(
+        `UPDATE admin_settings 
+         SET value = $1::jsonb,
+             key = COALESCE(key, 'current'),
+             theme_colors = COALESCE($2::jsonb, theme_colors),
+             site_name = COALESCE($3, site_name),
+             titlebar_emoji = COALESCE($4, titlebar_emoji),
+             titlebar_image = COALESCE($5, titlebar_image),
+             favicon_emoji = COALESCE($6, favicon_emoji),
+             favicon_image = COALESCE($7, favicon_image),
+             updated_at = NOW()
+         WHERE ${whereCond};`,
+        [jsonStr, themeJson, siteName, titlebarEmoji, titlebarImage, faviconEmoji, faviconImage]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO admin_settings (key, value, theme_colors, site_name, titlebar_emoji, titlebar_image, favicon_emoji, favicon_image, updated_at)
+         VALUES ('current', $1::jsonb, $2::jsonb, $3, $4, $5, $6, $7, NOW());`,
+        [jsonStr, themeJson, siteName, titlebarEmoji, titlebarImage, faviconEmoji, faviconImage]
+      );
+    }
+
+    if (data.themeColors) {
+      const checkUserTheme = await pool.query("SELECT user_id FROM user_theme WHERE user_id = 'default' LIMIT 1;");
+      if (checkUserTheme.rows && checkUserTheme.rows.length > 0) {
+        await pool.query(
+          "UPDATE user_theme SET theme_colors = $1::jsonb, updated_at = NOW() WHERE user_id = 'default';",
+          [themeJson]
+        );
+      } else {
+        await pool.query(
+          "INSERT INTO user_theme (user_id, theme_colors, updated_at) VALUES ('default', $1::jsonb, NOW());",
+          [themeJson]
+        );
+      }
+    }
+    return true;
+  } catch (err) {
+    console.error('[PostgreSQL] Save error:', err);
+    return false;
+  }
+}
+
+function readServerSettings(): Record<string, any> {
+  const filePaths = getStorePaths();
+  for (const fp of filePaths) {
+    if (fs.existsSync(fp)) {
+      try {
+        const raw = fs.readFileSync(fp, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch (_) {}
+    }
+  }
+  return {};
+}
+
+function writeServerSettings(data: Record<string, any>): boolean {
+  const filePaths = getStorePaths();
+  let wrote = false;
+  const payload = {
+    ...data,
+    updatedAt: new Date().toISOString()
+  };
+  for (const fp of filePaths) {
+    try {
+      const dir = path.dirname(fp);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(fp, JSON.stringify(payload, null, 2), 'utf-8');
+      wrote = true;
+    } catch (_) {}
+  }
+  return wrote;
 }
 
 export async function GET() {
   try {
-    let pgSettings: any = null;
-    try {
-      const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['default']);
-      if (rows && rows.length > 0) {
-        pgSettings = rows[0];
+    const pool = await getPostgresPool();
+    const pgData = await readFromPostgres(pool);
+    const diskData = readServerSettings();
+    const settings = { ...diskData, ...(pgData || {}) };
+
+    return NextResponse.json(
+      { success: true, settings, themeColors: settings.themeColors },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+        }
       }
-    } catch (_) {}
-
-    let jsonSettings: any = {};
-    try {
-      const p = getLocalJsonPath();
-      if (fs.existsSync(p)) {
-        jsonSettings = JSON.parse(fs.readFileSync(p, 'utf-8'));
-      }
-    } catch (_) {}
-
-    const themeColors = pgSettings?.theme_colors && Object.keys(pgSettings.theme_colors).length > 0
-      ? pgSettings.theme_colors
-      : (jsonSettings.themeColors || {});
-
-    const chefAiSettings = pgSettings?.chef_ai_settings && Object.keys(pgSettings.chef_ai_settings).length > 0
-      ? pgSettings.chef_ai_settings
-      : (jsonSettings.chefAiSettings || {});
-
-    const chefQuestionnaire = pgSettings?.chef_questionnaire && pgSettings.chef_questionnaire.length > 0
-      ? pgSettings.chef_questionnaire
-      : (jsonSettings.chefQuestionnaire || []);
-
-    const themeMode = pgSettings?.theme_mode || jsonSettings.themeMode || 'dark';
-
-    return NextResponse.json({
-      success: true,
-      themeColors,
-      themeMode,
-      chefAiSettings,
-      chefQuestionnaire,
-      ...jsonSettings
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+    );
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Failed to read settings' }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const pool = await getPostgresPool();
+    const pgData = await readFromPostgres(pool);
+    const current = { ...readServerSettings(), ...(pgData || {}) };
 
-    // 1. Update PostgreSQL
-    try {
-      const current = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['default']);
-      const curRow = (current && current.length > 0) ? current[0] : {};
+    const merged = {
+      ...current,
+      ...body,
+      themeColors: {
+        ...(current.themeColors || {}),
+        ...(body.themeColors || {})
+      },
+      socialLogin: {
+        ...(current.socialLogin || {}),
+        ...(body.socialLogin || {})
+      },
+      subscriptionPlans: body.subscriptionPlans || current.subscriptionPlans || []
+    };
 
-      const nextTheme = body.themeColors ? { ...(curRow.theme_colors || {}), ...body.themeColors } : curRow.theme_colors;
-      const nextAi = body.chefAiSettings ? { ...(curRow.chef_ai_settings || {}), ...body.chefAiSettings } : curRow.chef_ai_settings;
-      const nextQ = body.chefQuestionnaire ? body.chefQuestionnaire : curRow.chef_questionnaire;
-      const nextMode = body.themeMode ? body.themeMode : curRow.theme_mode;
+    const pgSaved = await saveToPostgres(pool, merged);
+    const diskSaved = writeServerSettings(merged);
 
-      await query(`
-        INSERT INTO admin_settings (id, theme_colors, theme_mode, chef_ai_settings, chef_questionnaire, updated_at)
-        VALUES ('default', $1::jsonb, $2, $3::jsonb, $4::jsonb, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          theme_colors = COALESCE(EXCLUDED.theme_colors, admin_settings.theme_colors),
-          theme_mode = COALESCE(EXCLUDED.theme_mode, admin_settings.theme_mode),
-          chef_ai_settings = COALESCE(EXCLUDED.chef_ai_settings, admin_settings.chef_ai_settings),
-          chef_questionnaire = COALESCE(EXCLUDED.chef_questionnaire, admin_settings.chef_questionnaire),
-          updated_at = NOW();
-      `, [JSON.stringify(nextTheme || {}), nextMode || 'dark', JSON.stringify(nextAi || {}), JSON.stringify(nextQ || [])]);
-    } catch (_) {}
+    if (!pgSaved && !diskSaved) {
+      return NextResponse.json({ error: 'Failed to write settings to storage' }, { status: 500 });
+    }
 
-    // 2. Update server JSON backup
-    try {
-      const p = getLocalJsonPath();
-      os.makedirs ? undefined : null;
-      let existing: any = {};
-      if (fs.existsSync(p)) {
-        try { existing = JSON.parse(fs.readFileSync(p, 'utf-8')); } catch (_) {}
+    return NextResponse.json(
+      { success: true, settings: merged, themeColors: merged.themeColors },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+        }
       }
-      const updated = {
-        ...existing,
-        ...body,
-        themeColors: body.themeColors ? { ...(existing.themeColors || {}), ...body.themeColors } : existing.themeColors,
-        chefAiSettings: body.chefAiSettings ? { ...(existing.chefAiSettings || {}), ...body.chefAiSettings } : existing.chefAiSettings,
-        updatedAt: new Date().toISOString()
-      };
-      const dir = path.dirname(p);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(p, JSON.stringify(updated, null, 2), 'utf-8');
-    } catch (_) {}
-
-    return NextResponse.json({ success: true, message: 'Settings persisted successfully.' });
+    );
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Failed to persist settings' }, { status: 500 });
   }
 }
 
@@ -35301,6 +35598,17 @@ export async function PUT(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/payment/route.ts`
 ```typescript
+async function ensurePaymentSchema() {
+  try {
+    await query(`
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT TRUE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(32) DEFAULT 'MONTH';
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+    `);
+  } catch (_) {}
+}
+
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -35449,6 +35757,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export async function GET() {
+  await ensurePaymentSchema();
   const pool = await getDbClient();
   if (pool) {
     try {
@@ -35489,6 +35798,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  await ensurePaymentSchema();
   try {
     const body = await req.json();
     const pool = await getDbClient();
@@ -36957,29 +37267,69 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/user/theme/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+function getStorePaths(): string[] {
+  const cwd = process.cwd();
+  return [
+    path.join(cwd, 'apps/web/data/admin_settings.json'),
+    path.join(cwd, 'data/admin_settings.json')
+  ];
+}
+
+async function getPostgresPool() {
+  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  if (!connStr) return null;
+  try {
+    const { Pool } = await import('pg');
+    const requiresSsl = connStr.includes('sslmode=require') || 
+                        connStr.includes('neon.tech') || 
+                        connStr.includes('supabase.co') || 
+                        process.env.NODE_ENV === 'production';
+    return new Pool({
+      connectionString: connStr,
+      ssl: requiresSsl ? { rejectUnauthorized: false } : false
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
 export async function GET() {
   try {
-    let themeColors = {};
-    let themeMode = 'dark';
-    try {
-      const rows = await query('SELECT theme_colors, theme_mode FROM admin_settings WHERE id = $1 LIMIT 1', ['default']);
-      if (rows && rows.length > 0) {
-        themeColors = rows[0].theme_colors || {};
-        themeMode = rows[0].theme_mode || 'dark';
-      }
-    } catch (_) {}
+    const pool = await getPostgresPool();
+    if (pool) {
+      try {
+        const res = await pool.query("SELECT * FROM user_theme WHERE user_id = 'default' LIMIT 1;");
+        if (res.rows && res.rows.length > 0) {
+          const colors = res.rows[0].theme_colors || res.rows[0].themeColors || res.rows[0].value;
+          return NextResponse.json({
+            success: true,
+            themeColors: typeof colors === 'string' ? JSON.parse(colors) : colors
+          });
+        }
+      } catch (_) {}
+    }
 
-    return NextResponse.json({
-      success: true,
-      themeColors,
-      themeMode
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+    const filePaths = getStorePaths();
+    for (const fp of filePaths) {
+      if (fs.existsSync(fp)) {
+        try {
+          const raw = fs.readFileSync(fp, 'utf-8');
+          const data = JSON.parse(raw);
+          if (data?.themeColors) {
+            return NextResponse.json({ success: true, themeColors: data.themeColors });
+          }
+        } catch (_) {}
+      }
+    }
+
+    return NextResponse.json({ success: true, themeColors: null });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
@@ -36988,19 +37338,53 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const colors = body.themeColors || body;
 
-    try {
-      await query(`
-        INSERT INTO admin_settings (id, theme_colors, updated_at)
-        VALUES ('default', $1::jsonb, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          theme_colors = COALESCE(EXCLUDED.theme_colors, admin_settings.theme_colors),
-          updated_at = NOW();
-      `, [JSON.stringify(colors)]);
-    } catch (_) {}
+    const pool = await getPostgresPool();
+    if (pool) {
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS user_theme (
+            user_id VARCHAR(100) PRIMARY KEY,
+            theme_colors JSONB NOT NULL,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);
+          ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS theme_colors JSONB;
+          ALTER TABLE user_theme ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+        `);
 
-    return NextResponse.json({ success: true, message: 'Theme updated in PostgreSQL.' });
+        const jsonStr = JSON.stringify(colors);
+        const check = await pool.query("SELECT user_id FROM user_theme WHERE user_id = 'default' LIMIT 1;");
+        if (check.rows && check.rows.length > 0) {
+          await pool.query(
+            "UPDATE user_theme SET theme_colors = $1::jsonb, updated_at = NOW() WHERE user_id = 'default';",
+            [jsonStr]
+          );
+        } else {
+          await pool.query(
+            "INSERT INTO user_theme (user_id, theme_colors, updated_at) VALUES ('default', $1::jsonb, NOW());",
+            [jsonStr]
+          );
+        }
+      } catch (e) {
+        console.error('[PostgreSQL] Theme write error:', e);
+      }
+    }
+
+    const filePaths = getStorePaths();
+    for (const fp of filePaths) {
+      try {
+        if (fs.existsSync(fp)) {
+          const raw = fs.readFileSync(fp, 'utf-8');
+          const data = JSON.parse(raw);
+          data.themeColors = { ...(data.themeColors || {}), ...colors };
+          fs.writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
+        }
+      } catch (_) {}
+    }
+
+    return NextResponse.json({ success: true, themeColors: colors });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
@@ -39898,6 +40282,9 @@ async function ensureBillingSchema() {
     await query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method VARCHAR(64) DEFAULT 'stripe';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(128) PRIMARY KEY,
         customer_name VARCHAR(255),
@@ -39917,7 +40304,11 @@ async function ensureBillingSchema() {
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE INDEX IF NOT EXISTS idx_payment_transactions_email ON payment_transactions(customer_email);
+
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT TRUE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(32) DEFAULT 'MONTH';
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
     `);
   } catch (_) {}
 }
@@ -40115,19 +40506,44 @@ export async function POST(req: NextRequest) {
     }
 
     // ACTION 2: Cancel Subscription Renewal
-    if (action === 'cancel_subscription') {
-      await query(`
-        UPDATE payment_transactions
-        SET auto_renew = FALSE,
-            is_recurring = FALSE,
-            status = 'canceled',
-            updated_at = NOW()
-        WHERE LOWER(TRIM(customer_email)) = $1 AND LOWER(status) IN ('succeeded', 'successful', 'paid', 'active')
-      `, [email]);
+        if (action === 'cancel_subscription') {
+      const email = (body.email || '').toLowerCase().trim();
+      const txId = body.transactionId;
+
+      if (txId) {
+        await query(`
+          UPDATE payment_transactions
+          SET is_recurring = FALSE,
+              auto_renew = FALSE,
+              status = 'canceled',
+              updated_at = NOW()
+          WHERE id = $1
+        `, [txId]);
+      } else if (email) {
+        await query(`
+          UPDATE payment_transactions
+          SET is_recurring = FALSE,
+              auto_renew = FALSE,
+              status = 'canceled',
+              updated_at = NOW()
+          WHERE LOWER(customer_email) = LOWER($1)
+            AND (status IN ('succeeded', 'paid', 'successful', 'canceled'))
+            AND (expiry_date IS NULL OR expiry_date > NOW())
+        `, [email]);
+      }
+
+      if (email) {
+        await query(`
+          UPDATE users
+          SET auto_renew = FALSE,
+              updated_at = NOW()
+          WHERE LOWER(email) = LOWER($1)
+        `, [email]).catch(() => {});
+      }
 
       return NextResponse.json({
         success: true,
-        message: 'Subscription renewal cancelled. Access remains active until the end of your billing cycle.'
+        message: 'Auto-renewal has been cancelled. Your active paid benefits remain accessible until the end of your billing cycle.'
       });
     }
 
@@ -43971,18 +44387,30 @@ export default function UserBillingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'cancel_subscription',
-          email: user?.email
+          email: user?.email,
+          transactionId: activeTransaction?.id
         })
       });
       const data = await res.json();
       if (data.success) {
-        setFeedback({ type: 'success', msg: data.message || 'Auto-renewal cancelled successfully.' });
-        fetchData();
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('renewalCancelledSuccess', 'Auto-renewal cancelled successfully.') 
+        });
+
+        // Broadcast cross-component synchronization events
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+
+        await fetchData();
       } else {
-        throw new Error(data.error);
+        throw new Error(data.error || 'Failed to cancel subscription');
       }
     } catch (err: any) {
-      setFeedback({ type: 'error', msg: err.message || 'Failed to cancel subscription' });
+      setFeedback({ type: 'error', msg: err.message || t('cancelSubscriptionFailed', 'Failed to cancel subscription') });
     } finally {
       setProcessing(false);
     }
@@ -46107,6 +46535,7 @@ export interface ThemeColors {
   borderColor?: string;
   textSecondary?: string;
   textColor?: string;
+  [key: string]: any;
 }
 
 let memoryThemeColors: ThemeColors | null = null;
@@ -46140,13 +46569,7 @@ export function applyThemeToDocument(colors?: ThemeColors | null): void {
   const root = document.documentElement;
   const isDayMode = getEffectiveThemeMode() === 'light';
 
-  let activeColors = (colors && Object.keys(colors).length > 0) ? colors : memoryThemeColors;
-  if (!activeColors && typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      if (stored) activeColors = JSON.parse(stored);
-    } catch (_) {}
-  }
+  const activeColors = (colors && Object.keys(colors).length > 0) ? colors : memoryThemeColors;
 
   if (activeColors) {
     setMemoryThemeColors(activeColors);
@@ -46234,7 +46657,6 @@ export function setThemeMode(mode: 'light' | 'dark'): void {
   applyThemeToDocument();
   window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode } }));
   window.dispatchEvent(new Event('zecratary_theme_changed'));
-  window.dispatchEvent(new Event('storage'));
 }
 
 export function toggleThemeMode(): 'light' | 'dark' {
@@ -46247,13 +46669,9 @@ export function toggleThemeMode(): 'light' | 'dark' {
 export async function saveThemeColors(colors: ThemeColors): Promise<void> {
   setMemoryThemeColors(colors);
   if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
-    } catch (_) {}
     applyThemeToDocument(colors);
     window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
     window.dispatchEvent(new Event('zecratary_theme_changed'));
-    window.dispatchEvent(new Event('storage'));
   }
 
   try {
@@ -47059,94 +47477,60 @@ export function getLocalRecipes(userId: string): any[] {
 
 ## File: `apps/web/src/lib/adminSync.ts`
 ```typescript
-// Centralized Server-Backed Admin Settings Engine
-// Zero localStorage read/write persistence for administrative configs
-
-export function purgeLegacyBrowserAdminStorage(): void {
-  if (typeof window === 'undefined') return;
-  const legacyKeys = [
-    'zecratary_admin_settings',
-    'socialLogin',
-    'zecratary_social_login',
-    'social_login_config',
-    'zecratary_recipetypes',
-    'recipe_types',
-    'zecratary_recipe_types',
-    'zecratary_default_plan',
-    'zecratary_default_plan_slug',
-    'zecratary_deleted_plan_slugs',
-    'payment_transactions',
-    'payment_settings',
-    'zecratary_currency',
-    'zecratary_payment_transactions',
-    'zecratary_payment_settings',
-    'theme_colors',
-    'site_config',
-    'zecratary_theme_config',
-    'zecratary_theme_colors',
-    'zecratary_site_config',
-    'zecratary_active_language',
-    'languages',
-    'zecratary_languages',
-    'zecratary_categories',
-    'ingredient_categories',
-    'zecratary_ingredient_categories',
-    'zecratary_ai_config',
-    'zecratary_chef_questionnaire',
-    'zecratary_settings',
-    'zecratary_engine_config',
-    'zecratary_chef_ai_settings',
-    'zecratary_social_login_config',
-    'zecratary_subscription_configs',
-    'zecratary_subscription_plans',
-    'zecratary_system_config',
-    'admin_settings',
-    'adminSettings',
-    'site_settings'
-  ];
-  legacyKeys.forEach((key) => {
-    try {
-      localStorage.removeItem(key);
-    } catch (_) {}
-  });
+export interface AdminSettingsPayload {
+  siteName?: string;
+  titlebarEmoji?: string;
+  titlebarImage?: string;
+  faviconEmoji?: string;
+  faviconImage?: string;
+  themeColors?: Record<string, any>;
+  [key: string]: any;
 }
 
-export async function fetchServerAdminSettings(): Promise<any> {
+export async function fetchServerAdminSettings(): Promise<AdminSettingsPayload | null> {
   try {
     const res = await fetch('/api/admin/settings', {
-      method: 'GET',
+      cache: 'no-store',
       headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate'
-      },
-      cache: 'no-store'
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      }
     });
     if (res.ok) {
       const data = await res.json();
-      return data.settings || data;
+      return (data && data.settings) ? data.settings : data;
     }
   } catch (err) {
-    console.error('[adminSync] Failed to fetch server settings:', err);
+    console.error('[adminSync] fetchServerAdminSettings error:', err);
   }
   return null;
 }
 
-export async function persistServerAdminSettings(updates: Record<string, any>): Promise<boolean> {
+export async function persistServerAdminSettings(payload: AdminSettingsPayload): Promise<boolean> {
   try {
     const res = await fetch('/api/admin/settings', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache'
+      },
+      body: JSON.stringify(payload)
     });
-    if (res.ok) {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-      return true;
-    }
+    return res.ok;
   } catch (err) {
-    console.error('[adminSync] Failed to persist server settings:', err);
+    console.error('[adminSync] persistServerAdminSettings error:', err);
+    return false;
   }
-  return false;
+}
+
+export function purgeLegacyBrowserAdminStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem('zecratary_theme_colors');
+    localStorage.removeItem('zecratary_site_config');
+    localStorage.removeItem('zecratary_theme_config');
+    localStorage.removeItem('zecratary_admin_settings');
+  } catch (_) {}
 }
 
 ```
