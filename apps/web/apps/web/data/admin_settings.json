@@ -60,7 +60,7 @@
       "tokenReimburseFrequency": "monthly"
     }
   ],
-  "updatedAt": "2026-09-18T08:25:53.875Z",
+  "updatedAt": "2026-09-18T10:21:23.174Z",
   "chefAiSettings": {
     "model": "gemini-3.5-flash-lite",
     "apiKey": "AQ.Ab8RN6IhH6iaU_4chRKwnTIyKxG4bBTJURnex1GtD9nPAttcOQ",
@@ -87,19 +87,19 @@
   "titlebarImage": "",
   "faviconImage": "",
   "themeColors": {
-    "accent": "#10b981",
-    "primary": "#f59e0b",
-    "cardBorder": "#36270a",
-    "accentColor": "#10b981",
-    "sidebarIcon": "#fbbf24",
-    "primaryColor": "#f59e0b",
-    "primaryHover": "#d97706",
-    "accentEmerald": "#10b981",
-    "textSecondary": "#fcd34d",
-    "backgroundDark": "#120d04",
-    "cardBackground": "#1c1507",
-    "backgroundColor": "#120d04",
-    "sidebarIconColor": "#fbbf24"
+    "accent": "#ec4899",
+    "primary": "#8b5cf6",
+    "cardBorder": "#2a1650",
+    "accentColor": "#ec4899",
+    "sidebarIcon": "#c084fc",
+    "primaryColor": "#8b5cf6",
+    "primaryHover": "#7c3aed",
+    "accentEmerald": "#ec4899",
+    "textSecondary": "#d8b4fe",
+    "backgroundDark": "#0f081c",
+    "cardBackground": "#180d2e",
+    "backgroundColor": "#0f081c",
+    "sidebarIconColor": "#c084fc"
   },
   "supportedLanguages": {
     "code": "en",

@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   User as UserIcon, Mail, Lock, CheckCircle, 
-  AlertCircle, Calendar, LogOut, Check, CreditCard,
-  Zap, Sparkles, CheckCircle2, RefreshCw, Shield,
+  AlertCircle, Calendar, LogOut, Check,
+  Zap, Sparkles, RefreshCw, Shield,
   Clock, Cpu, Repeat, Link2, Unlink, Key
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
@@ -31,13 +31,8 @@ interface SubscriptionPlanItem {
   socialScrapeLimit?: number;
   canViewMacros?: boolean;
   allowedAiModels?: string[] | string;
-  stripePriceId?: string;
   badge?: string;
   saveBadge?: string;
-  subPrice?: string;
-  strikethroughPrice?: string;
-  buttonText?: string;
-  buttonTheme?: 'orange' | 'green';
   features?: string[];
   isFree?: boolean;
   tokenLimit?: number;
@@ -80,8 +75,6 @@ const SYSTEM_DEFAULT_FREE_PLAN: SubscriptionPlanItem = {
   isFree: true,
   badge: '',
   saveBadge: '',
-  buttonText: 'Switch to Free',
-  buttonTheme: 'orange',
   features: [
     'Create up to 5 AI-powered recipes per month',
     'Personal recipe library (25 total recipes)',
@@ -147,12 +140,12 @@ export default function ProfilePage() {
   const [plans, setPlans] = useState<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
   const plansRef = useRef<SubscriptionPlanItem[]>([SYSTEM_DEFAULT_FREE_PLAN]);
   plansRef.current = plans;
+
   const isFetchingPlansRef = useRef(false);
   const isFetchingProfileRef = useRef(false);
+  const isFetchingThemeRef = useRef(false);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const [selectedInterval, setSelectedInterval] = useState<'ALL' | 'MONTH' | 'YEAR'>('ALL');
-  const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
-  const [currencyCode, setCurrencyCode] = useState('USD');
   const [currencySymbol, setCurrencySymbol] = useState('$');
 
   const [tokenUsage, setTokenUsage] = useState<TokenUsageData>({
@@ -165,63 +158,80 @@ export default function ProfilePage() {
   });
   const [activeModelName, setActiveModelName] = useState('gemini-1.5-flash');
 
+  // Load and apply system theme without self-feeding event dispatches
   const applySavedTheme = useCallback(async () => {
+    if (isFetchingThemeRef.current) return;
+    isFetchingThemeRef.current = true;
     try {
-      try {
-        const res = await fetch('/api/system-settings', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.settings) {
-            const s = data.settings;
-            if (s.themeMode && !localStorage.getItem('zecratary_theme_mode')) {
-              localStorage.setItem('zecratary_theme_mode', s.themeMode);
+      const res = await fetch('/api/system-settings', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.settings) {
+          const s = data.settings;
+          const isDay = s.themeMode === 'light' || s.themeMode === 'day';
+          setIsDayMode(isDay);
+
+          if (s.themeColors) {
+            const root = document.documentElement;
+            if (s.themeColors.primary || s.themeColors.primaryColor) {
+              root.style.setProperty('--color-primary', s.themeColors.primary || s.themeColors.primaryColor);
             }
-            if (s.themeColors && !localStorage.getItem('zecratary_theme_colors')) {
-              localStorage.setItem('zecratary_theme_colors', JSON.stringify(s.themeColors));
+            if (s.themeColors.primaryHover) {
+              root.style.setProperty('--color-primary-hover', s.themeColors.primaryHover);
             }
-            if (s.currency && !localStorage.getItem('zecratary_currency')) {
-              localStorage.setItem('zecratary_currency', s.currency);
+            if (s.themeColors.accentEmerald || s.themeColors.accentColor) {
+              root.style.setProperty('--color-emerald', s.themeColors.accentEmerald || s.themeColors.accentColor);
             }
           }
+
+          if (s.currency) {
+            const symbols: Record<string, string> = {
+              USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
+              JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
+            };
+            setCurrencySymbol(symbols[s.currency] || '$');
+          }
         }
-      } catch (_) {}
-
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light' || mode === 'day';
-      setIsDayMode(isDay);
-
-      const curr = localStorage.getItem('zecratary_currency') || 'USD';
-      setCurrencyCode(curr);
-      const symbols: Record<string, string> = {
-        USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
-        JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
-      };
-      setCurrencySymbol(symbols[curr] || '$');
-
-      const aiConfigRaw = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
-      if (aiConfigRaw) {
-        const aiCfg = JSON.parse(aiConfigRaw);
-        if (aiCfg.model) setActiveModelName(aiCfg.model);
       }
-    } catch (e) {}
+
+      if (typeof window !== 'undefined') {
+        const mode = localStorage.getItem('zecratary_theme_mode');
+        if (mode) setIsDayMode(mode === 'light' || mode === 'day');
+
+        const aiConfigRaw = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
+        if (aiConfigRaw) {
+          try {
+            const aiCfg = JSON.parse(aiConfigRaw);
+            if (aiCfg.model) setActiveModelName(aiCfg.model);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {
+    } finally {
+      isFetchingThemeRef.current = false;
+    }
   }, []);
 
+  const applyThemeRef = useRef(applySavedTheme);
+  applyThemeRef.current = applySavedTheme;
+
   useEffect(() => {
-    applySavedTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('zecratary_payment_updated', applySavedTheme);
+    applyThemeRef.current();
+
+    const handleThemeEvent = () => {
+      applyThemeRef.current();
+    };
+
+    window.addEventListener('zecratary_theme_mode_changed', handleThemeEvent);
+    window.addEventListener('zecratary_theme_changed', handleThemeEvent);
+    window.addEventListener('zecratary_theme_updated', handleThemeEvent);
 
     return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('zecratary_payment_updated', applySavedTheme);
+      window.removeEventListener('zecratary_theme_mode_changed', handleThemeEvent);
+      window.removeEventListener('zecratary_theme_changed', handleThemeEvent);
+      window.removeEventListener('zecratary_theme_updated', handleThemeEvent);
     };
-  }, [applySavedTheme]);
+  }, []);
 
   const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem): boolean => {
     if (!user) return false;
@@ -275,22 +285,16 @@ export default function ProfilePage() {
       }
     }
 
-    try {
-      const storedTokens = typeof window !== 'undefined' ? localStorage.getItem('zecratary_token_usage') : null;
-      const parsed = storedTokens ? JSON.parse(storedTokens) : {};
-      const updated = {
-        promptTokens: parsed.promptTokens || 1420,
-        completionTokens: parsed.completionTokens || 850,
-        totalTokens: (parsed.promptTokens || 1420) + (parsed.completionTokens || 850),
-        requestCount: parsed.requestCount || 14,
+    setTokenUsage(prev => {
+      if (prev.monthlyLimit === assignedLimit && prev.reimburseFrequency === assignedFrequency) {
+        return prev;
+      }
+      return {
+        ...prev,
         monthlyLimit: assignedLimit,
         reimburseFrequency: assignedFrequency
       };
-      setTokenUsage(updated);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('zecratary_token_usage', JSON.stringify(updated));
-      }
-    } catch (_) {}
+    });
   }, []);
 
   const syncPlansFromAdmin = useCallback(async () => {
@@ -305,9 +309,6 @@ export default function ProfilePage() {
         const list = Array.isArray(data) ? data : (data.configs || data.plans || data.packages || data.subscriptionPlans);
         if (Array.isArray(list) && list.length > 0) {
           serverConfigs = list;
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('zecratary_subscription_configs', JSON.stringify(serverConfigs));
-          }
         }
       }
     } catch (_) {}
@@ -348,7 +349,6 @@ export default function ProfilePage() {
         trialBadge: '',
         descriptionMonthly: SYSTEM_DEFAULT_FREE_PLAN.description,
         descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
-        buttonText: t('switchToFreeBtn') || 'Switch to Free',
         features: SYSTEM_DEFAULT_FREE_PLAN.features,
         tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
         tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
@@ -396,8 +396,6 @@ export default function ProfilePage() {
           isFree: true,
           badge: cfg.badge || cfg.monthlyBadge || '',
           saveBadge: '',
-          buttonText: cfg.buttonText || (t('switchToFreeBtn') || 'Switch to Free'),
-          buttonTheme: 'orange',
           features: planFeatures,
           aiRecipeLimit: cfg.aiRecipeLimit,
           recipeLibraryLimit: cfg.recipeLibraryLimit,
@@ -425,8 +423,6 @@ export default function ProfilePage() {
             isFree: false,
             badge: cfg.monthlyBadge || cfg.badge || 'Billed Monthly',
             saveBadge: '',
-            buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-            buttonTheme: 'green',
             features: planFeatures,
             aiRecipeLimit: cfg.aiRecipeLimit,
             recipeLibraryLimit: cfg.recipeLibraryLimit,
@@ -441,7 +437,6 @@ export default function ProfilePage() {
         if (hasAnnual) {
           const aPrice = Number(cfg.annualPriceDollars || 0);
           const annualSlug = `${cleanBaseSlug}-annual`;
-          const mEquivalent = (aPrice / 12).toFixed(2);
           plansMap.set(annualSlug, {
             id: `${cfg.id || cleanBaseSlug}-annual`,
             name: cfg.name,
@@ -453,10 +448,6 @@ export default function ProfilePage() {
             isFree: false,
             badge: cfg.trialBadge || cfg.annualBadge || 'Best Value',
             saveBadge: cfg.annualBadge || '',
-            subPrice: `${currencySymbol}${mEquivalent}/month`,
-            strikethroughPrice: hasMonthly ? `${currencySymbol}${Number(cfg.monthlyPriceDollars).toFixed(2)}/month` : undefined,
-            buttonText: cfg.buttonText || (t('choosePlanBtn') || 'Choose Plan'),
-            buttonTheme: 'green',
             features: planFeatures,
             aiRecipeLimit: cfg.aiRecipeLimit,
             recipeLibraryLimit: cfg.recipeLibraryLimit,
@@ -482,7 +473,7 @@ export default function ProfilePage() {
         syncActivePlanTokens(uPlan, dynamicPlans);
       } catch (_) {}
     }
-  }, [currencySymbol, syncActivePlanTokens, t]);
+  }, [currencySymbol, syncActivePlanTokens]);
 
   const reloadActiveUser = useCallback(async () => {
     if (isFetchingProfileRef.current) return;
@@ -579,9 +570,9 @@ export default function ProfilePage() {
         }
       } catch (_) {}
 
-      setUserState(prev => JSON.stringify(prev) === JSON.stringify(matchedUser) ? prev : matchedUser);
-      setName(matchedUser.name || '');
-      setEmail(matchedUser.email || '');
+      setUserState(prev => (prev && JSON.stringify(prev) === JSON.stringify(matchedUser) ? prev : matchedUser));
+      setName(prev => (prev === (matchedUser.name || '') ? prev : (matchedUser.name || '')));
+      setEmail(prev => (prev === (matchedUser.email || '') ? prev : (matchedUser.email || '')));
 
       try {
         localStorage.setItem('zecratary_current_user', JSON.stringify(matchedUser));
@@ -595,32 +586,39 @@ export default function ProfilePage() {
     }
   }, [router, syncActivePlanTokens]);
 
+  const syncPlansRef = useRef(syncPlansFromAdmin);
+  syncPlansRef.current = syncPlansFromAdmin;
+
+  const reloadUserRef = useRef(reloadActiveUser);
+  reloadUserRef.current = reloadActiveUser;
+
+  // Isolated title update
   useEffect(() => {
     document.title = `${t('accountProfileTitle') || 'Account Profile'} - Zecratary`;
   }, [t]);
 
+  // Mount-only lifecycle effect with 300ms debounced event listeners
   useEffect(() => {
-    syncPlansFromAdmin();
-    reloadActiveUser();
+    syncPlansRef.current();
+    reloadUserRef.current();
 
-    let debounceTimer: NodeJS.Timeout | null = null;
-    const handleSyncEvent = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        syncPlansFromAdmin();
-        reloadActiveUser();
+    const handleDebouncedSync = () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = setTimeout(() => {
+        syncPlansRef.current();
+        reloadUserRef.current();
       }, 300);
     };
 
-    window.addEventListener('zecratary_plans_updated', handleSyncEvent);
-    window.addEventListener('zecratary_payment_updated', handleSyncEvent);
+    window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
 
     return () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      window.removeEventListener('zecratary_plans_updated', handleSyncEvent);
-      window.removeEventListener('zecratary_payment_updated', handleSyncEvent);
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
     };
-  }, [syncPlansFromAdmin, reloadActiveUser]);
+  }, []);
 
   const handleToggleSocialLink = async (provider: SocialProvider) => {
     if (!user) return;
@@ -762,7 +760,6 @@ export default function ProfilePage() {
     setPassword('');
     setConfirmPassword('');
 
-    window.dispatchEvent(new Event('zecratary_users_updated'));
     setSuccessMsg(t('profileSavedSuccess') || 'Your profile changes have been saved successfully!');
     setTimeout(() => setSuccessMsg(''), 4000);
   };
@@ -789,121 +786,6 @@ export default function ProfilePage() {
     }
   };
 
-  const handleSelectPlan = async (plan: SubscriptionPlanItem) => {
-    if (!user) return;
-    setPaymentLoading(plan.id);
-    setError('');
-    setSuccessMsg('');
-
-    try {
-      const isFree = Boolean(plan.priceCents === 0 || plan.isFree);
-      const targetSlug = sanitizeSinglePlan(plan.slug);
-      const userEmail = user.email.toLowerCase().trim();
-
-      if (checkIsCurrentPlan(plan)) {
-        setError(t('alreadySubscribedToPlan') || `You are already subscribed to ${plan.name}.`);
-        setPaymentLoading(null);
-        return;
-      }
-
-      const newExpiryDate = isFree ? '' : calculateRenewalExpiry(new Date(), plan.interval);
-
-      try {
-        const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
-        if (txRes.ok) {
-          const txData = await txRes.json();
-          const existingList: any[] = Array.isArray(txData.transactions) ? txData.transactions : [];
-          const userActiveTxs = existingList.filter((tx: any) => {
-            const em = (tx.customerEmail || tx.customer_email || '').toLowerCase().trim();
-            const st = (tx.status || '').toLowerCase();
-            return em === userEmail && (st === 'succeeded' || st === 'paid' || st === 'active');
-          });
-
-          for (const oldTx of userActiveTxs) {
-            const cancelledTx = {
-              ...oldTx,
-              status: 'refunded',
-              expiryDate: new Date().toISOString()
-            };
-            await fetch('/api/admin/payment', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'update_transaction', transaction: cancelledTx })
-            }).catch(() => {});
-          }
-        }
-      } catch (_) {}
-
-      if (!isFree) {
-        const newTx: PaymentTransaction = {
-          id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
-          customerName: user.name,
-          customerEmail: userEmail,
-          planName: `${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})`,
-          planSlug: targetSlug,
-          amount: plan.priceCents / 100,
-          currency: currencyCode || 'USD',
-          gateway: 'stripe',
-          status: 'succeeded',
-          testMode: true,
-          createdAt: new Date().toISOString(),
-          expiryDate: newExpiryDate
-        };
-
-        await fetch('/api/admin/payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'add_transaction', transaction: newTx })
-        }).catch(() => {});
-      }
-
-      const finalPlanSlug = isFree ? 'taster' : targetSlug;
-      const updatedUserPayload: ExtendedUser = {
-        ...user,
-        subscriptionPlan: finalPlanSlug,
-        subscriptionTier: finalPlanSlug,
-        planSlug: finalPlanSlug,
-        planId: plan.id,
-        planName: `${plan.name}${isFree ? ' (Free)' : plan.interval === 'YEAR' ? ' (Annual)' : ' (Monthly)'}`,
-        planInterval: plan.interval,
-        subscriptionStatus: 'active',
-        lastPaymentDate: isFree ? '' : new Date().toISOString(),
-        planExpiryDate: newExpiryDate,
-        expiryDate: newExpiryDate,
-        updatedAt: new Date().toISOString()
-      } as any;
-
-      await fetch('/api/admin/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedUserPayload)
-      }).catch(() => {});
-
-      try {
-        localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUserPayload));
-        localStorage.setItem('zecratary_user', JSON.stringify(updatedUserPayload));
-      } catch (_) {}
-
-      setCurrentUser(updatedUserPayload);
-      setUserState(updatedUserPayload);
-      syncActivePlanTokens(finalPlanSlug, plansRef.current);
-
-      window.dispatchEvent(new Event('zecratary_payment_updated'));
-      window.dispatchEvent(new Event('zecratary_users_updated'));
-
-      setSuccessMsg(
-        isFree 
-          ? (t('switchedToFreeNotice') || `Switched to ${plan.name} (Free)! Previous subscription was cancelled.`)
-          : (t('planSubscribedNotice') || `Plan changed successfully to ${plan.name} (${plan.interval === 'YEAR' ? 'Annual' : 'Monthly'})!`)
-      );
-      setTimeout(() => setSuccessMsg(''), 5000);
-    } catch (err: any) {
-      setError(err.message || 'Payment processing failed. Please try again.');
-    } finally {
-      setPaymentLoading(null);
-    }
-  };
-
   if (!user) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
@@ -916,10 +798,6 @@ export default function ProfilePage() {
   }
 
   const PlanHeaderIcon = userPlanBadge.icon;
-  const filteredPlans = plans.filter(p => {
-    if (selectedInterval === 'ALL') return true;
-    return p.isFree || p.priceCents === 0 || p.interval === selectedInterval;
-  });
   const activeExpiryDate = (user as any).planExpiryDate || (user as any).expiryDate;
 
   const isUnlimited = tokenUsage.monthlyLimit === -1;
@@ -1502,317 +1380,6 @@ export default function ProfilePage() {
             </button>
           </div>
         </div>
-      </div>
-
-      {/* UPGRADE OR CHANGE MEMBERSHIP PLAN */}
-      <div 
-        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
-        style={{
-          backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
-        }}
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-          <div>
-            <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              <CreditCard className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-              {t('upgradeChangePlanTitle') || 'Upgrade or Change Membership Plan'}
-            </h2>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('onePlanPerEmailSub') || 'Strictly 1 plan per email. Changing plans automatically cancels your prior plan and recalculates your expiry date.'}
-            </p>
-          </div>
-
-          <div 
-            className="flex items-center p-1 rounded-xl border text-xs font-bold self-start sm:self-auto shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setSelectedInterval('ALL')}
-              className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                selectedInterval === 'ALL'
-                  ? 'text-white shadow'
-                  : ''
-              }`}
-              style={selectedInterval === 'ALL' ? {
-                backgroundColor: 'var(--color-primary)'
-              } : {
-                color: 'var(--color-text-secondary)'
-              }}
-            >
-              All Plans ({plans.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedInterval('MONTH')}
-              className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                selectedInterval === 'MONTH'
-                  ? 'text-white shadow'
-                  : ''
-              }`}
-              style={selectedInterval === 'MONTH' ? {
-                backgroundColor: 'var(--color-primary)'
-              } : {
-                color: 'var(--color-text-secondary)'
-              }}
-            >
-              {t('monthlyBtn') || 'Monthly'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedInterval('YEAR')}
-              className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                selectedInterval === 'YEAR'
-                  ? 'text-white shadow'
-                  : ''
-              }`}
-              style={selectedInterval === 'YEAR' ? {
-                backgroundColor: 'var(--color-primary)'
-              } : {
-                color: 'var(--color-text-secondary)'
-              }}
-            >
-              {t('annualSaveLabel') || 'Annual (Save up to 44%)'}
-            </button>
-          </div>
-        </div>
-
-        {/* ACTIVE MEMBERSHIP PLAN CARD BANNER */}
-        <div 
-          className="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm transition"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: 'var(--color-emerald)'
-          }}
-        >
-          <div className="flex items-center gap-3">
-            <div 
-              className="w-10 h-10 rounded-xl flex items-center justify-center shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-emerald)'
-              }}
-            >
-              <CheckCircle2 className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-emerald)' }}>
-                  Your Current Selected Plan
-                </span>
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
-                  Active
-                </span>
-              </div>
-              <h4 className="text-base font-black" style={{ color: 'var(--color-text)' }}>
-                {userPlanBadge.label}
-              </h4>
-            </div>
-          </div>
-
-          <div className="text-xs sm:text-right" style={{ color: 'var(--color-text-secondary)' }}>
-            <span className="block font-medium">
-              {activeExpiryDate 
-                ? `Renewal / Expiry: ${new Date(activeExpiryDate).toLocaleDateString()}` 
-                : 'Free Tier (No Expiration)'}
-            </span>
-            <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>
-              {tokenUsage.monthlyLimit === -1 ? 'Unlimited AI Tokens' : `${tokenUsage.monthlyLimit.toLocaleString()} Monthly Tokens`}
-            </span>
-          </div>
-        </div>
-
-        {/* ALL AVAILABLE PLANS GRID */}
-        {filteredPlans.length === 0 ? (
-          <div 
-            className="p-8 text-center rounded-2xl border text-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-secondary)'
-            }}
-          >
-            No plans configured in admin yet. Go to <Link href="/admin/plans" className="font-bold underline text-[var(--color-primary)]">Admin Plans</Link> to create plans.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
-            {filteredPlans.map((plan) => {
-              const isCurrent = checkIsCurrentPlan(plan);
-              const isFree = plan.priceCents === 0 || plan.isFree;
-
-              return (
-                <div 
-                  key={plan.id || plan.slug}
-                  className={`rounded-3xl p-6 border-2 relative flex flex-col justify-between shadow-xl transition-all duration-200 ${
-                    isCurrent 
-                      ? 'ring-4 scale-[1.02]' 
-                      : 'hover:scale-[1.01]'
-                  }`}
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: isCurrent 
-                      ? 'var(--color-emerald)' 
-                      : (plan.badge ? 'var(--color-primary)' : 'var(--color-border)')
-                  }}
-                >
-                  {(isCurrent || plan.saveBadge || plan.badge) && (
-                    <div 
-                      className="absolute -top-3.5 right-6 px-3 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-md flex items-center gap-1 z-10"
-                      style={{
-                        backgroundColor: isCurrent 
-                          ? 'var(--color-emerald)' 
-                          : (plan.saveBadge ? 'var(--color-emerald)' : 'var(--color-primary)')
-                      }}
-                    >
-                      {isCurrent ? (
-                        <>
-                          <CheckCircle2 className="h-3 w-3" style={{ color: '#ffffff' }} /> {t('currentPlanBadge') || 'Current Active Plan'}
-                        </>
-                      ) : (
-                        plan.saveBadge || plan.badge
-                      )}
-                    </div>
-                  )}
-
-                  <div className="space-y-4">
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
-                            {plan.name}
-                          </h3>
-                          <span 
-                            className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border"
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text-secondary)'
-                            }}
-                          >
-                            {plan.isFree ? 'Free' : plan.interval === 'YEAR' ? 'Annual' : 'Monthly'}
-                          </span>
-                        </div>
-
-                        {isCurrent ? (
-                          <span 
-                            className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border flex items-center gap-1"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-emerald)',
-                              color: 'var(--color-emerald)'
-                            }}
-                          >
-                            <CheckCircle2 className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} />
-                            {t('activeStatus') || 'Active'}
-                          </span>
-                        ) : (
-                          <span 
-                            className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border"
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text-secondary)'
-                            }}
-                          >
-                            Available
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs font-medium mt-1 min-h-[32px]" style={{ color: 'var(--color-text-secondary)' }}>
-                        {plan.description}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 text-xs font-mono font-bold px-3 py-1.5 rounded-xl w-fit shadow-xs border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}>
-                      <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                      <span>{plan.tokenLimit === -1 ? 'Unlimited Tokens' : `${(plan.tokenLimit || 0).toLocaleString()} Tokens`}</span>
-                      <span className="text-[10px] font-sans font-normal" style={{ color: 'var(--color-text-secondary)' }}>
-                        ({plan.tokenReimburseFrequency === 'once' ? 'Once' : plan.tokenReimburseFrequency === 'weekly' ? 'Weekly' : 'Monthly'})
-                      </span>
-                    </div>
-
-                    <div>
-                      {isFree ? (
-                        <div className="text-3xl font-black" style={{ color: 'var(--color-primary)' }}>
-                          {t('free') || 'Free'}
-                        </div>
-                      ) : (
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-3xl font-black" style={{ color: 'var(--color-primary)' }}>
-                            {currencySymbol}{(plan.priceCents / 100).toFixed(2)}
-                          </span>
-                          <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                            /{plan.interval === 'YEAR' ? (t('perYear') || 'year') : (t('perMonth') || 'month')}
-                          </span>
-                        </div>
-                      )}
-
-                      {!isFree && plan.interval === 'YEAR' && plan.subPrice && (
-                        <div className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                          <span className="font-bold" style={{ color: 'var(--color-text)' }}>{plan.subPrice}</span>{' '}
-                          {plan.strikethroughPrice && (
-                            <span className="line-through" style={{ color: 'var(--color-text-secondary)' }}>{plan.strikethroughPrice}</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="pt-2 border-t space-y-2 text-xs font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                      {plan.features && plan.features.length > 0 ? (
-                        plan.features.map((f, i) => (
-                          <div key={i} className="flex items-start gap-2">
-                            <Check className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald)' }} />
-                            <span className="leading-snug">{f}</span>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="italic text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{t('includesFullTierFeatureAccess') || 'Includes full tier feature access.'}</div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="pt-6 mt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                    <button
-                      type="button"
-                      disabled={isCurrent || paymentLoading === plan.id}
-                      onClick={() => handleSelectPlan(plan)}
-                      className="w-full py-3 rounded-2xl text-xs font-black text-white transition shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                      style={{
-                        backgroundColor: isCurrent 
-                          ? 'var(--color-emerald)' 
-                          : 'var(--color-primary)'
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)';
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary)';
-                      }}
-                    >
-                      {paymentLoading === plan.id ? (
-                        <>
-                          <RefreshCw className="h-4 w-4 animate-spin" /> {t('processing') || 'Processing...'}
-                        </>
-                      ) : isCurrent ? (
-                        <>
-                          <CheckCircle2 className="h-4 w-4" style={{ color: '#ffffff' }} /> {t('currentActivePlan') || 'Current Active Plan'}
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-4 w-4" /> {isFree ? (t('switchToFreeBtn') || 'Switch to Free') : `${t('changeToPlanPrefix') || 'Change to '}${plan.name}`}
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
 
     </div>
