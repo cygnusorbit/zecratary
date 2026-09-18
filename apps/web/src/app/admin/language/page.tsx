@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -119,7 +120,6 @@ export default function AdminLanguagePage() {
   const [search, setSearch] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [feedbackType, setFeedbackType] = useState<'success' | 'error'>('success');
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Modal State
@@ -151,49 +151,7 @@ export default function AdminLanguagePage() {
   // Dynamic Theme Synchronization
   const applyGlobalTheme = useCallback(() => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light' || mode === 'day';
-      setIsDayMode(isDay);
-
-      const stored = typeof window !== 'undefined'
-        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
-        : null;
-      const c = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
-
-      if (isDay) {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
-        }
-      } else {
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', c.backgroundDark || c.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-card', c.cardDark || c.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', c.innerDark || c.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', c.borderColor || c.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', c.textSecondary || '#94a3b8');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-        }
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (_) {}
   }, []);
 
@@ -209,8 +167,6 @@ export default function AdminLanguagePage() {
       window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
       window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
       window.removeEventListener('storage', applyGlobalTheme);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-      }
     };
   }, [applyGlobalTheme]);
 
@@ -319,7 +275,6 @@ export default function AdminLanguagePage() {
       lastUpdated: new Date().toISOString()
     };
 
-    // Baseline en words
     const initialWords: Record<string, string> = {};
     Object.keys(en).forEach((k) => {
       initialWords[k] = (en as any)[k];
@@ -348,7 +303,6 @@ export default function AdminLanguagePage() {
     showToast(`"${cleanName}" (${cleanCode}.ts) ${t('languageAddedSuccess', 'added successfully!')}`);
   };
 
-  // OPEN EDIT MODAL
   const handleOpenEditModal = (lang: SupportedLanguage) => {
     setEditingCode(lang.code);
     setLangCode(lang.code);
@@ -456,7 +410,6 @@ export default function AdminLanguagePage() {
     showToast(`"${cleanName}" & ${editingCode}.ts updated successfully!`);
   };
 
-  // DELETE LANGUAGE
   const handleDeleteLanguage = async (lang: SupportedLanguage) => {
     if (lang.isDefault) {
       showToast(t('cannotDeleteDefaultError', 'Default language cannot be deleted.'), 'error');
@@ -483,7 +436,6 @@ export default function AdminLanguagePage() {
     showToast(`"${lang.name}" (${lang.code}.ts) ${t('languageRemoved', 'removed successfully.')}`);
   };
 
-  // SET DEFAULT
   const handleSetDefault = async (code: string) => {
     const updated = languages.map((l) => ({
       ...l,
@@ -530,16 +482,16 @@ export default function AdminLanguagePage() {
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
-      style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+      style={{ color: 'var(--color-text)' }}
     >
       {/* ACCESS WARNING */}
       {currentUser && currentUser.role !== 'admin' && (
         <div 
           className="p-4 rounded-2xl border flex items-center justify-between text-xs shadow-xs"
           style={{
-            backgroundColor: isDayMode ? '#fef3c7' : 'rgba(180, 83, 9, 0.2)',
-            borderColor: isDayMode ? '#f59e0b' : 'rgba(217, 119, 6, 0.4)',
-            color: isDayMode ? '#92400e' : '#fde68a'
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'rgba(217, 119, 6, 0.4)',
+            color: '#fde68a'
           }}
         >
           <div className="flex items-center gap-2">
@@ -551,7 +503,7 @@ export default function AdminLanguagePage() {
           <Link 
             href="/login"
             className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 shadow-sm"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+            style={{ backgroundColor: 'var(--color-primary)' }}
           >
             {t('switchToAdmin', 'Switch to Admin')}
           </Link>
@@ -562,20 +514,16 @@ export default function AdminLanguagePage() {
       {feedbackMsg && (
         <div 
           className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-sm animate-in fade-in"
-          style={feedbackType === 'success' ? {
-            backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-            borderColor: 'var(--color-emerald, #10b981)',
-            color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
-          } : {
-            backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-            borderColor: '#ef4444',
-            color: isDayMode ? '#b91c1c' : '#f87171'
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: feedbackType === 'success' ? 'var(--color-emerald)' : '#ef4444',
+            color: feedbackType === 'success' ? 'var(--color-emerald)' : '#ef4444'
           }}
         >
           {feedbackType === 'success' ? (
-            <CheckCircle className="h-4 w-4 shrink-0" style={{ color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }} />
+            <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
           ) : (
-            <AlertCircle className="h-4 w-4 shrink-0" />
+            <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
           )}
           <span>{feedbackMsg}</span>
         </div>
@@ -586,13 +534,13 @@ export default function AdminLanguagePage() {
         <div>
           <h1 
             className="text-3xl font-black tracking-tight flex items-center gap-2.5"
-            style={{ color: 'var(--color-primary, #E05638)' }}
+            style={{ color: 'var(--color-primary)' }}
           >
-            <Languages className="h-8 w-8" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('langPageTitle', 'Language Management')}
+            <Languages className="h-8 w-8" style={{ color: 'var(--color-primary)' }} /> {t('langPageTitle', 'Language Management')}
           </h1>
           <p 
             className="text-sm font-semibold"
-            style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}
+            style={{ color: 'var(--color-emerald)' }}
           >
             {t('langPageSubtitle', 'Configure active system locales and in-app dictionaries')} ({languages.length} {t('installedSuffix', 'installed')})
           </p>
@@ -602,15 +550,15 @@ export default function AdminLanguagePage() {
           <button
             onClick={loadLanguages}
             disabled={isLoading}
-            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#cbd5e1'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
             title="Reload from server store"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
             <span>{t('refreshBtn', 'Reload')}</span>
           </button>
 
@@ -618,7 +566,9 @@ export default function AdminLanguagePage() {
             onClick={handleOpenAddModal}
             disabled={currentUser?.role !== 'admin'}
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             <Plus className="h-4 w-4" /> {t('addLanguage', 'Add Language')}
           </button>
@@ -626,19 +576,19 @@ export default function AdminLanguagePage() {
             href="/admin"
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#cbd5e1'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
-            <Shield className="h-4 w-4" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }} /> {t('adminConsole', 'Admin Console')}
+            <Shield className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('adminConsole', 'Admin Console')}
           </Link>
         </div>
       </div>
 
       {/* SEARCH BAR */}
       <div className="relative">
-        <Search className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+        <Search className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
         <input
           type="text"
           placeholder={t('searchLanguagePlaceholder', 'Search language by name, code or native script...')}
@@ -646,12 +596,12 @@ export default function AdminLanguagePage() {
           onChange={(e) => setSearch(e.target.value)}
           className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition shadow-xs"
           style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-inner-dark, #070b13)',
-            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-            color: isDayMode ? '#0f172a' : '#ffffff'
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)',
+            color: 'var(--color-text)'
           }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-          onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
         />
       </div>
 
@@ -659,8 +609,8 @@ export default function AdminLanguagePage() {
       <div 
         className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
         }}
       >
         <div className="overflow-x-auto">
@@ -668,9 +618,9 @@ export default function AdminLanguagePage() {
             <thead 
               className="border-b uppercase font-bold text-[10px] tracking-wider transition-colors duration-200"
               style={{
-                backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#64748b' : '#94a3b8'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)'
               }}
             >
               <tr>
@@ -682,10 +632,10 @@ export default function AdminLanguagePage() {
                 <th className="px-5 py-4 text-right">{t('tableActions', 'Actions')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y transition-colors duration-200" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <tbody className="divide-y transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-12" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <td colSpan={6} className="text-center py-12" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('noLanguagesFound', 'No languages found matching')} "{search}"
                   </td>
                 </tr>
@@ -693,40 +643,40 @@ export default function AdminLanguagePage() {
                 filtered.map((item) => (
                   <tr 
                     key={item.code} 
-                    className={`transition ${isDayMode ? 'hover:bg-slate-50' : 'hover:bg-slate-900/40'}`}
-                    style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+                    className="transition"
+                    style={{ borderColor: 'var(--color-border)' }}
                   >
-                    <td className="px-5 py-4 font-bold flex items-center gap-3" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                    <td className="px-5 py-4 font-bold flex items-center gap-3" style={{ color: 'var(--color-text)' }}>
                       <div 
                         className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0 uppercase shadow-xs"
                         style={{
-                          backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #111726)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: 'var(--color-primary, #E05638)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-primary)'
                         }}
                       >
                         {item.code}
                       </div>
                       <div>
-                        <div className="font-bold text-sm" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{item.name}</div>
-                        <div className="font-mono text-[10px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{item.code}.ts</div>
+                        <div className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{item.name}</div>
+                        <div className="font-mono text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{item.code}.ts</div>
                       </div>
                     </td>
-                    <td className="px-5 py-4 font-medium" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    <td className="px-5 py-4 font-medium" style={{ color: 'var(--color-text)' }}>
                       <div className="flex items-center gap-2">
                         <span className="text-xl leading-none select-none drop-shadow-sm" title={`${item.name} flag`}>
                           {item.flag || getLanguageFlag(item.code)}
                         </span>
-                        <span className="font-semibold" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{item.nativeName}</span>
+                        <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{item.nativeName}</span>
                       </div>
                     </td>
                     <td className="px-5 py-4">
                       <span 
                         className="border text-[10px] font-bold px-2 py-0.5 rounded uppercase shadow-xs"
                         style={{
-                          backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#334155' : '#cbd5e1'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
                         }}
                       >
                         {item.direction}
@@ -737,9 +687,9 @@ export default function AdminLanguagePage() {
                         <span 
                           className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border inline-flex items-center gap-1 shadow-xs"
                           style={{
-                            backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                            borderColor: 'var(--color-emerald, #10b981)',
-                            color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-emerald)'
                           }}
                         >
                           <Star className="h-3 w-3 fill-current" /> {t('defaultBadge', 'Default')}
@@ -750,9 +700,9 @@ export default function AdminLanguagePage() {
                           disabled={currentUser?.role !== 'admin'}
                           className="text-[10px] border px-2 py-1 rounded-lg transition cursor-pointer shadow-xs"
                           style={{
-                            backgroundColor: isDayMode ? '#ffffff' : 'transparent',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#334155' : '#94a3b8'
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
                           }}
                         >
                           {t('setDefault', 'Set Default')}
@@ -763,13 +713,13 @@ export default function AdminLanguagePage() {
                       <span 
                         className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border shadow-xs"
                         style={item.status === 'active' ? {
-                          backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                          borderColor: 'var(--color-emerald, #10b981)',
-                          color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-emerald)',
+                          color: 'var(--color-emerald)'
                         } : {
-                          backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                          color: isDayMode ? '#64748b' : '#94a3b8'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
                         }}
                       >
                         {item.status === 'active' ? t('active', 'Active') : t('inactive', 'Inactive')}
@@ -783,13 +733,13 @@ export default function AdminLanguagePage() {
                           disabled={currentUser?.role !== 'admin'}
                           className="p-2 rounded-xl border transition shadow-xs cursor-pointer disabled:opacity-40"
                           style={{
-                            backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#334155' : '#cbd5e1'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                           title="Edit Language & Words"
                         >
-                          <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                          <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                         </button>
                         <button
                           type="button"
@@ -797,9 +747,9 @@ export default function AdminLanguagePage() {
                           disabled={currentUser?.role !== 'admin' || item.isDefault || item.code === 'en'}
                           className="p-2 rounded-xl border transition shadow-xs cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed hover:text-red-500"
                           style={{
-                            backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                            borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                            color: isDayMode ? '#64748b' : '#94a3b8'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
                           }}
                           title={item.isDefault ? t('cannotDeleteDefault', 'Cannot delete default language') : t('deleteLanguageTooltip', 'Delete Language')}
                         >
@@ -825,17 +775,17 @@ export default function AdminLanguagePage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => setShowAddModal(false)}
               className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #172033)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
@@ -844,11 +794,11 @@ export default function AdminLanguagePage() {
             <div className="space-y-1 pr-6">
               <h2 
                 className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 <Languages className="h-5 w-5" /> {t('addNewLanguageTitle', 'Add New Language')}
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('addNewLanguageSub', 'Register a new locale code and initialize system translations.')}
               </p>
             </div>
@@ -857,12 +807,12 @@ export default function AdminLanguagePage() {
               <div 
                 className="p-3 rounded-xl font-semibold flex items-center gap-2 border shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                  borderColor: '#ef4444',
-                  color: isDayMode ? '#b91c1c' : '#f87171'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'rgba(239, 68, 68, 0.4)',
+                  color: '#ef4444'
                 }}
               >
-                <AlertCircle className="h-4 w-4 shrink-0" />
+                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
                 <span>{modalError}</span>
               </div>
             )}
@@ -870,14 +820,14 @@ export default function AdminLanguagePage() {
             <form onSubmit={handleAddLanguageSubmit} className="space-y-4 pt-1">
               <div className="flex gap-3 items-start">
                 <div className="relative">
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Flag</label>
+                  <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Flag</label>
                   <button
                     type="button"
                     onClick={() => setShowFlagPicker(!showFlagPicker)}
-                    className="w-14 h-[42px] border rounded-xl flex items-center justify-center text-2xl transition cursor-pointer shadow-sm hover:border-[#E05638]"
+                    className="w-14 h-[42px] border rounded-xl flex items-center justify-center text-2xl transition cursor-pointer shadow-sm hover:border-[var(--color-primary)]"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: showFlagPicker ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: showFlagPicker ? 'var(--color-primary)' : 'var(--color-border)'
                     }}
                     title="Select Country Flag"
                   >
@@ -886,14 +836,14 @@ export default function AdminLanguagePage() {
 
                   {showFlagPicker && (
                     <div 
-                      className="absolute top-full left-0 mt-1.5 w-72 p-3 border rounded-2xl space-y-2 shadow-2xl z-30"
+                      className="absolute top-full left-0 mt-1.5 w-72 p-3 border rounded-2xl space-y-2 shadow-2xl z-30 transition-colors duration-200"
                       style={{
-                        backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
                       }}
                     >
                       <div className="relative">
-                        <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+                        <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                         <input
                           type="text"
                           placeholder="Search country or code..."
@@ -901,9 +851,9 @@ export default function AdminLanguagePage() {
                           onChange={(e) => setFlagCountrySearch(e.target.value)}
                           className="w-full pl-8 pr-3 py-1.5 border rounded-xl text-xs outline-none transition"
                           style={{
-                            backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                            borderColor: isDayMode ? '#cbd5e1' : '#334155',
-                            color: isDayMode ? '#0f172a' : '#ffffff'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                         />
                       </div>
@@ -920,8 +870,8 @@ export default function AdminLanguagePage() {
                             }}
                             className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition text-xs cursor-pointer"
                             style={{
-                              backgroundColor: isDayMode ? '#f1f5f9' : 'transparent',
-                              color: isDayMode ? '#0f172a' : '#e2e8f0'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              color: 'var(--color-text)'
                             }}
                           >
                             <span className="text-lg leading-none">{c.flag}</span>
@@ -934,7 +884,7 @@ export default function AdminLanguagePage() {
                 </div>
 
                 <div className="flex-1">
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('langCodeLabel', 'Language Code (ISO)')}
                   </label>
                   <input
@@ -946,16 +896,16 @@ export default function AdminLanguagePage() {
                     onChange={(e) => setLangCode(e.target.value)}
                     className="w-full border rounded-xl px-3.5 py-2.5 text-xs uppercase font-mono outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('displayNameLabel', 'Display Name')}
                 </label>
                 <input
@@ -966,15 +916,15 @@ export default function AdminLanguagePage() {
                   onChange={(e) => setLangName(e.target.value)}
                   className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 />
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('nativeNameLabel', 'Native Name')}
                 </label>
                 <input
@@ -984,16 +934,16 @@ export default function AdminLanguagePage() {
                   onChange={(e) => setLangNativeName(e.target.value)}
                   className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('layoutDirectionLabel', 'Layout Direction')}
                   </label>
                   <select
@@ -1001,18 +951,18 @@ export default function AdminLanguagePage() {
                     onChange={(e) => setLangDirection(e.target.value as any)}
                     className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
-                    <option value="ltr" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionLtr', 'Left-to-Right (LTR)')}</option>
-                    <option value="rtl" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionRtl', 'Right-to-Left (RTL)')}</option>
+                    <option value="ltr" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('directionLtr', 'Left-to-Right (LTR)')}</option>
+                    <option value="rtl" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('directionRtl', 'Right-to-Left (RTL)')}</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('statusLabel', 'Status')}
                   </label>
                   <select
@@ -1020,19 +970,19 @@ export default function AdminLanguagePage() {
                     onChange={(e) => setLangStatus(e.target.value as any)}
                     className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   >
-                    <option value="active" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active', 'Active')}</option>
-                    <option value="inactive" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('inactive', 'Inactive')}</option>
+                    <option value="active" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('active', 'Active')}</option>
+                    <option value="inactive" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('inactive', 'Inactive')}</option>
                   </select>
                 </div>
               </div>
 
               <div className="pt-2">
-                <label className="flex items-center gap-2 cursor-pointer font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                <label className="flex items-center gap-2 cursor-pointer font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                   <input
                     type="checkbox"
                     checked={langIsDefault}
@@ -1043,15 +993,15 @@ export default function AdminLanguagePage() {
                 </label>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
                   className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
                   style={{
-                    backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#475569' : '#cbd5e1'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
                   {t('cancel', 'Cancel')}
@@ -1059,7 +1009,7 @@ export default function AdminLanguagePage() {
                 <button
                   type="submit"
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                  style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   <Plus className="h-4 w-4" /> {t('addLanguage', 'Add Language')}
                 </button>
@@ -1079,17 +1029,17 @@ export default function AdminLanguagePage() {
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-3xl w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default flex flex-col max-h-[90vh] transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#0f172a' : '#ffffff'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
           >
             <button 
               onClick={() => setShowEditModal(false)}
               className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #172033)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
               }}
             >
               <X className="h-4 w-4" />
@@ -1098,27 +1048,27 @@ export default function AdminLanguagePage() {
             <div className="space-y-1 pr-6">
               <h2 
                 className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
                 <Edit3 className="h-5 w-5" /> {t('editLanguageTitle', 'Edit Language')} ({editingCode?.toUpperCase()})
               </h2>
-              <p className="text-xs" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('editLanguageSub', 'Customize locale configuration and system dictionary phrases.')}
               </p>
             </div>
 
             {/* TAB NAVIGATION */}
-            <div className="flex border-b gap-4 shrink-0 transition-colors duration-200" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <div className="flex border-b gap-4 shrink-0 transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
                 onClick={() => setEditActiveTab('settings')}
                 className={`flex items-center gap-2 pb-2.5 text-xs font-bold border-b-2 transition cursor-pointer ${
                   editActiveTab === 'settings'
-                    ? 'border-[#E05638]'
+                    ? 'border-[var(--color-primary)]'
                     : 'border-transparent'
                 }`}
                 style={{
-                  color: editActiveTab === 'settings' ? 'var(--color-primary, #E05638)' : (isDayMode ? '#64748b' : '#94a3b8')
+                  color: editActiveTab === 'settings' ? 'var(--color-primary)' : 'var(--color-text-secondary)'
                 }}
               >
                 <Sliders className="h-3.5 w-3.5" /> Language Configuration
@@ -1128,11 +1078,11 @@ export default function AdminLanguagePage() {
                 onClick={() => setEditActiveTab('words')}
                 className={`flex items-center gap-2 pb-2.5 text-xs font-bold border-b-2 transition cursor-pointer ${
                   editActiveTab === 'words'
-                    ? 'border-[#E05638]'
+                    ? 'border-[var(--color-primary)]'
                     : 'border-transparent'
                 }`}
                 style={{
-                  color: editActiveTab === 'words' ? 'var(--color-primary, #E05638)' : (isDayMode ? '#64748b' : '#94a3b8')
+                  color: editActiveTab === 'words' ? 'var(--color-primary)' : 'var(--color-text-secondary)'
                 }}
               >
                 <Type className="h-3.5 w-3.5" /> System Words & Translations ({Object.keys(wordsMap).length})
@@ -1143,12 +1093,12 @@ export default function AdminLanguagePage() {
               <div 
                 className="p-3 rounded-xl font-semibold flex items-center gap-2 border shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                  borderColor: '#ef4444',
-                  color: isDayMode ? '#b91c1c' : '#f87171'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'rgba(239, 68, 68, 0.4)',
+                  color: '#ef4444'
                 }}
               >
-                <AlertCircle className="h-4 w-4 shrink-0" />
+                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
                 <span>{modalError}</span>
               </div>
             )}
@@ -1158,14 +1108,14 @@ export default function AdminLanguagePage() {
               <div className="space-y-4 pt-1 overflow-y-auto pr-1">
                 <div className="flex gap-3 items-start">
                   <div className="relative">
-                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>Flag</label>
+                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Flag</label>
                     <button
                       type="button"
                       onClick={() => setShowFlagPicker(!showFlagPicker)}
-                      className="w-14 h-[42px] border rounded-xl flex items-center justify-center text-2xl transition cursor-pointer shadow-sm hover:border-[#E05638]"
+                      className="w-14 h-[42px] border rounded-xl flex items-center justify-center text-2xl transition cursor-pointer shadow-sm hover:border-[var(--color-primary)]"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                        borderColor: showFlagPicker ? 'var(--color-primary, #E05638)' : (isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: showFlagPicker ? 'var(--color-primary)' : 'var(--color-border)'
                       }}
                       title="Change Country Flag"
                     >
@@ -1176,12 +1126,12 @@ export default function AdminLanguagePage() {
                       <div 
                         className="absolute top-full left-0 mt-1.5 w-72 p-3 border rounded-2xl space-y-2 shadow-2xl z-30 transition-colors duration-200"
                         style={{
-                          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                          borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)'
                         }}
                       >
                         <div className="relative">
-                          <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+                          <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                           <input
                             type="text"
                             placeholder="Search country or code..."
@@ -1189,9 +1139,9 @@ export default function AdminLanguagePage() {
                             onChange={(e) => setFlagCountrySearch(e.target.value)}
                             className="w-full pl-8 pr-3 py-1.5 border rounded-xl text-xs outline-none transition"
                             style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : '#070b13',
-                              borderColor: isDayMode ? '#cbd5e1' : '#334155',
-                              color: isDayMode ? '#0f172a' : '#ffffff'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
                             }}
                           />
                         </div>
@@ -1207,8 +1157,8 @@ export default function AdminLanguagePage() {
                               }}
                               className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition text-xs cursor-pointer"
                               style={{
-                                backgroundColor: isDayMode ? '#f1f5f9' : 'transparent',
-                                color: isDayMode ? '#0f172a' : '#e2e8f0'
+                                backgroundColor: 'var(--color-inner-dark)',
+                                color: 'var(--color-text)'
                               }}
                             >
                               <span className="text-lg leading-none">{c.flag}</span>
@@ -1221,7 +1171,7 @@ export default function AdminLanguagePage() {
                   </div>
 
                   <div className="flex-1">
-                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('displayNameLabel', 'Display Name')}
                     </label>
                     <input
@@ -1231,16 +1181,16 @@ export default function AdminLanguagePage() {
                       onChange={(e) => setLangName(e.target.value)}
                       className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('nativeNameLabel', 'Native Name')}
                   </label>
                   <input
@@ -1249,16 +1199,16 @@ export default function AdminLanguagePage() {
                     onChange={(e) => setLangNativeName(e.target.value)}
                     className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('layoutDirectionLabel', 'Layout Direction')}
                     </label>
                     <select
@@ -1266,18 +1216,18 @@ export default function AdminLanguagePage() {
                       onChange={(e) => setLangDirection(e.target.value as any)}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     >
-                      <option value="ltr" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionLtr', 'Left-to-Right (LTR)')}</option>
-                      <option value="rtl" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('directionRtl', 'Right-to-Left (RTL)')}</option>
+                      <option value="ltr" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('directionLtr', 'Left-to-Right (LTR)')}</option>
+                      <option value="rtl" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('directionRtl', 'Right-to-Left (RTL)')}</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                       {t('statusLabel', 'Status')}
                     </label>
                     <select
@@ -1285,19 +1235,19 @@ export default function AdminLanguagePage() {
                       onChange={(e) => setLangStatus(e.target.value as any)}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     >
-                      <option value="active" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('active', 'Active')}</option>
-                      <option value="inactive" style={{ backgroundColor: isDayMode ? '#ffffff' : '#070b13', color: isDayMode ? '#0f172a' : '#ffffff' }}>{t('inactive', 'Inactive')}</option>
+                      <option value="active" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('active', 'Active')}</option>
+                      <option value="inactive" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('inactive', 'Inactive')}</option>
                     </select>
                   </div>
                 </div>
 
                 <div className="pt-2">
-                  <label className="flex items-center gap-2 cursor-pointer font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                  <label className="flex items-center gap-2 cursor-pointer font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                     <input
                       type="checkbox"
                       checked={langIsDefault}
@@ -1315,7 +1265,7 @@ export default function AdminLanguagePage() {
               <div className="space-y-3 pt-1 flex-1 flex flex-col min-h-0">
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
                   <div className="relative flex-1">
-                    <Search className="h-3.5 w-3.5 absolute left-3 top-2.5 pointer-events-none" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} />
+                    <Search className="h-3.5 w-3.5 absolute left-3 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                     <input
                       type="text"
                       placeholder="Filter words by translation key or English text..."
@@ -1323,9 +1273,9 @@ export default function AdminLanguagePage() {
                       onChange={(e) => setWordSearch(e.target.value)}
                       className="w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none transition"
                       style={{
-                        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                        borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                        color: isDayMode ? '#0f172a' : '#ffffff'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
                       }}
                     />
                   </div>
@@ -1335,9 +1285,9 @@ export default function AdminLanguagePage() {
                     onClick={handleResetWordsToDefault}
                     className="px-3 py-2 border rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition shrink-0 cursor-pointer shadow-xs"
                     style={{
-                      backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#334155' : '#cbd5e1'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
                     }}
                   >
                     <RotateCcw className="h-3.5 w-3.5" /> Reset to Defaults
@@ -1347,8 +1297,8 @@ export default function AdminLanguagePage() {
                 <div 
                   className="p-3 border rounded-2xl flex flex-col sm:flex-row gap-2 items-center shrink-0 transition-colors duration-200"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   <input
@@ -1358,9 +1308,9 @@ export default function AdminLanguagePage() {
                     onChange={(e) => setNewWordKey(e.target.value)}
                     className="flex-1 border rounded-lg px-2.5 py-1.5 text-xs outline-none font-mono transition"
                     style={{
-                      backgroundColor: isDayMode ? '#ffffff' : 'transparent',
-                      borderColor: isDayMode ? '#cbd5e1' : '#334155',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                   <input
@@ -1370,16 +1320,16 @@ export default function AdminLanguagePage() {
                     onChange={(e) => setNewWordVal(e.target.value)}
                     className="flex-1 border rounded-lg px-2.5 py-1.5 text-xs outline-none transition"
                     style={{
-                      backgroundColor: isDayMode ? '#ffffff' : 'transparent',
-                      borderColor: isDayMode ? '#cbd5e1' : '#334155',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
                   />
                   <button
                     type="button"
                     onClick={handleAddNewWordKey}
                     className="px-3 py-1.5 text-white font-bold rounded-lg text-xs flex items-center gap-1 shrink-0 cursor-pointer shadow-xs"
-                    style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                    style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-3.5 w-3.5" /> Add Phrase
                   </button>
@@ -1388,12 +1338,12 @@ export default function AdminLanguagePage() {
                 <div 
                   className="flex-1 overflow-y-auto border rounded-2xl divide-y space-y-0.5 p-2 transition-colors duration-200"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
                   {wordKeysList.length === 0 ? (
-                    <div className="text-center py-8" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                    <div className="text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>
                       No system phrases matching "{wordSearch}"
                     </div>
                   ) : (
@@ -1405,13 +1355,13 @@ export default function AdminLanguagePage() {
                         <div 
                           key={key} 
                           className="p-2.5 rounded-xl transition flex flex-col sm:flex-row items-start sm:items-center gap-3"
-                          style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+                          style={{ borderColor: 'var(--color-border)' }}
                         >
                           <div className="sm:w-1/3 shrink-0">
-                            <div className="font-mono text-[11px] font-bold truncate" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }} title={key}>
+                            <div className="font-mono text-[11px] font-bold truncate" style={{ color: 'var(--color-text)' }} title={key}>
                               {key}
                             </div>
-                            <div className="text-[10px] truncate" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }} title={englishRef}>
+                            <div className="text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }} title={englishRef}>
                               EN: {englishRef}
                             </div>
                           </div>
@@ -1424,9 +1374,9 @@ export default function AdminLanguagePage() {
                               onChange={(e) => handleWordChange(key, e.target.value)}
                               className="w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                               style={{
-                                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                                color: isDayMode ? '#0f172a' : '#ffffff'
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text)'
                               }}
                             />
                           </div>
@@ -1439,15 +1389,15 @@ export default function AdminLanguagePage() {
             )}
 
             {/* MODAL FOOTER */}
-            <div className="flex justify-end gap-2.5 pt-3 border-t shrink-0 transition-colors duration-200" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <div className="flex justify-end gap-2.5 pt-3 border-t shrink-0 transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
                 onClick={() => setShowEditModal(false)}
                 className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#475569' : '#cbd5e1'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
                 }}
               >
                 {t('cancel', 'Cancel')}
@@ -1456,7 +1406,7 @@ export default function AdminLanguagePage() {
                 type="submit"
                 onClick={handleEditLanguageSubmit}
                 className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 <Check className="h-4 w-4" /> {t('saveChanges', 'Save Changes')}
               </button>

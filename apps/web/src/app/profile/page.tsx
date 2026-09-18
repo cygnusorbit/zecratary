@@ -186,21 +186,11 @@ export default function ProfilePage() {
         }
       } catch (_) {}
 
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
       const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
-
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      if (stored) {
-        const c = JSON.parse(stored);
-        const root = document.documentElement;
-        if (c.primary || c.primaryColor) root.style.setProperty('--color-primary', c.primary || c.primaryColor);
-        if (c.primaryHover) root.style.setProperty('--color-primary-hover', c.primaryHover);
-        if (c.accentEmerald || c.accentColor) {
-          root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor);
-          root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor);
-        }
-      }
 
       const curr = localStorage.getItem('zecratary_currency') || 'USD';
       setCurrencyCode(curr);
@@ -230,12 +220,9 @@ export default function ProfilePage() {
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_payment_updated', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
-      }
     };
   }, [applySavedTheme]);
 
-  // Synchronized plan matcher aligning with /admin/users logic
   const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem): boolean => {
     if (!user) return false;
 
@@ -306,7 +293,6 @@ export default function ProfilePage() {
     } catch (_) {}
   }, []);
 
-  // Synchronize available subscription plans dynamically from /api/admin/plans with /admin/users interval naming
   const syncPlansFromAdmin = useCallback(async () => {
     if (isFetchingPlansRef.current) return;
     isFetchingPlansRef.current = true;
@@ -498,126 +484,121 @@ export default function ProfilePage() {
     }
   }, [currencySymbol, syncActivePlanTokens, t]);
 
-  // Authoritative PostgreSQL hydration synchronized with /admin/users
   const reloadActiveUser = useCallback(async () => {
     if (isFetchingProfileRef.current) return;
     isFetchingProfileRef.current = true;
     try {
-    initAuthStorage();
-    let active = getCurrentUser() as ExtendedUser | null;
+      initAuthStorage();
+      let active = getCurrentUser() as ExtendedUser | null;
 
-    if (!active && typeof document !== 'undefined') {
-      const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
-      if (match && match[1]) {
-        try {
-          const cookieData = JSON.parse(decodeURIComponent(match[1]));
-          if (cookieData && (cookieData.email || cookieData.id)) {
-            active = {
-              id: cookieData.id || 'usr_standard_default',
-              name: cookieData.name || 'Standard User',
-              email: cookieData.email || 'user@foodieprep.com',
-              role: cookieData.role || 'user',
-              subscriptionPlan: 'taster'
+      if (!active && typeof document !== 'undefined') {
+        const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
+        if (match && match[1]) {
+          try {
+            const cookieData = JSON.parse(decodeURIComponent(match[1]));
+            if (cookieData && (cookieData.email || cookieData.id)) {
+              active = {
+                id: cookieData.id || 'usr_standard_default',
+                name: cookieData.name || 'Standard User',
+                email: cookieData.email || 'user@foodieprep.com',
+                role: cookieData.role || 'user',
+                subscriptionPlan: 'taster'
+              };
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('zecratary_current_user', JSON.stringify(active));
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!active) {
+        router.replace('/login');
+        return;
+      }
+
+      let matchedUser: ExtendedUser = { ...active };
+
+      try {
+        const uRes = await fetch('/api/admin/users', { cache: 'no-store' });
+        if (uRes.ok) {
+          const uData = await uRes.json();
+          const usersList: any[] = Array.isArray(uData.users) ? uData.users : Array.isArray(uData) ? uData : [];
+          const fresh = usersList.find((u: any) => 
+            (active?.id && u.id === active.id) || 
+            (active?.email && u.email?.toLowerCase().trim() === active.email.toLowerCase().trim())
+          );
+
+          if (fresh) {
+            const authoritativePlan = sanitizeSinglePlan(fresh.subscriptionPlan || fresh.subscription_plan || 'taster');
+            matchedUser = {
+              ...active,
+              ...fresh,
+              subscriptionPlan: authoritativePlan,
+              planSlug: authoritativePlan
             };
-            if (typeof window !== 'undefined') {
-              localStorage.setItem('zecratary_current_user', JSON.stringify(active));
+          }
+        }
+      } catch (_) {}
+
+      if (!matchedUser.linkedProviders) {
+        const initialLinked: SocialProvider[] = [];
+        if (matchedUser.id.startsWith('usr_google_')) initialLinked.push('google');
+        if (matchedUser.id.startsWith('usr_facebook_')) initialLinked.push('facebook');
+        if (matchedUser.id.startsWith('usr_apple_')) initialLinked.push('apple');
+        matchedUser.linkedProviders = initialLinked;
+      }
+
+      try {
+        const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
+        if (txRes.ok) {
+          const txData = await txRes.json();
+          const txList: PaymentTransaction[] = Array.isArray(txData.transactions) ? txData.transactions : [];
+          const now = new Date();
+          const userEmail = matchedUser.email.toLowerCase().trim();
+
+          const userTxs = txList.filter((t) => (t.customerEmail || '').toLowerCase().trim() === userEmail);
+          userTxs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+          const latestActiveTx = userTxs.find((t) => 
+            (t.status === 'succeeded' || (t.status as any) === 'paid') &&
+            (!t.expiryDate || new Date(t.expiryDate).getTime() > now.getTime())
+          );
+
+          if (latestActiveTx && latestActiveTx.expiryDate) {
+            (matchedUser as any).expiryDate = latestActiveTx.expiryDate;
+            (matchedUser as any).planExpiryDate = latestActiveTx.expiryDate;
+          } else if (matchedUser.subscriptionPlan && matchedUser.subscriptionPlan !== 'taster' && !matchedUser.subscriptionPlan.includes('free')) {
+            const fallbackExpiry = (matchedUser as any).planExpiryDate || (matchedUser as any).expiryDate;
+            if (!fallbackExpiry) {
+              const calculatedExpiry = calculateRenewalExpiry(new Date(), matchedUser.subscriptionPlan.includes('annual') ? 'YEAR' : 'MONTH');
+              (matchedUser as any).expiryDate = calculatedExpiry;
+              (matchedUser as any).planExpiryDate = calculatedExpiry;
             }
           }
-        } catch (_) {}
-      }
-    }
-
-    if (!active) {
-      router.replace('/login');
-      return;
-    }
-
-    let matchedUser: ExtendedUser = { ...active };
-
-    // 1. Fetch authoritative user record from PostgreSQL API (/api/admin/users)
-    try {
-      const uRes = await fetch('/api/admin/users', { cache: 'no-store' });
-      if (uRes.ok) {
-        const uData = await uRes.json();
-        const usersList: any[] = Array.isArray(uData.users) ? uData.users : Array.isArray(uData) ? uData : [];
-        const fresh = usersList.find((u: any) => 
-          (active?.id && u.id === active.id) || 
-          (active?.email && u.email?.toLowerCase().trim() === active.email.toLowerCase().trim())
-        );
-
-        if (fresh) {
-          const authoritativePlan = sanitizeSinglePlan(fresh.subscriptionPlan || fresh.subscription_plan || 'taster');
-          matchedUser = {
-            ...active,
-            ...fresh,
-            subscriptionPlan: authoritativePlan,
-            planSlug: authoritativePlan
-          };
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
 
-    if (!matchedUser.linkedProviders) {
-      const initialLinked: SocialProvider[] = [];
-      if (matchedUser.id.startsWith('usr_google_')) initialLinked.push('google');
-      if (matchedUser.id.startsWith('usr_facebook_')) initialLinked.push('facebook');
-      if (matchedUser.id.startsWith('usr_apple_')) initialLinked.push('apple');
-      matchedUser.linkedProviders = initialLinked;
-    }
+      setUserState(prev => JSON.stringify(prev) === JSON.stringify(matchedUser) ? prev : matchedUser);
+      setName(matchedUser.name || '');
+      setEmail(matchedUser.email || '');
 
-    // 2. Fetch payment transactions for renewal/expiry date alignment without reverting user plan
-    try {
-      const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
-      if (txRes.ok) {
-        const txData = await txRes.json();
-        const txList: PaymentTransaction[] = Array.isArray(txData.transactions) ? txData.transactions : [];
-        const now = new Date();
-        const userEmail = matchedUser.email.toLowerCase().trim();
+      try {
+        localStorage.setItem('zecratary_current_user', JSON.stringify(matchedUser));
+        localStorage.setItem('zecratary_user', JSON.stringify(matchedUser));
+      } catch (_) {}
 
-        const userTxs = txList.filter((t) => (t.customerEmail || '').toLowerCase().trim() === userEmail);
-        userTxs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-
-        const latestActiveTx = userTxs.find((t) => 
-          (t.status === 'succeeded' || (t.status as any) === 'paid') &&
-          (!t.expiryDate || new Date(t.expiryDate).getTime() > now.getTime())
-        );
-
-        if (latestActiveTx && latestActiveTx.expiryDate) {
-          (matchedUser as any).expiryDate = latestActiveTx.expiryDate;
-          (matchedUser as any).planExpiryDate = latestActiveTx.expiryDate;
-        } else if (matchedUser.subscriptionPlan && matchedUser.subscriptionPlan !== 'taster' && !matchedUser.subscriptionPlan.includes('free')) {
-          const fallbackExpiry = (matchedUser as any).planExpiryDate || (matchedUser as any).expiryDate;
-          if (!fallbackExpiry) {
-            const calculatedExpiry = calculateRenewalExpiry(new Date(), matchedUser.subscriptionPlan.includes('annual') ? 'YEAR' : 'MONTH');
-            (matchedUser as any).expiryDate = calculatedExpiry;
-            (matchedUser as any).planExpiryDate = calculatedExpiry;
-          }
-        }
-      }
-    } catch (_) {}
-
-    setUserState(prev => JSON.stringify(prev) === JSON.stringify(matchedUser) ? prev : matchedUser);
-    setName(matchedUser.name || '');
-    setEmail(matchedUser.email || '');
-
-    try {
-      localStorage.setItem('zecratary_current_user', JSON.stringify(matchedUser));
-      localStorage.setItem('zecratary_user', JSON.stringify(matchedUser));
-    } catch (_) {}
-
-    const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).planSlug || 'taster');
-    syncActivePlanTokens(userPlan, plansRef.current);
+      const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).planSlug || 'taster');
+      syncActivePlanTokens(userPlan, plansRef.current);
     } finally {
       isFetchingProfileRef.current = false;
     }
   }, [router, syncActivePlanTokens]);
 
-    // Decoupled document title
   useEffect(() => {
     document.title = `${t('accountProfileTitle') || 'Account Profile'} - Zecratary`;
   }, [t]);
 
-  // Mount-only data initialization with debounced event listener
   useEffect(() => {
     syncPlansFromAdmin();
     reloadActiveUser();
@@ -639,7 +620,7 @@ export default function ProfilePage() {
       window.removeEventListener('zecratary_plans_updated', handleSyncEvent);
       window.removeEventListener('zecratary_payment_updated', handleSyncEvent);
     };
-  }, []);
+  }, [syncPlansFromAdmin, reloadActiveUser]);
 
   const handleToggleSocialLink = async (provider: SocialProvider) => {
     if (!user) return;
@@ -696,21 +677,9 @@ export default function ProfilePage() {
       const isAnnual = matched.interval === 'YEAR' || matched.slug.includes('annual');
       return {
         label: `${matched.name}${matched.isFree ? ' (Free)' : isAnnual ? ' (Annual)' : ' (Monthly)'}`,
-        bg: matched.isFree 
-          ? (isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)') 
-          : isAnnual 
-          ? (isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)') 
-          : (isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.15)'),
-        border: matched.isFree 
-          ? (isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)') 
-          : isAnnual 
-          ? (isDayMode ? '#bfdbfe' : '#3b82f6') 
-          : (isDayMode ? '#fdba74' : 'var(--color-primary, #E05638)'),
-        color: matched.isFree 
-          ? (isDayMode ? '#047857' : 'var(--color-emerald, #10b981)') 
-          : isAnnual 
-          ? (isDayMode ? '#1d4ed8' : '#60a5fa') 
-          : (isDayMode ? '#c2410c' : 'var(--color-primary, #E05638)'),
+        bg: 'var(--color-inner-dark)',
+        border: matched.isFree ? 'var(--color-emerald)' : isAnnual ? '#3b82f6' : 'var(--color-primary)',
+        color: matched.isFree ? 'var(--color-emerald)' : isAnnual ? '#60a5fa' : 'var(--color-primary)',
         icon: matched.isFree ? Sparkles : Zap,
         matchedPlan: matched
       };
@@ -719,9 +688,9 @@ export default function ProfilePage() {
     if (!planKey || planKey === 'free' || planKey.includes('free') || planKey === 'taster') {
       return {
         label: t('freeTierNoExpiry') || 'Taster (Free)',
-        bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-        border: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
-        color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)',
+        bg: 'var(--color-inner-dark)',
+        border: 'var(--color-emerald)',
+        color: 'var(--color-emerald)',
         icon: Sparkles,
         matchedPlan: null
       };
@@ -734,13 +703,13 @@ export default function ProfilePage() {
 
     return {
       label: formatted,
-      bg: isDayMode ? '#fff7ed' : 'rgba(224, 86, 56, 0.15)',
-      border: isDayMode ? '#fdba74' : 'var(--color-primary, #E05638)',
-      color: isDayMode ? '#c2410c' : 'var(--color-primary, #E05638)',
+      bg: 'var(--color-inner-dark)',
+      border: 'var(--color-primary)',
+      color: 'var(--color-primary)',
       icon: Zap,
       matchedPlan: null
     };
-  }, [user, plans, checkIsCurrentPlan, isDayMode, t]);
+  }, [user, plans, checkIsCurrentPlan, t]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -820,7 +789,6 @@ export default function ProfilePage() {
     }
   };
 
-  // CHANGE PLAN LOGIC: Fully synchronized with /admin/users & PostgreSQL
   const handleSelectPlan = async (plan: SubscriptionPlanItem) => {
     if (!user) return;
     setPaymentLoading(plan.id);
@@ -840,7 +808,6 @@ export default function ProfilePage() {
 
       const newExpiryDate = isFree ? '' : calculateRenewalExpiry(new Date(), plan.interval);
 
-      // 1. Cancel prior active transactions in PostgreSQL /api/admin/payment
       try {
         const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
         if (txRes.ok) {
@@ -867,7 +834,6 @@ export default function ProfilePage() {
         }
       } catch (_) {}
 
-      // 2. Record new transaction in PostgreSQL /api/admin/payment if paid plan
       if (!isFree) {
         const newTx: PaymentTransaction = {
           id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
@@ -891,7 +857,6 @@ export default function ProfilePage() {
         }).catch(() => {});
       }
 
-      // 3. Update user account in PostgreSQL /api/admin/users
       const finalPlanSlug = isFree ? 'taster' : targetSlug;
       const updatedUserPayload: ExtendedUser = {
         ...user,
@@ -914,7 +879,6 @@ export default function ProfilePage() {
         body: JSON.stringify(updatedUserPayload)
       }).catch(() => {});
 
-      // 4. Update local state & storage
       try {
         localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUserPayload));
         localStorage.setItem('zecratary_user', JSON.stringify(updatedUserPayload));
@@ -945,7 +909,7 @@ export default function ProfilePage() {
       <div className="min-h-[70vh] flex items-center justify-center">
         <div 
           className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-          style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }}
+          style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}
         />
       </div>
     );
@@ -974,8 +938,8 @@ export default function ProfilePage() {
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200 min-h-screen"
       style={{ 
-        color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)',
-        backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)'
+        color: 'var(--color-text)',
+        backgroundColor: 'var(--color-bg)'
       }}
     >
       <style dangerouslySetInnerHTML={{ __html: `
@@ -983,10 +947,10 @@ export default function ProfilePage() {
         .profile-input:-webkit-autofill:hover,
         .profile-input:-webkit-autofill:focus,
         .profile-input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'} inset !important;
-          box-shadow: 0 0 0 1000px ${isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)'} inset !important;
-          -webkit-text-fill-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
-          caret-color: ${isDayMode ? '#0f172a' : '#ffffff'} !important;
+          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          -webkit-text-fill-color: var(--color-text) !important;
+          caret-color: var(--color-text) !important;
           transition: background-color 50000s ease-in-out 0s !important;
         }
       `}} />
@@ -996,7 +960,7 @@ export default function ProfilePage() {
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
              {t('accountProfileTitle') || 'Account Profile'}
           </h1>
-          <p className="text-xs" style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {t('accountProfileSubtitle') || 'Manage your credentials, active AI token quotas, and subscription plan'}
           </p>
         </div>
@@ -1007,9 +971,9 @@ export default function ProfilePage() {
               href="/admin/social-login-setting"
               className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
             >
               <Key className="h-3.5 w-3.5 text-orange-400" /> Social Settings
@@ -1018,9 +982,9 @@ export default function ProfilePage() {
               href="/admin"
               className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
             >
               <Shield className="h-3.5 w-3.5 text-emerald-400" /> {t('adminAccess') || 'Admin Access'}
@@ -1029,9 +993,9 @@ export default function ProfilePage() {
               href="/admin/plans"
               className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
               style={{
-                backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-                borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                color: isDayMode ? '#0f172a' : '#cbd5e1'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
             >
               <Zap className="h-3.5 w-3.5 text-orange-400" /> {t('subscriptionPlans') || 'Subscription Plans'}
@@ -1051,12 +1015,12 @@ export default function ProfilePage() {
         <div 
           className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
           style={{
-            backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-            borderColor: 'var(--color-emerald, #10b981)',
-            color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-emerald)',
+            color: 'var(--color-emerald)'
           }}
         >
-          <CheckCircle className="h-4 w-4 shrink-0" />
+          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
           <span>{successMsg}</span>
         </div>
       )}
@@ -1068,50 +1032,46 @@ export default function ProfilePage() {
         <div 
           className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
           style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
           }}
         >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6" style={{ borderColor: 'var(--color-border)' }}>
             <div className="flex items-center gap-4">
               <div 
                 className="w-14 h-14 rounded-2xl border flex items-center justify-center text-xl font-black shadow-inner"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: 'var(--color-primary, #E05638)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-primary)'
                 }}
               >
                 {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
               </div>
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-black tracking-tight" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{user.name}</h1>
-                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${
-                    user.role === 'admin'
-                      ? (isDayMode ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-emerald-950/60 border-emerald-500/60 text-emerald-400')
-                      : (isDayMode ? 'bg-slate-100 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-300')
-                  }`}>
+                  <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>{user.name}</h1>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                     {user.role}
                   </span>
                 </div>
-                <p className="text-xs font-mono" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{user.email}</p>
+                <p className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>{user.email}</p>
                 {user.id && (
-                  <p className="text-[11px] font-mono tracking-tight" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                  <p className="text-[11px] font-mono tracking-tight" style={{ color: 'var(--color-text-secondary)' }}>
                     ID: {user.id}
                   </p>
                 )}
               </div>
             </div>
 
-            <div className="text-left sm:text-right text-[11px] space-y-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+            <div className="text-left sm:text-right text-[11px] space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
               <div className="flex sm:justify-end items-center gap-1.5">
-                <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                 <span>{t('joinedPrefix') || 'Joined: '} {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : (t('activeStatus') || 'Active')}</span>
               </div>
               
               <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
-                <span className="font-semibold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('activeMembershipLabel') || 'Membership:'}</span>
+                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{t('activeMembershipLabel') || 'Membership:'}</span>
                 <span 
                   className="font-bold px-2.5 py-0.5 rounded-full text-[10px] uppercase border shadow-sm inline-flex items-center gap-1"
                   style={{
@@ -1131,7 +1091,7 @@ export default function ProfilePage() {
                   <span>{t('renewalExpiryPrefix') || 'Expiry: '} {new Date(activeExpiryDate).toLocaleDateString()}</span>
                 </div>
               ) : (
-                <div className="flex sm:justify-end items-center gap-1 text-[11px] italic pt-0.5" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                <div className="flex sm:justify-end items-center gap-1 text-[11px] italic pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                   <span>{t('freeTierNoExpiry') || 'Free Tier'}</span>
                 </div>
               )}
@@ -1141,9 +1101,9 @@ export default function ProfilePage() {
           <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('fullNameLabel') || 'Full Name *'}</label>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{t('fullNameLabel') || 'Full Name *'}</label>
                 <div className="relative">
-                  <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
                     type="text"
                     required
@@ -1152,20 +1112,20 @@ export default function ProfilePage() {
                     placeholder="e.g. Jordan Smith"
                     className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>{t('emailAddressLabel') || 'Email Address *'}</label>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{t('emailAddressLabel') || 'Email Address *'}</label>
                 <div className="relative">
-                  <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
                     type="email"
                     required
@@ -1174,12 +1134,12 @@ export default function ProfilePage() {
                     placeholder="name@example.com"
                     className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
@@ -1187,11 +1147,11 @@ export default function ProfilePage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('newPasswordLabel') || 'New Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('leaveBlankCurrentPass') || '(leave blank)'}</span>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('newPasswordLabel') || 'New Password'} <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>{t('leaveBlankCurrentPass') || '(leave blank)'}</span>
                 </label>
                 <div className="relative">
-                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
                     type="password"
                     autoComplete="new-password"
@@ -1200,22 +1160,22 @@ export default function ProfilePage() {
                     placeholder="••••••••"
                     className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
-                  {t('confirmPasswordLabel') || 'Confirm Password'} <span className="font-normal" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('repeatNewPass') || '(repeat)'}</span>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('confirmPasswordLabel') || 'Confirm Password'} <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>{t('repeatNewPass') || '(repeat)'}</span>
                 </label>
                 <div className="relative">
-                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} />
+                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
                     type="password"
                     autoComplete="new-password"
@@ -1224,18 +1184,18 @@ export default function ProfilePage() {
                     placeholder="••••••••"
                     className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
                     style={{
-                      backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                      borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                      color: isDayMode ? '#0f172a' : '#ffffff'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
                 onClick={() => {
@@ -1244,9 +1204,9 @@ export default function ProfilePage() {
                 }}
                 className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.2)',
-                  borderColor: isDayMode ? '#fca5a5' : 'rgba(153, 27, 27, 0.5)',
-                  color: isDayMode ? '#b91c1c' : '#fca5a5'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'rgba(239, 68, 68, 0.4)',
+                  color: '#ef4444'
                 }}
               >
                 <LogOut className="h-4 w-4 text-red-500" /> {t('signOutBtn') || 'Sign Out'}
@@ -1263,9 +1223,9 @@ export default function ProfilePage() {
               <button
                 type="submit"
                 className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)')}
+                style={{ backgroundColor: 'var(--color-primary)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
               >
                 <Check className="h-4 w-4" /> {t('saveProfileBtn') || 'Save Profile'}
               </button>
@@ -1277,20 +1237,20 @@ export default function ProfilePage() {
         <div 
           className="lg:col-span-5 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
           style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
           }}
         >
           <div className="space-y-4">
-            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
                 <Cpu className="h-5 w-5 text-orange-400" /> AI Token Usage & Quota
               </h2>
               <span 
                 className="text-[10px] font-mono px-2.5 py-1 rounded-lg border font-bold shadow-xs"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : '#0B101D',
-                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
                   color: '#f97316'
                 }}
               >
@@ -1300,10 +1260,10 @@ export default function ProfilePage() {
 
             <div className="space-y-3">
               <div className="flex justify-between items-baseline">
-                <span className="text-xs font-medium" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Token Allocation Limit</span>
-                <span className="text-sm font-black font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Token Allocation Limit</span>
+                <span className="text-sm font-black font-mono" style={{ color: 'var(--color-text)' }}>
                   {tokenUsage.totalTokens.toLocaleString()}{' '}
-                  <span className="text-[11px]" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>
+                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                     / {isUnlimited ? '∞ Unlimited' : tokenUsage.monthlyLimit.toLocaleString()}
                   </span>
                 </span>
@@ -1312,21 +1272,21 @@ export default function ProfilePage() {
               <div 
                 className="border rounded-full h-3.5 overflow-hidden p-0.5 shadow-inner"
                 style={{
-                  backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
-                  borderColor: isDayMode ? '#cbd5e1' : '#1e293b'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
                 <div 
                   className="h-full rounded-full transition-all duration-500" 
                   style={{ 
                     width: isUnlimited ? '100%' : `${tokenPercentage}%`,
-                    backgroundColor: isUnlimited ? '#10b981' : tokenPercentage > 85 ? '#ef4444' : tokenPercentage > 60 ? '#f59e0b' : 'var(--color-primary, #E05638)'
+                    backgroundColor: isUnlimited ? 'var(--color-emerald)' : tokenPercentage > 85 ? '#ef4444' : tokenPercentage > 60 ? '#f59e0b' : 'var(--color-primary)'
                   }}
                 />
               </div>
 
               <div className="flex justify-between text-[11px]">
-                <span style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>{isUnlimited ? 'Unlimited Tokens Tier' : `${tokenPercentage}% of quota used`}</span>
+                <span style={{ color: 'var(--color-text-secondary)' }}>{isUnlimited ? 'Unlimited Tokens Tier' : `${tokenPercentage}% of quota used`}</span>
                 <span className="text-emerald-500 dark:text-emerald-400 font-semibold">{tokenUsage.requestCount} AI Requests</span>
               </div>
             </div>
@@ -1335,25 +1295,25 @@ export default function ProfilePage() {
               <div 
                 className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
-                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Prompt Input</span>
-                <span className="text-base font-black font-mono" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>{tokenUsage.promptTokens.toLocaleString()}</span>
-                <span className="text-[10px] block" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>Tokens (User & Context)</span>
+                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: 'var(--color-text-secondary)' }}>Prompt Input</span>
+                <span className="text-base font-black font-mono" style={{ color: 'var(--color-text)' }}>{tokenUsage.promptTokens.toLocaleString()}</span>
+                <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>Tokens (User & Context)</span>
               </div>
 
               <div 
                 className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-                  borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
                 }}
               >
-                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>Completion Output</span>
+                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: 'var(--color-text-secondary)' }}>Completion Output</span>
                 <span className="text-base font-black text-emerald-500 dark:text-emerald-400 font-mono">{tokenUsage.completionTokens.toLocaleString()}</span>
-                <span className="text-[10px] block" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>Tokens (Generated Reply)</span>
+                <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>Tokens (Generated Reply)</span>
               </div>
             </div>
           </div>
@@ -1361,13 +1321,13 @@ export default function ProfilePage() {
           <div 
             className="p-4 rounded-2xl border text-[11px] space-y-2 shadow-inner"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#64748b' : '#94a3b8'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
             }}
           >
             <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 font-bold" style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}>
+              <span className="flex items-center gap-1.5 font-bold" style={{ color: 'var(--color-text)' }}>
                 <Repeat className="h-3.5 w-3.5 text-orange-400" /> Reimburse Schedule
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold uppercase bg-orange-500/10 text-orange-400 border border-orange-500/20">
@@ -1386,16 +1346,16 @@ export default function ProfilePage() {
       <div 
         className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
         }}
       >
-        <div className="border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
-          <h2 className="text-xl font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+        <div className="border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+          <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
             <Link2 className="h-5 w-5 text-[var(--color-primary)]" />
             Connected Social Accounts
           </h2>
-          <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             Link external identities (Google, Facebook, Apple) to enable seamless one-click sign in.
           </p>
         </div>
@@ -1405,8 +1365,8 @@ export default function ProfilePage() {
           <div 
             className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="flex items-center gap-3">
@@ -1417,8 +1377,8 @@ export default function ProfilePage() {
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
               </svg>
               <div>
-                <span className="block font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Google</span>
-                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('google') ? 'text-emerald-400' : 'text-slate-500'}`}>
+                <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>Google</span>
+                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('google') ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
                   {user.linkedProviders?.includes('google') ? 'Connected' : 'Not linked'}
                 </span>
               </div>
@@ -1433,7 +1393,7 @@ export default function ProfilePage() {
                   : 'text-white shadow-xs'
               }`}
               style={{
-                backgroundColor: user.linkedProviders?.includes('google') ? 'transparent' : 'var(--color-primary, #E05638)'
+                backgroundColor: user.linkedProviders?.includes('google') ? 'transparent' : 'var(--color-primary)'
               }}
             >
               {processingSocial === 'google' ? (
@@ -1454,8 +1414,8 @@ export default function ProfilePage() {
           <div 
             className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="flex items-center gap-3">
@@ -1463,8 +1423,8 @@ export default function ProfilePage() {
                 <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.312h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
               </svg>
               <div>
-                <span className="block font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Facebook</span>
-                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('facebook') ? 'text-emerald-400' : 'text-slate-500'}`}>
+                <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>Facebook</span>
+                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('facebook') ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
                   {user.linkedProviders?.includes('facebook') ? 'Connected' : 'Not linked'}
                 </span>
               </div>
@@ -1479,7 +1439,7 @@ export default function ProfilePage() {
                   : 'text-white shadow-xs'
               }`}
               style={{
-                backgroundColor: user.linkedProviders?.includes('facebook') ? 'transparent' : 'var(--color-primary, #E05638)'
+                backgroundColor: user.linkedProviders?.includes('facebook') ? 'transparent' : 'var(--color-primary)'
               }}
             >
               {processingSocial === 'facebook' ? (
@@ -1500,8 +1460,8 @@ export default function ProfilePage() {
           <div 
             className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <div className="flex items-center gap-3">
@@ -1509,8 +1469,8 @@ export default function ProfilePage() {
                 <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.56.64-1.06 1.7-0.93 2.73 1.02.08 2.05-.48 2.66-1.23z" />
               </svg>
               <div>
-                <span className="block font-bold text-xs" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>Apple</span>
-                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('apple') ? 'text-emerald-400' : 'text-slate-500'}`}>
+                <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>Apple</span>
+                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('apple') ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
                   {user.linkedProviders?.includes('apple') ? 'Connected' : 'Not linked'}
                 </span>
               </div>
@@ -1525,7 +1485,7 @@ export default function ProfilePage() {
                   : 'text-white shadow-xs'
               }`}
               style={{
-                backgroundColor: user.linkedProviders?.includes('apple') ? 'transparent' : 'var(--color-primary, #E05638)'
+                backgroundColor: user.linkedProviders?.includes('apple') ? 'transparent' : 'var(--color-primary)'
               }}
             >
               {processingSocial === 'apple' ? (
@@ -1548,17 +1508,17 @@ export default function ProfilePage() {
       <div 
         className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #111726)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
         }}
       >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
           <div>
-            <h2 className="text-xl font-black flex items-center gap-2" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
-              <CreditCard className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} />
+            <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <CreditCard className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
               {t('upgradeChangePlanTitle') || 'Upgrade or Change Membership Plan'}
             </h2>
-            <p className="text-xs mt-0.5" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
               {t('onePlanPerEmailSub') || 'Strictly 1 plan per email. Changing plans automatically cancels your prior plan and recalculates your expiry date.'}
             </p>
           </div>
@@ -1566,8 +1526,8 @@ export default function ProfilePage() {
           <div 
             className="flex items-center p-1 rounded-xl border text-xs font-bold self-start sm:self-auto shadow-xs"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-              borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
             }}
           >
             <button
@@ -1579,9 +1539,9 @@ export default function ProfilePage() {
                   : ''
               }`}
               style={selectedInterval === 'ALL' ? {
-                backgroundColor: 'var(--color-primary, #E05638)'
+                backgroundColor: 'var(--color-primary)'
               } : {
-                color: isDayMode ? '#64748b' : '#94a3b8'
+                color: 'var(--color-text-secondary)'
               }}
             >
               All Plans ({plans.length})
@@ -1595,9 +1555,9 @@ export default function ProfilePage() {
                   : ''
               }`}
               style={selectedInterval === 'MONTH' ? {
-                backgroundColor: 'var(--color-primary, #E05638)'
+                backgroundColor: 'var(--color-primary)'
               } : {
-                color: isDayMode ? '#64748b' : '#94a3b8'
+                color: 'var(--color-text-secondary)'
               }}
             >
               {t('monthlyBtn') || 'Monthly'}
@@ -1611,9 +1571,9 @@ export default function ProfilePage() {
                   : ''
               }`}
               style={selectedInterval === 'YEAR' ? {
-                backgroundColor: 'var(--color-primary, #E05638)'
+                backgroundColor: 'var(--color-primary)'
               } : {
-                color: isDayMode ? '#64748b' : '#94a3b8'
+                color: 'var(--color-text-secondary)'
               }}
             >
               {t('annualSaveLabel') || 'Annual (Save up to 44%)'}
@@ -1625,42 +1585,42 @@ export default function ProfilePage() {
         <div 
           className="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm transition"
           style={{
-            backgroundColor: isDayMode ? '#f0fdf4' : 'rgba(16, 185, 129, 0.08)',
-            borderColor: 'var(--color-emerald, #10b981)'
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-emerald)'
           }}
         >
           <div className="flex items-center gap-3">
             <div 
               className="w-10 h-10 rounded-xl flex items-center justify-center shadow-xs"
               style={{
-                backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                color: 'var(--color-emerald, #10b981)'
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-emerald)'
               }}
             >
-              <CheckCircle2 className="h-5 w-5" />
+              <CheckCircle2 className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-emerald)' }}>
                   Your Current Selected Plan
                 </span>
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
                   Active
                 </span>
               </div>
-              <h4 className="text-base font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+              <h4 className="text-base font-black" style={{ color: 'var(--color-text)' }}>
                 {userPlanBadge.label}
               </h4>
             </div>
           </div>
 
-          <div className="text-xs sm:text-right" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+          <div className="text-xs sm:text-right" style={{ color: 'var(--color-text-secondary)' }}>
             <span className="block font-medium">
               {activeExpiryDate 
                 ? `Renewal / Expiry: ${new Date(activeExpiryDate).toLocaleDateString()}` 
                 : 'Free Tier (No Expiration)'}
             </span>
-            <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+            <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>
               {tokenUsage.monthlyLimit === -1 ? 'Unlimited AI Tokens' : `${tokenUsage.monthlyLimit.toLocaleString()} Monthly Tokens`}
             </span>
           </div>
@@ -1671,9 +1631,9 @@ export default function ProfilePage() {
           <div 
             className="p-8 text-center rounded-2xl border text-xs"
             style={{
-              backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
-              borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-              color: isDayMode ? '#64748b' : '#94a3b8'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
             }}
           >
             No plans configured in admin yet. Go to <Link href="/admin/plans" className="font-bold underline text-[var(--color-primary)]">Admin Plans</Link> to create plans.
@@ -1689,14 +1649,14 @@ export default function ProfilePage() {
                   key={plan.id || plan.slug}
                   className={`rounded-3xl p-6 border-2 relative flex flex-col justify-between shadow-xl transition-all duration-200 ${
                     isCurrent 
-                      ? 'ring-4 ring-emerald-500/25 scale-[1.02]' 
+                      ? 'ring-4 scale-[1.02]' 
                       : 'hover:scale-[1.01]'
                   }`}
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #0B101D)',
+                    backgroundColor: 'var(--color-inner-dark)',
                     borderColor: isCurrent 
-                      ? 'var(--color-emerald, #10b981)' 
-                      : (plan.badge ? 'var(--color-primary, #E05638)' : (isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'))
+                      ? 'var(--color-emerald)' 
+                      : (plan.badge ? 'var(--color-primary)' : 'var(--color-border)')
                   }}
                 >
                   {(isCurrent || plan.saveBadge || plan.badge) && (
@@ -1704,13 +1664,13 @@ export default function ProfilePage() {
                       className="absolute -top-3.5 right-6 px-3 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-md flex items-center gap-1 z-10"
                       style={{
                         backgroundColor: isCurrent 
-                          ? 'var(--color-emerald, #10b981)' 
-                          : (plan.saveBadge ? 'var(--color-emerald, #10b981)' : 'var(--color-primary, #E05638)')
+                          ? 'var(--color-emerald)' 
+                          : (plan.saveBadge ? 'var(--color-emerald)' : 'var(--color-primary)')
                       }}
                     >
                       {isCurrent ? (
                         <>
-                          <CheckCircle2 className="h-3 w-3" /> {t('currentPlanBadge') || 'Current Active Plan'}
+                          <CheckCircle2 className="h-3 w-3" style={{ color: '#ffffff' }} /> {t('currentPlanBadge') || 'Current Active Plan'}
                         </>
                       ) : (
                         plan.saveBadge || plan.badge
@@ -1722,15 +1682,15 @@ export default function ProfilePage() {
                     <div>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <h3 className="text-xl font-black" style={{ color: isDayMode ? '#0f172a' : '#ffffff' }}>
+                          <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
                             {plan.name}
                           </h3>
                           <span 
                             className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border"
                             style={{
-                              backgroundColor: isDayMode ? '#f1f5f9' : '#0B101D',
-                              borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
-                              color: isDayMode ? '#475569' : '#94a3b8'
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)'
                             }}
                           >
                             {plan.isFree ? 'Free' : plan.interval === 'YEAR' ? 'Annual' : 'Monthly'}
@@ -1741,81 +1701,81 @@ export default function ProfilePage() {
                           <span 
                             className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border flex items-center gap-1"
                             style={{
-                              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                              borderColor: 'var(--color-emerald, #10b981)',
-                              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-emerald)',
+                              color: 'var(--color-emerald)'
                             }}
                           >
-                            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                            <CheckCircle2 className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} />
                             {t('activeStatus') || 'Active'}
                           </span>
                         ) : (
                           <span 
                             className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border"
                             style={{
-                              backgroundColor: isDayMode ? '#f8fafc' : 'rgba(148, 163, 184, 0.1)',
-                              borderColor: isDayMode ? '#e2e8f0' : '#1e293b',
-                              color: isDayMode ? '#64748b' : '#94a3b8'
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)'
                             }}
                           >
                             Available
                           </span>
                         )}
                       </div>
-                      <p className="text-xs font-medium mt-1 min-h-[32px]" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      <p className="text-xs font-medium mt-1 min-h-[32px]" style={{ color: 'var(--color-text-secondary)' }}>
                         {plan.description}
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-orange-400 bg-orange-950/40 border border-orange-500/30 px-3 py-1.5 rounded-xl w-fit shadow-xs">
-                      <Cpu className="h-3.5 w-3.5" />
+                    <div className="flex items-center gap-1.5 text-xs font-mono font-bold px-3 py-1.5 rounded-xl w-fit shadow-xs border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}>
+                      <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                       <span>{plan.tokenLimit === -1 ? 'Unlimited Tokens' : `${(plan.tokenLimit || 0).toLocaleString()} Tokens`}</span>
-                      <span className="text-[10px] font-sans font-normal" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                      <span className="text-[10px] font-sans font-normal" style={{ color: 'var(--color-text-secondary)' }}>
                         ({plan.tokenReimburseFrequency === 'once' ? 'Once' : plan.tokenReimburseFrequency === 'weekly' ? 'Weekly' : 'Monthly'})
                       </span>
                     </div>
 
                     <div>
                       {isFree ? (
-                        <div className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                        <div className="text-3xl font-black" style={{ color: 'var(--color-primary)' }}>
                           {t('free') || 'Free'}
                         </div>
                       ) : (
                         <div className="flex items-baseline gap-1">
-                          <span className="text-3xl font-black" style={{ color: 'var(--color-primary, #E05638)' }}>
+                          <span className="text-3xl font-black" style={{ color: 'var(--color-primary)' }}>
                             {currencySymbol}{(plan.priceCents / 100).toFixed(2)}
                           </span>
-                          <span className="text-xs font-bold" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
+                          <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                             /{plan.interval === 'YEAR' ? (t('perYear') || 'year') : (t('perMonth') || 'month')}
                           </span>
                         </div>
                       )}
 
                       {!isFree && plan.interval === 'YEAR' && plan.subPrice && (
-                        <div className="text-[11px] font-medium mt-1" style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}>
-                          <span className="font-bold" style={{ color: isDayMode ? '#0f172a' : '#cbd5e1' }}>{plan.subPrice}</span>{' '}
+                        <div className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                          <span className="font-bold" style={{ color: 'var(--color-text)' }}>{plan.subPrice}</span>{' '}
                           {plan.strikethroughPrice && (
-                            <span className="line-through" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{plan.strikethroughPrice}</span>
+                            <span className="line-through" style={{ color: 'var(--color-text-secondary)' }}>{plan.strikethroughPrice}</span>
                           )}
                         </div>
                       )}
                     </div>
 
-                    <div className="pt-2 border-t space-y-2 text-xs font-semibold" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)', color: isDayMode ? '#334155' : '#cbd5e1' }}>
+                    <div className="pt-2 border-t space-y-2 text-xs font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                       {plan.features && plan.features.length > 0 ? (
                         plan.features.map((f, i) => (
                           <div key={i} className="flex items-start gap-2">
-                            <Check className="h-4 w-4 shrink-0 mt-0.5 text-emerald-500 dark:text-emerald-400" />
+                            <Check className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald)' }} />
                             <span className="leading-snug">{f}</span>
                           </div>
                         ))
                       ) : (
-                        <div className="italic text-[11px]" style={{ color: isDayMode ? '#94a3b8' : '#64748b' }}>{t('includesFullTierFeatureAccess') || 'Includes full tier feature access.'}</div>
+                        <div className="italic text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{t('includesFullTierFeatureAccess') || 'Includes full tier feature access.'}</div>
                       )}
                     </div>
                   </div>
 
-                  <div className="pt-6 mt-4 border-t" style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}>
+                  <div className="pt-6 mt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
                     <button
                       type="button"
                       disabled={isCurrent || paymentLoading === plan.id}
@@ -1823,14 +1783,14 @@ export default function ProfilePage() {
                       className="w-full py-3 rounded-2xl text-xs font-black text-white transition shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                       style={{
                         backgroundColor: isCurrent 
-                          ? 'var(--color-emerald, #10b981)' 
-                          : 'var(--color-primary, #E05638)'
+                          ? 'var(--color-emerald)' 
+                          : 'var(--color-primary)'
                       }}
                       onMouseEnter={(e) => {
-                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)';
+                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)';
                       }}
                       onMouseLeave={(e) => {
-                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary, #E05638)';
+                        if (!isCurrent) e.currentTarget.style.backgroundColor = 'var(--color-primary)';
                       }}
                     >
                       {paymentLoading === plan.id ? (
@@ -1839,7 +1799,7 @@ export default function ProfilePage() {
                         </>
                       ) : isCurrent ? (
                         <>
-                          <CheckCircle2 className="h-4 w-4" /> {t('currentActivePlan') || 'Current Active Plan'}
+                          <CheckCircle2 className="h-4 w-4" style={{ color: '#ffffff' }} /> {t('currentActivePlan') || 'Current Active Plan'}
                         </>
                       ) : (
                         <>

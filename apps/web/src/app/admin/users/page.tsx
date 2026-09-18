@@ -115,17 +115,7 @@ export default function AdminUserManagementPage() {
 
   const syncTheme = useCallback(() => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const day = mode === 'light' || mode === 'day';
-      setIsDayMode(day);
-      const stored = typeof window !== 'undefined'
-        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
-        : null;
-      if (stored) {
-        applyThemeToDocument(JSON.parse(stored));
-      } else {
-        applyThemeToDocument(null);
-      }
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (_) {}
   }, []);
 
@@ -268,12 +258,10 @@ export default function AdminUserManagementPage() {
     }
   }, []);
 
-    // Decoupled document title
   useEffect(() => {
     document.title = tr('admin.users.docTitle', 'User Management - Admin Console');
   }, [tr]);
 
-  // Mount-only data initialization with debounced event listener
   useEffect(() => {
     initAuthStorage();
     const u = getCurrentUser();
@@ -300,7 +288,7 @@ export default function AdminUserManagementPage() {
       window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, []);
+  }, [loadUsers, loadPlans]);
 
   const showToast = (msg: string) => {
     setFeedbackMsg(msg);
@@ -422,14 +410,12 @@ export default function AdminUserManagementPage() {
     else setSelectedUserIds(prev => Array.from(new Set([...prev, ...pageUserIds])));
   };
 
-  // Synchronize payment transaction ledger with /admin/payment when user plan changes
   const syncUserPlanWithPaymentLedger = async (email: string, planSlug: string, planName: string, priceDollars: number, interval?: string) => {
     const cleanEmail = email.toLowerCase().trim();
     const isFree = !planSlug || planSlug === 'taster' || planSlug === 'free' || priceDollars === 0;
     const targetSlug = isFree ? 'taster' : sanitizeSinglePlan(planSlug);
 
     try {
-      // 1. Cancel / Refund prior active transactions in /api/admin/payment
       const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
       if (txRes.ok) {
         const txData = await txRes.json();
@@ -454,7 +440,6 @@ export default function AdminUserManagementPage() {
         }
       }
 
-      // 2. Record fresh payment transaction if not free
       if (!isFree) {
         const newExpiryDate = calculateRenewalExpiry(new Date(), interval);
         const newTx = {
@@ -705,54 +690,46 @@ export default function AdminUserManagementPage() {
   };
 
   const renderSortIcon = (currentField: SortField, targetField: SortField, order: SortOrder) => {
-    if (currentField !== targetField) return <ArrowUpDown className={`h-3.5 w-3.5 opacity-60 ${isDayMode ? 'text-slate-400' : 'text-slate-500'}`} />;
-    return order === 'asc' ? <ArrowUp className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary, #E05638)' }} /> : <ArrowDown className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary, #E05638)' }} />;
+    if (currentField !== targetField) return <ArrowUpDown className="h-3.5 w-3.5 opacity-60" style={{ color: 'var(--color-text-secondary)' }} />;
+    return order === 'asc' ? <ArrowUp className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary)' }} /> : <ArrowDown className="h-3.5 w-3.5 stroke-[2.5]" style={{ color: 'var(--color-primary)' }} />;
   };
 
   const getPlanBadge = (planKey?: string) => {
     const isFreePlan = !planKey || planKey === 'taster' || planKey.includes('free');
     if (isFreePlan) {
-      return { label: 'Taster (Free)', bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)', border: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)', color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)', icon: Sparkles };
+      return { label: 'Taster (Free)', bg: 'var(--color-inner-dark)', border: 'var(--color-emerald)', color: 'var(--color-emerald)', icon: Sparkles };
     }
     const matched = availablePlans.find(p => p.slug === planKey || p.id === planKey || p.slug.toLowerCase() === planKey?.toLowerCase());
     if (matched) {
       if (matched.isFree || planKey === 'taster') {
-        return { label: matched.name, bg: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)', border: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)', color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)', icon: Sparkles };
+        return { label: matched.name, bg: 'var(--color-inner-dark)', border: 'var(--color-emerald)', color: 'var(--color-emerald)', icon: Sparkles };
       }
       if (matched.interval === 'YEAR' || planKey.includes('annual')) {
-        return { label: matched.name, bg: isDayMode ? '#eff6ff' : 'rgba(59, 130, 246, 0.15)', border: isDayMode ? '#bfdbfe' : '#3b82f6', color: isDayMode ? '#1d4ed8' : '#60a5fa', icon: Zap };
+        return { label: matched.name, bg: 'var(--color-inner-dark)', border: '#3b82f6', color: '#60a5fa', icon: Zap };
       }
-      return { label: matched.name, bg: isDayMode ? 'rgba(224, 86, 56, 0.08)' : 'rgba(224, 86, 56, 0.15)', border: isDayMode ? 'rgba(224, 86, 56, 0.3)' : 'var(--color-primary, #E05638)', color: 'var(--color-primary, #E05638)', icon: Zap };
+      return { label: matched.name, bg: 'var(--color-inner-dark)', border: 'var(--color-primary)', color: 'var(--color-primary)', icon: Zap };
     }
     const formatted = (planKey || '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    return { label: formatted, bg: isDayMode ? '#faf5ff' : 'rgba(168, 85, 247, 0.15)', border: isDayMode ? '#e9d5ff' : '#a855f7', color: isDayMode ? '#7e22ce' : '#c084fc', icon: CreditCard };
+    return { label: formatted, bg: 'var(--color-inner-dark)', border: '#a855f7', color: '#c084fc', icon: CreditCard };
   };
 
-  const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)';
-  const cInnerBg = isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)';
-  const cBorder = isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)';
-  const cInputBorder = isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)';
-  const cText = isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)';
-  const cSubText = isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)';
-  const cLabel = isDayMode ? '#334155' : '#cbd5e1';
-
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200" style={{ color: cText }}>
+    <div className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200" style={{ color: 'var(--color-text)' }}>
       {currentUser && currentUser.role !== 'admin' && (
-        <div className="rounded-2xl p-4 flex items-center justify-between text-xs border shadow-xs" style={{ backgroundColor: isDayMode ? '#fffbeb' : 'rgba(120, 53, 15, 0.4)', borderColor: isDayMode ? '#fde68a' : 'rgba(217, 119, 6, 0.4)', color: isDayMode ? '#92400e' : '#fde68a' }}>
+        <div className="rounded-2xl p-4 flex items-center justify-between text-xs border shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'rgba(217, 119, 6, 0.4)', color: '#fde68a' }}>
           <div className="flex items-center gap-2">
             <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" />
             <span>Signed in as <strong>{currentUser.email}</strong>. Switch to an admin account to manage user subscriptions.</span>
           </div>
-          <button onClick={() => window.location.href = '/login'} className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 cursor-pointer shadow-xs hover:opacity-90" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
+          <button onClick={() => window.location.href = '/login'} className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 cursor-pointer shadow-xs hover:opacity-90" style={{ backgroundColor: 'var(--color-primary)' }}>
             Switch to Admin
           </button>
         </div>
       )}
 
       {feedbackMsg && (
-        <div className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in border" style={{ backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)', borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)', color: isDayMode ? '#065f46' : 'var(--color-emerald, #10b981)' }}>
-          <CheckCircle className="h-4 w-4 shrink-0" />
+        <div className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
+          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
           <span>{feedbackMsg}</span>
         </div>
       )}
@@ -762,37 +739,39 @@ export default function AdminUserManagementPage() {
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
             User & Subscription Management
           </h1>
-          <p className="text-xs" style={{ color: cSubText }}>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             Active System Packages synced: {availablePlans.length} plans available from /admin/plans and synchronized with /admin/payment
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={loadUsers} disabled={isLoading} className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50" style={{ backgroundColor: cCardBg, borderColor: cInputBorder, color: cText }}>
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
+          <button type="button" onClick={loadUsers} disabled={isLoading} className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
             <span>Reload</span>
           </button>
 
-          <button type="button" onClick={() => handleExportSelected('csv')} disabled={selectedUserIds.length === 0} className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs" style={{ backgroundColor: cCardBg, borderColor: selectedUserIds.length > 0 ? 'var(--color-primary, #E05638)' : cInputBorder, color: selectedUserIds.length > 0 ? 'var(--color-primary, #E05638)' : cSubText }}>
+          <button type="button" onClick={() => handleExportSelected('csv')} disabled={selectedUserIds.length === 0} className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs" style={{ backgroundColor: 'var(--color-card)', borderColor: selectedUserIds.length > 0 ? 'var(--color-primary)' : 'var(--color-border)', color: selectedUserIds.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}>
             <Download className="h-4 w-4" />
             <span>Export CSV {selectedUserIds.length > 0 ? `(${selectedUserIds.length})` : ''}</span>
           </button>
 
-          <button onClick={() => handleOpenAddModal('user')} className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer hover:opacity-90" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
+          <button onClick={() => handleOpenAddModal('user')} className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer hover:opacity-90" style={{ backgroundColor: 'var(--color-primary)' }} onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')} onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}>
             <UserPlus className="h-4 w-4" /> Add New User
           </button>
         </div>
       </div>
 
       <div className="relative">
-        <Search className={`h-4 w-4 absolute left-4 top-3.5 pointer-events-none ${isDayMode ? 'text-slate-400' : 'text-slate-500'}`} />
+        <Search className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
         <input
           type="text"
           placeholder="Search by name, email, or subscription plan across all tables..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition shadow-inner font-medium"
-          style={{ backgroundColor: isDayMode ? '#ffffff' : cInnerBg, borderColor: cInputBorder, color: cText }}
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
         />
       </div>
 
@@ -800,31 +779,31 @@ export default function AdminUserManagementPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl border flex items-center justify-center" style={{ backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)', borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)', color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }}>
+            <div className="w-8 h-8 rounded-xl border flex items-center justify-center" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
               <Shield className="h-4 w-4" />
             </div>
-            <h2 className="text-lg font-black flex items-center gap-2" style={{ color: cText }}>
+            <h2 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
               Administrators
-              <span className="text-xs border font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)', borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)', color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }}>
+              <span className="text-xs border font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
                 {processedAdmins.length}
               </span>
             </h2>
           </div>
-          <button onClick={() => handleOpenAddModal('admin')} className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline" style={{ color: isDayMode ? '#059669' : 'var(--color-emerald, #10b981)' }}>
+          <button onClick={() => handleOpenAddModal('admin')} className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline" style={{ color: 'var(--color-emerald)' }}>
             <UserPlus className="h-3.5 w-3.5" /> Add Admin
           </button>
         </div>
 
-        <div className="border rounded-3xl overflow-hidden shadow-xl transition-colors" style={{ backgroundColor: cCardBg, borderColor: cBorder }}>
+        <div className="border rounded-3xl overflow-hidden shadow-xl transition-colors" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="border-b uppercase font-bold text-[10px] tracking-wider" style={{ backgroundColor: cInnerBg, borderColor: cBorder, color: cSubText }}>
+              <thead className="border-b uppercase font-bold text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
                 <tr>
                   <th className="w-10 px-4 py-4 text-center">
                     <input type="checkbox" checked={isAllAdminsOnPageSelected} onChange={handleToggleSelectAllAdmins} className="rounded cursor-pointer accent-[#E05638]" />
                   </th>
                   <th className="px-5 py-4">
-                    <button type="button" onClick={() => handleAdminSort('name')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: cText }}>
+                    <button type="button" onClick={() => handleAdminSort('name')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
                       <span>Admin User</span>
                       {renderSortIcon(adminSortField, 'name', adminSortOrder)}
                     </button>
@@ -832,7 +811,7 @@ export default function AdminUserManagementPage() {
                   <th className="px-5 py-4">Email Address</th>
                   <th className="px-5 py-4">Role</th>
                   <th className="px-5 py-4">
-                    <button type="button" onClick={() => handleAdminSort('subscriptionPlan')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: cText }}>
+                    <button type="button" onClick={() => handleAdminSort('subscriptionPlan')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
                       <span>Subscription Type</span>
                       {renderSortIcon(adminSortField, 'subscriptionPlan', adminSortOrder)}
                     </button>
@@ -841,9 +820,9 @@ export default function AdminUserManagementPage() {
                   <th className="px-5 py-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y" style={{ borderColor: cBorder, color: cText }}>
+              <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                 {paginatedAdmins.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-10" style={{ color: cSubText }}>No administrators found.</td></tr>
+                  <tr><td colSpan={7} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>No administrators found.</td></tr>
                 ) : (
                   paginatedAdmins.map((user) => {
                     const isCurrent = currentUser?.id === user.id || currentUser?.email?.toLowerCase() === user.email?.toLowerCase();
@@ -852,25 +831,25 @@ export default function AdminUserManagementPage() {
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
                     return (
-                      <tr key={user.id} className="transition" style={{ borderColor: cBorder, backgroundColor: isSelected ? 'rgba(224, 86, 56, 0.08)' : undefined }}>
+                      <tr key={user.id} className="transition" style={{ borderColor: 'var(--color-border)', backgroundColor: isSelected ? 'var(--color-inner-dark)' : undefined }}>
                         <td className="w-10 px-4 py-4 text-center">
                           <input type="checkbox" checked={isSelected} onChange={() => toggleSelectUser(user.id)} className="rounded cursor-pointer accent-[#E05638]" />
                         </td>
                         <td className="px-5 py-4 font-bold flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0" style={{ backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)', borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)', color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }}>
+                          <div className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
                             {(user.name || 'A').charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold" style={{ color: cText }}>{user.name}</span>
+                              <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{user.name}</span>
                               {isPrimary && <span className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-500 border-amber-500">PRIMARY</span>}
                               {isCurrent && !isPrimary && <span className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-500 border-emerald-500">YOU</span>}
                             </div>
                           </div>
                         </td>
-                        <td className="px-5 py-4 font-mono text-xs" style={{ color: cSubText }}>{user.email}</td>
+                        <td className="px-5 py-4 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>{user.email}</td>
                         <td className="px-5 py-4">
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit" style={{ backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)', borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)', color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)' }}>
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
                             <Shield className="h-3 w-3" /> Admin
                           </span>
                         </td>
@@ -880,15 +859,15 @@ export default function AdminUserManagementPage() {
                             {planBadge.label}
                           </span>
                         </td>
-                        <td className="px-5 py-4" style={{ color: cSubText }}>
+                        <td className="px-5 py-4" style={{ color: 'var(--color-text-secondary)' }}>
                           {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Active'}
                         </td>
                         <td className="px-5 py-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            <button type="button" onClick={() => handleOpenEditModal(user)} className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85" style={{ backgroundColor: cCardBg, borderColor: cInputBorder, color: cText }} title="Edit Admin">
-                              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                            <button type="button" onClick={() => handleOpenEditModal(user)} className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} title="Edit Admin">
+                              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                             </button>
-                            <button type="button" disabled={isCurrent || isPrimary} onClick={() => handleDeleteUser(user.id, user.email, user.name)} className={`p-2 rounded-xl border transition shadow-xs ${isCurrent || isPrimary ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`} style={{ backgroundColor: cCardBg, borderColor: cInputBorder, color: cSubText }} title="Delete Admin">
+                            <button type="button" disabled={isCurrent || isPrimary} onClick={() => handleDeleteUser(user.id, user.email, user.name)} className={`p-2 rounded-xl border transition shadow-xs ${isCurrent || isPrimary ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`} style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} title="Delete Admin">
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
@@ -907,31 +886,31 @@ export default function AdminUserManagementPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl border flex items-center justify-center" style={{ backgroundColor: isDayMode ? '#eff6ff' : 'rgba(30, 58, 138, 0.4)', borderColor: isDayMode ? '#bfdbfe' : 'rgba(59, 130, 246, 0.4)', color: isDayMode ? '#2563eb' : '#60a5fa' }}>
+            <div className="w-8 h-8 rounded-xl border flex items-center justify-center" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#3b82f6', color: '#60a5fa' }}>
               <Users className="h-4 w-4" />
             </div>
-            <h2 className="text-lg font-black flex items-center gap-2" style={{ color: cText }}>
+            <h2 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
               Standard Users
-              <span className="text-xs border font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: isDayMode ? '#eff6ff' : 'rgba(30, 58, 138, 0.6)', borderColor: isDayMode ? '#bfdbfe' : 'rgba(59, 130, 246, 0.5)', color: isDayMode ? '#1d4ed8' : '#93c5fd' }}>
+              <span className="text-xs border font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#3b82f6', color: '#93c5fd' }}>
                 {processedStandardUsers.length}
               </span>
             </h2>
           </div>
-          <button onClick={() => handleOpenAddModal('user')} className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
+          <button onClick={() => handleOpenAddModal('user')} className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline" style={{ color: 'var(--color-primary)' }}>
             <UserPlus className="h-3.5 w-3.5" /> Add Standard User
           </button>
         </div>
 
-        <div className="border rounded-3xl overflow-hidden shadow-xl transition-colors" style={{ backgroundColor: cCardBg, borderColor: cBorder }}>
+        <div className="border rounded-3xl overflow-hidden shadow-xl transition-colors" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="border-b uppercase font-bold text-[10px] tracking-wider" style={{ backgroundColor: cInnerBg, borderColor: cBorder, color: cSubText }}>
+              <thead className="border-b uppercase font-bold text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
                 <tr>
                   <th className="w-10 px-4 py-4 text-center">
                     <input type="checkbox" checked={isAllStandardOnPageSelected} onChange={handleToggleSelectAllStandardUsers} className="rounded cursor-pointer accent-[#E05638]" />
                   </th>
                   <th className="px-5 py-4">
-                    <button type="button" onClick={() => handleUserSort('name')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: cText }}>
+                    <button type="button" onClick={() => handleUserSort('name')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
                       <span>Standard User</span>
                       {renderSortIcon(userSortField, 'name', userSortOrder)}
                     </button>
@@ -939,7 +918,7 @@ export default function AdminUserManagementPage() {
                   <th className="px-5 py-4">Email Address</th>
                   <th className="px-5 py-4">Role</th>
                   <th className="px-5 py-4">
-                    <button type="button" onClick={() => handleUserSort('subscriptionPlan')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: cText }}>
+                    <button type="button" onClick={() => handleUserSort('subscriptionPlan')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
                       <span>Subscription Type</span>
                       {renderSortIcon(userSortField, 'subscriptionPlan', userSortOrder)}
                     </button>
@@ -948,9 +927,9 @@ export default function AdminUserManagementPage() {
                   <th className="px-5 py-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y" style={{ borderColor: cBorder, color: cText }}>
+              <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                 {paginatedStandardUsers.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-10" style={{ color: cSubText }}>No standard users found.</td></tr>
+                  <tr><td colSpan={7} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>No standard users found.</td></tr>
                 ) : (
                   paginatedStandardUsers.map((user) => {
                     const isCurrent = currentUser?.id === user.id || currentUser?.email?.toLowerCase() === user.email?.toLowerCase();
@@ -958,19 +937,19 @@ export default function AdminUserManagementPage() {
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
                     return (
-                      <tr key={user.id} className="transition" style={{ borderColor: cBorder, backgroundColor: isSelected ? 'rgba(224, 86, 56, 0.08)' : undefined }}>
+                      <tr key={user.id} className="transition" style={{ borderColor: 'var(--color-border)', backgroundColor: isSelected ? 'var(--color-inner-dark)' : undefined }}>
                         <td className="w-10 px-4 py-4 text-center">
                           <input type="checkbox" checked={isSelected} onChange={() => toggleSelectUser(user.id)} className="rounded cursor-pointer accent-[#E05638]" />
                         </td>
                         <td className="px-5 py-4 font-bold flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0" style={{ backgroundColor: isDayMode ? '#f1f5f9' : cInnerBg, borderColor: cInputBorder, color: 'var(--color-primary, #E05638)' }}>
+                          <div className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
                             {(user.name || 'U').charAt(0).toUpperCase()}
                           </div>
-                          <span className="text-sm font-bold" style={{ color: cText }}>{user.name}</span>
+                          <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{user.name}</span>
                         </td>
-                        <td className="px-5 py-4 font-mono text-xs" style={{ color: cSubText }}>{user.email}</td>
+                        <td className="px-5 py-4 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>{user.email}</td>
                         <td className="px-5 py-4">
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit" style={{ backgroundColor: isDayMode ? '#f1f5f9' : cInnerBg, borderColor: cInputBorder, color: cSubText }}>
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
                             <UserIcon className="h-3 w-3" /> Standard User
                           </span>
                         </td>
@@ -980,15 +959,15 @@ export default function AdminUserManagementPage() {
                             {planBadge.label}
                           </span>
                         </td>
-                        <td className="px-5 py-4" style={{ color: cSubText }}>
+                        <td className="px-5 py-4" style={{ color: 'var(--color-text-secondary)' }}>
                           {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Active'}
                         </td>
                         <td className="px-5 py-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            <button type="button" onClick={() => handleOpenEditModal(user)} className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85" style={{ backgroundColor: cCardBg, borderColor: cInputBorder, color: cText }} title="Edit User">
-                              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                            <button type="button" onClick={() => handleOpenEditModal(user)} className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} title="Edit User">
+                              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                             </button>
-                            <button type="button" disabled={isCurrent} onClick={() => handleDeleteUser(user.id, user.email, user.name)} className={`p-2 rounded-xl border transition shadow-xs ${isCurrent ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`} style={{ backgroundColor: cCardBg, borderColor: cInputBorder, color: cSubText }} title="Delete User">
+                            <button type="button" disabled={isCurrent} onClick={() => handleDeleteUser(user.id, user.email, user.name)} className={`p-2 rounded-xl border transition shadow-xs ${isCurrent ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`} style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} title="Delete User">
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
@@ -1006,37 +985,37 @@ export default function AdminUserManagementPage() {
       {/* ADD USER MODAL */}
       {showAddModal && (
         <div onClick={() => setShowAddModal(false)} className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer">
-          <div onClick={(e) => e.stopPropagation()} className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default" style={{ backgroundColor: cCardBg, borderColor: cBorder, color: cText }}>
-            <button onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: isDayMode ? '#f1f5f9' : cInnerBg, color: cSubText }}><X className="h-4 w-4" /></button>
-            <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary, #E05638)' }}><UserPlus className="h-5 w-5" /> Add New User</h2>
+          <div onClick={(e) => e.stopPropagation()} className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+            <button onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}><X className="h-4 w-4" /></button>
+            <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}><UserPlus className="h-5 w-5" /> Add New User</h2>
             {addError && <div className="p-3 border rounded-xl font-semibold flex items-center gap-2 bg-red-500/10 border-red-500 text-red-500"><AlertCircle className="h-4 w-4 shrink-0" /><span>{addError}</span></div>}
             <form onSubmit={handleAddUserSubmit} className="space-y-3.5">
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>Full Name *</label>
-                <input type="text" required placeholder="Jordan Smith" value={addName} onChange={e => setAddName(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : cInnerBg, borderColor: cInputBorder, color: cText }} />
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Full Name *</label>
+                <input type="text" required placeholder="Jordan Smith" value={addName} onChange={e => setAddName(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
               </div>
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>Email Address *</label>
-                <input type="email" required placeholder="jordan@example.com" value={addEmail} onChange={e => setAddEmail(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : cInnerBg, borderColor: cInputBorder, color: cText }} />
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Email Address *</label>
+                <input type="email" required placeholder="jordan@example.com" value={addEmail} onChange={e => setAddEmail(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
               </div>
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>Password *</label>
-                <input type="password" required placeholder="••••••••" value={addPassword} onChange={e => setAddPassword(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : cInnerBg, borderColor: cInputBorder, color: cText }} />
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Password *</label>
+                <input type="password" required placeholder="••••••••" value={addPassword} onChange={e => setAddPassword(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
               </div>
               <div>
-                <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: cLabel }}>
+                <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                   <span>Active Subscription Plan *</span>
-                  <Link href="/admin/plans" className="text-[10px] underline" style={{ color: cSubText }}>Manage Plans ({availablePlans.length})</Link>
+                  <Link href="/admin/plans" className="text-[10px] underline" style={{ color: 'var(--color-text-secondary)' }}>Manage Plans ({availablePlans.length})</Link>
                 </label>
-                <select value={addSubscriptionPlan} onChange={e => setAddSubscriptionPlan(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer" style={{ backgroundColor: isDayMode ? '#f8fafc' : cInnerBg, borderColor: cInputBorder, color: cText }}>
+                <select value={addSubscriptionPlan} onChange={e => setAddSubscriptionPlan(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                   {availablePlans.map(plan => (
-                    <option key={plan.id || plan.slug} value={plan.slug}>{plan.name} ({plan.priceFormatted})</option>
+                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{plan.name} ({plan.priceFormatted})</option>
                   ))}
                 </select>
               </div>
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: cBorder }}>
-                <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer" style={{ backgroundColor: isDayMode ? '#f8fafc' : cInnerBg, borderColor: cInputBorder, color: cText }}>Cancel</button>
-                <button type="submit" className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>Create User</button>
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
+                <button type="submit" className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>Create User</button>
               </div>
             </form>
           </div>
@@ -1046,37 +1025,37 @@ export default function AdminUserManagementPage() {
       {/* EDIT USER MODAL */}
       {showEditModal && (
         <div onClick={() => setShowEditModal(false)} className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer">
-          <div onClick={(e) => e.stopPropagation()} className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default" style={{ backgroundColor: cCardBg, borderColor: cBorder, color: cText }}>
-            <button onClick={() => setShowEditModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: isDayMode ? '#f1f5f9' : cInnerBg, color: cSubText }}><X className="h-4 w-4" /></button>
-            <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary, #E05638)' }}><Edit3 className="h-5 w-5" /> Edit User & Plan</h2>
+          <div onClick={(e) => e.stopPropagation()} className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+            <button onClick={() => setShowEditModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}><X className="h-4 w-4" /></button>
+            <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}><Edit3 className="h-5 w-5" /> Edit User & Plan</h2>
             {editError && <div className="p-3 border rounded-xl font-semibold flex items-center gap-2 bg-red-500/10 border-red-500 text-red-500"><AlertCircle className="h-4 w-4 shrink-0" /><span>{editError}</span></div>}
             <form onSubmit={handleEditUserSubmit} className="space-y-3.5">
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>Full Name *</label>
-                <input type="text" required value={editName} onChange={e => setEditName(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : cInnerBg, borderColor: cInputBorder, color: cText }} />
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Full Name *</label>
+                <input type="text" required value={editName} onChange={e => setEditName(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
               </div>
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>Email Address *</label>
-                <input type="email" required value={editEmail} onChange={e => setEditEmail(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : cInnerBg, borderColor: cInputBorder, color: cText }} />
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Email Address *</label>
+                <input type="email" required value={editEmail} onChange={e => setEditEmail(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
               </div>
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: cLabel }}>Change Password <span className="font-normal" style={{ color: cSubText }}>(leave blank)</span></label>
-                <input type="password" placeholder="New password..." value={editPassword} onChange={e => setEditPassword(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: isDayMode ? '#f8fafc' : cInnerBg, borderColor: cInputBorder, color: cText }} />
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Change Password <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>(leave blank)</span></label>
+                <input type="password" placeholder="New password..." value={editPassword} onChange={e => setEditPassword(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
               </div>
               <div>
-                <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: cLabel }}>
+                <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                   <span>Active Subscription Plan</span>
-                  <span className="text-[10px] font-bold text-emerald-500">Synced with /admin/payment</span>
+                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-emerald)' }}>Synced with /admin/payment</span>
                 </label>
-                <select value={editSubscriptionPlan} onChange={e => setEditSubscriptionPlan(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer" style={{ backgroundColor: isDayMode ? '#f8fafc' : cInnerBg, borderColor: cInputBorder, color: cText }}>
+                <select value={editSubscriptionPlan} onChange={e => setEditSubscriptionPlan(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                   {availablePlans.map(plan => (
-                    <option key={plan.id || plan.slug} value={plan.slug}>{plan.name} ({plan.priceFormatted})</option>
+                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{plan.name} ({plan.priceFormatted})</option>
                   ))}
                 </select>
               </div>
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: cBorder }}>
-                <button type="button" onClick={() => setShowEditModal(false)} className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer" style={{ backgroundColor: isDayMode ? '#f8fafc' : cInnerBg, borderColor: cInputBorder, color: cText }}>Cancel</button>
-                <button type="submit" className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>Save Changes</button>
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <button type="button" onClick={() => setShowEditModal(false)} className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
+                <button type="submit" className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>Save Changes</button>
               </div>
             </form>
           </div>
