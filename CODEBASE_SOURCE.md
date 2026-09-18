@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.4.4",
+  "version": "7.4.5",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.4.4",
+  "version": "7.4.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
