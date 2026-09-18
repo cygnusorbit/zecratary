@@ -16,6 +16,7 @@ export interface ThemeColors {
   borderColor?: string;
   textSecondary?: string;
   textColor?: string;
+  [key: string]: any;
 }
 
 let memoryThemeColors: ThemeColors | null = null;
@@ -49,13 +50,7 @@ export function applyThemeToDocument(colors?: ThemeColors | null): void {
   const root = document.documentElement;
   const isDayMode = getEffectiveThemeMode() === 'light';
 
-  let activeColors = (colors && Object.keys(colors).length > 0) ? colors : memoryThemeColors;
-  if (!activeColors && typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      if (stored) activeColors = JSON.parse(stored);
-    } catch (_) {}
-  }
+  const activeColors = (colors && Object.keys(colors).length > 0) ? colors : memoryThemeColors;
 
   if (activeColors) {
     setMemoryThemeColors(activeColors);
@@ -143,7 +138,6 @@ export function setThemeMode(mode: 'light' | 'dark'): void {
   applyThemeToDocument();
   window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode } }));
   window.dispatchEvent(new Event('zecratary_theme_changed'));
-  window.dispatchEvent(new Event('storage'));
 }
 
 export function toggleThemeMode(): 'light' | 'dark' {
@@ -156,13 +150,9 @@ export function toggleThemeMode(): 'light' | 'dark' {
 export async function saveThemeColors(colors: ThemeColors): Promise<void> {
   setMemoryThemeColors(colors);
   if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
-    } catch (_) {}
     applyThemeToDocument(colors);
     window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
     window.dispatchEvent(new Event('zecratary_theme_changed'));
-    window.dispatchEvent(new Event('storage'));
   }
 
   try {

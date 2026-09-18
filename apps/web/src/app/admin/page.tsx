@@ -21,13 +21,14 @@ import {
   Key,
   Languages,
   LayoutGrid,
-  BookOpen
+  BookOpen,
+  AlertCircle
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { 
   getSiteConfig, 
   saveSiteConfig, 
-  setMemorySiteConfig,
+  setMemorySiteConfig, 
   updateFavicon, 
   SiteIdentityConfig, 
   DEFAULT_SITE_NAME, 
@@ -36,7 +37,8 @@ import {
 import { 
   applyThemeToDocument, 
   saveThemeColors, 
-  setMemoryThemeColors 
+  setMemoryThemeColors,
+  getMemoryThemeColors
 } from '@/lib/themeConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -129,7 +131,12 @@ export default function AdminSettingsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [saved, setSaved] = useState<boolean>(false);
+  const [saveError, setSaveError] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // Lock to avoid self-dispatched server updates clobbering the form during save
+  const isSavingRef = useRef<boolean>(false);
 
   // Site Identity State
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
@@ -203,20 +210,23 @@ export default function AdminSettingsPage() {
     });
   };
 
-  // Load Settings Exclusively from Server Storage (Zero LocalStorage)
+  // Load Settings Exclusively from Server & PostgreSQL Storage
   const loadSettingsFromServer = useCallback(async () => {
+    if (isSavingRef.current) return;
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
       const serverData = await fetchServerAdminSettings();
       if (serverData) {
-        if (serverData.siteName) setSiteName(serverData.siteName);
-        if (serverData.titlebarEmoji) setTitlebarEmoji(serverData.titlebarEmoji);
-        if (serverData.titlebarImage !== undefined) setTitlebarImage(serverData.titlebarImage);
-        if (serverData.faviconEmoji) setFaviconEmoji(serverData.faviconEmoji);
-        if (serverData.faviconImage !== undefined) setFaviconImage(serverData.faviconImage);
+        const payload: any = serverData.settings || serverData;
 
-        const tc = serverData.themeColors || {};
+        if (payload.siteName) setSiteName(payload.siteName);
+        if (payload.titlebarEmoji) setTitlebarEmoji(payload.titlebarEmoji);
+        if (payload.titlebarImage !== undefined) setTitlebarImage(payload.titlebarImage);
+        if (payload.faviconEmoji) setFaviconEmoji(payload.faviconEmoji);
+        if (payload.faviconImage !== undefined) setFaviconImage(payload.faviconImage);
+
+        const tc = payload.themeColors || serverData.themeColors || getMemoryThemeColors() || {};
         const p = tc.primary || tc.primaryColor || '#E05638';
         const ph = tc.primaryHover || '#c94529';
         const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
@@ -252,7 +262,9 @@ export default function AdminSettingsPage() {
     loadSettingsFromServer();
 
     const handleServerUpdate = () => {
-      loadSettingsFromServer();
+      if (!isSavingRef.current) {
+        loadSettingsFromServer();
+      }
     };
 
     window.addEventListener('zecratary_admin_settings_updated', handleServerUpdate);
@@ -340,155 +352,188 @@ export default function AdminSettingsPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
+    isSavingRef.current = true;
+    setSaveError('');
 
-    const updatedBranding: SiteIdentityConfig = {
-      siteName: siteName.trim() || DEFAULT_SITE_NAME,
-      titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
-      titlebarImage,
-      faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
-      faviconImage
-    };
+    try {
+      const updatedBranding: SiteIdentityConfig = {
+        siteName: siteName.trim() || DEFAULT_SITE_NAME,
+        titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
+        titlebarImage,
+        faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
+        faviconImage
+      };
 
-    setMemorySiteConfig(updatedBranding);
-    if (faviconImage) {
-      updateFavicon(faviconImage);
-    } else if (faviconEmoji) {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${faviconEmoji}</text></svg>`;
-      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+      setMemorySiteConfig(updatedBranding);
+      if (faviconImage) {
+        updateFavicon(faviconImage);
+      } else if (faviconEmoji) {
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${faviconEmoji}</text></svg>`;
+        updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+      }
+
+      const themeColors = {
+        primary: primaryColor,
+        primaryColor: primaryColor,
+        primaryHover: primaryHoverColor,
+        accentEmerald: accentColor,
+        accentColor: accentColor,
+        accent: accentColor,
+        sidebarIconColor: sidebarIconColor,
+        sidebarIcon: sidebarIconColor,
+        backgroundColor: backgroundColor,
+        backgroundDark: backgroundColor,
+        cardBackground: cardBackgroundColor,
+        cardBorder: cardBorderColor,
+        textSecondary: secondaryTextColor,
+      };
+
+      setMemoryThemeColors(themeColors);
+      applyColorsLocally(
+        primaryColor,
+        primaryHoverColor,
+        accentColor,
+        sidebarIconColor,
+        backgroundColor,
+        cardBackgroundColor,
+        cardBorderColor,
+        secondaryTextColor
+      );
+
+      // 1. Persist directly to PostgreSQL user theme storage
+      await saveThemeColors(themeColors);
+
+      // 2. Persist to PostgreSQL admin settings table
+      const success = await persistServerAdminSettings({
+        siteName: updatedBranding.siteName,
+        titlebarEmoji: updatedBranding.titlebarEmoji,
+        titlebarImage: updatedBranding.titlebarImage || '',
+        faviconEmoji: updatedBranding.faviconEmoji,
+        faviconImage: updatedBranding.faviconImage || '',
+        themeColors
+      });
+
+      if (!success) {
+        throw new Error(t('admin.saveFailed', 'Failed to commit settings to database endpoint.'));
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: updatedBranding }));
+        window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
+        window.dispatchEvent(new Event('zecratary_theme_changed'));
+      }
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err: any) {
+      console.error('[AdminSettingsPage] Save failure:', err);
+      setSaveError(err?.message || 'Failed to save settings to server store');
+      setTimeout(() => setSaveError(''), 5000);
+    } finally {
+      setIsSaving(false);
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 600);
     }
-
-    const themeColors = {
-      primary: primaryColor,
-      primaryColor: primaryColor,
-      primaryHover: primaryHoverColor,
-      accentEmerald: accentColor,
-      accentColor: accentColor,
-      accent: accentColor,
-      sidebarIconColor: sidebarIconColor,
-      sidebarIcon: sidebarIconColor,
-      backgroundColor: backgroundColor,
-      backgroundDark: backgroundColor,
-      cardBackground: cardBackgroundColor,
-      cardBorder: cardBorderColor,
-      textSecondary: secondaryTextColor,
-    };
-
-    setMemoryThemeColors(themeColors);
-    applyColorsLocally(
-      primaryColor,
-      primaryHoverColor,
-      accentColor,
-      sidebarIconColor,
-      backgroundColor,
-      cardBackgroundColor,
-      cardBorderColor,
-      secondaryTextColor
-    );
-
-    // Save directly to server API with Zero LocalStorage writes
-    await persistServerAdminSettings({
-      siteName: updatedBranding.siteName,
-      titlebarEmoji: updatedBranding.titlebarEmoji,
-      titlebarImage: updatedBranding.titlebarImage || '',
-      faviconEmoji: updatedBranding.faviconEmoji,
-      faviconImage: updatedBranding.faviconImage || '',
-      themeColors
-    });
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: updatedBranding }));
-      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-    }
-
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const handleResetDefaults = async () => {
     if (!confirm(t('admin.confirmReset', 'Reset branding and theme settings to defaults?'))) return;
+    setIsSaving(true);
+    isSavingRef.current = true;
+    setSaveError('');
 
-    const defaultName = DEFAULT_SITE_NAME;
-    const defaultIcon = DEFAULT_SITE_ICON;
-    const defaultPrimary = '#E05638';
-    const defaultPrimaryHover = '#c94529';
-    const defaultAccent = '#10b981';
-    const defaultSidebarIcon = '#10b981';
-    const defaultBg = '#070b13';
-    const defaultCard = '#0b0f17';
-    const defaultBorder = '#1e293b';
-    const defaultTextSec = '#94a3b8';
+    try {
+      const defaultName = DEFAULT_SITE_NAME;
+      const defaultIcon = DEFAULT_SITE_ICON;
+      const defaultPrimary = '#E05638';
+      const defaultPrimaryHover = '#c94529';
+      const defaultAccent = '#10b981';
+      const defaultSidebarIcon = '#10b981';
+      const defaultBg = '#070b13';
+      const defaultCard = '#0b0f17';
+      const defaultBorder = '#1e293b';
+      const defaultTextSec = '#94a3b8';
 
-    setSiteName(defaultName);
-    setTitlebarEmoji(defaultIcon);
-    setTitlebarImage('');
-    setFaviconEmoji(defaultIcon);
-    setFaviconImage('');
+      setSiteName(defaultName);
+      setTitlebarEmoji(defaultIcon);
+      setTitlebarImage('');
+      setFaviconEmoji(defaultIcon);
+      setFaviconImage('');
 
-    setPrimaryColor(defaultPrimary);
-    setPrimaryHoverColor(defaultPrimaryHover);
-    setAccentColor(defaultAccent);
-    setSidebarIconColor(defaultSidebarIcon);
-    setBackgroundColor(defaultBg);
-    setCardBackgroundColor(defaultCard);
-    setCardBorderColor(defaultBorder);
-    setSecondaryTextColor(defaultTextSec);
+      setPrimaryColor(defaultPrimary);
+      setPrimaryHoverColor(defaultPrimaryHover);
+      setAccentColor(defaultAccent);
+      setSidebarIconColor(defaultSidebarIcon);
+      setBackgroundColor(defaultBg);
+      setCardBackgroundColor(defaultCard);
+      setCardBorderColor(defaultBorder);
+      setSecondaryTextColor(defaultTextSec);
 
-    const defaultBranding = {
-      siteName: defaultName,
-      titlebarEmoji: defaultIcon,
-      titlebarImage: '',
-      faviconEmoji: defaultIcon,
-      faviconImage: ''
-    };
+      const defaultBranding = {
+        siteName: defaultName,
+        titlebarEmoji: defaultIcon,
+        titlebarImage: '',
+        faviconEmoji: defaultIcon,
+        faviconImage: ''
+      };
 
-    const defaultColors = {
-      primary: defaultPrimary,
-      primaryColor: defaultPrimary,
-      primaryHover: defaultPrimaryHover,
-      accentEmerald: defaultAccent,
-      accentColor: defaultAccent,
-      accent: defaultAccent,
-      sidebarIconColor: defaultSidebarIcon,
-      sidebarIcon: defaultSidebarIcon,
-      backgroundColor: defaultBg,
-      backgroundDark: defaultBg,
-      cardBackground: defaultCard,
-      cardBorder: defaultBorder,
-      textSecondary: defaultTextSec
-    };
+      const defaultColors = {
+        primary: defaultPrimary,
+        primaryColor: defaultPrimary,
+        primaryHover: defaultPrimaryHover,
+        accentEmerald: defaultAccent,
+        accentColor: defaultAccent,
+        accent: defaultAccent,
+        sidebarIconColor: defaultSidebarIcon,
+        sidebarIcon: defaultSidebarIcon,
+        backgroundColor: defaultBg,
+        backgroundDark: defaultBg,
+        cardBackground: defaultCard,
+        cardBorder: defaultBorder,
+        textSecondary: defaultTextSec
+      };
 
-    setMemorySiteConfig(defaultBranding);
-    setMemoryThemeColors(defaultColors);
+      setMemorySiteConfig(defaultBranding);
+      setMemoryThemeColors(defaultColors);
 
-    applyColorsLocally(
-      defaultPrimary,
-      defaultPrimaryHover,
-      defaultAccent,
-      defaultSidebarIcon,
-      defaultBg,
-      defaultCard,
-      defaultBorder,
-      defaultTextSec
-    );
+      applyColorsLocally(
+        defaultPrimary,
+        defaultPrimaryHover,
+        defaultAccent,
+        defaultSidebarIcon,
+        defaultBg,
+        defaultCard,
+        defaultBorder,
+        defaultTextSec
+      );
 
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
-    updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
+      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
 
-    // Persist directly to server storage
-    await persistServerAdminSettings({
-      ...defaultBranding,
-      themeColors: defaultColors
-    });
+      await saveThemeColors(defaultColors);
+      await persistServerAdminSettings({
+        ...defaultBranding,
+        themeColors: defaultColors
+      });
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
-      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
+        window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
+        window.dispatchEvent(new Event('zecratary_theme_changed'));
+      }
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err: any) {
+      setSaveError(err?.message || 'Failed to reset settings');
+    } finally {
+      setIsSaving(false);
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 600);
     }
-
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const isTitlebarImageActive = !!titlebarImage;
@@ -520,17 +565,17 @@ export default function AdminSettingsPage() {
           <button
             type="button"
             onClick={loadSettingsFromServer}
-            disabled={isLoading}
+            disabled={isLoading || isSaving}
             className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
             style={{
               backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
               borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
               color: isDayMode ? '#334155' : '#cbd5e1'
             }}
-            title="Reload settings from server store"
+            title={t('admin.reloadTitle', 'Reload settings from server store')}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #E05638)' }} />
-            <span>Reload</span>
+            <span>{t('admin.reloadBtn', 'Reload')}</span>
           </button>
 
           {saved && (
@@ -540,6 +585,16 @@ export default function AdminSettingsPage() {
                 : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
             }`}>
               <CheckCircle2 className="h-4 w-4" /> {t('admin.settingsSaved', 'Settings Saved & Broadcasted')}
+            </div>
+          )}
+
+          {saveError && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
+              isDayMode 
+                ? 'bg-red-100 border-red-300 text-red-700' 
+                : 'bg-red-500/10 border-red-500/30 text-red-400'
+            }`}>
+              <AlertCircle className="h-4 w-4" /> {saveError}
             </div>
           )}
         </div>
@@ -1384,7 +1439,8 @@ export default function AdminSettingsPage() {
           <button
             type="button"
             onClick={handleResetDefaults}
-            className="px-4 py-2.5 border rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition hover:opacity-80 shadow-xs"
+            disabled={isSaving}
+            className="px-4 py-2.5 border rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition hover:opacity-80 shadow-xs disabled:opacity-50"
             style={{ 
               backgroundColor: isDayMode ? '#ffffff' : '#0b0f17',
               borderColor: isDayMode ? '#cbd5e1' : '#1e293b',
@@ -1396,10 +1452,21 @@ export default function AdminSettingsPage() {
 
           <button
             type="submit"
-            className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+            disabled={isSaving}
+            className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
-            <CheckCircle2 className="h-4 w-4" /> {activeTab === 'theme' ? t('admin.saveThemeSettings', 'Save Theme Settings') : t('admin.saveBrandingSettings', 'Save Branding Settings')}
+            {isSaving ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                <span>{t('admin.saving', 'Saving...')}</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-4 w-4" />
+                <span>{activeTab === 'theme' ? t('admin.saveThemeSettings', 'Save Theme Settings') : t('admin.saveBrandingSettings', 'Save Branding Settings')}</span>
+              </>
+            )}
           </button>
         </div>
       </form>
