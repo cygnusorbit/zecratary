@@ -347,8 +347,10 @@ export default function AdminSettingsPage() {
     );
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
     setIsSaving(true);
     isSavingRef.current = true;
     setSaveError('');
@@ -430,6 +432,16 @@ export default function AdminSettingsPage() {
       setTimeout(() => {
         isSavingRef.current = false;
       }, 600);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+      const target = e.target as HTMLInputElement;
+      if (target.type !== 'file') {
+        e.preventDefault();
+        handleSave();
+      }
     }
   };
 
@@ -647,7 +659,8 @@ export default function AdminSettingsPage() {
         </button>
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6">
+      {/* SETTINGS CONTAINER (Decoupled from Form Autofill Heuristics) */}
+      <div onKeyDown={handleKeyDown} className="space-y-6">
         {/* TAB 1: BRANDING */}
         <div className={activeTab === 'branding' ? 'space-y-6' : 'hidden'}>
           {/* APPLICATION NAME */}
@@ -667,6 +680,14 @@ export default function AdminSettingsPage() {
               </label>
               <input 
                 type="text" 
+                id="site_display_name_setting"
+                name="site_display_name_setting"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck="false"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-form-type="other"
                 value={siteName} 
                 onChange={(e) => setSiteName(e.target.value)} 
                 placeholder="e.g. Zecratary" 
@@ -753,6 +774,14 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center gap-3">
                   <input 
                     type="text" 
+                    id="site_titlebar_emoji_setting"
+                    name="site_titlebar_emoji_setting"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     value={titlebarEmoji} 
                     onChange={(e) => setTitlebarEmoji(e.target.value)} 
                     maxLength={4} 
@@ -866,6 +895,14 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center gap-3">
                   <input 
                     type="text" 
+                    id="site_favicon_emoji_setting"
+                    name="site_favicon_emoji_setting"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     value={faviconEmoji} 
                     onChange={(e) => setFaviconEmoji(e.target.value)} 
                     maxLength={4} 
@@ -1018,6 +1055,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_primary_color"
+                      name="theme_primary_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={primaryColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1059,6 +1101,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_primary_hover_color"
+                      name="theme_primary_hover_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={primaryHoverColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1100,6 +1147,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_accent_color"
+                      name="theme_accent_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={accentColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1141,6 +1193,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_sidebar_icon_color"
+                      name="theme_sidebar_icon_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={sidebarIconColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1190,6 +1247,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_page_bg_color"
+                      name="theme_page_bg_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={backgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1231,6 +1293,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_card_bg_color"
+                      name="theme_card_bg_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={cardBackgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1272,6 +1339,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_card_border_color"
+                      name="theme_card_border_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={cardBorderColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1313,6 +1385,11 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="theme_muted_text_color"
+                      name="theme_muted_text_color"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
                       value={secondaryTextColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1450,7 +1527,8 @@ export default function AdminSettingsPage() {
           </button>
 
           <button
-            type="submit"
+            type="button"
+            onClick={handleSave}
             disabled={isSaving}
             className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary)' }}
@@ -1468,7 +1546,7 @@ export default function AdminSettingsPage() {
             )}
           </button>
         </div>
-      </form>
+      </div>
     </div>
   );
 }
