@@ -6,22 +6,23 @@ export const dynamic = 'force-dynamic';
 async function ensureColumns() {
   try {
     await query(`
-      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(128);
-      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE;
-      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE;
-      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT 0;
-      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '';
+      ALTER TABLE saved_recipes 
+      ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS rating INT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
+      ADD COLUMN IF NOT EXISTS book_id TEXT,
+      ADD COLUMN IF NOT EXISTS source_url TEXT;
     `);
   } catch (_) {}
 }
 
 export async function GET(req: NextRequest) {
-  await ensureColumns();
   try {
+    await ensureColumns();
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
     const category = searchParams.get('category');
-    const bookId = searchParams.get('bookId');
 
     let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
     const params: any[] = [];
@@ -34,11 +35,6 @@ export async function GET(req: NextRequest) {
     if (category && category !== 'all' && category !== 'All Types') {
       params.push(category);
       sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
-    }
-
-    if (bookId) {
-      params.push(bookId);
-      sql += ` AND book_id = $${params.length}`;
     }
 
     sql += ' ORDER BY created_at DESC';
@@ -65,8 +61,6 @@ export async function GET(req: NextRequest) {
       if (typeof tags === 'string') {
         try { tags = JSON.parse(tags); } catch (_) { tags = []; }
       }
-
-      const activeBookId = r.book_id || r.bookId || null;
 
       return {
         ...r,
@@ -95,14 +89,18 @@ export async function GET(req: NextRequest) {
         imageUrl: r.image_url || r.imageUrl || r.image || '',
         image: r.image_url || r.imageUrl || r.image || '',
         image_url: r.image_url || r.imageUrl || r.image || '',
-        isPublic: Boolean(r.is_public),
-        is_public: Boolean(r.is_public),
-        bookId: activeBookId,
-        book_id: activeBookId,
-        isFavorite: Boolean(r.is_favorite),
-        isCooked: Boolean(r.is_cooked),
+        sourceUrl: r.source_url || r.sourceUrl || '',
+        source_url: r.source_url || r.sourceUrl || '',
+        isFavorite: Boolean(r.is_favorite || r.isFavorite),
+        is_favorite: Boolean(r.is_favorite || r.isFavorite),
+        isCooked: Boolean(r.is_cooked || r.isCooked),
+        is_cooked: Boolean(r.is_cooked || r.isCooked),
         rating: Number(r.rating) || 0,
         note: r.note || '',
+        bookId: r.book_id || r.bookId || null,
+        book_id: r.book_id || r.bookId || null,
+        isPublic: Boolean(r.is_public),
+        is_public: Boolean(r.is_public),
         createdAt: r.created_at || new Date().toISOString(),
         updatedAt: r.updated_at || new Date().toISOString()
       };
@@ -118,8 +116,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  await ensureColumns();
   try {
+    await ensureColumns();
     const body = await req.json();
     const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
@@ -162,14 +160,16 @@ export async function POST(req: NextRequest) {
         try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
       }
 
-      const bookId = item.bookId !== undefined ? item.bookId : (item.book_id !== undefined ? item.book_id : null);
-
       await query(`
         INSERT INTO saved_recipes (
           id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
           servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
-          book_id, is_favorite, is_cooked, rating, note, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19, $20, $21, NOW())
+          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16,
+          $17, $18, $19, $20, $21, $22, NOW()
+        )
         ON CONFLICT (id) DO UPDATE SET
           user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
           title = EXCLUDED.title,
@@ -186,11 +186,12 @@ export async function POST(req: NextRequest) {
           tags = EXCLUDED.tags,
           image_url = EXCLUDED.image_url,
           is_public = EXCLUDED.is_public,
+          is_favorite = EXCLUDED.is_favorite,
+          is_cooked = EXCLUDED.is_cooked,
+          rating = EXCLUDED.rating,
+          note = EXCLUDED.note,
           book_id = EXCLUDED.book_id,
-          is_favorite = COALESCE(EXCLUDED.is_favorite, saved_recipes.is_favorite),
-          is_cooked = COALESCE(EXCLUDED.is_cooked, saved_recipes.is_cooked),
-          rating = COALESCE(EXCLUDED.rating, saved_recipes.rating),
-          note = COALESCE(EXCLUDED.note, saved_recipes.note),
+          source_url = EXCLUDED.source_url,
           updated_at = NOW();
       `, [
         id,
@@ -209,15 +210,65 @@ export async function POST(req: NextRequest) {
         JSON.stringify(tags),
         item.imageUrl || item.image || item.image_url || '',
         Boolean(item.isPublic || item.is_public),
-        bookId,
         Boolean(item.isFavorite || item.is_favorite),
         Boolean(item.isCooked || item.is_cooked),
         Number(item.rating) || 0,
-        item.note || ''
+        item.note || '',
+        item.bookId || item.book_id || null,
+        item.sourceUrl || item.source_url || ''
       ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe(s) saved to PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Recipe(s) synchronized with PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    await ensureColumns();
+    const body = await req.json();
+    const { id, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id, sourceUrl, source_url } = body;
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
+    }
+
+    const updates: string[] = [];
+    const params: any[] = [id];
+
+    if (isFavorite !== undefined || is_favorite !== undefined) {
+      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
+      updates.push(`is_favorite = $${params.length}`);
+    }
+    if (isCooked !== undefined || is_cooked !== undefined) {
+      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
+      updates.push(`is_cooked = $${params.length}`);
+    }
+    if (rating !== undefined) {
+      params.push(Number(rating));
+      updates.push(`rating = $${params.length}`);
+    }
+    if (note !== undefined) {
+      params.push(String(note));
+      updates.push(`note = $${params.length}`);
+    }
+    if (bookId !== undefined || book_id !== undefined) {
+      params.push(bookId !== undefined ? bookId : book_id);
+      updates.push(`book_id = $${params.length}`);
+    }
+    if (sourceUrl !== undefined || source_url !== undefined) {
+      params.push(sourceUrl !== undefined ? sourceUrl : source_url);
+      updates.push(`source_url = $${params.length}`);
+    }
+
+    if (updates.length > 0) {
+      updates.push('updated_at = NOW()');
+      await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
+    }
+
+    return NextResponse.json({ success: true, message: 'Recipe updated in PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

@@ -12,7 +12,7 @@ import {
   Grid3X3, Rows3
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
-import { syncUserSavedRecipes, persistSavedRecipe, getLocalRecipes, deleteSavedRecipe } from '@/lib/recipeSync';
+import { syncUserSavedRecipes, persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
 import { getStoredCategories } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -86,7 +86,7 @@ export default function SavedRecipesPage() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // Add to Plan / Calendar Modal State (Dynamic Current Date)
+  // Add to Plan / Calendar Modal State
   const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
   const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [planMealType, setPlanMealType] = useState('Dinner');
@@ -184,9 +184,13 @@ export default function SavedRecipesPage() {
           category: cleanType,
           bookId: r.book_id || r.bookId || null,
           isFavorite: Boolean(r.is_favorite || r.isFavorite),
+          is_favorite: Boolean(r.is_favorite || r.isFavorite),
           isCooked: Boolean(r.is_cooked || r.isCooked),
+          is_cooked: Boolean(r.is_cooked || r.isCooked),
           rating: Number(r.rating) || 0,
           note: r.note || '',
+          sourceUrl: r.source_url || r.sourceUrl || '',
+          source_url: r.source_url || r.sourceUrl || '',
           tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
         };
       });
@@ -285,7 +289,17 @@ export default function SavedRecipesPage() {
     const updatedWithId = updatedUserList.map(r => ({
       ...r,
       userId: targetUserId,
-      bookId: r.bookId || r.book_id || null
+      user_id: targetUserId,
+      bookId: r.bookId || r.book_id || null,
+      book_id: r.bookId || r.book_id || null,
+      isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
+      is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
+      isCooked: Boolean(r.isCooked ?? r.is_cooked),
+      is_cooked: Boolean(r.isCooked ?? r.is_cooked),
+      rating: Number(r.rating) || 0,
+      note: r.note || '',
+      sourceUrl: r.sourceUrl || r.source_url || '',
+      source_url: r.sourceUrl || r.source_url || ''
     }));
 
     setRecipes(updatedWithId);
@@ -305,22 +319,54 @@ export default function SavedRecipesPage() {
     setBooks(updatedBooks);
   };
 
-  const toggleFavorite = (e: React.MouseEvent, id: string) => {
+  const toggleFavorite = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const updated = recipes.map(r => r.id === id ? { ...r, isFavorite: !r.isFavorite } : r);
-    saveAllRecipes(updated);
+    const target = recipes.find(r => r.id === id);
+    if (!target) return;
+    const newFav = !target.isFavorite;
+
+    const updated = recipes.map(r => r.id === id ? { ...r, isFavorite: newFav, is_favorite: newFav } : r);
+    setRecipes(updated);
+
     if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isFavorite: !selectedRecipe.isFavorite });
+      setSelectedRecipe({ ...selectedRecipe, isFavorite: newFav, is_favorite: newFav });
     }
+
+    saveAllRecipes(updated);
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, isFavorite: newFav, is_favorite: newFav })
+      });
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+    } catch (_) {}
   };
 
-  const toggleCooked = (e: React.MouseEvent, id: string) => {
+  const toggleCooked = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const updated = recipes.map(r => r.id === id ? { ...r, isCooked: !r.isCooked } : r);
-    saveAllRecipes(updated);
+    const target = recipes.find(r => r.id === id);
+    if (!target) return;
+    const newCooked = !target.isCooked;
+
+    const updated = recipes.map(r => r.id === id ? { ...r, isCooked: newCooked, is_cooked: newCooked } : r);
+    setRecipes(updated);
+
     if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isCooked: !selectedRecipe.isCooked });
+      setSelectedRecipe({ ...selectedRecipe, isCooked: newCooked, is_cooked: newCooked });
     }
+
+    saveAllRecipes(updated);
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, isCooked: newCooked, is_cooked: newCooked })
+      });
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+    } catch (_) {}
   };
 
   const handleAssignToBook = async (bookId: string) => {
@@ -340,9 +386,9 @@ export default function SavedRecipesPage() {
 
     try {
       await fetch('/api/recipes/saved', {
-        method: 'POST',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedRecipe)
+        body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
       });
       window.dispatchEvent(new Event('zecratary_recipes_updated'));
       window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
@@ -438,12 +484,25 @@ export default function SavedRecipesPage() {
     alert(alertMsg);
   };
 
-  const updateSelectedRecipeState = (key: string, val: any) => {
+  const updateSelectedRecipeState = async (key: string, val: any) => {
     if (!selectedRecipe) return;
     const updatedRec = { ...selectedRecipe, [key]: val };
+    if (key === 'isFavorite') updatedRec.is_favorite = val;
+    if (key === 'isCooked') updatedRec.is_cooked = val;
+    if (key === 'bookId') updatedRec.book_id = val;
+
     setSelectedRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
     saveAllRecipes(updatedList);
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
+      });
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+    } catch (_) {}
   };
 
   const handleDeleteRecipe = async (id: string) => {
@@ -562,7 +621,7 @@ export default function SavedRecipesPage() {
       title: selectedRecipe.title || selectedRecipe.name || '',
       description: selectedRecipe.description || '',
       recipeType: cleanType,
-      sourceUrl: selectedRecipe.sourceUrl || '',
+      sourceUrl: selectedRecipe.sourceUrl || selectedRecipe.source_url || '',
       servings: selectedRecipe.servings || 4,
       prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
       cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
@@ -963,7 +1022,7 @@ export default function SavedRecipesPage() {
             <button
               type="button"
               onClick={() => setFilterFavorites(!filterFavorites)}
-              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
               style={filterFavorites ? {
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-primary)',
@@ -983,7 +1042,7 @@ export default function SavedRecipesPage() {
               <button
                 type="button"
                 onClick={() => setOpenDropdown(openDropdown === 'ingredients' ? null : 'ingredients')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
                 style={selectedIngredientsList.length > 0 || openDropdown === 'ingredients' ? {
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-primary)',
@@ -1071,7 +1130,7 @@ export default function SavedRecipesPage() {
               <button
                 type="button"
                 onClick={() => setOpenDropdown(openDropdown === 'recipeType' ? null : 'recipeType')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
                 style={selectedType !== 'All Types' ? {
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-primary)',
@@ -1120,7 +1179,7 @@ export default function SavedRecipesPage() {
             <button
               type="button"
               onClick={() => setFilterCooked(!filterCooked)}
-              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
               style={filterCooked ? {
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-emerald)',
@@ -1140,7 +1199,7 @@ export default function SavedRecipesPage() {
               <button
                 type="button"
                 onClick={() => setOpenDropdown(openDropdown === 'rating' ? null : 'rating')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
                 style={selectedRating !== 'All Ratings' ? {
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-primary)',
@@ -1190,7 +1249,7 @@ export default function SavedRecipesPage() {
               <button
                 type="button"
                 onClick={() => setOpenDropdown(openDropdown === 'prepTime' ? null : 'prepTime')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
                 style={selectedPrepTime !== 'All Prep Times' ? {
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-emerald)',
@@ -1240,7 +1299,7 @@ export default function SavedRecipesPage() {
               <button
                 type="button"
                 onClick={() => setOpenDropdown(openDropdown === 'cookTime' ? null : 'cookTime')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
                 style={selectedCookTime !== 'All Cook Times' ? {
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-emerald)',
@@ -1325,19 +1384,22 @@ export default function SavedRecipesPage() {
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
                     
+                    {/* Card Action Buttons (Day Mode Contrast Preserved) */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
                         onClick={(e) => toggleCooked(e, r.id)}
-                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer"
+                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
                         style={r.isCooked ? {
                           backgroundColor: 'var(--color-emerald)',
+                          borderColor: 'var(--color-emerald)',
                           color: '#ffffff'
                         } : {
-                          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                          color: '#cbd5e1'
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
                         }}
-                        title={r.isCooked ? "Marked as Cooked" : "Mark as Cooked"}
+                        title={r.isCooked ? (t('cooked') || 'Cooked') : (t('markAsCooked') || 'Mark as Cooked')}
                       >
                         <CheckCircle2 className="h-3.5 w-3.5"/>
                       </button>
@@ -1345,12 +1407,21 @@ export default function SavedRecipesPage() {
                       <button
                         type="button"
                         onClick={(e) => toggleFavorite(e, r.id)}
-                        className="p-1.5 bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-full text-white transition shadow-md border border-slate-700/60 cursor-pointer"
-                        title="Favorite"
+                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
+                        style={r.isFavorite ? {
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        } : {
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
+                        }}
+                        title={r.isFavorite ? (t('favorites') || 'Favorite') : (t('addToFavorites') || 'Add to Favorites')}
                       >
                         <Heart 
                           className={`h-3.5 w-3.5 ${r.isFavorite ? 'fill-current' : ''}`}
-                          style={{ color: r.isFavorite ? 'var(--color-primary)' : '#ffffff' }}
+                          style={{ color: r.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
                         />
                       </button>
                     </div>
@@ -1492,9 +1563,9 @@ export default function SavedRecipesPage() {
           >
             <button
               onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
-              className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer"
+              className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md"
               style={{
-                backgroundColor: 'var(--color-inner-dark)',
+                backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text)'
               }}
@@ -1529,12 +1600,19 @@ export default function SavedRecipesPage() {
                           <Utensils className="h-3.5 w-3.5"/> {recipeCategoryBadge}
                         </span>
                         
+                        {/* Modal Header Favorite Button */}
                         <button
+                          type="button"
                           onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
-                          className="ml-auto w-8 h-8 bg-white/95 rounded-full flex items-center justify-center shadow cursor-pointer"
-                          style={{ color: 'var(--color-primary)' }}
+                          className="ml-auto w-8 h-8 rounded-full flex items-center justify-center shadow-md cursor-pointer transition border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: selectedRecipe.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                          }}
+                          title={selectedRecipe.isFavorite ? "Favorite" : "Mark as Favorite"}
                         >
-                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-current' : 'text-slate-400'}`}/>
+                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-current' : ''}`} style={{ color: selectedRecipe.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
                         </button>
                       </div>
                     </div>
@@ -1547,11 +1625,8 @@ export default function SavedRecipesPage() {
                         type="button"
                         onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
                         className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
-                        style={assignedBook ? {
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        } : {
+                        style={{
+                          backgroundColor: assignedBook ? 'var(--color-inner-dark)' : 'var(--color-card)',
                           borderColor: 'var(--color-primary)',
                           color: 'var(--color-primary)'
                         }}
@@ -1625,6 +1700,7 @@ export default function SavedRecipesPage() {
                       onClick={openAddToPlanModal}
                       className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
                       style={{
+                        backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-primary)',
                         color: 'var(--color-primary)'
                       }}
@@ -1637,6 +1713,7 @@ export default function SavedRecipesPage() {
                       onClick={handleOpenShoppingModal}
                       className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
                       style={{
+                        backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-primary)',
                         color: 'var(--color-primary)'
                       }}
@@ -1657,7 +1734,7 @@ export default function SavedRecipesPage() {
                         <Users className="h-4 w-4"/> {t('servingsLabel') || 'Servings'}
                       </span>
                       <div 
-                        className="flex items-center border rounded-lg overflow-hidden"
+                        className="flex items-center border rounded-lg overflow-hidden shadow-xs"
                         style={{
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-border)'
@@ -1688,6 +1765,7 @@ export default function SavedRecipesPage() {
                         onClick={() => alert(t('timerSetAlert') || 'Kitchen Timer set for 15 minutes!')}
                         className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                         style={{
+                          backgroundColor: 'var(--color-card)',
                           borderColor: 'var(--color-primary)',
                           color: 'var(--color-primary)'
                         }}
@@ -1698,6 +1776,7 @@ export default function SavedRecipesPage() {
                         onClick={handleOpenEdit}
                         className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                         style={{
+                          backgroundColor: 'var(--color-card)',
                           borderColor: 'var(--color-primary)',
                           color: 'var(--color-primary)'
                         }}
@@ -1711,6 +1790,7 @@ export default function SavedRecipesPage() {
                         }}
                         className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                         style={{
+                          backgroundColor: 'var(--color-card)',
                           borderColor: 'var(--color-primary)',
                           color: 'var(--color-primary)'
                         }}
@@ -1732,7 +1812,7 @@ export default function SavedRecipesPage() {
                     <div className="flex items-center justify-between">
                       <button
                         type="button"
-                        onClick={() => updateSelectedRecipeState('isCooked', !selectedRecipe.isCooked)}
+                        onClick={(e) => toggleCooked(e, selectedRecipe.id)}
                         className="flex items-center gap-2.5 text-base font-extrabold group cursor-pointer select-none transition"
                         style={{ color: 'var(--color-text)' }}
                       >
@@ -1741,13 +1821,15 @@ export default function SavedRecipesPage() {
                         </span>
                         
                         <span 
-                          className="w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm"
+                          className="w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm border"
                           style={selectedRecipe.isCooked ? {
                             backgroundColor: 'var(--color-emerald)',
+                            borderColor: 'var(--color-emerald)',
                             color: '#ffffff'
                           } : {
                             border: '1px solid var(--color-border)',
-                            backgroundColor: 'transparent'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: 'var(--color-text-secondary)'
                           }}
                         >
                           {selectedRecipe.isCooked && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
@@ -1822,38 +1904,13 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* SOURCE SECTION */}
-                  <div className="px-5 space-y-1 text-xs">
-                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('source') || 'Source'}</h3>
-                    <div className="pt-0.5">
-                      {selectedRecipe.sourceUrl ? (
-                        <a
-                          href={getSafeHref(selectedRecipe.sourceUrl)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-bold text-sm hover:underline inline-flex items-center gap-1"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          <span className="underline">
-                            {(t('visitSource') || 'Visit {domain}').replace('{domain}', getSafeHostname(selectedRecipe.sourceUrl))}
-                          </span>
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
-                      ) : (
-                        <span style={{ color: 'var(--color-text-secondary)' }}>{t('createdManually') || 'Created manually'}</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
-
                   {/* INGREDIENTS SECTION */}
                   <div className="px-5 space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('ingredientsHeading') || 'Ingredients'}</h3>
                       
                       <div 
-                        className="flex items-center border rounded-lg overflow-hidden text-xs"
+                        className="flex items-center border rounded-lg overflow-hidden text-xs shadow-xs"
                         style={{
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-border)'
@@ -1970,8 +2027,8 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* Delete Option */}
-                  <div className="px-5 flex items-center justify-end text-xs">
+                  {/* MODAL FOOTER: Delete (Left) & Source (Bottom Right) */}
+                  <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
                     <button
                       onClick={() => handleDeleteRecipe(selectedRecipe.id)}
                       className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
@@ -1983,6 +2040,42 @@ export default function SavedRecipesPage() {
                     >
                       <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
                     </button>
+
+                    {/* Moved to Modal Bottom Right */}
+                    <div className="flex items-center gap-2 ml-auto text-xs">
+                      <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                        {t('source') || 'Source'}:
+                      </span>
+                      {selectedRecipe.sourceUrl || selectedRecipe.source_url ? (
+                        <a
+                          href={getSafeHref(selectedRecipe.sourceUrl || selectedRecipe.source_url)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-bold text-xs hover:underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <span className="underline">
+                            {(t('visitSource') || 'Visit {domain}').replace('{domain}', getSafeHostname(selectedRecipe.sourceUrl || selectedRecipe.source_url))}
+                          </span>
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      ) : (
+                        <span 
+                          className="px-3 py-1.5 rounded-xl border text-xs font-medium"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {t('createdManually') || 'Created manually'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ) : (

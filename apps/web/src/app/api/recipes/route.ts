@@ -3,13 +3,28 @@ import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+async function ensureColumns() {
+  try {
+    await query(`
+      ALTER TABLE saved_recipes 
+      ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS rating INT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
+      ADD COLUMN IF NOT EXISTS book_id TEXT,
+      ADD COLUMN IF NOT EXISTS source_url TEXT;
+    `);
+  } catch (_) {}
+}
+
 export async function GET(req: NextRequest) {
   try {
+    await ensureColumns();
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
     const category = searchParams.get('category');
 
-    let sql = 'SELECT * FROM saved_recipes WHERE 1=1';
+    let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
     const params: any[] = [];
 
     if (userId) {
@@ -19,7 +34,7 @@ export async function GET(req: NextRequest) {
 
     if (category && category !== 'all' && category !== 'All Types') {
       params.push(category);
-      sql += ` AND (LOWER(recipe_type) = LOWER($${params.length}) OR LOWER(recipe_type) LIKE LOWER($${params.length}))`;
+      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
     }
 
     sql += ' ORDER BY created_at DESC';
@@ -47,48 +62,45 @@ export async function GET(req: NextRequest) {
         try { tags = JSON.parse(tags); } catch (_) { tags = []; }
       }
 
-      const prepMin = parseInt(String(r.prep_time || '15'), 10) || 15;
-      const cookMin = parseInt(String(r.cook_time || '25'), 10) || 25;
-      const cleanImg = r.image_url || r.imageUrl || r.image || '/uploads/recipes/default.jpg';
-      const cleanTitle = r.title || r.name || 'Untitled Recipe';
-      const cleanType = r.recipe_type || r.recipeType || r.category || 'Main Dish';
-
       return {
         ...r,
         id: r.id,
         userId: r.user_id || r.userId || 'usr_admin_1',
         user_id: r.user_id || r.userId || 'usr_admin_1',
-        title: cleanTitle,
-        name: cleanTitle,
+        title: r.title || r.name || 'Untitled Recipe',
+        name: r.title || r.name || 'Untitled Recipe',
         description: r.description || '',
-        recipeType: cleanType,
-        category: cleanType,
-        recipe_type: cleanType,
+        recipeType: r.recipe_type || 'Main Dish',
+        category: r.recipe_type || 'Main Dish',
+        recipe_type: r.recipe_type || 'Main Dish',
         cuisine: r.cuisine || '',
-        prepTime: r.prep_time || `${prepMin} mins`,
-        cookTime: r.cook_time || `${cookMin} mins`,
-        prepTimeMinutes: prepMin,
-        cookTimeMinutes: cookMin,
-        servings: parseInt(String(r.servings || '4'), 10) || 4,
+        prepTime: r.prep_time || '15',
+        cookTime: r.cook_time || '25',
+        prepTimeMinutes: Number(r.prep_time) || 15,
+        cookTimeMinutes: Number(r.cook_time) || 25,
+        servings: Number(r.servings) || 4,
         difficulty: r.difficulty || 'Medium',
         ingredients: Array.isArray(ingredients) ? ingredients : [],
         directions: Array.isArray(directions) ? directions : [],
         instructions: Array.isArray(directions) ? directions : [],
         steps: Array.isArray(directions) ? directions : [],
         nutrition: nutrition || {},
-        tags: Array.isArray(tags) ? tags : [cleanType],
-        imageUrl: cleanImg,
-        image: cleanImg,
-        image_url: cleanImg,
+        tags: Array.isArray(tags) ? tags : [],
+        imageUrl: r.image_url || r.imageUrl || r.image || '',
+        image: r.image_url || r.imageUrl || r.image || '',
+        image_url: r.image_url || r.imageUrl || r.image || '',
         sourceUrl: r.source_url || r.sourceUrl || '',
         source_url: r.source_url || r.sourceUrl || '',
         isFavorite: Boolean(r.is_favorite || r.isFavorite),
+        is_favorite: Boolean(r.is_favorite || r.isFavorite),
         isCooked: Boolean(r.is_cooked || r.isCooked),
+        is_cooked: Boolean(r.is_cooked || r.isCooked),
         rating: Number(r.rating) || 0,
         note: r.note || '',
         bookId: r.book_id || r.bookId || null,
         book_id: r.book_id || r.bookId || null,
-        isPublic: Boolean(r.is_public || r.isPublic),
+        isPublic: Boolean(r.is_public),
+        is_public: Boolean(r.is_public),
         createdAt: r.created_at || new Date().toISOString(),
         updatedAt: r.updated_at || new Date().toISOString()
       };
@@ -105,27 +117,25 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureColumns();
     const body = await req.json();
     const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
     for (const item of items) {
       if (!item) continue;
-      const rawTitle = item.title || item.name || 'Untitled Recipe';
-      const cleanTitle = String(rawTitle).trim().slice(0, 250);
-      const id = String(item.id || 'rec_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)).slice(0, 64);
+      const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
-      let targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
-
-      let validUserId: string | null = null;
-      if (targetUserId) {
-        const u = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
-        if (u.length > 0) {
-          validUserId = u[0].id;
-        } else {
-          const adminUser = await query("SELECT id FROM users WHERE id = 'usr_admin_1' OR role = 'admin' LIMIT 1");
-          if (adminUser.length > 0) validUserId = adminUser[0].id;
+      try {
+        const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
+        if (userCheck.length === 0) {
+          await query(`
+            INSERT INTO users (id, name, email, role, subscription_plan)
+            VALUES ($1, 'User', $2, 'user', 'taster')
+            ON CONFLICT (id) DO NOTHING;
+          `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
         }
-      }
+      } catch (_) {}
 
       let ingredients = item.ingredients;
       if (typeof ingredients === 'string') {
@@ -150,26 +160,16 @@ export async function POST(req: NextRequest) {
         try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
       }
 
-      const recipeType = String(item.recipeType || item.category || item.recipe_type || 'Main Dish').slice(0, 64);
-      const cuisine = String(item.cuisine || '').slice(0, 64);
-      const prepTime = String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15').slice(0, 32);
-      const cookTime = String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25').slice(0, 32);
-      const servings = String(item.servings || '4').slice(0, 32);
-      const difficulty = String(item.difficulty || 'Medium').slice(0, 32);
-      const imageUrl = String(item.imageUrl || item.image || item.image_url || '');
-      const sourceUrl = String(item.sourceUrl || item.source_url || '');
-      const bookId = item.bookId || item.book_id ? String(item.bookId || item.book_id).slice(0, 64) : null;
-      const isFavorite = Boolean(item.isFavorite || item.is_favorite);
-      const isCooked = Boolean(item.isCooked || item.is_cooked);
-      const rating = Number(item.rating) || 0;
-      const note = String(item.note || '');
-
       await query(`
         INSERT INTO saved_recipes (
           id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, nutrition, tags, image_url, source_url,
-          book_id, is_favorite, is_cooked, rating, note, is_public, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19, $20, $21, $22, NOW())
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
+          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16,
+          $17, $18, $19, $20, $21, $22, NOW()
+        )
         ON CONFLICT (id) DO UPDATE SET
           user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
           title = EXCLUDED.title,
@@ -185,43 +185,91 @@ export async function POST(req: NextRequest) {
           nutrition = EXCLUDED.nutrition,
           tags = EXCLUDED.tags,
           image_url = EXCLUDED.image_url,
-          source_url = EXCLUDED.source_url,
-          book_id = EXCLUDED.book_id,
+          is_public = EXCLUDED.is_public,
           is_favorite = EXCLUDED.is_favorite,
           is_cooked = EXCLUDED.is_cooked,
           rating = EXCLUDED.rating,
           note = EXCLUDED.note,
-          is_public = EXCLUDED.is_public,
+          book_id = EXCLUDED.book_id,
+          source_url = EXCLUDED.source_url,
           updated_at = NOW();
       `, [
         id,
-        validUserId,
-        cleanTitle,
+        targetUserId,
+        item.title || item.name || 'Untitled Recipe',
         item.description || '',
-        recipeType,
-        cuisine,
-        prepTime,
-        cookTime,
-        servings,
-        difficulty,
+        item.recipeType || item.category || item.recipe_type || 'Main Dish',
+        item.cuisine || '',
+        String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15'),
+        String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25'),
+        String(item.servings || '4'),
+        item.difficulty || 'Medium',
         JSON.stringify(ingredients),
         JSON.stringify(directions),
         JSON.stringify(nutrition),
         JSON.stringify(tags),
-        imageUrl,
-        sourceUrl,
-        bookId,
-        isFavorite,
-        isCooked,
-        rating,
-        note,
-        Boolean(item.isPublic || item.is_public)
+        item.imageUrl || item.image || item.image_url || '',
+        Boolean(item.isPublic || item.is_public),
+        Boolean(item.isFavorite || item.is_favorite),
+        Boolean(item.isCooked || item.is_cooked),
+        Number(item.rating) || 0,
+        item.note || '',
+        item.bookId || item.book_id || null,
+        item.sourceUrl || item.source_url || ''
       ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe(s) saved to PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Recipe(s) synchronized with PostgreSQL.' });
   } catch (err: any) {
-    console.error('[POST /api/recipes/saved] Error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    await ensureColumns();
+    const body = await req.json();
+    const { id, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id, sourceUrl, source_url } = body;
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
+    }
+
+    const updates: string[] = [];
+    const params: any[] = [id];
+
+    if (isFavorite !== undefined || is_favorite !== undefined) {
+      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
+      updates.push(`is_favorite = $${params.length}`);
+    }
+    if (isCooked !== undefined || is_cooked !== undefined) {
+      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
+      updates.push(`is_cooked = $${params.length}`);
+    }
+    if (rating !== undefined) {
+      params.push(Number(rating));
+      updates.push(`rating = $${params.length}`);
+    }
+    if (note !== undefined) {
+      params.push(String(note));
+      updates.push(`note = $${params.length}`);
+    }
+    if (bookId !== undefined || book_id !== undefined) {
+      params.push(bookId !== undefined ? bookId : book_id);
+      updates.push(`book_id = $${params.length}`);
+    }
+    if (sourceUrl !== undefined || source_url !== undefined) {
+      params.push(sourceUrl !== undefined ? sourceUrl : source_url);
+      updates.push(`source_url = $${params.length}`);
+    }
+
+    if (updates.length > 0) {
+      updates.push('updated_at = NOW()');
+      await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
+    }
+
+    return NextResponse.json({ success: true, message: 'Recipe updated in PostgreSQL.' });
+  } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
