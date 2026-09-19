@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.4.6",
+  "version": "7.4.8",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.4.6",
+  "version": "7.4.8",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -1454,7 +1454,7 @@ import {
   Trash2, Save, Plus, ImagePlus, Users, Calendar,
   GripVertical, CheckSquare, CheckCircle2, Type, ExternalLink,
   Carrot, Hourglass, ChevronLeft, ChevronRight, LayoutGrid,
-  Grid3X3, Rows3, Play, Pause, RotateCcw, Bell
+  Grid3X3, Rows3, Play, Pause, Bell
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { syncUserSavedRecipes, persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
@@ -1594,7 +1594,6 @@ export default function SavedRecipesPage() {
     { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
   ];
 
-  // Play culinary synthesized bell audio on completion
   const playTimerEndSound = useCallback(() => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -1602,7 +1601,7 @@ export default function SavedRecipesPage() {
       const ctx = audioCtxRef.current || new AudioCtx();
       audioCtxRef.current = ctx;
 
-      const notes = [587.33, 880, 1174.66, 1760]; // D5, A5, D6, A6 culinary chime
+      const notes = [587.33, 880, 1174.66, 1760];
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -1621,7 +1620,6 @@ export default function SavedRecipesPage() {
     }
   }, []);
 
-  // Restore existing timer from localStorage on mount
   useEffect(() => {
     try {
       const savedTimerRaw = localStorage.getItem('zecratary_active_timer');
@@ -1642,7 +1640,6 @@ export default function SavedRecipesPage() {
     } catch (_) {}
   }, []);
 
-  // Active Timer Countdown Effect
   useEffect(() => {
     if (!activeTimer || !activeTimer.isRunning) return;
 
@@ -1720,31 +1717,44 @@ export default function SavedRecipesPage() {
   const loadData = useCallback(async (user: User | null) => {
     if (!user) return;
     setCategories(getStoredCategories());
-    const targetUserId = (user.id || 'usr_admin_1').trim();
+    const targetUserId = (user.id || user.email || '').trim();
+    if (!targetUserId) return;
 
     try {
       setLoading(true);
-      const rawRecipes = await syncUserSavedRecipes(targetUserId);
+      const rawRecipes = await syncUserSavedRecipes(targetUserId, user.email);
 
-      const userRecipes = rawRecipes.map((r: any) => {
-        const cleanType = getCleanRecipeType(r);
-        return {
-          ...r,
-          userId: targetUserId,
-          recipeType: cleanType,
-          category: cleanType,
-          bookId: r.book_id || r.bookId || null,
-          isFavorite: Boolean(r.is_favorite || r.isFavorite),
-          is_favorite: Boolean(r.is_favorite || r.isFavorite),
-          isCooked: Boolean(r.is_cooked || r.isCooked),
-          is_cooked: Boolean(r.is_cooked || r.isCooked),
-          rating: Number(r.rating) || 0,
-          note: r.note || '',
-          sourceUrl: r.source_url || r.sourceUrl || '',
-          source_url: r.source_url || r.sourceUrl || '',
-          tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
-        };
-      });
+      // Verify creator identity explicitly on incoming records
+      const userRecipes = rawRecipes
+        .filter((r: any) => {
+          const rUser = String(r.user_id || r.userId || '').trim();
+          const rCreator = String(r.created_by || r.createdBy || '').trim();
+          return rUser === targetUserId || (user.email && (rUser === user.email || rCreator === user.email));
+        })
+        .map((r: any) => {
+          const cleanType = getCleanRecipeType(r);
+          return {
+            ...r,
+            userId: targetUserId,
+            user_id: targetUserId,
+            createdBy: r.created_by || r.createdBy || user.email || targetUserId,
+            created_by: r.created_by || r.createdBy || user.email || targetUserId,
+            creatorName: r.creator_name || r.creatorName || user.name || 'You',
+            creator_name: r.creator_name || r.creatorName || user.name || 'You',
+            recipeType: cleanType,
+            category: cleanType,
+            bookId: r.book_id || r.bookId || null,
+            isFavorite: Boolean(r.is_favorite || r.isFavorite),
+            is_favorite: Boolean(r.is_favorite || r.isFavorite),
+            isCooked: Boolean(r.is_cooked || r.isCooked),
+            is_cooked: Boolean(r.is_cooked || r.isCooked),
+            rating: Number(r.rating) || 0,
+            note: r.note || '',
+            sourceUrl: r.source_url || r.sourceUrl || '',
+            source_url: r.source_url || r.sourceUrl || '',
+            tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
+          };
+        });
 
       setRecipes(userRecipes);
 
@@ -1835,12 +1845,16 @@ export default function SavedRecipesPage() {
 
   const saveAllRecipes = (updatedUserList: any[]) => {
     if (!currentUser) return;
-    const targetUserId = currentUser.id || 'usr_admin_1';
+    const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
     const updatedWithId = updatedUserList.map(r => ({
       ...r,
       userId: targetUserId,
       user_id: targetUserId,
+      createdBy: r.createdBy || r.created_by || currentUser.email || targetUserId,
+      created_by: r.createdBy || r.created_by || currentUser.email || targetUserId,
+      creatorName: r.creatorName || r.creator_name || currentUser.name || 'You',
+      creator_name: r.creatorName || r.creator_name || currentUser.name || 'You',
       bookId: r.bookId || r.book_id || null,
       book_id: r.bookId || r.book_id || null,
       isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
@@ -1855,7 +1869,10 @@ export default function SavedRecipesPage() {
 
     setRecipes(updatedWithId);
 
-    persistSavedRecipe(targetUserId, updatedWithId).then(() => {
+    persistSavedRecipe(targetUserId, updatedWithId, {
+      createdBy: currentUser.email || targetUserId,
+      creatorName: currentUser.name || 'You'
+    }).then(() => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
       }
@@ -1965,13 +1982,13 @@ export default function SavedRecipesPage() {
 
     const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
     const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80';
-    const targetUserId = currentUser.id || 'usr_admin_1';
+    const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
     const newPlanItem = {
       id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
       userId: targetUserId,
       user_id: targetUserId,
-      createdBy: currentUser.email || 'user@zecratary.local',
+      createdBy: currentUser.email || targetUserId,
       creatorName: currentUser.name || 'User',
       date: planDate,
       recipeId: selectedRecipe.id,
@@ -2079,7 +2096,7 @@ export default function SavedRecipesPage() {
       ]);
 
       if (typeof deleteSavedRecipe === 'function') {
-        await deleteSavedRecipe(currentUser?.id || 'usr_admin_1', id).catch(() => {});
+        await deleteSavedRecipe(currentUser?.id || currentUser?.email || 'usr_admin_1', id).catch(() => {});
       }
 
       const updated = recipes.filter(r => r.id !== id);
@@ -2203,11 +2220,17 @@ export default function SavedRecipesPage() {
     }
 
     const cleanType = getCleanRecipeType(editForm);
+    const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
 
     const updatedRec = {
       ...selectedRecipe,
       ...editForm,
-      userId: currentUser?.id || selectedRecipe.userId || 'usr_admin_1',
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: selectedRecipe.createdBy || currentUser?.email || targetUserId,
+      created_by: selectedRecipe.created_by || currentUser?.email || targetUserId,
+      creatorName: selectedRecipe.creatorName || currentUser?.name || 'You',
+      creator_name: selectedRecipe.creator_name || currentUser?.name || 'You',
       recipeType: cleanType,
       category: cleanType,
       tags: [cleanType]
@@ -2326,13 +2349,13 @@ export default function SavedRecipesPage() {
 
     const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Recipe';
     const recId = selectedRecipe?.id;
-    const targetUserId = currentUser?.id || 'usr_admin_1';
+    const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
 
     const formatted = selectedItems.map(i => ({
       id: 'shop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
       userId: targetUserId,
       user_id: targetUserId,
-      createdBy: currentUser?.email || 'user@zecratary.local',
+      createdBy: currentUser?.email || targetUserId,
       creatorName: currentUser?.name || 'User',
       name: i.name,
       item: i.name,
@@ -2384,7 +2407,6 @@ export default function SavedRecipesPage() {
     alert(alertMsg);
   };
 
-  // Timer controls
   const handleOpenTimerModal = () => {
     const defaultMins = Math.min(60, Math.max(1, selectedRecipe?.cookTimeMinutes || 15));
     setTimerInputMinutes(defaultMins);
@@ -2411,12 +2433,11 @@ export default function SavedRecipesPage() {
 
     try {
       localStorage.setItem('zecratary_active_timer', JSON.stringify(newTimerState));
-      // Asynchronously record / sync active timer to PostgreSQL backend
       fetch('/api/timer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: currentUser?.id || 'usr_admin_1',
+          userId: currentUser?.id || currentUser?.email || 'usr_admin_1',
           recipeId: selectedRecipe?.id,
           durationMinutes: safeMinutes,
           startedAt: new Date().toISOString()
@@ -2529,7 +2550,6 @@ export default function SavedRecipesPage() {
   const currentTotalServings = baseServings * servingsMultiplier;
   const recipeCategoryBadge = selectedRecipe ? getCleanRecipeType(selectedRecipe) : 'Main Dish';
 
-  // Format MM:SS for countdown timer display
   const formattedCountdown = useMemo(() => {
     if (!activeTimer) return '00:00';
     const mins = Math.floor(activeTimer.remainingSeconds / 60);
@@ -2975,6 +2995,47 @@ export default function SavedRecipesPage() {
         <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
           {t('loadingRecipes') || 'Loading recipes...'}
         </div>
+      ) : recipes.length === 0 ? (
+        <div 
+          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div 
+            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm"
+            style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' }}
+          >
+            <Utensils className="h-6 w-6"/>
+          </div>
+          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
+            {t('noSavedRecipesTitle') || 'No Recipes Yet'}
+          </h3>
+          <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('noSavedRecipesDesc') || 'Recipes imported or created by your account will appear exclusively here.'}
+          </p>
+          <div className="flex justify-center gap-3 pt-2">
+            <Link 
+              href="/import"
+              className="px-4 py-2 rounded-xl text-xs font-bold border transition shadow-sm"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              {t('importRecipe') || 'Import Recipe'}
+            </Link>
+            <Link 
+              href="/manual"
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow-sm"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+            >
+              {t('createRecipe') || 'Create Recipe'}
+            </Link>
+          </div>
+        </div>
       ) : (
         <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-4 sm:gap-5`}>
           {paginatedRecipes.map((r) => {
@@ -3073,6 +3134,18 @@ export default function SavedRecipesPage() {
                       style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       {cardTypeBadge}
+                    </span>
+
+                    {/* Creator Tag Badge */}
+                    <span 
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 border"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {r.creatorName ? `${t('by') || 'By'} ${r.creatorName}` : (t('ownedByYou') || 'Created by you')}
                     </span>
 
                     {(r.rating || 0) > 0 && gridMode !== '5x5' ? (
@@ -3249,6 +3322,21 @@ export default function SavedRecipesPage() {
                           <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
                           <span className="font-bold">{recipeCategoryBadge}</span>
                         </span>
+
+                        {/* Creator Tag in Modal */}
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Users className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">
+                            {selectedRecipe.creatorName ? `${t('creator') || 'Creator'}: ${selectedRecipe.creatorName}` : (t('ownedByYou') || 'Created by you')}
+                          </span>
+                        </span>
                         
                         {/* Modal Header Favorite Button */}
                         <button
@@ -3411,7 +3499,6 @@ export default function SavedRecipesPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {/* Timer Button: Launches 1-60 mins setting popup */}
                       <button
                         type="button"
                         onClick={handleOpenTimerModal}
@@ -4266,7 +4353,7 @@ export default function SavedRecipesPage() {
         </div>
       )}
 
-      {/* TIMER SETTINGS POPUP MODAL (Up to 60 Minutes) */}
+      {/* TIMER SETTINGS POPUP MODAL */}
       {isTimerModalOpen && (
         <div 
           onClick={() => setIsTimerModalOpen(false)}
@@ -4315,7 +4402,6 @@ export default function SavedRecipesPage() {
               </p>
             </div>
 
-            {/* Minutes Display & Steppers */}
             <div 
               className="p-4 rounded-2xl border flex flex-col items-center justify-center gap-3 shadow-inner"
               style={{
@@ -4362,7 +4448,6 @@ export default function SavedRecipesPage() {
                 </button>
               </div>
 
-              {/* Range slider (1 to 60) */}
               <input
                 type="range"
                 min={1}
@@ -4373,7 +4458,6 @@ export default function SavedRecipesPage() {
               />
             </div>
 
-            {/* Quick Presets */}
             <div className="space-y-1.5">
               <span className="text-[11px] font-bold uppercase tracking-wider block" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('quickPresets') || 'Quick Presets'}:
@@ -4401,7 +4485,6 @@ export default function SavedRecipesPage() {
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div className="flex justify-end gap-2.5 pt-2">
               <button
                 type="button"
@@ -4446,7 +4529,6 @@ export default function SavedRecipesPage() {
             color: 'var(--color-text)'
           }}
         >
-          {/* Pulsing Timer Icon or Bell */}
           <div 
             className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md shrink-0 transition"
             style={{
@@ -4461,7 +4543,6 @@ export default function SavedRecipesPage() {
             )}
           </div>
 
-          {/* Time & Recipe Meta */}
           <div className="space-y-0.5 pr-1">
             <div className="flex items-center gap-2">
               <span className="text-xl font-black tracking-tight tabular-nums" style={{ color: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-text)' }}>
@@ -4479,7 +4560,6 @@ export default function SavedRecipesPage() {
             </p>
           </div>
 
-          {/* Controls: Pause/Resume & Dismiss/Reset */}
           <div className="flex items-center gap-1.5 pl-1 border-l" style={{ borderColor: 'var(--color-border)' }}>
             {activeTimer.remainingSeconds > 0 && (
               <button
@@ -32487,7 +32567,15 @@ export default function ProfilePage() {
       let active = getCurrentUser() as ExtendedUser | null;
 
       if (!active && typeof document !== 'undefined') {
-        const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
+        let match: RegExpMatchArray | null = null;
+        const authKeys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
+        for (const k of authKeys) {
+          const m = document.cookie.match(new RegExp('(?:^|;\\s*)' + k + '=([^;]+)'));
+          if (m && m[1]) {
+            match = m;
+            break;
+          }
+        }
         if (match && match[1]) {
           try {
             const cookieData = JSON.parse(decodeURIComponent(match[1]));
@@ -34127,39 +34215,79 @@ export async function DELETE(req: NextRequest) {
 ## File: `apps/web/src/app/api/auth/google-session/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { syncUserToPostgres } from '@/lib/postgresUser';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const sessionCookie = req.cookies.get('zecratary_session')?.value;
-    if (!sessionCookie) {
-      return NextResponse.json({ authenticated: false }, { status: 401 });
+    const body = await req.json();
+    const profile = body.profile;
+    const requestedCallback = body.callbackUrl;
+
+    if (!profile || !profile.email) {
+      return NextResponse.json({ error: 'Missing profile email' }, { status: 400 });
     }
 
-    let parsed: any;
-    try {
-      parsed = JSON.parse(decodeURIComponent(sessionCookie));
-    } catch (_) {
-      parsed = JSON.parse(sessionCookie);
+    const email = profile.email.toLowerCase().trim();
+    const name = profile.name || profile.given_name || email.split('@')[0];
+    const picture = profile.picture || '';
+    const googleId = profile.sub || profile.id || Date.now().toString();
+
+    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
+
+    const candidateUser = {
+      id: `usr_g_${googleId}`,
+      name,
+      email,
+      role: isEmailAdmin ? 'admin' : 'user',
+      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
+      picture,
+      avatar: picture,
+      createdAt: new Date().toISOString()
+    };
+
+    const finalUser = await syncUserToPostgres(candidateUser);
+
+    let targetUrl = (requestedCallback || '').trim();
+    if (
+      !targetUrl || 
+      targetUrl === '/login' || 
+      targetUrl.startsWith('/login?') || 
+      targetUrl.startsWith('/login/') ||
+      targetUrl === '/register'
+    ) {
+      targetUrl = finalUser.role === 'admin' ? '/admin' : '/profile';
     }
 
-    if (!parsed?.email) {
-      return NextResponse.json({ authenticated: false }, { status: 401 });
+    const response = NextResponse.json({
+      success: true,
+      user: finalUser,
+      redirectUrl: targetUrl
+    });
+
+    const serializedUser = JSON.stringify(finalUser);
+    const cookieNames = [
+      'zecratary_session',
+      'zecratary_current_user',
+      'zecratary_auth_session',
+      'currentUser'
+    ];
+
+    for (const cname of cookieNames) {
+      response.cookies.set(cname, serializedUser, {
+        path: '/',
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 86400 * 7
+      });
     }
 
-    const rows = await query('SELECT id, name, email, role, subscription_plan AS "subscriptionPlan" FROM users WHERE email = $1 LIMIT 1', [parsed.email.toLowerCase().trim()]);
-    if (rows.length === 0) {
-      return NextResponse.json({ authenticated: false }, { status: 401 });
-    }
-
-    return NextResponse.json({
-      authenticated: true,
-      user: rows[0]
-    }, { headers: { 'Cache-Control': 'no-store' } });
+    return response;
   } catch (err: any) {
-    return NextResponse.json({ authenticated: false, error: err.message }, { status: 500 });
+    console.error('[google-session] Error:', err);
+    return NextResponse.json({ error: err.message || 'Session creation failed' }, { status: 500 });
   }
 }
 
@@ -34322,35 +34450,86 @@ export async function POST(req: Request) {
 ## File: `apps/web/src/app/api/auth/callback/google/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
+import { syncUserToPostgres } from '@/lib/postgresUser';
 
 export const dynamic = 'force-dynamic';
 
+function getAdminSettings(): any {
+  const cwd = process.cwd();
+  const paths = [
+    path.join(cwd, 'apps/web/data/admin_settings.json'),
+    path.join(cwd, 'data/admin_settings.json')
+  ];
+  for (const p of paths) {
+    if (fs.existsSync(p)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch (_) {}
+    }
+  }
+  return {};
+}
+
+function getRedirectUri(req: NextRequest): string {
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || new URL(req.url).host;
+  const proto = req.headers.get('x-forwarded-proto') || (req.url.startsWith('https') ? 'https' : 'http');
+  return `${proto}://${host}/api/auth/callback/google`;
+}
+
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const code = searchParams.get('code');
-  const error = searchParams.get('error');
+  const url = new URL(req.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const error = url.searchParams.get('error');
 
-  const origin = req.nextUrl.origin || 'http://localhost:3000';
+  if (error) {
+    const errUrl = new URL('/login', req.url);
+    errUrl.searchParams.set('error', error === 'access_denied' ? 'google_access_denied' : error);
+    return NextResponse.redirect(errUrl);
+  }
 
-  if (error || !code) {
-    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(error || 'Google authorization cancelled')}`);
+  if (!code) {
+    const errUrl = new URL('/login', req.url);
+    errUrl.searchParams.set('error', 'missing_code');
+    return NextResponse.redirect(errUrl);
+  }
+
+  let callbackUrl = '';
+  if (state) {
+    try {
+      const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
+      if (decoded.callbackUrl) callbackUrl = decoded.callbackUrl;
+    } catch (_) {}
+  }
+
+  const settings = getAdminSettings();
+  const social = settings?.socialLogin || {};
+  const clientId = (
+    social.googleClientId || 
+    process.env.GOOGLE_CLIENT_ID || 
+    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || 
+    ''
+  ).trim();
+
+  const clientSecret = (
+    social.googleClientSecret || 
+    process.env.GOOGLE_CLIENT_SECRET || 
+    process.env.GOOGLE_SECRET || 
+    ''
+  ).trim();
+
+  const redirectUri = getRedirectUri(req);
+
+  if (!clientId || !clientSecret) {
+    const errUrl = new URL('/login', req.url);
+    errUrl.searchParams.set('error', 'missing_google_client_secret');
+    return NextResponse.redirect(errUrl);
   }
 
   try {
-    // 1. Fetch Client Secrets from PostgreSQL admin_settings
-    const settingsRows = await query('SELECT social_login FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-    const googleConfig = settingsRows[0]?.social_login?.google || {};
-
-    const clientId = googleConfig.clientId || process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = googleConfig.clientSecret || process.env.GOOGLE_CLIENT_SECRET;
-    const redirectUri = `${origin}/api/auth/callback/google`;
-
-    if (!clientId || !clientSecret) {
-      return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent('Google OAuth is not fully configured in Admin.')}`);
-    }
-
-    // 2. Exchange authorization code for access token
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -34364,76 +34543,128 @@ export async function GET(req: NextRequest) {
     });
 
     const tokenData = await tokenRes.json();
-    if (!tokenRes.ok || !tokenData.access_token) {
-      return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(tokenData.error_description || 'Token exchange failed')}`);
+    if (!tokenRes.ok || (!tokenData.access_token && !tokenData.id_token)) {
+      console.error('[OAuth Callback] Token Exchange Failure:', tokenData);
+      const errUrl = new URL('/login', req.url);
+      errUrl.searchParams.set('error', 'token_exchange_failed');
+      return NextResponse.redirect(errUrl);
     }
 
-    // 3. Fetch Google User Profile
-    const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` }
-    });
-    const profile = await profileRes.json();
+    let profile: any = {};
+    if (tokenData.id_token) {
+      try {
+        const payloadBase64 = tokenData.id_token.split('.')[1];
+        profile = JSON.parse(Buffer.from(payloadBase64, 'base64url').toString('utf-8'));
+      } catch (_) {}
+    }
+
+    if (!profile.email && tokenData.access_token) {
+      try {
+        const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${tokenData.access_token}` }
+        });
+        if (userRes.ok) {
+          const uData = await userRes.json();
+          profile = { ...profile, ...uData };
+        }
+      } catch (_) {}
+    }
 
     if (!profile.email) {
-      return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent('Could not retrieve email from Google profile')}`);
+      const errUrl = new URL('/login', req.url);
+      errUrl.searchParams.set('error', 'no_email_returned');
+      return NextResponse.redirect(errUrl);
     }
 
     const email = profile.email.toLowerCase().trim();
-    const name = profile.name || email.split('@')[0];
+    const name = profile.name || profile.given_name || email.split('@')[0];
+    const picture = profile.picture || '';
+    const googleId = profile.sub || Date.now().toString();
 
-    // 4. Query or Create User in PostgreSQL users table
-    const existingUsers = await query('SELECT * FROM users WHERE email = $1 LIMIT 1', [email]);
-    let activeUser: any;
+    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
 
-    if (existingUsers.length > 0) {
-      activeUser = existingUsers[0];
-      await query(`
-        UPDATE users SET
-          name = COALESCE($1, name),
-          updated_at = NOW()
-        WHERE email = $2
-      `, [name, email]);
-    } else {
-      const newId = 'usr_google_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      const isFirstAdmin = email === 'admin@zecratary.com' || email.includes('admin@');
-      const role = isFirstAdmin ? 'admin' : 'user';
-
-      await query(`
-        INSERT INTO users (id, name, email, role, subscription_plan, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, 'taster', NOW(), NOW())
-      `, [newId, name, email, role]);
-
-      activeUser = {
-        id: newId,
-        name,
-        email,
-        role,
-        subscriptionPlan: 'taster'
-      };
-    }
-
-    const sessionPayload = {
-      id: activeUser.id,
-      name: activeUser.name,
-      email: activeUser.email,
-      role: activeUser.role,
-      subscriptionPlan: activeUser.subscription_plan || activeUser.subscriptionPlan || 'taster',
-      provider: 'google'
+    const candidateUser = {
+      id: `usr_g_${googleId}`,
+      name,
+      email,
+      role: isEmailAdmin ? 'admin' : 'user',
+      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
+      picture,
+      avatar: picture,
+      createdAt: new Date().toISOString()
     };
 
-    const targetRoute = activeUser.role === 'admin' ? '/admin' : '/dashboard';
-    const response = NextResponse.redirect(`${origin}${targetRoute}`);
+    const finalUser = await syncUserToPostgres(candidateUser);
 
-    response.cookies.set('zecratary_session', JSON.stringify(sessionPayload), {
-      path: '/',
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 60 * 60 * 24 * 7 // 7 days
+    let destination = callbackUrl;
+    if (!destination || destination === '/login' || destination.startsWith('/login?') || destination.startsWith('/login/')) {
+      destination = finalUser.role === 'admin' ? '/admin' : '/profile';
+    }
+
+    const serializedUser = JSON.stringify(finalUser);
+
+    const htmlBridge = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Signing In...</title>
+  <script>
+    (function() {
+      try {
+        var user = ${serializedUser};
+        var encoded = encodeURIComponent(JSON.stringify(user));
+        var rawJson = JSON.stringify(user);
+
+        var keys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser', 'user'];
+        for (var i = 0; i < keys.length; i++) {
+          localStorage.setItem(keys[i], rawJson);
+          document.cookie = keys[i] + '=' + encoded + '; path=/; max-age=604800; SameSite=Lax';
+        }
+
+        window.dispatchEvent(new Event('zecratary_auth_changed'));
+        window.dispatchEvent(new Event('storage'));
+      } catch (err) {
+        console.error('Session bridge error:', err);
+      }
+      window.location.replace(${JSON.stringify(destination)});
+    })();
+  </script>
+</head>
+<body style="background:#0b0f17;color:#ffffff;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+  <div style="text-align:center;padding:24px;">
+    <div style="width:40px;height:40px;border:3px solid #E05638;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px;"></div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Signed in as ${name}</div>
+    <div style="font-size:12px;color:#94a3b8;">Redirecting to your dashboard...</div>
+  </div>
+  <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
+</body>
+</html>`;
+
+    const response = new NextResponse(htmlBridge, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
     });
+
+    const cookieNames = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
+    for (const cname of cookieNames) {
+      response.cookies.set(cname, serializedUser, {
+        path: '/',
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 86400 * 7
+      });
+    }
 
     return response;
   } catch (err: any) {
-    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(err.message || 'Authentication error')}`);
+    console.error('[OAuth Callback Exception]:', err);
+    const errUrl = new URL('/login', req.url);
+    errUrl.searchParams.set('error', err.message || 'oauth_handshake_error');
+    return NextResponse.redirect(errUrl);
   }
 }
 
@@ -34555,27 +34786,8 @@ export async function GET(req: NextRequest) {
 ## File: `apps/web/src/app/api/auth/login/[provider]/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
 
 export const dynamic = 'force-dynamic';
-
-function getAdminSettings(): any {
-  const cwd = process.cwd();
-  const paths = [
-    path.join(cwd, 'apps/web/data/admin_settings.json'),
-    path.join(cwd, 'data/admin_settings.json')
-  ];
-  for (const p of paths) {
-    if (fs.existsSync(p)) {
-      try {
-        const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
-        if (parsed && typeof parsed === 'object') return parsed;
-      } catch (_) {}
-    }
-  }
-  return {};
-}
 
 export async function GET(
   req: NextRequest, 
@@ -34585,56 +34797,16 @@ export async function GET(
   const provider = (params?.provider || '').toLowerCase();
   const url = new URL(req.url);
   const callbackUrl = url.searchParams.get('callbackUrl') || '/profile';
-  const settings = getAdminSettings();
-  const social = settings?.socialLogin || {};
 
   if (provider === 'google') {
-    const clientId = social.googleClientId || 
-                     process.env.GOOGLE_CLIENT_ID || 
-                     process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-
-    if (!clientId || clientId.trim() === '') {
-      const errorUrl = new URL('/login', req.url);
-      errorUrl.searchParams.set('error', 'missing_google_client_id');
-      return NextResponse.redirect(errorUrl);
-    }
-
-    const origin = url.origin;
-    const redirectUri = `${origin}/api/auth/callback/google`;
-
-    const statePayload = JSON.stringify({
-      callbackUrl,
-      provider: 'google',
-      nonce: Math.random().toString(36).substring(2, 12),
-      timestamp: Date.now()
-    });
-    const state = Buffer.from(statePayload).toString('base64url');
-
-    const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    googleAuthUrl.searchParams.set('client_id', clientId.trim());
-    googleAuthUrl.searchParams.set('redirect_uri', redirectUri);
-    googleAuthUrl.searchParams.set('response_type', 'code');
-    googleAuthUrl.searchParams.set('scope', 'openid email profile');
-    googleAuthUrl.searchParams.set('prompt', 'select_account'); // Prompt user to select Gmail account
-    googleAuthUrl.searchParams.set('access_type', 'offline');
-    googleAuthUrl.searchParams.set('include_granted_scopes', 'true');
-    googleAuthUrl.searchParams.set('state', state);
-
-    const res = NextResponse.redirect(googleAuthUrl.toString(), 307);
-    res.cookies.set('zecratary_oauth_state', state, {
-      path: '/',
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 600
-    });
-    return res;
+    const dest = new URL('/api/auth/login/google', req.url);
+    dest.searchParams.set('callbackUrl', callbackUrl);
+    return NextResponse.redirect(dest);
   }
 
-  // Fallback for unconfigured providers
-  const fallbackUrl = new URL('/login', req.url);
-  fallbackUrl.searchParams.set('error', `unsupported_provider_${provider}`);
-  return NextResponse.redirect(fallbackUrl);
+  const fallback = new URL('/login', req.url);
+  fallback.searchParams.set('error', `unsupported_provider_${provider}`);
+  return NextResponse.redirect(fallback);
 }
 
 ```
@@ -37532,12 +37704,17 @@ async function ensureColumns() {
   try {
     await query(`
       ALTER TABLE saved_recipes 
+      ADD COLUMN IF NOT EXISTS user_id TEXT,
+      ADD COLUMN IF NOT EXISTS created_by TEXT,
+      ADD COLUMN IF NOT EXISTS creator_name TEXT,
       ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS rating INT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS rating NUMERIC DEFAULT 0,
       ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
       ADD COLUMN IF NOT EXISTS book_id TEXT,
       ADD COLUMN IF NOT EXISTS source_url TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_saved_recipes_creator ON saved_recipes(user_id, created_by);
     `);
   } catch (_) {}
 }
@@ -37546,16 +37723,31 @@ export async function GET(req: NextRequest) {
   try {
     await ensureColumns();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
+    const userId = searchParams.get('userId')?.trim();
+    const email = searchParams.get('email')?.trim();
     const category = searchParams.get('category');
 
-    let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
+    if (!userId && !email) {
+      return NextResponse.json(
+        { success: true, recipes: [] },
+        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+      );
+    }
+
+    let sql = `SELECT * FROM saved_recipes WHERE `;
     const params: any[] = [];
 
+    const conditions: string[] = [];
     if (userId) {
       params.push(userId);
-      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL OR is_public = TRUE)`;
+      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
     }
+    if (email && email !== userId) {
+      params.push(email);
+      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+    }
+
+    sql += `(${conditions.join(' OR ')})`;
 
     if (category && category !== 'all' && category !== 'All Types') {
       params.push(category);
@@ -37590,8 +37782,12 @@ export async function GET(req: NextRequest) {
       return {
         ...r,
         id: r.id,
-        userId: r.user_id || r.userId || 'usr_admin_1',
-        user_id: r.user_id || r.userId || 'usr_admin_1',
+        userId: r.user_id || userId,
+        user_id: r.user_id || userId,
+        createdBy: r.created_by || r.user_id || userId,
+        created_by: r.created_by || r.user_id || userId,
+        creatorName: r.creator_name || 'Creator',
+        creator_name: r.creator_name || 'Creator',
         title: r.title || r.name || 'Untitled Recipe',
         name: r.title || r.name || 'Untitled Recipe',
         description: r.description || '',
@@ -37648,17 +37844,21 @@ export async function POST(req: NextRequest) {
 
     for (const item of items) {
       if (!item) continue;
+      const targetUserId = (item.userId || item.user_id || body.userId || body.user_id || '').trim();
+      if (!targetUserId) continue;
+
+      const createdBy = (item.createdBy || item.created_by || body.createdBy || body.created_by || targetUserId).trim();
+      const creatorName = (item.creatorName || item.creator_name || body.creatorName || body.creator_name || 'Creator').trim();
       const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
       try {
         const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
         if (userCheck.length === 0) {
           await query(`
             INSERT INTO users (id, name, email, role, subscription_plan)
-            VALUES ($1, 'User', $2, 'user', 'taster')
-            ON CONFLICT (id) DO NOTHING;
-          `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
+            VALUES ($1, $2, $3, 'user', 'taster')
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
+          `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
         }
       } catch (_) {}
 
@@ -37687,16 +37887,18 @@ export async function POST(req: NextRequest) {
 
       await query(`
         INSERT INTO saved_recipes (
-          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
           servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
           is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16,
-          $17, $18, $19, $20, $21, $22, NOW()
+          $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18,
+          $19, $20, $21, $22, $23, $24, NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
-          user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
+          user_id = EXCLUDED.user_id,
+          created_by = COALESCE(EXCLUDED.created_by, saved_recipes.created_by),
+          creator_name = COALESCE(EXCLUDED.creator_name, saved_recipes.creator_name),
           title = EXCLUDED.title,
           description = EXCLUDED.description,
           recipe_type = EXCLUDED.recipe_type,
@@ -37721,6 +37923,8 @@ export async function POST(req: NextRequest) {
       `, [
         id,
         targetUserId,
+        createdBy,
+        creatorName,
         item.title || item.name || 'Untitled Recipe',
         item.description || '',
         item.recipeType || item.category || item.recipe_type || 'Main Dish',
@@ -37835,12 +38039,17 @@ async function ensureColumns() {
   try {
     await query(`
       ALTER TABLE saved_recipes 
+      ADD COLUMN IF NOT EXISTS user_id TEXT,
+      ADD COLUMN IF NOT EXISTS created_by TEXT,
+      ADD COLUMN IF NOT EXISTS creator_name TEXT,
       ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS rating INT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS rating NUMERIC DEFAULT 0,
       ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
       ADD COLUMN IF NOT EXISTS book_id TEXT,
       ADD COLUMN IF NOT EXISTS source_url TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_saved_recipes_creator ON saved_recipes(user_id, created_by);
     `);
   } catch (_) {}
 }
@@ -37849,16 +38058,31 @@ export async function GET(req: NextRequest) {
   try {
     await ensureColumns();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
+    const userId = searchParams.get('userId')?.trim();
+    const email = searchParams.get('email')?.trim();
     const category = searchParams.get('category');
 
-    let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
+    if (!userId && !email) {
+      return NextResponse.json(
+        { success: true, recipes: [] },
+        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+      );
+    }
+
+    let sql = `SELECT * FROM saved_recipes WHERE `;
     const params: any[] = [];
 
+    const conditions: string[] = [];
     if (userId) {
       params.push(userId);
-      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL OR is_public = TRUE)`;
+      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
     }
+    if (email && email !== userId) {
+      params.push(email);
+      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+    }
+
+    sql += `(${conditions.join(' OR ')})`;
 
     if (category && category !== 'all' && category !== 'All Types') {
       params.push(category);
@@ -37893,8 +38117,12 @@ export async function GET(req: NextRequest) {
       return {
         ...r,
         id: r.id,
-        userId: r.user_id || r.userId || 'usr_admin_1',
-        user_id: r.user_id || r.userId || 'usr_admin_1',
+        userId: r.user_id || userId,
+        user_id: r.user_id || userId,
+        createdBy: r.created_by || r.user_id || userId,
+        created_by: r.created_by || r.user_id || userId,
+        creatorName: r.creator_name || 'Creator',
+        creator_name: r.creator_name || 'Creator',
         title: r.title || r.name || 'Untitled Recipe',
         name: r.title || r.name || 'Untitled Recipe',
         description: r.description || '',
@@ -37951,17 +38179,21 @@ export async function POST(req: NextRequest) {
 
     for (const item of items) {
       if (!item) continue;
+      const targetUserId = (item.userId || item.user_id || body.userId || body.user_id || '').trim();
+      if (!targetUserId) continue;
+
+      const createdBy = (item.createdBy || item.created_by || body.createdBy || body.created_by || targetUserId).trim();
+      const creatorName = (item.creatorName || item.creator_name || body.creatorName || body.creator_name || 'Creator').trim();
       const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
       try {
         const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
         if (userCheck.length === 0) {
           await query(`
             INSERT INTO users (id, name, email, role, subscription_plan)
-            VALUES ($1, 'User', $2, 'user', 'taster')
-            ON CONFLICT (id) DO NOTHING;
-          `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
+            VALUES ($1, $2, $3, 'user', 'taster')
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
+          `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
         }
       } catch (_) {}
 
@@ -37990,16 +38222,18 @@ export async function POST(req: NextRequest) {
 
       await query(`
         INSERT INTO saved_recipes (
-          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
           servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
           is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16,
-          $17, $18, $19, $20, $21, $22, NOW()
+          $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18,
+          $19, $20, $21, $22, $23, $24, NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
-          user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
+          user_id = EXCLUDED.user_id,
+          created_by = COALESCE(EXCLUDED.created_by, saved_recipes.created_by),
+          creator_name = COALESCE(EXCLUDED.creator_name, saved_recipes.creator_name),
           title = EXCLUDED.title,
           description = EXCLUDED.description,
           recipe_type = EXCLUDED.recipe_type,
@@ -38024,6 +38258,8 @@ export async function POST(req: NextRequest) {
       `, [
         id,
         targetUserId,
+        createdBy,
+        creatorName,
         item.title || item.name || 'Untitled Recipe',
         item.description || '',
         item.recipeType || item.category || item.recipe_type || 'Main Dish',
@@ -38843,6 +39079,112 @@ export async function POST(req: Request) {
       console.error('[Ingest API] PostgreSQL persistence error:', dbErr);
     }
 
+    
+    // Tag imported recipe explicitly with creator identity in PostgreSQL
+    try {
+      const targetUserId = (body.userId || body.user_id || 'usr_admin_1').trim();
+      const createdBy = (body.createdBy || body.created_by || body.email || targetUserId).trim();
+      const creatorName = (body.creatorName || body.creator_name || body.name || 'Creator').trim();
+      const targetId = newRecipe.id || ('import_' + Date.now().toString(36));
+
+      await query(`
+        INSERT INTO users (id, name, email, role, subscription_plan)
+        VALUES ($1, $2, $3, 'user', 'taster')
+        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
+      `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = EXCLUDED.user_id,
+          created_by = EXCLUDED.created_by,
+          creator_name = EXCLUDED.creator_name,
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          image_url = EXCLUDED.image_url,
+          updated_at = NOW();
+      `, [
+        targetId,
+        targetUserId,
+        createdBy,
+        creatorName,
+        newRecipe.title || newRecipe.name || 'Imported Recipe',
+        newRecipe.description || '',
+        newRecipe.recipeType || newRecipe.category || 'Main Dish',
+        newRecipe.cuisine || '',
+        String(newRecipe.prepTime || newRecipe.prepTimeMinutes || '15'),
+        String(newRecipe.cookTime || newRecipe.cookTimeMinutes || '25'),
+        String(newRecipe.servings || '4'),
+        newRecipe.difficulty || 'Medium',
+        JSON.stringify(newRecipe.ingredients || []),
+        JSON.stringify(newRecipe.directions || newRecipe.instructions || newRecipe.steps || []),
+        JSON.stringify(newRecipe.nutrition || newRecipe.macros || {}),
+        JSON.stringify(newRecipe.tags || ['Imported']),
+        newRecipe.imageUrl || newRecipe.image || '',
+        false
+      ]);
+    } catch (dbErr) {
+      console.error('[Ingest API] PostgreSQL creator persistence error:', dbErr);
+    }
+
+    
+    // Tag imported recipe with creator identity in PostgreSQL
+    try {
+      const targetUserId = (body.userId || body.user_id || 'usr_admin_1').trim();
+      const createdBy = (body.createdBy || body.created_by || body.email || targetUserId).trim();
+      const creatorName = (body.creatorName || body.creator_name || body.name || 'Creator').trim();
+      const targetId = newRecipe.id || ('import_' + Date.now().toString(36));
+
+      await query(`
+        INSERT INTO users (id, name, email, role, subscription_plan)
+        VALUES ($1, $2, $3, 'user', 'taster')
+        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
+      `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = EXCLUDED.user_id,
+          created_by = EXCLUDED.created_by,
+          creator_name = EXCLUDED.creator_name,
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          image_url = EXCLUDED.image_url,
+          updated_at = NOW();
+      `, [
+        targetId,
+        targetUserId,
+        createdBy,
+        creatorName,
+        newRecipe.title || newRecipe.name || 'Imported Recipe',
+        newRecipe.description || '',
+        newRecipe.recipeType || newRecipe.category || 'Main Dish',
+        newRecipe.cuisine || '',
+        String(newRecipe.prepTime || newRecipe.prepTimeMinutes || '15'),
+        String(newRecipe.cookTime || newRecipe.cookTimeMinutes || '25'),
+        String(newRecipe.servings || '4'),
+        newRecipe.difficulty || 'Medium',
+        JSON.stringify(newRecipe.ingredients || []),
+        JSON.stringify(newRecipe.directions || newRecipe.instructions || newRecipe.steps || []),
+        JSON.stringify(newRecipe.nutrition || newRecipe.macros || {}),
+        JSON.stringify(newRecipe.tags || ['Imported']),
+        newRecipe.imageUrl || newRecipe.image || '',
+        false
+      ]);
+    } catch (dbErr) {
+      console.error('[Ingest API] PostgreSQL creator persistence error:', dbErr);
+    }
+
     return NextResponse.json({ success: false, error: error.message || 'Ingestion failed' }, { status: 500 });
   }
 }
@@ -39433,12 +39775,17 @@ async function ensureColumns() {
   try {
     await query(`
       ALTER TABLE saved_recipes 
+      ADD COLUMN IF NOT EXISTS user_id TEXT,
+      ADD COLUMN IF NOT EXISTS created_by TEXT,
+      ADD COLUMN IF NOT EXISTS creator_name TEXT,
       ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS rating INT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS rating NUMERIC DEFAULT 0,
       ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
       ADD COLUMN IF NOT EXISTS book_id TEXT,
       ADD COLUMN IF NOT EXISTS source_url TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_saved_recipes_creator ON saved_recipes(user_id, created_by);
     `);
   } catch (_) {}
 }
@@ -39447,16 +39794,31 @@ export async function GET(req: NextRequest) {
   try {
     await ensureColumns();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
+    const userId = searchParams.get('userId')?.trim();
+    const email = searchParams.get('email')?.trim();
     const category = searchParams.get('category');
 
-    let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
+    if (!userId && !email) {
+      return NextResponse.json(
+        { success: true, recipes: [] },
+        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+      );
+    }
+
+    let sql = `SELECT * FROM saved_recipes WHERE `;
     const params: any[] = [];
 
+    const conditions: string[] = [];
     if (userId) {
       params.push(userId);
-      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL OR is_public = TRUE)`;
+      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
     }
+    if (email && email !== userId) {
+      params.push(email);
+      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+    }
+
+    sql += `(${conditions.join(' OR ')})`;
 
     if (category && category !== 'all' && category !== 'All Types') {
       params.push(category);
@@ -39491,8 +39853,12 @@ export async function GET(req: NextRequest) {
       return {
         ...r,
         id: r.id,
-        userId: r.user_id || r.userId || 'usr_admin_1',
-        user_id: r.user_id || r.userId || 'usr_admin_1',
+        userId: r.user_id || userId,
+        user_id: r.user_id || userId,
+        createdBy: r.created_by || r.user_id || userId,
+        created_by: r.created_by || r.user_id || userId,
+        creatorName: r.creator_name || 'Creator',
+        creator_name: r.creator_name || 'Creator',
         title: r.title || r.name || 'Untitled Recipe',
         name: r.title || r.name || 'Untitled Recipe',
         description: r.description || '',
@@ -39549,17 +39915,21 @@ export async function POST(req: NextRequest) {
 
     for (const item of items) {
       if (!item) continue;
+      const targetUserId = (item.userId || item.user_id || body.userId || body.user_id || '').trim();
+      if (!targetUserId) continue;
+
+      const createdBy = (item.createdBy || item.created_by || body.createdBy || body.created_by || targetUserId).trim();
+      const creatorName = (item.creatorName || item.creator_name || body.creatorName || body.creator_name || 'Creator').trim();
       const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
       try {
         const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
         if (userCheck.length === 0) {
           await query(`
             INSERT INTO users (id, name, email, role, subscription_plan)
-            VALUES ($1, 'User', $2, 'user', 'taster')
-            ON CONFLICT (id) DO NOTHING;
-          `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
+            VALUES ($1, $2, $3, 'user', 'taster')
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
+          `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
         }
       } catch (_) {}
 
@@ -39588,16 +39958,18 @@ export async function POST(req: NextRequest) {
 
       await query(`
         INSERT INTO saved_recipes (
-          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
           servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
           is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16,
-          $17, $18, $19, $20, $21, $22, NOW()
+          $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18,
+          $19, $20, $21, $22, $23, $24, NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
-          user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
+          user_id = EXCLUDED.user_id,
+          created_by = COALESCE(EXCLUDED.created_by, saved_recipes.created_by),
+          creator_name = COALESCE(EXCLUDED.creator_name, saved_recipes.creator_name),
           title = EXCLUDED.title,
           description = EXCLUDED.description,
           recipe_type = EXCLUDED.recipe_type,
@@ -39622,6 +39994,8 @@ export async function POST(req: NextRequest) {
       `, [
         id,
         targetUserId,
+        createdBy,
+        creatorName,
         item.title || item.name || 'Untitled Recipe',
         item.description || '',
         item.recipeType || item.category || item.recipe_type || 'Main Dish',
@@ -42024,12 +42398,12 @@ export default function GroceriesPage() {
 
 ## File: `apps/web/src/app/import/page.tsx`
 ```typescript
-import { persistSavedRecipe } from '@/lib/recipeSync';
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Link2, FileText, Image as ImageIcon, Sparkles, AlertCircle, CheckCircle2, Upload, X } from 'lucide-react';
 import { getCurrentUser } from '@/lib/auth';
+import { persistSavedRecipe } from '@/lib/recipeSync';
 import { useTranslation } from '@/components/LanguageProvider';
 
 const DEFAULT_RECIPE_TYPES = [
@@ -42223,8 +42597,12 @@ export default function ImportPage() {
     };
   }, [applyGlobalTheme, t]);
 
-  const saveAndRedirect = (recipeData: any) => {
+  const saveAndRedirect = async (recipeData: any) => {
     const user = getCurrentUser();
+    const targetUserId = (user?.id || user?.email || 'usr_admin_1').trim();
+    const userEmail = (user?.email || targetUserId).trim();
+    const userName = (user?.name || 'You').trim();
+
     const recipeTitle = decodeHtmlEntities(recipeData.title || recipeData.name || 'Imported Recipe');
     const recipeImage = recipeData.imageUrl || recipeData.image || '/uploads/recipes/default.jpg';
     const recipeCategory = recipeData.category || recipeData.recipeType || (recipeTypes[0] || 'Main Dish');
@@ -42277,15 +42655,20 @@ export default function ImportPage() {
 
     const normalizedRecipe = {
       id: recipeData.id || 'rec_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      userId: user?.id,
-      createdBy: user?.email,
-      creatorName: user?.name,
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: userEmail,
+      created_by: userEmail,
+      creatorName: userName,
+      creator_name: userName,
       title: recipeTitle,
       name: recipeTitle,
       imageUrl: recipeImage,
       image: recipeImage,
+      image_url: recipeImage,
       category: recipeCategory,
       recipeType: recipeCategory,
+      recipe_type: recipeCategory,
       tags: recipeData.tags || [recipeCategory, 'Imported'],
       servings: Number(recipeData.servings) || 4,
       prepTimeMinutes: Number(recipeData.prepTimeMinutes) || 20,
@@ -42295,13 +42678,36 @@ export default function ImportPage() {
       ingredients: cleanIngredients,
       instructions: finalSteps,
       steps: finalSteps,
+      directions: finalSteps,
       sourceUrl: recipeData.sourceUrl || url || '',
+      source_url: recipeData.sourceUrl || url || '',
       isFavorite: false,
       isCooked: false,
       rating: 0,
       createdAt: new Date().toISOString()
     };
 
+    // 1. Persist directly to PostgreSQL
+    try {
+      await persistSavedRecipe(targetUserId, normalizedRecipe, {
+        createdBy: userEmail,
+        creatorName: userName
+      });
+    } catch (err) {
+      console.warn('[Import] persistSavedRecipe failed, trying direct API:', err);
+    }
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([normalizedRecipe])
+      });
+    } catch (apiErr) {
+      console.warn('[Import] Direct API persist fallback failed:', apiErr);
+    }
+
+    // 2. Synchronize to localStorage for instant local availability
     const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
     storageKeys.forEach((key) => {
       try {
@@ -42327,7 +42733,7 @@ export default function ImportPage() {
 
     setTimeout(() => {
       router.push('/saved');
-    }, 900);
+    }, 750);
   };
 
   const handleUrlImport = async (e: React.FormEvent) => {
@@ -42336,11 +42742,24 @@ export default function ImportPage() {
     setLoading(true);
     setStatus(null);
 
+    const user = getCurrentUser();
+    const targetUserId = (user?.id || user?.email || 'usr_admin_1').trim();
+    const userEmail = (user?.email || targetUserId).trim();
+    const userName = (user?.name || 'User').trim();
+
     try {
       const res = await fetch('/api/recipes/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ 
+          url: url.trim(),
+          userId: targetUserId,
+          user_id: targetUserId,
+          createdBy: userEmail,
+          created_by: userEmail,
+          creatorName: userName,
+          creator_name: userName
+        }),
       });
 
       let result: any = null;
@@ -42352,7 +42771,7 @@ export default function ImportPage() {
       }
 
       if (result && result.success && result.data) {
-        saveAndRedirect(result.data);
+        await saveAndRedirect(result.data);
       } else {
         setStatus({ type: 'error', msg: result?.error || 'Failed to extract recipe from URL.' });
         setLoading(false);
@@ -42487,7 +42906,7 @@ export default function ImportPage() {
       rating: 0
     };
 
-    saveAndRedirect(parsedRecipe);
+    await saveAndRedirect(parsedRecipe);
   };
 
   const handleFilesAdded = (files: FileList | File[]) => {
@@ -42573,7 +42992,7 @@ export default function ImportPage() {
 
       recipeData.isFavorite = false;
       recipeData.rating = 0;
-      saveAndRedirect(recipeData);
+      await saveAndRedirect(recipeData);
     } catch (err: any) {
       setStatus({ type: 'error', msg: err.message || 'Image upload or AI analysis failed.' });
       setLoading(false);
@@ -43321,21 +43740,88 @@ export default function CookbooksPage() {
 ```typescript
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  Mail, Lock, Eye, EyeOff, LogIn, AlertCircle, CheckCircle2, 
-  ArrowRight, Sparkles, ChefHat 
+  Mail, Lock, Eye, EyeOff, AlertCircle, CheckCircle2, 
+  ArrowRight, ChefHat, ExternalLink 
 } from 'lucide-react';
-import { getCurrentUser, loginUser, initAuthStorage } from '@/lib/auth';
+import { getCurrentUser, loginUser, initAuthStorage, setCurrentUser } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 import { applyThemeToDocument } from '@/lib/themeConfig';
 
 interface SocialProvidersConfig {
   googleEnabled: boolean;
+  googleClientId?: string;
   facebookEnabled: boolean;
   appleEnabled: boolean;
+}
+
+// Synchronize all storage keys and cookie names simultaneously
+function persistSessionUniversally(user: any) {
+  if (typeof window === 'undefined' || !user) return;
+  try {
+    if (typeof setCurrentUser === 'function') {
+      setCurrentUser(user);
+    }
+    const raw = JSON.stringify(user);
+    const encoded = encodeURIComponent(raw);
+    const keys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser', 'user'];
+    for (const k of keys) {
+      localStorage.setItem(k, raw);
+      document.cookie = `${k}=${encoded}; path=/; max-age=604800; SameSite=Lax`;
+    }
+  } catch (_) {}
+}
+
+function sanitizeDestination(targetUrl: string | null | undefined, userRole?: string): string {
+  const fallback = userRole === 'admin' ? '/admin' : '/profile';
+  if (!targetUrl) return fallback;
+
+  const trimmed = targetUrl.trim();
+  if (!trimmed) return fallback;
+
+  try {
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      const parsed = new URL(trimmed);
+      const path = parsed.pathname.toLowerCase();
+      if (
+        path === '/login' || 
+        path === '/login/' || 
+        path.startsWith('/login/') || 
+        path === '/register' || 
+        path === '/register/' || 
+        path.startsWith('/register/')
+      ) {
+        return fallback;
+      }
+      if (typeof window !== 'undefined' && parsed.origin !== window.location.origin) {
+        return fallback;
+      }
+      return parsed.pathname + parsed.search;
+    }
+  } catch (_) {}
+
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === '/login' ||
+    lower === '/login/' ||
+    lower.startsWith('/login?') ||
+    lower.startsWith('/login/') ||
+    lower === '/register' ||
+    lower === '/register/' ||
+    lower.startsWith('/register?') ||
+    lower.startsWith('/register/') ||
+    lower === 'login' ||
+    lower === 'register' ||
+    lower.includes('%2flogin') ||
+    lower.includes('%2fregister')
+  ) {
+    return fallback;
+  }
+
+  return trimmed;
 }
 
 function LoginForm() {
@@ -43351,9 +43837,13 @@ function LoginForm() {
   const [successMsg, setSuccessMsg] = useState('');
   const [isDayMode, setIsDayMode] = useState(false);
 
-  // Dynamic social provider configuration state (defaulting to false to prevent layout flash)
+  const isRedirectingRef = useRef(false);
+  const hasExchangedCodeRef = useRef(false);
+  const isFetchingSocialRef = useRef(false);
+
   const [socialConfig, setSocialConfig] = useState<SocialProvidersConfig>({
     googleEnabled: false,
+    googleClientId: '',
     facebookEnabled: false,
     appleEnabled: false
   });
@@ -43379,20 +43869,75 @@ function LoginForm() {
 
   useEffect(() => {
     syncTheme();
-    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
-    window.addEventListener('zecratary_theme_changed', syncTheme);
-    window.addEventListener('zecratary_theme_updated', syncTheme);
-    window.addEventListener('storage', syncTheme);
+    let debounceTimer: NodeJS.Timeout;
+    const handleDebouncedTheme = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        syncTheme();
+      }, 100);
+    };
+
+    window.addEventListener('zecratary_theme_mode_changed', handleDebouncedTheme);
+    window.addEventListener('zecratary_theme_changed', handleDebouncedTheme);
+    window.addEventListener('zecratary_theme_updated', handleDebouncedTheme);
+    window.addEventListener('storage', handleDebouncedTheme);
     return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
-      window.removeEventListener('zecratary_theme_changed', syncTheme);
-      window.removeEventListener('zecratary_theme_updated', syncTheme);
-      window.removeEventListener('storage', syncTheme);
+      clearTimeout(debounceTimer);
+      window.removeEventListener('zecratary_theme_mode_changed', handleDebouncedTheme);
+      window.removeEventListener('zecratary_theme_changed', handleDebouncedTheme);
+      window.removeEventListener('zecratary_theme_updated', handleDebouncedTheme);
+      window.removeEventListener('storage', handleDebouncedTheme);
     };
   }, [syncTheme]);
 
-  // 2. Fetch Centralized Server-Backed Social Login Settings
+  // 2. Google Identity Services (GIS)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !document.getElementById('google-gsi-client')) {
+      const script = document.createElement('script');
+      script.id = 'google-gsi-client';
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+  }, []);
+
+  // 3. Automated Code Exchange
+  useEffect(() => {
+    const code = searchParams.get('code');
+    const state = searchParams.get('state');
+    if (code && !hasExchangedCodeRef.current) {
+      hasExchangedCodeRef.current = true;
+      setLoading(true);
+      setSuccessMsg(t('loginSuccess') || 'Signing in with Google...');
+      const target = `/api/auth/callback/google?code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ''}`;
+      window.location.replace(target);
+    }
+  }, [searchParams]);
+
+  // 4. Map Error Parameters
+  useEffect(() => {
+    const err = searchParams.get('error');
+    if (err) {
+      setLoading(false);
+      if (err === 'missing_google_client_id') {
+        setErrorMsg(t('missingGoogleClientId') || 'Google Client ID is not configured. Please add your OAuth Client ID in /admin/social-login-setting.');
+      } else if (err === 'missing_google_client_secret') {
+        setErrorMsg(t('missingGoogleClientSecret') || 'Google Client Secret is not configured in /admin/social-login-setting. Click Google to sign in directly.');
+      } else if (err === 'google_access_denied') {
+        setErrorMsg(t('googleAccessDenied') || 'Google sign-in was canceled.');
+      } else if (err === 'token_exchange_failed' || err === 'oauth_handshake_error') {
+        setErrorMsg(t('oauthHandshakeError') || 'Server OAuth handshake was interrupted. Click below to sign in directly with Google.');
+      } else {
+        setErrorMsg(t('loginError') || `Authentication error: ${err}`);
+      }
+    }
+  }, [searchParams]);
+
+  // 5. Fetch Server Settings
   const fetchSocialConfig = useCallback(async () => {
+    if (isFetchingSocialRef.current) return;
+    isFetchingSocialRef.current = true;
     try {
       const res = await fetch('/api/admin/settings', {
         cache: 'no-store',
@@ -43402,56 +43947,117 @@ function LoginForm() {
         const data = await res.json();
         const settings = data.settings || data;
         if (settings && settings.socialLogin) {
-          setSocialConfig({
+          const newCfg: SocialProvidersConfig = {
             googleEnabled: Boolean(settings.socialLogin.googleEnabled),
+            googleClientId: settings.socialLogin.googleClientId || '',
             facebookEnabled: Boolean(settings.socialLogin.facebookEnabled),
             appleEnabled: Boolean(settings.socialLogin.appleEnabled)
-          });
+          };
+          setSocialConfig(prev => JSON.stringify(prev) === JSON.stringify(newCfg) ? prev : newCfg);
           setSocialLoaded(true);
           return;
         }
       }
 
-      // Fallback: Query .env endpoint if server store hasn't initialized
       const envRes = await fetch('/api/admin/social-env', { cache: 'no-store' });
       if (envRes.ok) {
         const envData = await envRes.json();
         if (envData.success && envData.config) {
-          setSocialConfig({
+          const newCfg: SocialProvidersConfig = {
             googleEnabled: Boolean(envData.config.googleEnabled),
+            googleClientId: envData.config.googleClientId || '',
             facebookEnabled: Boolean(envData.config.facebookEnabled),
             appleEnabled: Boolean(envData.config.appleEnabled)
-          });
+          };
+          setSocialConfig(prev => JSON.stringify(prev) === JSON.stringify(newCfg) ? prev : newCfg);
         }
       }
     } catch (err) {
       console.error('[login] Failed to load dynamic social login settings:', err);
     } finally {
+      isFetchingSocialRef.current = false;
       setSocialLoaded(true);
     }
   }, []);
 
   useEffect(() => {
     fetchSocialConfig();
-    window.addEventListener('zecratary_social_login_updated', fetchSocialConfig);
-    window.addEventListener('zecratary_admin_settings_updated', fetchSocialConfig);
+    let debounceTimer: NodeJS.Timeout;
+    const handleDebouncedSync = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchSocialConfig();
+      }, 300);
+    };
+
+    window.addEventListener('zecratary_social_login_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
     return () => {
-      window.removeEventListener('zecratary_social_login_updated', fetchSocialConfig);
-      window.removeEventListener('zecratary_admin_settings_updated', fetchSocialConfig);
+      clearTimeout(debounceTimer);
+      window.removeEventListener('zecratary_social_login_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
     };
   }, [fetchSocialConfig]);
 
-  // 3. User Session Verification
-  useEffect(() => {
+  // 6. User Session Verification & Navigation Guard
+  const verifySession = useCallback(() => {
+    if (isRedirectingRef.current) return;
     initAuthStorage();
     const active = getCurrentUser();
-    if (active) {
-      const callback = searchParams.get('callbackUrl') || (active.role === 'admin' ? '/admin' : '/profile');
-      router.replace(callback);
-    }
-  }, [router, searchParams]);
+    if (!active) return;
 
-  // 4. Form Submission Handler
+    const err = searchParams.get('error');
+    if (err) return;
+
+    const rawCallback = searchParams.get('callbackUrl');
+    const dest = sanitizeDestination(rawCallback, active.role);
+
+    if (!dest || dest === '/login' || dest.startsWith('/login?') || dest.startsWith('/login/')) {
+      return;
+    }
+
+    // Session bounce detection
+    try {
+      const now = Date.now();
+      const lastTs = parseInt(sessionStorage.getItem('zec_login_bounce_ts') || '0', 10);
+      const count = parseInt(sessionStorage.getItem('zec_login_bounce_count') || '0', 10);
+      if (now - lastTs < 3000) {
+        if (count >= 2) {
+          console.warn('[login] Redirection bounce suppressed to protect server.');
+          sessionStorage.removeItem('zec_login_bounce_ts');
+          sessionStorage.removeItem('zec_login_bounce_count');
+          return;
+        }
+        sessionStorage.setItem('zec_login_bounce_count', String(count + 1));
+      } else {
+        sessionStorage.setItem('zec_login_bounce_count', '1');
+      }
+      sessionStorage.setItem('zec_login_bounce_ts', String(now));
+    } catch (_) {}
+
+    isRedirectingRef.current = true;
+    persistSessionUniversally(active);
+    window.location.replace(dest);
+  }, [searchParams]);
+
+  useEffect(() => {
+    verifySession();
+    let debounceTimer: NodeJS.Timeout;
+    const handleAuthChange = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        verifySession();
+      }, 250);
+    };
+
+    window.addEventListener('zecratary_auth_changed', handleAuthChange);
+    return () => {
+      clearTimeout(debounceTimer);
+      window.removeEventListener('zecratary_auth_changed', handleAuthChange);
+    };
+  }, [verifySession]);
+
+  // 7. Standard Credentials Login
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -43467,28 +44073,102 @@ function LoginForm() {
       const user = await Promise.resolve(loginUser(email.trim(), password));
       if (user) {
         setSuccessMsg(t('loginSuccess') || 'Signing in...');
-        const callback = searchParams.get('callbackUrl') || (user.role === 'admin' ? '/admin' : '/profile');
+        persistSessionUniversally(user);
+        window.dispatchEvent(new Event('zecratary_auth_changed'));
+
+        const rawCb = searchParams.get('callbackUrl');
+        const dest = sanitizeDestination(rawCb, user.role);
+
         setTimeout(() => {
-          router.push(callback);
-        }, 500);
+          window.location.replace(dest);
+        }, 300);
       } else {
         setErrorMsg(t('invalidCredentials') || 'Invalid email or password.');
+        setLoading(false);
       }
     } catch (err: any) {
       setErrorMsg(err.message || (t('loginError') || 'Failed to sign in. Please try again.'));
-    } finally {
       setLoading(false);
     }
   };
 
+  // 8. Google Sign-In with GIS Popup & Direct Navigation
   const handleSocialClick = (provider: 'google' | 'facebook' | 'apple') => {
-    const callback = searchParams.get('callbackUrl') || '/profile';
-    window.location.href = `/api/auth/login/${provider}?callbackUrl=${encodeURIComponent(callback)}`;
+    const rawCb = searchParams.get('callbackUrl');
+    const dest = sanitizeDestination(rawCb, 'user');
+
+    if (provider === 'google' && socialConfig.googleClientId && socialConfig.googleClientId.trim()) {
+      const win = typeof window !== 'undefined' ? (window as any) : null;
+      if (win && win.google && win.google.accounts && win.google.accounts.oauth2) {
+        setLoading(true);
+        setErrorMsg('');
+
+        const safetyTimer = setTimeout(() => {
+          setLoading(false);
+        }, 12000);
+
+        try {
+          const client = win.google.accounts.oauth2.initTokenClient({
+            client_id: socialConfig.googleClientId.trim(),
+            scope: 'openid email profile',
+            prompt: 'select_account',
+            callback: async (tokenResponse: any) => {
+              clearTimeout(safetyTimer);
+              if (tokenResponse && tokenResponse.access_token) {
+                try {
+                  const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                    headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
+                  });
+                  const profile = await userRes.json();
+                  if (profile && profile.email) {
+                    const sessionRes = await fetch('/api/auth/google-session', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ profile, callbackUrl: dest })
+                    });
+                    const sessionData = await sessionRes.json();
+                    if (sessionData.success && sessionData.user) {
+                      persistSessionUniversally(sessionData.user);
+                      window.dispatchEvent(new Event('zecratary_auth_changed'));
+                      setSuccessMsg(t('loginSuccess') || 'Signing in...');
+
+                      const finalTarget = sanitizeDestination(sessionData.redirectUrl || dest, sessionData.user.role);
+
+                      setTimeout(() => {
+                        window.location.replace(finalTarget);
+                      }, 250);
+                      return;
+                    }
+                  }
+                } catch (fetchErr: any) {
+                  console.error('Failed to establish Google user session:', fetchErr);
+                  setErrorMsg(fetchErr.message || 'Unable to retrieve user information from Google.');
+                }
+              }
+              setLoading(false);
+            },
+            error_callback: (err: any) => {
+              clearTimeout(safetyTimer);
+              console.warn('GIS popup canceled or failed, using redirect fallback:', err);
+              setLoading(false);
+              window.location.href = `/api/auth/login/google?callbackUrl=${encodeURIComponent(dest)}`;
+            }
+          });
+          client.requestAccessToken({ prompt: 'select_account' });
+          return;
+        } catch (gisErr) {
+          clearTimeout(safetyTimer);
+          console.warn('Failed to initiate GIS client:', gisErr);
+          setLoading(false);
+        }
+      }
+    }
+
+    window.location.href = `/api/auth/login/${provider}?callbackUrl=${encodeURIComponent(dest)}`;
   };
 
   const hasAnySocial = socialLoaded && (socialConfig.googleEnabled || socialConfig.facebookEnabled || socialConfig.appleEnabled);
 
-  // Active enabled providers count for flexible grid styling
   const activeProvidersCount = [
     socialConfig.googleEnabled, 
     socialConfig.facebookEnabled, 
@@ -43500,7 +44180,7 @@ function LoginForm() {
       {/* Brand Header */}
       <div className="text-center space-y-2">
         <div 
-          className="inline-flex items-center justify-center w-12 h-12 rounded-2xl shadow-md border mb-2"
+          className="inline-flex items-center justify-center w-12 h-12 rounded-2xl shadow-md border mb-2 transition-colors duration-200"
           style={{
             backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
             borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
@@ -43510,13 +44190,13 @@ function LoginForm() {
           <ChefHat className="h-6 w-6" />
         </div>
         <h1 
-          className="text-2xl sm:text-3xl font-black tracking-tight"
+          className="text-2xl sm:text-3xl font-black tracking-tight transition-colors duration-200"
           style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
         >
           {t('signInTitle') || 'Welcome Back'}
         </h1>
         <p 
-          className="text-xs sm:text-sm"
+          className="text-xs sm:text-sm transition-colors duration-200"
           style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
         >
           {t('signInSubtitle') || 'Enter your credentials to access your meal assistant.'}
@@ -43534,21 +44214,35 @@ function LoginForm() {
         {/* Status Alerts */}
         {errorMsg && (
           <div 
-            className="mb-5 p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in"
+            className="mb-5 p-3.5 border rounded-2xl text-xs font-semibold flex items-start gap-2.5 shadow-xs animate-in fade-in transition-colors duration-200"
             style={{
               backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
               borderColor: isDayMode ? '#fca5a5' : '#991b1b',
               color: isDayMode ? '#991b1b' : '#fca5a5'
             }}
           >
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
-            <span>{errorMsg}</span>
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
+            <div className="flex-1">
+              <span>{errorMsg}</span>
+              {errorMsg.includes('/admin/social-login-setting') && (
+                <div className="mt-1.5">
+                  <Link 
+                    href="/admin/social-login-setting"
+                    className="inline-flex items-center gap-1 font-bold underline hover:opacity-80"
+                    style={{ color: 'var(--color-primary, #E05638)' }}
+                  >
+                    <span>Configure Google OAuth</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
         {successMsg && (
           <div 
-            className="mb-5 p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in"
+            className="mb-5 p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in transition-colors duration-200"
             style={{
               backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
               borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
@@ -43564,14 +44258,14 @@ function LoginForm() {
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           <div>
             <label 
-              className="block font-bold mb-1.5"
+              className="block font-bold mb-1.5 transition-colors duration-200"
               style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
             >
               {t('emailLabel') || 'Email Address'}
             </label>
             <div className="relative">
               <Mail 
-                className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none" 
+                className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none transition-colors duration-200" 
                 style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} 
               />
               <input 
@@ -43581,7 +44275,7 @@ function LoginForm() {
                 placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full border rounded-xl pl-10 pr-3 py-2.5 outline-none font-medium transition"
+                className="w-full border rounded-xl pl-10 pr-3 py-2.5 outline-none font-medium transition-colors duration-200"
                 style={{
                   backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
@@ -43594,7 +44288,7 @@ function LoginForm() {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label 
-                className="block font-bold"
+                className="block font-bold transition-colors duration-200"
                 style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
               >
                 {t('passwordLabel') || 'Password'}
@@ -43609,7 +44303,7 @@ function LoginForm() {
             </div>
             <div className="relative">
               <Lock 
-                className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none" 
+                className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none transition-colors duration-200" 
                 style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} 
               />
               <input 
@@ -43619,7 +44313,7 @@ function LoginForm() {
                 placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none font-mono transition"
+                className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none font-mono transition-colors duration-200"
                 style={{
                   backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                   borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
@@ -43655,16 +44349,16 @@ function LoginForm() {
           </button>
         </form>
 
-        {/* Dynamic Social Login Section (Only rendered when at least one provider is enabled) */}
+        {/* Dynamic Social Login Section */}
         {hasAnySocial && (
           <div className="mt-6 space-y-4">
             <div className="relative flex items-center justify-center">
               <div 
-                className="w-full border-t"
+                className="w-full border-t transition-colors duration-200"
                 style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
               />
               <span 
-                className="absolute px-3 text-[11px] font-bold uppercase tracking-wider"
+                className="absolute px-3 text-[11px] font-bold uppercase tracking-wider transition-colors duration-200"
                 style={{ 
                   backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
                   color: isDayMode ? '#94a3b8' : '#64748b' 
@@ -43679,12 +44373,12 @@ function LoginForm() {
                 activeProvidersCount === 1 ? 'grid-cols-1' : activeProvidersCount === 2 ? 'grid-cols-2' : 'grid-cols-3'
               }`}
             >
-              {/* Google Provider Button */}
               {socialConfig.googleEnabled && (
                 <button 
                   type="button"
+                  disabled={loading}
                   onClick={() => handleSocialClick('google')}
-                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs"
+                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs disabled:opacity-50"
                   style={{
                     backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                     borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
@@ -43693,33 +44387,21 @@ function LoginForm() {
                   title={t('signInWithGoogle') || 'Sign in with Google'}
                 >
                   <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.98 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                    />
+                    <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z" />
+                    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z" />
+                    <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.98 0 12s.45 3.82 1.25 5.42l4.03-3.15z" />
+                    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
                   </svg>
                   <span>Google</span>
                 </button>
               )}
 
-              {/* Facebook Provider Button */}
               {socialConfig.facebookEnabled && (
                 <button 
                   type="button"
+                  disabled={loading}
                   onClick={() => handleSocialClick('facebook')}
-                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs"
+                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs disabled:opacity-50"
                   style={{
                     backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                     borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
@@ -43734,12 +44416,12 @@ function LoginForm() {
                 </button>
               )}
 
-              {/* Apple Provider Button */}
               {socialConfig.appleEnabled && (
                 <button 
                   type="button"
+                  disabled={loading}
                   onClick={() => handleSocialClick('apple')}
-                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs"
+                  className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs disabled:opacity-50"
                   style={{
                     backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
                     borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
@@ -43759,10 +44441,13 @@ function LoginForm() {
 
         {/* Footer Navigation */}
         <div 
-          className="mt-6 pt-4 border-t text-center text-xs"
+          className="mt-6 pt-4 border-t text-center text-xs transition-colors duration-200"
           style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
         >
-          <span style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}>
+          <span 
+            className="transition-colors duration-200"
+            style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
+          >
             {t('noAccountPrompt') || "Don't have an account?"}{' '}
           </span>
           <Link 
@@ -46196,6 +46881,175 @@ export default function GlobalThemeSync() {
 
 ```
 
+## File: `apps/web/src/lib/postgresUser.ts`
+```typescript
+import { Pool } from 'pg';
+import fs from 'fs';
+import path from 'path';
+
+let pool: Pool | null = null;
+
+export function getPostgresPool(): Pool | null {
+  if (pool) return pool;
+
+  const connectionString = 
+    process.env.DATABASE_URL || 
+    process.env.POSTGRES_URL || 
+    process.env.PG_CONNECTION_STRING;
+
+  if (!connectionString) {
+    return null;
+  }
+
+  try {
+    pool = new Pool({
+      connectionString,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
+    return pool;
+  } catch (err) {
+    console.error('[PostgreSQL] Pool initialization error:', err);
+    return null;
+  }
+}
+
+export async function syncUserToPostgres(user: any): Promise<any> {
+  let resolvedUser = { ...user };
+  const p = getPostgresPool();
+
+  if (p) {
+    try {
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id VARCHAR(255) PRIMARY KEY,
+          name VARCHAR(255),
+          email VARCHAR(255) UNIQUE NOT NULL,
+          password VARCHAR(255),
+          role VARCHAR(50) DEFAULT 'user',
+          picture TEXT,
+          avatar TEXT,
+          subscription_plan VARCHAR(100) DEFAULT 'taster',
+          provider VARCHAR(50) DEFAULT 'credentials',
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      const alterQueries = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS picture TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS provider VARCHAR(50) DEFAULT 'credentials'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(100) DEFAULT 'taster'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP"
+      ];
+      for (const q of alterQueries) {
+        try { await p.query(q); } catch (_) {}
+      }
+
+      const email = user.email.toLowerCase().trim();
+      const existing = await p.query(
+        'SELECT * FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+        [email]
+      );
+
+      if (existing.rows && existing.rows.length > 0) {
+        const row = existing.rows[0];
+        const updatedRes = await p.query(
+          `UPDATE users SET 
+            name = COALESCE($1, name),
+            picture = COALESCE($2, picture),
+            avatar = COALESCE($2, avatar),
+            provider = COALESCE(provider, 'google'),
+            updated_at = CURRENT_TIMESTAMP
+          WHERE LOWER(email) = LOWER($3)
+          RETURNING *`,
+          [
+            user.name || row.name, 
+            user.picture || row.picture || row.avatar, 
+            email
+          ]
+        );
+        const ur = updatedRes.rows[0] || row;
+        resolvedUser = {
+          id: ur.id,
+          name: ur.name,
+          email: ur.email,
+          role: ur.role || row.role || user.role || 'user',
+          subscriptionPlan: ur.subscription_plan || row.subscription_plan || 'taster',
+          picture: ur.picture || ur.avatar || user.picture || '',
+          avatar: ur.avatar || ur.picture || user.avatar || '',
+          createdAt: ur.created_at || user.createdAt
+        };
+      } else {
+        const insertRes = await p.query(
+          `INSERT INTO users (id, name, email, role, picture, avatar, subscription_plan, provider, created_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $5, $6, 'google', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          RETURNING *`,
+          [
+            user.id,
+            user.name,
+            email,
+            user.role || 'user',
+            user.picture || '',
+            user.subscriptionPlan || 'taster'
+          ]
+        );
+        const nr = insertRes.rows[0];
+        if (nr) {
+          resolvedUser = {
+            id: nr.id,
+            name: nr.name,
+            email: nr.email,
+            role: nr.role,
+            subscriptionPlan: nr.subscription_plan,
+            picture: nr.picture || nr.avatar || '',
+            avatar: nr.avatar || nr.picture || '',
+            createdAt: nr.created_at
+          };
+        }
+      }
+    } catch (dbErr) {
+      console.error('[PostgreSQL] Failed to sync user to PostgreSQL:', dbErr);
+    }
+  }
+
+  // File-based store fallback
+  try {
+    const cwd = process.cwd();
+    const paths = [
+      path.join(cwd, 'apps/web/data/users.json'),
+      path.join(cwd, 'data/users.json')
+    ];
+    for (const p of paths) {
+      try {
+        let list: any[] = [];
+        if (fs.existsSync(p)) {
+          const raw = fs.readFileSync(p, 'utf-8');
+          list = JSON.parse(raw);
+          if (!Array.isArray(list)) list = [];
+        } else {
+          fs.mkdirSync(path.dirname(p), { recursive: true });
+        }
+        const idx = list.findIndex(u => u && u.email && u.email.toLowerCase() === resolvedUser.email.toLowerCase());
+        if (idx >= 0) {
+          list[idx] = { ...list[idx], ...resolvedUser };
+        } else {
+          list.unshift(resolvedUser);
+        }
+        fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf-8');
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  return resolvedUser;
+}
+
+```
+
 ## File: `apps/web/src/lib/themeConfig.ts`
 ```typescript
 'use client';
@@ -46977,71 +47831,70 @@ export function useRecipeTypes(): string[] {
 ## File: `apps/web/src/lib/recipeSync.ts`
 ```typescript
 // Server-Backed Recipe Synchronization Module
-// Direct PostgreSQL operations with local fallback sync
+// Strictly enforces creator ownership and attribution
 
-export async function syncUserSavedRecipes(userId: string): Promise<any[]> {
-  const targetId = userId || 'usr_admin_1';
-  let serverRecipes: any[] = [];
+export async function syncUserSavedRecipes(userId: string, email?: string): Promise<any[]> {
+  const targetId = (userId || '').trim();
+  const targetEmail = (email || '').trim();
+  if (!targetId && !targetEmail) return [];
+
+  const queryParams = new URLSearchParams();
+  if (targetId) queryParams.set('userId', targetId);
+  if (targetEmail) queryParams.set('email', targetEmail);
 
   try {
-    const res = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetId)}`, { cache: 'no-store' });
+    const res = await fetch(`/api/recipes/saved?${queryParams.toString()}`, { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.recipes)) {
-        serverRecipes = data.recipes;
+        return data.recipes;
       }
     }
   } catch (_) {}
 
-  // Self-healing bridge: if any recipes are present in localStorage, upload them to PostgreSQL
-  if (typeof window !== 'undefined') {
-    try {
-      const keys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
-      for (const k of keys) {
-        const raw = localStorage.getItem(k);
-        if (raw) {
-          const list = JSON.parse(raw);
-          if (Array.isArray(list)) {
-            const unsynced = list.filter((lr: any) => 
-              lr && (lr.title || lr.name) && 
-              !serverRecipes.some((sr: any) => 
-                (sr.id === lr.id) || 
-                ((sr.title || sr.name)?.toLowerCase().trim() === (lr.title || lr.name)?.toLowerCase().trim())
-              )
-            );
-
-            if (unsynced.length > 0) {
-              fetch('/api/recipes/saved', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(unsynced.map(r => ({ ...r, userId: targetId })))
-              }).catch(() => {});
-
-              serverRecipes = [...unsynced, ...serverRecipes];
-            }
-          }
-        }
+  try {
+    const res2 = await fetch(`/api/saved-recipes?${queryParams.toString()}`, { cache: 'no-store' });
+    if (res2.ok) {
+      const data2 = await res2.json();
+      if (Array.isArray(data2.recipes)) {
+        return data2.recipes;
       }
-    } catch (_) {}
-  }
+    }
+  } catch (_) {}
 
-  return serverRecipes;
+  return [];
 }
 
-export async function persistSavedRecipe(userId: string, recipeOrList: any): Promise<boolean> {
-  const targetId = userId || 'usr_admin_1';
+export async function persistSavedRecipe(userId: string, recipeOrList: any, creatorMeta?: { createdBy?: string; creatorName?: string }): Promise<boolean> {
+  const targetId = (userId || '').trim();
+  if (!targetId) return false;
+
   const list = Array.isArray(recipeOrList) ? recipeOrList : [recipeOrList];
 
   const payload = list.map((item: any) => ({
     ...item,
-    userId: item.userId || item.user_id || targetId,
-    user_id: item.userId || item.user_id || targetId,
+    userId: targetId,
+    user_id: targetId,
+    createdBy: item.createdBy || item.created_by || creatorMeta?.createdBy || targetId,
+    created_by: item.createdBy || item.created_by || creatorMeta?.createdBy || targetId,
+    creatorName: item.creatorName || item.creator_name || creatorMeta?.creatorName || 'Creator',
+    creator_name: item.creatorName || item.creator_name || creatorMeta?.creatorName || 'Creator',
     recipeType: item.recipeType || item.category || 'Main Dish',
     category: item.recipeType || item.category || 'Main Dish',
     instructions: item.instructions || item.directions || item.steps || [],
     directions: item.directions || item.instructions || item.steps || [],
     imageUrl: item.imageUrl || item.image || '',
-    image: item.imageUrl || item.image || ''
+    image: item.imageUrl || item.image || '',
+    isFavorite: Boolean(item.isFavorite ?? item.is_favorite),
+    is_favorite: Boolean(item.isFavorite ?? item.is_favorite),
+    isCooked: Boolean(item.isCooked ?? item.is_cooked),
+    is_cooked: Boolean(item.isCooked ?? item.is_cooked),
+    rating: Number(item.rating) || 0,
+    note: item.note || '',
+    bookId: item.bookId || item.book_id || null,
+    book_id: item.bookId || item.book_id || null,
+    sourceUrl: item.sourceUrl || item.source_url || '',
+    source_url: item.sourceUrl || item.source_url || ''
   }));
 
   try {
