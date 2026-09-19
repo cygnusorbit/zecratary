@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
+import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +10,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const prompt = (body.prompt || '').trim();
 
-    // 1. Resolve active user from payload or cookie
+    // 1. Resolve user
     let userId = body.userId;
     let userEmail = body.userEmail || body.email;
 
@@ -28,7 +29,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
-    // 2. Load active AI Model settings from PostgreSQL admin_settings
+    // 2. Enforce Token System Quotas (/chef usage)
+    const tokenSettings = await getTokenSettings();
+    const chefCost = tokenSettings.chefCost ?? 1;
+
+    if (tokenSettings.isEnabled && chefCost > 0) {
+      const deduction = await deductUserTokens({
+        userId,
+        userEmail,
+        cost: chefCost,
+        feature: 'chef',
+        description: `Foodie Chef query: "${prompt.slice(0, 40)}..."`
+      });
+
+      if (!deduction.success) {
+        return NextResponse.json({
+          success: false,
+          error: deduction.error,
+          insufficientTokens: true,
+          required: chefCost,
+          currentBalance: deduction.currentBalance,
+          tokenSymbol: tokenSettings.tokenSymbol
+        }, { status: 402 });
+      }
+    }
+
+    // 3. Load active AI Model settings from PostgreSQL admin_settings
     let activeModel = 'gemini-1.5-flash';
     try {
       const sRows = await query('SELECT chef_ai_settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
@@ -37,7 +63,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (_) {}
 
-    // 3. Generate response and calculate prompt/completion tokens
+    // 4. Generate Chef response
     let responseText = '';
     let generatedRecipe: any = null;
 
@@ -55,11 +81,11 @@ export async function POST(req: NextRequest) {
         cookMinutes: 20,
         servings: body.preferences?.servings || 2,
         ingredients: [
-          'Fresh Vegetables (diced)',
-          'Olive Oil & Sea Salt',
+          'Fresh Seasonal Vegetables (diced)',
+          'Extra Virgin Olive Oil & Sea Salt',
           'Garlic & Aromatics',
-          'Protein of choice',
-          'Fresh Herbs & Lemon'
+          'Selected Protein of choice',
+          'Fresh Herbs & Lemon Zest'
         ],
         directions: [
           'Prepare and chop all fresh ingredients evenly.',
@@ -75,12 +101,10 @@ export async function POST(req: NextRequest) {
       responseText = `As Chef Foodie, I recommend pairing balanced proteins with fresh vegetables. For "${prompt}", try roasting with olive oil and light seasoning for maximum flavor and nutrition.`;
     }
 
-    // 4. Calculate realistic token consumption
-    // Context + Prompt tokens (~1 token per 4 characters + system prompt baseline)
+    // 5. Track LLM token usage
     const promptTokens = Math.max(18, Math.ceil((prompt.length + 180) / 4));
     const completionTokens = Math.max(35, Math.ceil(responseText.length / 4) + (generatedRecipe ? 85 : 0));
 
-    // 5. Commit token consumption to PostgreSQL users table
     const tokenUsage = await recordTokenUsage({
       userId,
       userEmail,
@@ -95,6 +119,8 @@ export async function POST(req: NextRequest) {
       reply: responseText,
       recipe: generatedRecipe,
       model: activeModel,
+      consumedSystemTokens: chefCost,
+      tokenSymbol: tokenSettings.tokenSymbol,
       tokenUsage: tokenUsage || {
         promptTokens,
         completionTokens,

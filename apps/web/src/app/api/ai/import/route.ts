@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
+import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,10 +30,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Import content is required.' }, { status: 400 });
     }
 
-    // 2. Token calculation based on import complexity
+    // 2. Token System Deductions for /import
+    const tokenSettings = await getTokenSettings();
+    let importCost = tokenSettings.importUrlCost;
+    if (type === 'text') importCost = tokenSettings.importTextCost;
+    if (type === 'photo') importCost = tokenSettings.importPhotoCost;
+
+    if (tokenSettings.isEnabled && importCost > 0) {
+      const deduction = await deductUserTokens({
+        userId,
+        userEmail,
+        cost: importCost,
+        feature: `import_${type}`,
+        description: `Import recipe via ${type.toUpperCase()}`
+      });
+
+      if (!deduction.success) {
+        return NextResponse.json({
+          success: false,
+          error: deduction.error,
+          insufficientTokens: true,
+          required: importCost,
+          currentBalance: deduction.currentBalance,
+          tokenSymbol: tokenSettings.tokenSymbol
+        }, { status: 402 });
+      }
+    }
+
+    // 3. Token calculation based on import complexity
     let promptTokens = 0;
     let completionTokens = 0;
-
     let recipeTitle = 'Imported Culinary Recipe';
     let recipeDescription = 'Extracted and structured via Foodie AI engine.';
 
@@ -43,7 +70,7 @@ export async function POST(req: NextRequest) {
       recipeTitle = `Gourmet Dish from ${cleanDomain}`;
       recipeDescription = `Recipe imported and parsed from ${inputContent}`;
     } else if (type === 'photo') {
-      promptTokens = 240; // Multimodal Vision OCR token overhead
+      promptTokens = 240;
       completionTokens = 210;
       recipeTitle = 'Photo Scanned Kitchen Recipe';
       recipeDescription = 'Parsed from cookbook capture via AI Vision.';
@@ -54,7 +81,7 @@ export async function POST(req: NextRequest) {
       recipeDescription = inputContent.slice(0, 120);
     }
 
-    // 3. Structured Recipe Object
+    // 4. Structured Recipe Object
     const recipeId = 'rcp_imp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
     const parsedRecipe = {
       id: recipeId,
@@ -87,7 +114,7 @@ export async function POST(req: NextRequest) {
       isPublic: false
     };
 
-    // 4. Save to PostgreSQL saved_recipes table
+    // 5. Save to PostgreSQL saved_recipes
     try {
       await query(`
         INSERT INTO saved_recipes (
@@ -111,7 +138,7 @@ export async function POST(req: NextRequest) {
       console.error('Failed to save imported recipe in PostgreSQL:', dbErr);
     }
 
-    // 5. Commit Token Consumption to PostgreSQL
+    // 6. Record token usage
     const tokenUsage = await recordTokenUsage({
       userId,
       userEmail,
@@ -124,13 +151,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       recipe: parsedRecipe,
+      consumedSystemTokens: importCost,
+      tokenSymbol: tokenSettings.tokenSymbol,
       tokenUsage: tokenUsage || {
         promptTokens,
         completionTokens,
         totalTokens: promptTokens + completionTokens,
         requestCount: 1
       },
-      message: `Successfully imported recipe. Consumed ${promptTokens + completionTokens} tokens.`
+      message: `Successfully imported recipe. Consumed ${importCost} ${tokenSettings.tokenSymbol}.`
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
