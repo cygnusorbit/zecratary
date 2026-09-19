@@ -30,7 +30,8 @@ import {
   Cpu,
   Moon,
   Sun,
-  Key
+  Key,
+  Coins
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -454,6 +455,10 @@ export default function Sidebar() {
                 <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
                   <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
+                </Link>
+                <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title={t('tokenSettings') || 'Token Settings'}>
+                  <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('tokenSettings') || 'Token Settings'}</span>}
                 </Link>
                 <Link href="/admin/plans" className={navClass('/admin/plans')} title={t('subscriptionPlans') || 'Subscription Plans'}>
                   <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />

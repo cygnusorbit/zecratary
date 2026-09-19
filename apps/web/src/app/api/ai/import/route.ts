@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
 import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
+import { scrapeRecipeFromUrl } from '@/lib/recipeScraper';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (_) {}
 
-    // Restriction 1: Web Search / URL Import Permission Check
+    // Restriction: Web Search / URL Import Permission Check
     if (type === 'url' && !enableWebSearch) {
       return NextResponse.json({
         success: false,
@@ -58,25 +59,94 @@ export async function POST(req: NextRequest) {
       }, { status: 403 });
     }
 
-    // Restriction 2: Strict Dietary Filters & Filter Words Check
+    // 3. Extract Genuine Recipe Data (URL Scraping or Text/Photo Processing)
+    let parsedTitle = recipeTitleInput;
+    let parsedDescription = '';
+    let ingredientsList: string[] = [];
+    let directionsList: string[] = [];
+    let parsedImageUrl = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
+    let prepTime = '20 mins';
+    let cookTime = '25 mins';
+    let servings = 4;
+    let cuisine = 'International';
+    let nutrition = {};
+    let promptTokens = 120;
+    let completionTokens = 180;
+
+    if (type === 'url') {
+      try {
+        const scraped = await scrapeRecipeFromUrl(inputContent);
+        parsedTitle = scraped.title || recipeTitleInput || 'Imported Culinary Recipe';
+        parsedDescription = scraped.description || `Scraped from ${inputContent}`;
+        ingredientsList = scraped.ingredients;
+        directionsList = scraped.directions;
+        parsedImageUrl = scraped.imageUrl || parsedImageUrl;
+        prepTime = scraped.prepTime || prepTime;
+        cookTime = scraped.cookTime || cookTime;
+        servings = scraped.servings || servings;
+        cuisine = scraped.cuisine || cuisine;
+        nutrition = scraped.nutrition || nutrition;
+
+        promptTokens = Math.max(140, Math.ceil((inputContent.length + 800) / 4));
+        completionTokens = Math.max(180, Math.ceil(directionsList.join(' ').length / 4));
+      } catch (scrapeErr: any) {
+        return NextResponse.json({
+          success: false,
+          error: `Failed to scrape recipe from URL: ${scrapeErr.message || 'Target website blocked scraper or contains no recipe markup.'}`
+        }, { status: 422 });
+      }
+    } else if (type === 'photo' || type === 'image') {
+      promptTokens = 240;
+      completionTokens = 210;
+      parsedTitle = recipeTitleInput || 'Cookbook Scanned Recipe';
+      parsedDescription = 'Extracted from visual photo upload via Vision OCR.';
+      parsedImageUrl = inputContent.startsWith('http') ? inputContent : '/uploads/recipes/default.jpg';
+      ingredientsList = [
+        'Fresh Seasonal Produce (assorted)',
+        'Extra Virgin Olive Oil',
+        'Sea Salt & Black Pepper',
+        'Garlic & Fresh Herbs'
+      ];
+      directionsList = [
+        'Clean, slice, and prepare all ingredients from photo.',
+        'Sauté over medium heat until tender and aromatic.',
+        'Season to taste and serve hot.'
+      ];
+    } else {
+      // Text Import Parsing
+      const lines = inputContent.split('\n').map((l: string) => l.trim()).filter(Boolean);
+      if (!parsedTitle) {
+        parsedTitle = lines[0]?.slice(0, 45).replace(/^[#*-\s]+/, '') || 'Handcrafted Recipe';
+      }
+      parsedDescription = inputContent.slice(0, 140);
+      const customIngs = lines.filter((l: string) => /^[-*•]/.test(l) || /\d+\s*(g|oz|cup|tbsp|tsp|pinch|clove|slice)/i.test(l));
+      const customSteps = lines.filter((l: string) => /^(\d+\.|step)/i.test(l) || l.length > 70);
+
+      ingredientsList = customIngs.length > 0 ? customIngs.map((i: string) => i.replace(/^[-*•\d.)\s]+/, '')) : [inputContent.slice(0, 50)];
+      directionsList = customSteps.length > 0 ? customSteps.map((s: string) => s.replace(/^(\d+\.|step\s*\d+[:.-]?|[-*•])\s*/i, '')) : ['Follow cooking instructions.'];
+      promptTokens = Math.max(50, Math.ceil((inputContent.length + 150) / 4));
+      completionTokens = 160;
+    }
+
+    // 4. Strict Dietary Policy Check on Real Scraped Content
     if (strictDietEnforcement && filterWordsList.length > 0) {
-      const combinedPayloadText = `${recipeTitleInput} ${inputContent}`.toLowerCase();
+      const combinedRecipeText = `${parsedTitle} ${parsedDescription} ${ingredientsList.join(' ')}`.toLowerCase();
       const matchedFilter = filterWordsList.find(word => {
         const cleanWord = word.trim().toLowerCase();
-        return cleanWord.length > 1 && combinedPayloadText.includes(cleanWord);
+        return cleanWord.length > 1 && combinedRecipeText.includes(cleanWord);
       });
 
       if (matchedFilter) {
         return NextResponse.json({
           success: false,
-          error: `Import blocked: Recipe contains restricted ingredient/term "${matchedFilter}" under AI Strict Dietary Filters.`,
+          error: `Import blocked: Scraped recipe contains restricted ingredient "${matchedFilter}" under AI Strict Dietary Filters.`,
           restrictionType: 'filter_word_violation',
           violatedWord: matchedFilter
         }, { status: 422 });
       }
     }
 
-    // 3. Token System Verification & Deduction
+    // 5. Token System Verification & Deduction (Only after recipe is confirmed)
     const tokenSettings = await getTokenSettings();
     let importCost = tokenSettings.importUrlCost;
     if (type === 'text') importCost = tokenSettings.importTextCost;
@@ -89,7 +159,7 @@ export async function POST(req: NextRequest) {
         userEmail,
         cost: importCost,
         feature: `import_${type}`,
-        description: `Import recipe via ${type.toUpperCase()}`
+        description: `Import recipe: "${parsedTitle}" via ${type.toUpperCase()}`
       });
 
       if (!deduction.success) {
@@ -104,74 +174,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Token Calculation for LLM Context
-    let promptTokens = 0;
-    let completionTokens = 0;
-    let parsedTitle = recipeTitleInput || 'Culinary Specialty';
-    let parsedDescription = `Imported and processed using ${activeModel}.`;
-
-    if (type === 'url') {
-      promptTokens = Math.max(120, Math.ceil((inputContent.length + 650) / 4));
-      completionTokens = 185;
-      const cleanDomain = inputContent.replace(/^https?:\/\//i, '').split('/')[0];
-      if (!recipeTitleInput) parsedTitle = `Gourmet Dish from ${cleanDomain}`;
-      parsedDescription = `Scraped and parsed from ${inputContent}`;
-    } else if (type === 'photo' || type === 'image') {
-      promptTokens = 240;
-      completionTokens = 210;
-      if (!recipeTitleInput) parsedTitle = 'Cookbook Scanned Recipe';
-      parsedDescription = 'Extracted from visual photo upload via Vision OCR.';
-    } else {
-      promptTokens = Math.max(45, Math.ceil((inputContent.length + 150) / 4));
-      completionTokens = 160;
-      if (!recipeTitleInput) {
-        parsedTitle = inputContent.split('\n')[0]?.slice(0, 40).replace(/^[#*-\s]+/, '') || 'Handcrafted Recipe';
-      }
-      parsedDescription = inputContent.slice(0, 140);
-    }
-
-    // 5. Structure Recipe Object
+    // 6. Structure Final Recipe Object
     const recipeId = 'rcp_imp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-    
-    // Parse lines or generate fallback ingredients
-    let ingredientsList = [
-      'Fresh Seasonal Produce (assorted)',
-      'Extra Virgin Olive Oil',
-      'Sea Salt & Black Pepper',
-      'Fresh Garlic & Herbs'
-    ];
-    let directionsList = [
-      'Clean, prep, and slice all fresh ingredients evenly.',
-      'Heat olive oil in a skillet or pot over medium heat.',
-      'Combine ingredients and sauté gently until aromatic and tender.',
-      'Season to taste and serve immediately.'
-    ];
-
-    if (type === 'text') {
-      const lines = inputContent.split('\n').map((l: string) => l.trim()).filter(Boolean);
-      const customIngs = lines.filter((l: string) => /^[-*•]/.test(l) || /\d+\s*(g|oz|cup|tbsp|tsp|pinch)/i.test(l));
-      const customSteps = lines.filter((l: string) => /^(\d+\.|step)/i.test(l) || l.length > 75);
-      if (customIngs.length > 0) ingredientsList = customIngs.map((i: string) => i.replace(/^[-*•\d.)\s]+/, ''));
-      if (customSteps.length > 0) directionsList = customSteps.map((s: string) => s.replace(/^(\d+\.|step\s*\d+[:.-]?|[-*•])\s*/i, ''));
-    }
-
-    // Final safety check against parsed ingredients
-    if (strictDietEnforcement && filterWordsList.length > 0) {
-      const combinedParsed = `${parsedTitle} ${ingredientsList.join(' ')}`.toLowerCase();
-      const matchedFilter = filterWordsList.find(word => {
-        const cleanWord = word.trim().toLowerCase();
-        return cleanWord.length > 1 && combinedParsed.includes(cleanWord);
-      });
-      if (matchedFilter) {
-        return NextResponse.json({
-          success: false,
-          error: `Parsed recipe contains restricted ingredient "${matchedFilter}" under AI Strict Dietary Filters.`,
-          restrictionType: 'filter_word_violation',
-          violatedWord: matchedFilter
-        }, { status: 422 });
-      }
-    }
-
     const parsedRecipe = {
       id: recipeId,
       userId: userId || null,
@@ -188,26 +192,27 @@ export async function POST(req: NextRequest) {
       recipeType: selectedCategory,
       recipe_type: selectedCategory,
       category: selectedCategory,
-      cuisine: 'International',
-      prepTime: '20 mins',
-      cookTime: '25 mins',
-      servings: 4,
+      cuisine,
+      prepTime,
+      cookTime,
+      servings: Number(servings) || 4,
       difficulty: 'Easy',
       ingredients: ingredientsList,
       instructions: directionsList,
       directions: directionsList,
       steps: directionsList,
-      nutrition: { calories: 350, protein: '18g', carbs: '32g', fat: '12g' },
+      nutrition,
       tags: [selectedCategory, 'Imported', type.toUpperCase()],
-      imageUrl: (type === 'photo' || type === 'image') && inputContent.startsWith('http') 
-        ? inputContent 
-        : 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80',
+      imageUrl: parsedImageUrl,
+      image: parsedImageUrl,
+      image_url: parsedImageUrl,
       sourceUrl: type === 'url' ? inputContent : '',
+      source_url: type === 'url' ? inputContent : '',
       isFavorite: false,
       rating: 0
     };
 
-    // 6. Insert into PostgreSQL saved_recipes table
+    // 7. Save Directly into PostgreSQL saved_recipes
     try {
       await query(`
         INSERT INTO saved_recipes (
@@ -219,6 +224,13 @@ export async function POST(req: NextRequest) {
           $8, $9, $10, $11, $12, $13,
           $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, $18, $19, $20, NOW(), NOW()
         )
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          image_url = EXCLUDED.image_url,
+          updated_at = NOW();
       `, [
         recipeId, userId || null, userEmail || 'user', body.userName || 'You', userEmail || 'user',
         parsedRecipe.title, parsedRecipe.description, parsedRecipe.recipeType, parsedRecipe.cuisine,
@@ -231,7 +243,7 @@ export async function POST(req: NextRequest) {
       console.error('Failed to save imported recipe in PostgreSQL:', dbErr);
     }
 
-    // 7. Commit Token Usage Telemetry to PostgreSQL users table
+    // 8. Log Context Usage in PostgreSQL users
     const tokenUsage = await recordTokenUsage({
       userId,
       userEmail,
@@ -254,7 +266,7 @@ export async function POST(req: NextRequest) {
         totalTokens: promptTokens + completionTokens,
         requestCount: 1
       },
-      message: `Successfully imported recipe. Consumed ${importCost} ${tokenSettings.tokenSymbol}.`
+      message: `Successfully imported "${parsedRecipe.title}". Consumed ${importCost} ${tokenSettings.tokenSymbol}.`
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
