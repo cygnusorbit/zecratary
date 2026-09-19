@@ -483,7 +483,15 @@ export default function ProfilePage() {
       let active = getCurrentUser() as ExtendedUser | null;
 
       if (!active && typeof document !== 'undefined') {
-        const match = document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/);
+        let match: RegExpMatchArray | null = null;
+        const authKeys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
+        for (const k of authKeys) {
+          const m = document.cookie.match(new RegExp('(?:^|;\\s*)' + k + '=([^;]+)'));
+          if (m && m[1]) {
+            match = m;
+            break;
+          }
+        }
         if (match && match[1]) {
           try {
             const cookieData = JSON.parse(decodeURIComponent(match[1]));

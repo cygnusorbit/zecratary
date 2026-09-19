@@ -1,36 +1,76 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { syncUserToPostgres } from '@/lib/postgresUser';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const sessionCookie = req.cookies.get('zecratary_session')?.value;
-    if (!sessionCookie) {
-      return NextResponse.json({ authenticated: false }, { status: 401 });
+    const body = await req.json();
+    const profile = body.profile;
+    const requestedCallback = body.callbackUrl;
+
+    if (!profile || !profile.email) {
+      return NextResponse.json({ error: 'Missing profile email' }, { status: 400 });
     }
 
-    let parsed: any;
-    try {
-      parsed = JSON.parse(decodeURIComponent(sessionCookie));
-    } catch (_) {
-      parsed = JSON.parse(sessionCookie);
+    const email = profile.email.toLowerCase().trim();
+    const name = profile.name || profile.given_name || email.split('@')[0];
+    const picture = profile.picture || '';
+    const googleId = profile.sub || profile.id || Date.now().toString();
+
+    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
+
+    const candidateUser = {
+      id: `usr_g_${googleId}`,
+      name,
+      email,
+      role: isEmailAdmin ? 'admin' : 'user',
+      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
+      picture,
+      avatar: picture,
+      createdAt: new Date().toISOString()
+    };
+
+    const finalUser = await syncUserToPostgres(candidateUser);
+
+    let targetUrl = (requestedCallback || '').trim();
+    if (
+      !targetUrl || 
+      targetUrl === '/login' || 
+      targetUrl.startsWith('/login?') || 
+      targetUrl.startsWith('/login/') ||
+      targetUrl === '/register'
+    ) {
+      targetUrl = finalUser.role === 'admin' ? '/admin' : '/profile';
     }
 
-    if (!parsed?.email) {
-      return NextResponse.json({ authenticated: false }, { status: 401 });
+    const response = NextResponse.json({
+      success: true,
+      user: finalUser,
+      redirectUrl: targetUrl
+    });
+
+    const serializedUser = JSON.stringify(finalUser);
+    const cookieNames = [
+      'zecratary_session',
+      'zecratary_current_user',
+      'zecratary_auth_session',
+      'currentUser'
+    ];
+
+    for (const cname of cookieNames) {
+      response.cookies.set(cname, serializedUser, {
+        path: '/',
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 86400 * 7
+      });
     }
 
-    const rows = await query('SELECT id, name, email, role, subscription_plan AS "subscriptionPlan" FROM users WHERE email = $1 LIMIT 1', [parsed.email.toLowerCase().trim()]);
-    if (rows.length === 0) {
-      return NextResponse.json({ authenticated: false }, { status: 401 });
-    }
-
-    return NextResponse.json({
-      authenticated: true,
-      user: rows[0]
-    }, { headers: { 'Cache-Control': 'no-store' } });
+    return response;
   } catch (err: any) {
-    return NextResponse.json({ authenticated: false, error: err.message }, { status: 500 });
+    console.error('[google-session] Error:', err);
+    return NextResponse.json({ error: err.message || 'Session creation failed' }, { status: 500 });
   }
 }
