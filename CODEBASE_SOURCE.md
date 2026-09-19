@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.5.1",
+  "version": "7.5.2",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.5.1",
+  "version": "7.5.2",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -23840,6 +23840,549 @@ export default function AdminPaymentPage() {
 
 ```
 
+## File: `apps/web/src/app/admin/token-setting/page.tsx`
+```typescript
+'use client';
+
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { 
+  Coins, Sparkles, Plus, Trash2, Save, ArrowLeft,
+  CheckCircle2, AlertCircle, RefreshCw, Layers, ShieldCheck, 
+  ChefHat, DownloadCloud, FileText, Camera, Tag, DollarSign
+} from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+
+interface TokenPackage {
+  id: string;
+  name: string;
+  tokens: number;
+  price: number;
+  badge?: string;
+  isPopular?: boolean;
+}
+
+interface SubscriptionPlan {
+  id: string;
+  slug: string;
+  name: string;
+  monthly_tokens?: number;
+}
+
+export default function AdminTokenSettingPage() {
+  const { t } = useTranslation();
+  
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Token General Settings
+  const [tokenName, setTokenName] = useState('Foodie Token');
+  const [tokenSymbol, setTokenSymbol] = useState('🪙');
+  const [isEnabled, setIsEnabled] = useState(true);
+
+  // Per Feature Costs
+  const [chefCost, setChefCost] = useState(1);
+  const [importUrlCost, setImportUrlCost] = useState(2);
+  const [importTextCost, setImportTextCost] = useState(1);
+  const [importPhotoCost, setImportPhotoCost] = useState(3);
+
+  // Packages
+  const [packages, setPackages] = useState<TokenPackage[]>([]);
+  
+  // Subscription Plan Monthly Tokens
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [planAllocations, setPlanAllocations] = useState<{ [slug: string]: number }>({});
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/token-settings');
+      const data = await res.json();
+      if (data.success && data.settings) {
+        setTokenName(data.settings.tokenName || 'Foodie Token');
+        setTokenSymbol(data.settings.tokenSymbol || '🪙');
+        setIsEnabled(data.settings.isEnabled ?? true);
+        setChefCost(data.settings.chefCost ?? 1);
+        setImportUrlCost(data.settings.importUrlCost ?? 2);
+        setImportTextCost(data.settings.importTextCost ?? 1);
+        setImportPhotoCost(data.settings.importPhotoCost ?? 3);
+        setPackages(data.settings.packages || []);
+      }
+      if (data.plans) {
+        setPlans(data.plans);
+        const map: { [slug: string]: number } = {};
+        data.plans.forEach((p: SubscriptionPlan) => {
+          map[p.slug] = p.monthly_tokens ?? (p.slug.includes('pro') ? 500 : 50);
+        });
+        setPlanAllocations(map);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to fetch token settings');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSuccessMsg('');
+    setErrorMsg('');
+
+    try {
+      const res = await fetch('/api/admin/token-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokenName,
+          tokenSymbol,
+          chefCost: Number(chefCost),
+          importUrlCost: Number(importUrlCost),
+          importTextCost: Number(importTextCost),
+          importPhotoCost: Number(importPhotoCost),
+          isEnabled,
+          packages,
+          planAllocations
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed saving token configurations');
+      }
+
+      setSuccessMsg(t('tokenSettingsSavedSuccess', 'Token configuration saved and synchronized with PostgreSQL!'));
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error occurred while saving');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddPackage = () => {
+    const newPkg: TokenPackage = {
+      id: 'pkg_' + Date.now().toString(36),
+      name: 'Custom Package',
+      tokens: 250,
+      price: 9.99,
+      badge: 'Special',
+      isPopular: false
+    };
+    setPackages([...packages, newPkg]);
+  };
+
+  const handleRemovePackage = (id: string) => {
+    setPackages(packages.filter(p => p.id !== id));
+  };
+
+  const handlePackageChange = (id: string, field: keyof TokenPackage, value: any) => {
+    setPackages(packages.map(p => {
+      if (p.id === id) {
+        return { ...p, [field]: value };
+      }
+      return p;
+    }));
+  };
+
+  if (loading) {
+    return (
+      <div 
+        className="min-h-screen p-8 flex items-center justify-center font-sans transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
+      >
+        <div className="flex items-center gap-3">
+          <RefreshCw className="h-5 w-5 animate-spin" style={{ color: 'var(--color-primary)' }} />
+          <span className="text-xs font-bold">{t('loadingTokenSettings', 'Loading Token Settings...')}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      className="max-w-5xl mx-auto space-y-6 pb-24 px-4 sm:px-6 pt-4 font-sans transition-colors duration-200 min-h-screen"
+      style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
+    >
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Link 
+              href="/admin" 
+              className="p-1.5 rounded-lg border hover:opacity-80 transition"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              <Coins className="h-6 w-6 text-amber-500" /> {t('adminTokenSettingTitle', 'Token System Management')}
+            </h1>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('adminTokenSettingSubtitle', 'Configure custom token name, symbol, feature consumption costs (/chef & /import), and user purchase packages.')}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="px-5 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50"
+          style={{ backgroundColor: 'var(--color-primary)' }}
+        >
+          {saving ? (
+            <>
+              <RefreshCw className="h-4 w-4 animate-spin" /> {t('saving', 'Saving to PostgreSQL...')}
+            </>
+          ) : (
+            <>
+              <Save className="h-4 w-4" /> {t('saveTokenSettingsBtn', 'Save Configurations')}
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Notifications */}
+      {errorMsg && (
+        <div 
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
+          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }}
+        >
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {successMsg && (
+        <div 
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
+          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
+      {/* Section 1: Token Identity & System Status */}
+      <div 
+        className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex items-center gap-2">
+            <Coins className="h-4 w-4 text-amber-500" />
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('tokenIdentityHeading', 'Token Currency Identity & Master Toggle')}
+            </h2>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
+            <input
+              type="checkbox"
+              checked={isEnabled}
+              onChange={(e) => setIsEnabled(e.target.checked)}
+              className="rounded accent-amber-500 w-4 h-4 cursor-pointer"
+            />
+            <span style={{ color: isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
+              {isEnabled ? t('tokenSystemActive', 'System Active') : t('tokenSystemDisabled', 'Bypass Consumption')}
+            </span>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('tokenNameLabel', 'Token Name')}
+            </label>
+            <input
+              type="text"
+              value={tokenName}
+              onChange={(e) => setTokenName(e.target.value)}
+              placeholder="e.g. Foodie Token, Zecra Coin"
+              className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none transition"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('tokenSymbolLabel', 'Token Symbol / Emoji')}
+            </label>
+            <input
+              type="text"
+              value={tokenSymbol}
+              onChange={(e) => setTokenSymbol(e.target.value)}
+              placeholder="e.g. 🪙, CRD, TK"
+              className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none transition"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Section 2: Usage / Feature Costs */}
+      <div 
+        className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+          <Sparkles className="h-4 w-4 text-orange-400" />
+          <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+            {t('featureUsagePricingHeading', 'Feature Usage Consumption Costs (/chef & /import)')}
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Chef Chat Cost */}
+          <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center gap-2">
+              <ChefHat className="h-4 w-4 text-amber-500" />
+              <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>/chef (AI Chat)</span>
+            </div>
+            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('chefCostDesc', 'Tokens deducted per generated response.')}
+            </p>
+            <div className="flex items-center gap-1.5 pt-1">
+              <input
+                type="number"
+                min="0"
+                value={chefCost}
+                onChange={(e) => setChefCost(Math.max(0, parseInt(e.target.value) || 0))}
+                className="w-20 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+              <span className="text-xs font-bold text-amber-500">{tokenSymbol}</span>
+            </div>
+          </div>
+
+          {/* Import URL Cost */}
+          <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center gap-2">
+              <DownloadCloud className="h-4 w-4 text-emerald-500" />
+              <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>/import (URL)</span>
+            </div>
+            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('importUrlCostDesc', 'Tokens deducted per recipe scraped from link.')}
+            </p>
+            <div className="flex items-center gap-1.5 pt-1">
+              <input
+                type="number"
+                min="0"
+                value={importUrlCost}
+                onChange={(e) => setImportUrlCost(Math.max(0, parseInt(e.target.value) || 0))}
+                className="w-20 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+              <span className="text-xs font-bold text-amber-500">{tokenSymbol}</span>
+            </div>
+          </div>
+
+          {/* Import Text Cost */}
+          <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-blue-400" />
+              <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>/import (Raw Text)</span>
+            </div>
+            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('importTextCostDesc', 'Tokens deducted per recipe parsed from text.')}
+            </p>
+            <div className="flex items-center gap-1.5 pt-1">
+              <input
+                type="number"
+                min="0"
+                value={importTextCost}
+                onChange={(e) => setImportTextCost(Math.max(0, parseInt(e.target.value) || 0))}
+                className="w-20 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+              <span className="text-xs font-bold text-amber-500">{tokenSymbol}</span>
+            </div>
+          </div>
+
+          {/* Import Photo Cost */}
+          <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center gap-2">
+              <Camera className="h-4 w-4 text-purple-400" />
+              <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>/import (Photo OCR)</span>
+            </div>
+            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('importPhotoCostDesc', 'Tokens deducted for Vision OCR recipe imports.')}
+            </p>
+            <div className="flex items-center gap-1.5 pt-1">
+              <input
+                type="number"
+                min="0"
+                value={importPhotoCost}
+                onChange={(e) => setImportPhotoCost(Math.max(0, parseInt(e.target.value) || 0))}
+                className="w-20 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+              <span className="text-xs font-bold text-amber-500">{tokenSymbol}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 3: Token Purchase Packages */}
+      <div 
+        className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex items-center gap-2">
+            <DollarSign className="h-4 w-4 text-emerald-500" />
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('tokenPackagesHeading', 'User Purchasable Token Packages')}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={handleAddPackage}
+            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 shadow-sm hover:opacity-90 transition cursor-pointer"
+            style={{ backgroundColor: 'var(--color-primary)', color: '#ffffff', borderColor: 'transparent' }}
+          >
+            <Plus className="h-3.5 w-3.5" /> {t('addPackageBtn', 'Add Package')}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {packages.map((pkg, idx) => (
+            <div 
+              key={pkg.id} 
+              className="border rounded-2xl p-4 space-y-3 relative shadow-md transition"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-amber-500">
+                  {t('packageNumber', 'Bundle')} #{idx + 1}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleRemovePackage(pkg.id)}
+                  className="text-red-400 hover:text-red-500 p-1 transition cursor-pointer"
+                  title="Remove Package"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('packageNameLabel', 'Package Name')}
+                </label>
+                <input
+                  type="text"
+                  value={pkg.name}
+                  onChange={(e) => handlePackageChange(pkg.id, 'name', e.target.value)}
+                  className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-semibold outline-none"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('packageTokensLabel', 'Tokens Granted')}
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={pkg.tokens}
+                    onChange={(e) => handlePackageChange(pkg.id, 'tokens', parseInt(e.target.value) || 0)}
+                    className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('packagePriceLabel', 'Price ($ USD)')}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={pkg.price}
+                    onChange={(e) => handlePackageChange(pkg.id, 'price', parseFloat(e.target.value) || 0)}
+                    className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('packageBadgeLabel', 'Badge Label (Optional)')}
+                </label>
+                <input
+                  type="text"
+                  value={pkg.badge || ''}
+                  onChange={(e) => handlePackageChange(pkg.id, 'badge', e.target.value)}
+                  placeholder="e.g. Popular, Best Value"
+                  className="w-full border rounded-lg px-2.5 py-1.5 text-xs outline-none"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Section 4: Subscription Plan Monthly Grants */}
+      <div 
+        className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+          <Layers className="h-4 w-4 text-purple-400" />
+          <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+            {t('planMonthlyGrantsHeading', 'Subscription Plan Monthly Included Tokens')}
+          </h2>
+        </div>
+
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          {t('planMonthlyGrantsSubtitle', 'Subscribers automatically receive these tokens every recurring monthly billing cycle.')}
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {plans.map((p) => (
+            <div 
+              key={p.slug}
+              className="p-4 rounded-2xl border space-y-2"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{p.name || p.slug}</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-primary/10" style={{ borderColor: 'var(--color-border)' }}>
+                  {p.slug}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="number"
+                  min="0"
+                  value={planAllocations[p.slug] ?? 50}
+                  onChange={(e) => setPlanAllocations({ ...planAllocations, [p.slug]: parseInt(e.target.value) || 0 })}
+                  className="w-24 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <span className="text-xs font-bold text-amber-500">{tokenSymbol} / month</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+```
+
 ## File: `apps/web/src/app/admin/language/page.tsx`
 ```typescript
 // @ts-nocheck
@@ -36799,6 +37342,70 @@ export async function POST(req: NextRequest) {
 
 ```
 
+## File: `apps/web/src/app/api/admin/token-settings/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { getTokenSettings, saveTokenSettings, initTokenTables } from '@/lib/tokenService';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  try {
+    await initTokenTables();
+    const settings = await getTokenSettings();
+
+    // Fetch subscription plans to show monthly inclusions
+    let plans: any[] = [];
+    try {
+      plans = await query('SELECT id, slug, name, monthly_tokens FROM subscription_plans ORDER BY created_at ASC');
+    } catch (_) {}
+
+    return NextResponse.json({
+      success: true,
+      settings,
+      plans
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { tokenName, tokenSymbol, chefCost, importUrlCost, importTextCost, importPhotoCost, packages, isEnabled, planAllocations } = body;
+
+    const updated = await saveTokenSettings({
+      tokenName: tokenName?.trim() || 'Foodie Token',
+      tokenSymbol: tokenSymbol?.trim() || '🪙',
+      chefCost: Math.max(0, parseInt(chefCost ?? 1, 10)),
+      importUrlCost: Math.max(0, parseInt(importUrlCost ?? 2, 10)),
+      importTextCost: Math.max(0, parseInt(importTextCost ?? 1, 10)),
+      importPhotoCost: Math.max(0, parseInt(importPhotoCost ?? 3, 10)),
+      packages: Array.isArray(packages) ? packages : undefined,
+      isEnabled: Boolean(isEnabled)
+    });
+
+    // Update monthly tokens per plan if provided
+    if (planAllocations && typeof planAllocations === 'object') {
+      for (const [slug, amount] of Object.entries(planAllocations)) {
+        await query('UPDATE subscription_plans SET monthly_tokens = $1 WHERE slug = $2', [Math.max(0, Number(amount)), slug]);
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Token settings successfully persisted to PostgreSQL.',
+      settings: updated
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
 ## File: `apps/web/src/app/api/admin/social-env/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -39483,6 +40090,7 @@ export async function POST(req: Request) {
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
+import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
@@ -39491,7 +40099,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const prompt = (body.prompt || '').trim();
 
-    // 1. Resolve active user from payload or cookie
+    // 1. Resolve user
     let userId = body.userId;
     let userEmail = body.userEmail || body.email;
 
@@ -39510,7 +40118,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
-    // 2. Load active AI Model settings from PostgreSQL admin_settings
+    // 2. Enforce Token System Quotas (/chef usage)
+    const tokenSettings = await getTokenSettings();
+    const chefCost = tokenSettings.chefCost ?? 1;
+
+    if (tokenSettings.isEnabled && chefCost > 0) {
+      const deduction = await deductUserTokens({
+        userId,
+        userEmail,
+        cost: chefCost,
+        feature: 'chef',
+        description: `Foodie Chef query: "${prompt.slice(0, 40)}..."`
+      });
+
+      if (!deduction.success) {
+        return NextResponse.json({
+          success: false,
+          error: deduction.error,
+          insufficientTokens: true,
+          required: chefCost,
+          currentBalance: deduction.currentBalance,
+          tokenSymbol: tokenSettings.tokenSymbol
+        }, { status: 402 });
+      }
+    }
+
+    // 3. Load active AI Model settings from PostgreSQL admin_settings
     let activeModel = 'gemini-1.5-flash';
     try {
       const sRows = await query('SELECT chef_ai_settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
@@ -39519,7 +40152,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (_) {}
 
-    // 3. Generate response and calculate prompt/completion tokens
+    // 4. Generate Chef response
     let responseText = '';
     let generatedRecipe: any = null;
 
@@ -39537,11 +40170,11 @@ export async function POST(req: NextRequest) {
         cookMinutes: 20,
         servings: body.preferences?.servings || 2,
         ingredients: [
-          'Fresh Vegetables (diced)',
-          'Olive Oil & Sea Salt',
+          'Fresh Seasonal Vegetables (diced)',
+          'Extra Virgin Olive Oil & Sea Salt',
           'Garlic & Aromatics',
-          'Protein of choice',
-          'Fresh Herbs & Lemon'
+          'Selected Protein of choice',
+          'Fresh Herbs & Lemon Zest'
         ],
         directions: [
           'Prepare and chop all fresh ingredients evenly.',
@@ -39557,12 +40190,10 @@ export async function POST(req: NextRequest) {
       responseText = `As Chef Foodie, I recommend pairing balanced proteins with fresh vegetables. For "${prompt}", try roasting with olive oil and light seasoning for maximum flavor and nutrition.`;
     }
 
-    // 4. Calculate realistic token consumption
-    // Context + Prompt tokens (~1 token per 4 characters + system prompt baseline)
+    // 5. Track LLM token usage
     const promptTokens = Math.max(18, Math.ceil((prompt.length + 180) / 4));
     const completionTokens = Math.max(35, Math.ceil(responseText.length / 4) + (generatedRecipe ? 85 : 0));
 
-    // 5. Commit token consumption to PostgreSQL users table
     const tokenUsage = await recordTokenUsage({
       userId,
       userEmail,
@@ -39577,6 +40208,8 @@ export async function POST(req: NextRequest) {
       reply: responseText,
       recipe: generatedRecipe,
       model: activeModel,
+      consumedSystemTokens: chefCost,
+      tokenSymbol: tokenSettings.tokenSymbol,
       tokenUsage: tokenUsage || {
         promptTokens,
         completionTokens,
@@ -39678,6 +40311,7 @@ export async function GET(req: NextRequest) {
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
+import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
@@ -39706,10 +40340,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Import content is required.' }, { status: 400 });
     }
 
-    // 2. Token calculation based on import complexity
+    // 2. Token System Deductions for /import
+    const tokenSettings = await getTokenSettings();
+    let importCost = tokenSettings.importUrlCost;
+    if (type === 'text') importCost = tokenSettings.importTextCost;
+    if (type === 'photo') importCost = tokenSettings.importPhotoCost;
+
+    if (tokenSettings.isEnabled && importCost > 0) {
+      const deduction = await deductUserTokens({
+        userId,
+        userEmail,
+        cost: importCost,
+        feature: `import_${type}`,
+        description: `Import recipe via ${type.toUpperCase()}`
+      });
+
+      if (!deduction.success) {
+        return NextResponse.json({
+          success: false,
+          error: deduction.error,
+          insufficientTokens: true,
+          required: importCost,
+          currentBalance: deduction.currentBalance,
+          tokenSymbol: tokenSettings.tokenSymbol
+        }, { status: 402 });
+      }
+    }
+
+    // 3. Token calculation based on import complexity
     let promptTokens = 0;
     let completionTokens = 0;
-
     let recipeTitle = 'Imported Culinary Recipe';
     let recipeDescription = 'Extracted and structured via Foodie AI engine.';
 
@@ -39720,7 +40380,7 @@ export async function POST(req: NextRequest) {
       recipeTitle = `Gourmet Dish from ${cleanDomain}`;
       recipeDescription = `Recipe imported and parsed from ${inputContent}`;
     } else if (type === 'photo') {
-      promptTokens = 240; // Multimodal Vision OCR token overhead
+      promptTokens = 240;
       completionTokens = 210;
       recipeTitle = 'Photo Scanned Kitchen Recipe';
       recipeDescription = 'Parsed from cookbook capture via AI Vision.';
@@ -39731,7 +40391,7 @@ export async function POST(req: NextRequest) {
       recipeDescription = inputContent.slice(0, 120);
     }
 
-    // 3. Structured Recipe Object
+    // 4. Structured Recipe Object
     const recipeId = 'rcp_imp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
     const parsedRecipe = {
       id: recipeId,
@@ -39764,7 +40424,7 @@ export async function POST(req: NextRequest) {
       isPublic: false
     };
 
-    // 4. Save to PostgreSQL saved_recipes table
+    // 5. Save to PostgreSQL saved_recipes
     try {
       await query(`
         INSERT INTO saved_recipes (
@@ -39788,7 +40448,7 @@ export async function POST(req: NextRequest) {
       console.error('Failed to save imported recipe in PostgreSQL:', dbErr);
     }
 
-    // 5. Commit Token Consumption to PostgreSQL
+    // 6. Record token usage
     const tokenUsage = await recordTokenUsage({
       userId,
       userEmail,
@@ -39801,13 +40461,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       recipe: parsedRecipe,
+      consumedSystemTokens: importCost,
+      tokenSymbol: tokenSettings.tokenSymbol,
       tokenUsage: tokenUsage || {
         promptTokens,
         completionTokens,
         totalTokens: promptTokens + completionTokens,
         requestCount: 1
       },
-      message: `Successfully imported recipe. Consumed ${promptTokens + completionTokens} tokens.`
+      message: `Successfully imported recipe. Consumed ${importCost} ${tokenSettings.tokenSymbol}.`
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -40281,6 +40943,113 @@ export async function DELETE(req: NextRequest) {
     await query('DELETE FROM meal_plan_templates WHERE id = $1', [cleanId]);
 
     return NextResponse.json({ success: true, message: 'Template deleted from PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/tokens/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { 
+  getTokenSettings, 
+  getUserTokenBalance, 
+  addTokensToUser, 
+  syncUserMonthlyTokens 
+} from '@/lib/tokenService';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let userId = searchParams.get('userId');
+    let email = searchParams.get('email')?.toLowerCase().trim();
+
+    if (!userId && !email) {
+      const cookieHeader = req.cookies.get('zecratary_session')?.value;
+      if (cookieHeader) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(cookieHeader));
+          userId = parsed.id;
+          email = parsed.email?.toLowerCase().trim();
+        } catch (_) {}
+      }
+    }
+
+    // Sync monthly plan grant if due
+    if (userId || email) {
+      await syncUserMonthlyTokens(userId, email);
+    }
+
+    const settings = await getTokenSettings();
+    const balance = await getUserTokenBalance(userId, email);
+
+    // Fetch recent transactions
+    let transactions: any[] = [];
+    if (userId || email) {
+      transactions = await query(`
+        SELECT id, amount, balance_after, type, description, created_at
+        FROM token_transactions
+        WHERE user_id = $1 OR LOWER(user_email) = LOWER($2)
+        ORDER BY created_at DESC
+        LIMIT 10
+      `, [userId || 'none', email || 'none']);
+    }
+
+    return NextResponse.json({
+      success: true,
+      balance,
+      tokenName: settings.tokenName,
+      tokenSymbol: settings.tokenSymbol,
+      costs: {
+        chef: settings.chefCost,
+        importUrl: settings.importUrlCost,
+        importText: settings.importTextCost,
+        importPhoto: settings.importPhotoCost
+      },
+      packages: settings.packages,
+      isEnabled: settings.isEnabled,
+      transactions
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { action, packageId, userId, userEmail } = body;
+
+    const settings = await getTokenSettings();
+
+    if (action === 'purchase') {
+      const pkg = settings.packages.find(p => p.id === packageId);
+      if (!pkg) {
+        return NextResponse.json({ success: false, error: 'Token package not found' }, { status: 404 });
+      }
+
+      const newBalance = await addTokensToUser({
+        userId,
+        userEmail,
+        amount: pkg.tokens,
+        type: 'package_purchase',
+        description: `Purchased ${pkg.name} (+${pkg.tokens} ${settings.tokenSymbol} for $${pkg.price})`
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `Successfully added ${pkg.tokens} ${settings.tokenSymbol} to your balance!`,
+        newBalance,
+        package: pkg
+      });
+    }
+
+    return NextResponse.json({ success: false, error: 'Invalid token action' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -46935,6 +47704,177 @@ export default function ThemeSync() {
 
 ```
 
+## File: `apps/web/src/components/TokenPurchaseModal.tsx`
+```typescript
+'use client';
+
+import { useState } from 'react';
+import { Coins, CheckCircle2, AlertCircle, X, Sparkles, Loader2, ArrowRight } from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+
+interface TokenPackage {
+  id: string;
+  name: string;
+  tokens: number;
+  price: number;
+  badge?: string;
+}
+
+interface TokenPurchaseModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  userId?: string | null;
+  userEmail?: string | null;
+  tokenSymbol?: string;
+  packages: TokenPackage[];
+  onPurchased?: (newBalance: number) => void;
+}
+
+export default function TokenPurchaseModal({
+  isOpen,
+  onClose,
+  userId,
+  userEmail,
+  tokenSymbol = '🪙',
+  packages,
+  onPurchased
+}: TokenPurchaseModalProps) {
+  const { t } = useTranslation();
+  const [buyingId, setBuyingId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  if (!isOpen) return null;
+
+  const handleBuy = async (pkg: TokenPackage) => {
+    setBuyingId(pkg.id);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'purchase',
+          packageId: pkg.id,
+          userId,
+          userEmail
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to purchase tokens.');
+      }
+
+      setSuccessMsg(data.message || `Added ${pkg.tokens} tokens!`);
+      if (onPurchased && typeof data.newBalance === 'number') {
+        onPurchased(data.newBalance);
+      }
+      setTimeout(() => {
+        onClose();
+        setSuccessMsg('');
+      }, 1800);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Purchase error');
+    } finally {
+      setBuyingId(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+      <div 
+        className="w-full max-w-lg rounded-3xl border p-6 space-y-5 shadow-2xl transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+      >
+        <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500">
+              <Coins className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-black" style={{ color: 'var(--color-text)' }}>
+                {t('purchaseTokensModalTitle', 'Top Up Token Balance')}
+              </h3>
+              <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('purchaseTokensModalSubtitle', 'Choose a package to consume recipes & chef generation seamlessly.')}
+              </p>
+            </div>
+          </div>
+          <button 
+            type="button" 
+            onClick={onClose}
+            className="p-1.5 rounded-lg border hover:opacity-75 transition cursor-pointer"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {errorMsg && (
+          <div className="p-3 border rounded-xl text-xs font-semibold flex items-center gap-2 text-red-500 bg-red-500/10 border-red-500/20">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
+        {successMsg && (
+          <div className="p-3 border rounded-xl text-xs font-semibold flex items-center gap-2 text-emerald-500 bg-emerald-500/10 border-emerald-500/20">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            <span>{successMsg}</span>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {packages.map((pkg) => (
+            <div 
+              key={pkg.id}
+              className="flex items-center justify-between p-4 rounded-2xl border transition hover:border-amber-500/50"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black" style={{ color: 'var(--color-text)' }}>{pkg.name}</span>
+                  {pkg.badge && (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-500">
+                      {pkg.badge}
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs font-mono font-bold text-amber-500 flex items-center gap-1">
+                  <span>+{pkg.tokens}</span>
+                  <span>{tokenSymbol}</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={Boolean(buyingId)}
+                onClick={() => handleBuy(pkg)}
+                className="px-4 py-2 rounded-xl text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md transition cursor-pointer disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {buyingId === pkg.id ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <>
+                    <span>${pkg.price.toFixed(2)}</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </>
+                )}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+```
+
 ## File: `apps/web/src/components/GlobalThemeSync.tsx`
 ```typescript
 'use client';
@@ -47705,6 +48645,344 @@ export function executeSocialAuth(profile: SocialProfile): User {
   window.dispatchEvent(new Event('storage'));
 
   return matchedUser;
+}
+
+```
+
+## File: `apps/web/src/lib/tokenService.ts`
+```typescript
+import { query } from '@/lib/db';
+
+export interface TokenPackage {
+  id: string;
+  name: string;
+  tokens: number;
+  price: number;
+  badge?: string;
+  isPopular?: boolean;
+}
+
+export interface TokenSettings {
+  id: string;
+  tokenName: string;
+  tokenSymbol: string;
+  chefCost: number;
+  importUrlCost: number;
+  importTextCost: number;
+  importPhotoCost: number;
+  packages: TokenPackage[];
+  isEnabled: boolean;
+  updatedAt?: string;
+}
+
+export interface DeductionResult {
+  success: boolean;
+  error?: string;
+  deducted?: number;
+  currentBalance?: number;
+  required?: number;
+  tokenSymbol?: string;
+}
+
+const DEFAULT_SETTINGS: TokenSettings = {
+  id: 'primary_token_settings',
+  tokenName: 'Foodie Token',
+  tokenSymbol: '🪙',
+  chefCost: 1,
+  importUrlCost: 2,
+  importTextCost: 1,
+  importPhotoCost: 3,
+  packages: [
+    { id: 'pkg_starter', name: 'Starter Pantry', tokens: 100, price: 4.99, badge: 'Starter' },
+    { id: 'pkg_pro', name: 'Culinary Master', tokens: 500, price: 19.99, badge: 'Popular', isPopular: true },
+    { id: 'pkg_buffet', name: 'Executive Chef', tokens: 1500, price: 49.99, badge: 'Best Value' }
+  ],
+  isEnabled: true
+};
+
+export async function initTokenTables() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS token_settings (
+        id VARCHAR(64) PRIMARY KEY,
+        token_name VARCHAR(100) DEFAULT 'Foodie Token',
+        token_symbol VARCHAR(20) DEFAULT '🪙',
+        chef_cost INTEGER DEFAULT 1,
+        import_url_cost INTEGER DEFAULT 2,
+        import_text_cost INTEGER DEFAULT 1,
+        import_photo_cost INTEGER DEFAULT 3,
+        packages JSONB DEFAULT '[]'::jsonb,
+        is_enabled BOOLEAN DEFAULT true,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS token_transactions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        user_email VARCHAR(255),
+        amount INTEGER NOT NULL,
+        balance_after INTEGER NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance INTEGER DEFAULT 100;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50);
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 100;
+    `);
+  } catch (err) {
+    console.error('Failed initializing token tables in PostgreSQL:', err);
+  }
+}
+
+export async function getTokenSettings(): Promise<TokenSettings> {
+  await initTokenTables();
+  try {
+    const rows = await query('SELECT * FROM token_settings WHERE id = $1 LIMIT 1', ['primary_token_settings']);
+    if (rows.length > 0) {
+      const r = rows[0];
+      return {
+        id: r.id,
+        tokenName: r.token_name || DEFAULT_SETTINGS.tokenName,
+        tokenSymbol: r.token_symbol || DEFAULT_SETTINGS.tokenSymbol,
+        chefCost: Number(r.chef_cost ?? DEFAULT_SETTINGS.chefCost),
+        importUrlCost: Number(r.import_url_cost ?? DEFAULT_SETTINGS.importUrlCost),
+        importTextCost: Number(r.import_text_cost ?? DEFAULT_SETTINGS.importTextCost),
+        importPhotoCost: Number(r.import_photo_cost ?? DEFAULT_SETTINGS.importPhotoCost),
+        packages: Array.isArray(r.packages) && r.packages.length > 0 ? r.packages : DEFAULT_SETTINGS.packages,
+        isEnabled: Boolean(r.is_enabled ?? true),
+        updatedAt: r.updated_at
+      };
+    }
+  } catch (_) {}
+  return DEFAULT_SETTINGS;
+}
+
+export async function saveTokenSettings(settings: Partial<TokenSettings>): Promise<TokenSettings> {
+  await initTokenTables();
+  const current = await getTokenSettings();
+  const merged: TokenSettings = {
+    ...current,
+    ...settings,
+    packages: settings.packages || current.packages
+  };
+
+  await query(`
+    INSERT INTO token_settings (
+      id, token_name, token_symbol, chef_cost, import_url_cost,
+      import_text_cost, import_photo_cost, packages, is_enabled, updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, NOW())
+    ON CONFLICT (id) DO UPDATE SET
+      token_name = EXCLUDED.token_name,
+      token_symbol = EXCLUDED.token_symbol,
+      chef_cost = EXCLUDED.chef_cost,
+      import_url_cost = EXCLUDED.import_url_cost,
+      import_text_cost = EXCLUDED.import_text_cost,
+      import_photo_cost = EXCLUDED.import_photo_cost,
+      packages = EXCLUDED.packages,
+      is_enabled = EXCLUDED.is_enabled,
+      updated_at = NOW()
+  `, [
+    'primary_token_settings',
+    merged.tokenName,
+    merged.tokenSymbol,
+    merged.chefCost,
+    merged.importUrlCost,
+    merged.importTextCost,
+    merged.importPhotoCost,
+    JSON.stringify(merged.packages),
+    merged.isEnabled
+  ]);
+
+  return merged;
+}
+
+export async function getUserTokenBalance(userId?: string | null, userEmail?: string | null): Promise<number> {
+  await initTokenTables();
+  try {
+    let rows: any[] = [];
+    if (userId) {
+      rows = await query('SELECT token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
+    } else if (userEmail) {
+      rows = await query('SELECT token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
+    }
+    if (rows.length > 0 && rows[0].token_balance !== null) {
+      return Number(rows[0].token_balance);
+    }
+  } catch (_) {}
+  return 0;
+}
+
+export async function deductUserTokens({
+  userId,
+  userEmail,
+  cost,
+  feature,
+  description
+}: {
+  userId?: string | null;
+  userEmail?: string | null;
+  cost: number;
+  feature: string;
+  description: string;
+}): Promise<DeductionResult> {
+  await initTokenTables();
+  const settings = await getTokenSettings();
+
+  if (!settings.isEnabled || cost <= 0) {
+    const current = await getUserTokenBalance(userId, userEmail);
+    return { success: true, deducted: 0, currentBalance: current, tokenSymbol: settings.tokenSymbol };
+  }
+
+  // Find user
+  let userRow: any = null;
+  if (userId) {
+    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
+    if (rows.length > 0) userRow = rows[0];
+  }
+  if (!userRow && userEmail) {
+    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
+    if (rows.length > 0) userRow = rows[0];
+  }
+
+  if (!userRow) {
+    return { success: false, error: 'User not found' };
+  }
+
+  const currentBalance = Number(userRow.token_balance ?? 0);
+  if (currentBalance < cost) {
+    return {
+      success: false,
+      error: `Insufficient ${settings.tokenName}. Required: ${cost} ${settings.tokenSymbol}, Balance: ${currentBalance} ${settings.tokenSymbol}`,
+      currentBalance,
+      required: cost,
+      tokenSymbol: settings.tokenSymbol
+    };
+  }
+
+  // Atomically decrement
+  const updateRes = await query(`
+    UPDATE users 
+    SET token_balance = token_balance - $1, updated_at = NOW() 
+    WHERE id = $2 AND token_balance >= $1 
+    RETURNING token_balance
+  `, [cost, userRow.id]);
+
+  if (updateRes.length === 0) {
+    return {
+      success: false,
+      error: 'Token deduction failed due to concurrent update.',
+      currentBalance,
+      required: cost
+    };
+  }
+
+  const newBalance = Number(updateRes[0].token_balance);
+  const txId = 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+
+  try {
+    await query(`
+      INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+    `, [txId, userRow.id, userRow.email, -cost, newBalance, `usage_${feature}`, description]);
+  } catch (txErr) {
+    console.error('Failed to log token transaction:', txErr);
+  }
+
+  return {
+    success: true,
+    deducted: cost,
+    currentBalance: newBalance,
+    tokenSymbol: settings.tokenSymbol
+  };
+}
+
+export async function addTokensToUser({
+  userId,
+  userEmail,
+  amount,
+  type,
+  description
+}: {
+  userId?: string | null;
+  userEmail?: string | null;
+  amount: number;
+  type: string;
+  description: string;
+}) {
+  await initTokenTables();
+  let userRow: any = null;
+  if (userId) {
+    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
+    if (rows.length > 0) userRow = rows[0];
+  }
+  if (!userRow && userEmail) {
+    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
+    if (rows.length > 0) userRow = rows[0];
+  }
+
+  if (!userRow) return null;
+
+  const updateRes = await query(`
+    UPDATE users 
+    SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
+    WHERE id = $2 
+    RETURNING token_balance
+  `, [amount, userRow.id]);
+
+  const newBalance = Number(updateRes[0].token_balance);
+  const txId = 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+
+  await query(`
+    INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+  `, [txId, userRow.id, userRow.email, amount, newBalance, type, description]);
+
+  return newBalance;
+}
+
+export async function syncUserMonthlyTokens(userId?: string | null, userEmail?: string | null) {
+  await initTokenTables();
+  try {
+    let userRow: any = null;
+    if (userId) {
+      const rows = await query('SELECT * FROM users WHERE id = $1 LIMIT 1', [userId]);
+      if (rows.length > 0) userRow = rows[0];
+    } else if (userEmail) {
+      const rows = await query('SELECT * FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
+      if (rows.length > 0) userRow = rows[0];
+    }
+    if (!userRow) return;
+
+    const currentCycle = new Date().toISOString().slice(0, 7); // e.g. "2026-09"
+    if (userRow.last_token_grant_cycle === currentCycle) {
+      return; // Already granted for this monthly cycle
+    }
+
+    const planSlug = userRow.subscription_plan || 'taster';
+    const planRows = await query('SELECT monthly_tokens, token_limit FROM subscription_plans WHERE slug = $1 LIMIT 1', [planSlug]);
+    
+    // Default tokens granted per plan: Free/Taster: 50, Nutrition Pro: 500, Custom: 2000
+    let tokensToGrant = 50;
+    if (planRows.length > 0 && planRows[0].monthly_tokens) {
+      tokensToGrant = Number(planRows[0].monthly_tokens);
+    } else if (planSlug.includes('pro')) {
+      tokensToGrant = 500;
+    }
+
+    await addTokensToUser({
+      userId: userRow.id,
+      userEmail: userRow.email,
+      amount: tokensToGrant,
+      type: 'plan_monthly_grant',
+      description: `Monthly Plan Token Grant (${planSlug.toUpperCase()} - ${currentCycle})`
+    });
+
+    await query('UPDATE users SET last_token_grant_cycle = $1 WHERE id = $2', [currentCycle, userRow.id]);
+  } catch (err) {
+    console.error('Failed syncing monthly plan tokens:', err);
+  }
 }
 
 ```
