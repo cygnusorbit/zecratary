@@ -1,69 +1,68 @@
 // Server-Backed Recipe Synchronization Module
-// Direct PostgreSQL operations with local fallback sync
+// Strictly enforces creator ownership and attribution
 
-export async function syncUserSavedRecipes(userId: string): Promise<any[]> {
-  const targetId = userId || 'usr_admin_1';
-  let serverRecipes: any[] = [];
+export async function syncUserSavedRecipes(userId: string, email?: string): Promise<any[]> {
+  const targetId = (userId || '').trim();
+  const targetEmail = (email || '').trim();
+  if (!targetId && !targetEmail) return [];
+
+  const queryParams = new URLSearchParams();
+  if (targetId) queryParams.set('userId', targetId);
+  if (targetEmail) queryParams.set('email', targetEmail);
 
   try {
-    const res = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetId)}`, { cache: 'no-store' });
+    const res = await fetch(`/api/recipes/saved?${queryParams.toString()}`, { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.recipes)) {
-        serverRecipes = data.recipes;
+        return data.recipes;
       }
     }
   } catch (_) {}
 
-  // Self-healing bridge: if any recipes are present in localStorage, upload them to PostgreSQL
-  if (typeof window !== 'undefined') {
-    try {
-      const keys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
-      for (const k of keys) {
-        const raw = localStorage.getItem(k);
-        if (raw) {
-          const list = JSON.parse(raw);
-          if (Array.isArray(list)) {
-            const unsynced = list.filter((lr: any) => 
-              lr && (lr.title || lr.name) && 
-              !serverRecipes.some((sr: any) => 
-                (sr.id === lr.id) || 
-                ((sr.title || sr.name)?.toLowerCase().trim() === (lr.title || lr.name)?.toLowerCase().trim())
-              )
-            );
-
-            if (unsynced.length > 0) {
-              fetch('/api/recipes/saved', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(unsynced.map(r => ({ ...r, userId: targetId })))
-              }).catch(() => {});
-
-              serverRecipes = [...unsynced, ...serverRecipes];
-            }
-          }
-        }
+  try {
+    const res2 = await fetch(`/api/saved-recipes?${queryParams.toString()}`, { cache: 'no-store' });
+    if (res2.ok) {
+      const data2 = await res2.json();
+      if (Array.isArray(data2.recipes)) {
+        return data2.recipes;
       }
-    } catch (_) {}
-  }
+    }
+  } catch (_) {}
 
-  return serverRecipes;
+  return [];
 }
 
-export async function persistSavedRecipe(userId: string, recipeOrList: any): Promise<boolean> {
-  const targetId = userId || 'usr_admin_1';
+export async function persistSavedRecipe(userId: string, recipeOrList: any, creatorMeta?: { createdBy?: string; creatorName?: string }): Promise<boolean> {
+  const targetId = (userId || '').trim();
+  if (!targetId) return false;
+
   const list = Array.isArray(recipeOrList) ? recipeOrList : [recipeOrList];
 
   const payload = list.map((item: any) => ({
     ...item,
-    userId: item.userId || item.user_id || targetId,
-    user_id: item.userId || item.user_id || targetId,
+    userId: targetId,
+    user_id: targetId,
+    createdBy: item.createdBy || item.created_by || creatorMeta?.createdBy || targetId,
+    created_by: item.createdBy || item.created_by || creatorMeta?.createdBy || targetId,
+    creatorName: item.creatorName || item.creator_name || creatorMeta?.creatorName || 'Creator',
+    creator_name: item.creatorName || item.creator_name || creatorMeta?.creatorName || 'Creator',
     recipeType: item.recipeType || item.category || 'Main Dish',
     category: item.recipeType || item.category || 'Main Dish',
     instructions: item.instructions || item.directions || item.steps || [],
     directions: item.directions || item.instructions || item.steps || [],
     imageUrl: item.imageUrl || item.image || '',
-    image: item.imageUrl || item.image || ''
+    image: item.imageUrl || item.image || '',
+    isFavorite: Boolean(item.isFavorite ?? item.is_favorite),
+    is_favorite: Boolean(item.isFavorite ?? item.is_favorite),
+    isCooked: Boolean(item.isCooked ?? item.is_cooked),
+    is_cooked: Boolean(item.isCooked ?? item.is_cooked),
+    rating: Number(item.rating) || 0,
+    note: item.note || '',
+    bookId: item.bookId || item.book_id || null,
+    book_id: item.bookId || item.book_id || null,
+    sourceUrl: item.sourceUrl || item.source_url || '',
+    source_url: item.sourceUrl || item.source_url || ''
   }));
 
   try {

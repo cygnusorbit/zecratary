@@ -1,9 +1,9 @@
-import { persistSavedRecipe } from '@/lib/recipeSync';
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Link2, FileText, Image as ImageIcon, Sparkles, AlertCircle, CheckCircle2, Upload, X } from 'lucide-react';
 import { getCurrentUser } from '@/lib/auth';
+import { persistSavedRecipe } from '@/lib/recipeSync';
 import { useTranslation } from '@/components/LanguageProvider';
 
 const DEFAULT_RECIPE_TYPES = [
@@ -197,8 +197,12 @@ export default function ImportPage() {
     };
   }, [applyGlobalTheme, t]);
 
-  const saveAndRedirect = (recipeData: any) => {
+  const saveAndRedirect = async (recipeData: any) => {
     const user = getCurrentUser();
+    const targetUserId = (user?.id || user?.email || 'usr_admin_1').trim();
+    const userEmail = (user?.email || targetUserId).trim();
+    const userName = (user?.name || 'You').trim();
+
     const recipeTitle = decodeHtmlEntities(recipeData.title || recipeData.name || 'Imported Recipe');
     const recipeImage = recipeData.imageUrl || recipeData.image || '/uploads/recipes/default.jpg';
     const recipeCategory = recipeData.category || recipeData.recipeType || (recipeTypes[0] || 'Main Dish');
@@ -251,15 +255,20 @@ export default function ImportPage() {
 
     const normalizedRecipe = {
       id: recipeData.id || 'rec_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      userId: user?.id,
-      createdBy: user?.email,
-      creatorName: user?.name,
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: userEmail,
+      created_by: userEmail,
+      creatorName: userName,
+      creator_name: userName,
       title: recipeTitle,
       name: recipeTitle,
       imageUrl: recipeImage,
       image: recipeImage,
+      image_url: recipeImage,
       category: recipeCategory,
       recipeType: recipeCategory,
+      recipe_type: recipeCategory,
       tags: recipeData.tags || [recipeCategory, 'Imported'],
       servings: Number(recipeData.servings) || 4,
       prepTimeMinutes: Number(recipeData.prepTimeMinutes) || 20,
@@ -269,13 +278,36 @@ export default function ImportPage() {
       ingredients: cleanIngredients,
       instructions: finalSteps,
       steps: finalSteps,
+      directions: finalSteps,
       sourceUrl: recipeData.sourceUrl || url || '',
+      source_url: recipeData.sourceUrl || url || '',
       isFavorite: false,
       isCooked: false,
       rating: 0,
       createdAt: new Date().toISOString()
     };
 
+    // 1. Persist directly to PostgreSQL
+    try {
+      await persistSavedRecipe(targetUserId, normalizedRecipe, {
+        createdBy: userEmail,
+        creatorName: userName
+      });
+    } catch (err) {
+      console.warn('[Import] persistSavedRecipe failed, trying direct API:', err);
+    }
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([normalizedRecipe])
+      });
+    } catch (apiErr) {
+      console.warn('[Import] Direct API persist fallback failed:', apiErr);
+    }
+
+    // 2. Synchronize to localStorage for instant local availability
     const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
     storageKeys.forEach((key) => {
       try {
@@ -301,7 +333,7 @@ export default function ImportPage() {
 
     setTimeout(() => {
       router.push('/saved');
-    }, 900);
+    }, 750);
   };
 
   const handleUrlImport = async (e: React.FormEvent) => {
@@ -310,11 +342,24 @@ export default function ImportPage() {
     setLoading(true);
     setStatus(null);
 
+    const user = getCurrentUser();
+    const targetUserId = (user?.id || user?.email || 'usr_admin_1').trim();
+    const userEmail = (user?.email || targetUserId).trim();
+    const userName = (user?.name || 'User').trim();
+
     try {
       const res = await fetch('/api/recipes/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ 
+          url: url.trim(),
+          userId: targetUserId,
+          user_id: targetUserId,
+          createdBy: userEmail,
+          created_by: userEmail,
+          creatorName: userName,
+          creator_name: userName
+        }),
       });
 
       let result: any = null;
@@ -326,7 +371,7 @@ export default function ImportPage() {
       }
 
       if (result && result.success && result.data) {
-        saveAndRedirect(result.data);
+        await saveAndRedirect(result.data);
       } else {
         setStatus({ type: 'error', msg: result?.error || 'Failed to extract recipe from URL.' });
         setLoading(false);
@@ -461,7 +506,7 @@ export default function ImportPage() {
       rating: 0
     };
 
-    saveAndRedirect(parsedRecipe);
+    await saveAndRedirect(parsedRecipe);
   };
 
   const handleFilesAdded = (files: FileList | File[]) => {
@@ -547,7 +592,7 @@ export default function ImportPage() {
 
       recipeData.isFavorite = false;
       recipeData.rating = 0;
-      saveAndRedirect(recipeData);
+      await saveAndRedirect(recipeData);
     } catch (err: any) {
       setStatus({ type: 'error', msg: err.message || 'Image upload or AI analysis failed.' });
       setLoading(false);

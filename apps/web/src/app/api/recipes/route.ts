@@ -7,12 +7,17 @@ async function ensureColumns() {
   try {
     await query(`
       ALTER TABLE saved_recipes 
+      ADD COLUMN IF NOT EXISTS user_id TEXT,
+      ADD COLUMN IF NOT EXISTS created_by TEXT,
+      ADD COLUMN IF NOT EXISTS creator_name TEXT,
       ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS rating INT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS rating NUMERIC DEFAULT 0,
       ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
       ADD COLUMN IF NOT EXISTS book_id TEXT,
       ADD COLUMN IF NOT EXISTS source_url TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_saved_recipes_creator ON saved_recipes(user_id, created_by);
     `);
   } catch (_) {}
 }
@@ -21,16 +26,31 @@ export async function GET(req: NextRequest) {
   try {
     await ensureColumns();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
+    const userId = searchParams.get('userId')?.trim();
+    const email = searchParams.get('email')?.trim();
     const category = searchParams.get('category');
 
-    let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
+    if (!userId && !email) {
+      return NextResponse.json(
+        { success: true, recipes: [] },
+        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+      );
+    }
+
+    let sql = `SELECT * FROM saved_recipes WHERE `;
     const params: any[] = [];
 
+    const conditions: string[] = [];
     if (userId) {
       params.push(userId);
-      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL OR is_public = TRUE)`;
+      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
     }
+    if (email && email !== userId) {
+      params.push(email);
+      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+    }
+
+    sql += `(${conditions.join(' OR ')})`;
 
     if (category && category !== 'all' && category !== 'All Types') {
       params.push(category);
@@ -65,8 +85,12 @@ export async function GET(req: NextRequest) {
       return {
         ...r,
         id: r.id,
-        userId: r.user_id || r.userId || 'usr_admin_1',
-        user_id: r.user_id || r.userId || 'usr_admin_1',
+        userId: r.user_id || userId,
+        user_id: r.user_id || userId,
+        createdBy: r.created_by || r.user_id || userId,
+        created_by: r.created_by || r.user_id || userId,
+        creatorName: r.creator_name || 'Creator',
+        creator_name: r.creator_name || 'Creator',
         title: r.title || r.name || 'Untitled Recipe',
         name: r.title || r.name || 'Untitled Recipe',
         description: r.description || '',
@@ -123,17 +147,21 @@ export async function POST(req: NextRequest) {
 
     for (const item of items) {
       if (!item) continue;
+      const targetUserId = (item.userId || item.user_id || body.userId || body.user_id || '').trim();
+      if (!targetUserId) continue;
+
+      const createdBy = (item.createdBy || item.created_by || body.createdBy || body.created_by || targetUserId).trim();
+      const creatorName = (item.creatorName || item.creator_name || body.creatorName || body.creator_name || 'Creator').trim();
       const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
       try {
         const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
         if (userCheck.length === 0) {
           await query(`
             INSERT INTO users (id, name, email, role, subscription_plan)
-            VALUES ($1, 'User', $2, 'user', 'taster')
-            ON CONFLICT (id) DO NOTHING;
-          `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
+            VALUES ($1, $2, $3, 'user', 'taster')
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
+          `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
         }
       } catch (_) {}
 
@@ -162,16 +190,18 @@ export async function POST(req: NextRequest) {
 
       await query(`
         INSERT INTO saved_recipes (
-          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
           servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
           is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16,
-          $17, $18, $19, $20, $21, $22, NOW()
+          $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18,
+          $19, $20, $21, $22, $23, $24, NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
-          user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
+          user_id = EXCLUDED.user_id,
+          created_by = COALESCE(EXCLUDED.created_by, saved_recipes.created_by),
+          creator_name = COALESCE(EXCLUDED.creator_name, saved_recipes.creator_name),
           title = EXCLUDED.title,
           description = EXCLUDED.description,
           recipe_type = EXCLUDED.recipe_type,
@@ -196,6 +226,8 @@ export async function POST(req: NextRequest) {
       `, [
         id,
         targetUserId,
+        createdBy,
+        creatorName,
         item.title || item.name || 'Untitled Recipe',
         item.description || '',
         item.recipeType || item.category || item.recipe_type || 'Main Dish',

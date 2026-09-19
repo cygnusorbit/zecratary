@@ -454,6 +454,112 @@ export async function POST(req: Request) {
       console.error('[Ingest API] PostgreSQL persistence error:', dbErr);
     }
 
+    
+    // Tag imported recipe explicitly with creator identity in PostgreSQL
+    try {
+      const targetUserId = (body.userId || body.user_id || 'usr_admin_1').trim();
+      const createdBy = (body.createdBy || body.created_by || body.email || targetUserId).trim();
+      const creatorName = (body.creatorName || body.creator_name || body.name || 'Creator').trim();
+      const targetId = newRecipe.id || ('import_' + Date.now().toString(36));
+
+      await query(`
+        INSERT INTO users (id, name, email, role, subscription_plan)
+        VALUES ($1, $2, $3, 'user', 'taster')
+        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
+      `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = EXCLUDED.user_id,
+          created_by = EXCLUDED.created_by,
+          creator_name = EXCLUDED.creator_name,
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          image_url = EXCLUDED.image_url,
+          updated_at = NOW();
+      `, [
+        targetId,
+        targetUserId,
+        createdBy,
+        creatorName,
+        newRecipe.title || newRecipe.name || 'Imported Recipe',
+        newRecipe.description || '',
+        newRecipe.recipeType || newRecipe.category || 'Main Dish',
+        newRecipe.cuisine || '',
+        String(newRecipe.prepTime || newRecipe.prepTimeMinutes || '15'),
+        String(newRecipe.cookTime || newRecipe.cookTimeMinutes || '25'),
+        String(newRecipe.servings || '4'),
+        newRecipe.difficulty || 'Medium',
+        JSON.stringify(newRecipe.ingredients || []),
+        JSON.stringify(newRecipe.directions || newRecipe.instructions || newRecipe.steps || []),
+        JSON.stringify(newRecipe.nutrition || newRecipe.macros || {}),
+        JSON.stringify(newRecipe.tags || ['Imported']),
+        newRecipe.imageUrl || newRecipe.image || '',
+        false
+      ]);
+    } catch (dbErr) {
+      console.error('[Ingest API] PostgreSQL creator persistence error:', dbErr);
+    }
+
+    
+    // Tag imported recipe with creator identity in PostgreSQL
+    try {
+      const targetUserId = (body.userId || body.user_id || 'usr_admin_1').trim();
+      const createdBy = (body.createdBy || body.created_by || body.email || targetUserId).trim();
+      const creatorName = (body.creatorName || body.creator_name || body.name || 'Creator').trim();
+      const targetId = newRecipe.id || ('import_' + Date.now().toString(36));
+
+      await query(`
+        INSERT INTO users (id, name, email, role, subscription_plan)
+        VALUES ($1, $2, $3, 'user', 'taster')
+        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
+      `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = EXCLUDED.user_id,
+          created_by = EXCLUDED.created_by,
+          creator_name = EXCLUDED.creator_name,
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          image_url = EXCLUDED.image_url,
+          updated_at = NOW();
+      `, [
+        targetId,
+        targetUserId,
+        createdBy,
+        creatorName,
+        newRecipe.title || newRecipe.name || 'Imported Recipe',
+        newRecipe.description || '',
+        newRecipe.recipeType || newRecipe.category || 'Main Dish',
+        newRecipe.cuisine || '',
+        String(newRecipe.prepTime || newRecipe.prepTimeMinutes || '15'),
+        String(newRecipe.cookTime || newRecipe.cookTimeMinutes || '25'),
+        String(newRecipe.servings || '4'),
+        newRecipe.difficulty || 'Medium',
+        JSON.stringify(newRecipe.ingredients || []),
+        JSON.stringify(newRecipe.directions || newRecipe.instructions || newRecipe.steps || []),
+        JSON.stringify(newRecipe.nutrition || newRecipe.macros || {}),
+        JSON.stringify(newRecipe.tags || ['Imported']),
+        newRecipe.imageUrl || newRecipe.image || '',
+        false
+      ]);
+    } catch (dbErr) {
+      console.error('[Ingest API] PostgreSQL creator persistence error:', dbErr);
+    }
+
     return NextResponse.json({ success: false, error: error.message || 'Ingestion failed' }, { status: 500 });
   }
 }

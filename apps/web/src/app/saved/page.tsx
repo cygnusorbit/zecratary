@@ -9,7 +9,7 @@ import {
   Trash2, Save, Plus, ImagePlus, Users, Calendar,
   GripVertical, CheckSquare, CheckCircle2, Type, ExternalLink,
   Carrot, Hourglass, ChevronLeft, ChevronRight, LayoutGrid,
-  Grid3X3, Rows3, Play, Pause, RotateCcw, Bell
+  Grid3X3, Rows3, Play, Pause, Bell
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { syncUserSavedRecipes, persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
@@ -149,7 +149,6 @@ export default function SavedRecipesPage() {
     { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
   ];
 
-  // Play culinary synthesized bell audio on completion
   const playTimerEndSound = useCallback(() => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -157,7 +156,7 @@ export default function SavedRecipesPage() {
       const ctx = audioCtxRef.current || new AudioCtx();
       audioCtxRef.current = ctx;
 
-      const notes = [587.33, 880, 1174.66, 1760]; // D5, A5, D6, A6 culinary chime
+      const notes = [587.33, 880, 1174.66, 1760];
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -176,7 +175,6 @@ export default function SavedRecipesPage() {
     }
   }, []);
 
-  // Restore existing timer from localStorage on mount
   useEffect(() => {
     try {
       const savedTimerRaw = localStorage.getItem('zecratary_active_timer');
@@ -197,7 +195,6 @@ export default function SavedRecipesPage() {
     } catch (_) {}
   }, []);
 
-  // Active Timer Countdown Effect
   useEffect(() => {
     if (!activeTimer || !activeTimer.isRunning) return;
 
@@ -275,31 +272,44 @@ export default function SavedRecipesPage() {
   const loadData = useCallback(async (user: User | null) => {
     if (!user) return;
     setCategories(getStoredCategories());
-    const targetUserId = (user.id || 'usr_admin_1').trim();
+    const targetUserId = (user.id || user.email || '').trim();
+    if (!targetUserId) return;
 
     try {
       setLoading(true);
-      const rawRecipes = await syncUserSavedRecipes(targetUserId);
+      const rawRecipes = await syncUserSavedRecipes(targetUserId, user.email);
 
-      const userRecipes = rawRecipes.map((r: any) => {
-        const cleanType = getCleanRecipeType(r);
-        return {
-          ...r,
-          userId: targetUserId,
-          recipeType: cleanType,
-          category: cleanType,
-          bookId: r.book_id || r.bookId || null,
-          isFavorite: Boolean(r.is_favorite || r.isFavorite),
-          is_favorite: Boolean(r.is_favorite || r.isFavorite),
-          isCooked: Boolean(r.is_cooked || r.isCooked),
-          is_cooked: Boolean(r.is_cooked || r.isCooked),
-          rating: Number(r.rating) || 0,
-          note: r.note || '',
-          sourceUrl: r.source_url || r.sourceUrl || '',
-          source_url: r.source_url || r.sourceUrl || '',
-          tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
-        };
-      });
+      // Verify creator identity explicitly on incoming records
+      const userRecipes = rawRecipes
+        .filter((r: any) => {
+          const rUser = String(r.user_id || r.userId || '').trim();
+          const rCreator = String(r.created_by || r.createdBy || '').trim();
+          return rUser === targetUserId || (user.email && (rUser === user.email || rCreator === user.email));
+        })
+        .map((r: any) => {
+          const cleanType = getCleanRecipeType(r);
+          return {
+            ...r,
+            userId: targetUserId,
+            user_id: targetUserId,
+            createdBy: r.created_by || r.createdBy || user.email || targetUserId,
+            created_by: r.created_by || r.createdBy || user.email || targetUserId,
+            creatorName: r.creator_name || r.creatorName || user.name || 'You',
+            creator_name: r.creator_name || r.creatorName || user.name || 'You',
+            recipeType: cleanType,
+            category: cleanType,
+            bookId: r.book_id || r.bookId || null,
+            isFavorite: Boolean(r.is_favorite || r.isFavorite),
+            is_favorite: Boolean(r.is_favorite || r.isFavorite),
+            isCooked: Boolean(r.is_cooked || r.isCooked),
+            is_cooked: Boolean(r.is_cooked || r.isCooked),
+            rating: Number(r.rating) || 0,
+            note: r.note || '',
+            sourceUrl: r.source_url || r.sourceUrl || '',
+            source_url: r.source_url || r.sourceUrl || '',
+            tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
+          };
+        });
 
       setRecipes(userRecipes);
 
@@ -390,12 +400,16 @@ export default function SavedRecipesPage() {
 
   const saveAllRecipes = (updatedUserList: any[]) => {
     if (!currentUser) return;
-    const targetUserId = currentUser.id || 'usr_admin_1';
+    const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
     const updatedWithId = updatedUserList.map(r => ({
       ...r,
       userId: targetUserId,
       user_id: targetUserId,
+      createdBy: r.createdBy || r.created_by || currentUser.email || targetUserId,
+      created_by: r.createdBy || r.created_by || currentUser.email || targetUserId,
+      creatorName: r.creatorName || r.creator_name || currentUser.name || 'You',
+      creator_name: r.creatorName || r.creator_name || currentUser.name || 'You',
       bookId: r.bookId || r.book_id || null,
       book_id: r.bookId || r.book_id || null,
       isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
@@ -410,7 +424,10 @@ export default function SavedRecipesPage() {
 
     setRecipes(updatedWithId);
 
-    persistSavedRecipe(targetUserId, updatedWithId).then(() => {
+    persistSavedRecipe(targetUserId, updatedWithId, {
+      createdBy: currentUser.email || targetUserId,
+      creatorName: currentUser.name || 'You'
+    }).then(() => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
       }
@@ -520,13 +537,13 @@ export default function SavedRecipesPage() {
 
     const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
     const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80';
-    const targetUserId = currentUser.id || 'usr_admin_1';
+    const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
     const newPlanItem = {
       id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
       userId: targetUserId,
       user_id: targetUserId,
-      createdBy: currentUser.email || 'user@zecratary.local',
+      createdBy: currentUser.email || targetUserId,
       creatorName: currentUser.name || 'User',
       date: planDate,
       recipeId: selectedRecipe.id,
@@ -634,7 +651,7 @@ export default function SavedRecipesPage() {
       ]);
 
       if (typeof deleteSavedRecipe === 'function') {
-        await deleteSavedRecipe(currentUser?.id || 'usr_admin_1', id).catch(() => {});
+        await deleteSavedRecipe(currentUser?.id || currentUser?.email || 'usr_admin_1', id).catch(() => {});
       }
 
       const updated = recipes.filter(r => r.id !== id);
@@ -758,11 +775,17 @@ export default function SavedRecipesPage() {
     }
 
     const cleanType = getCleanRecipeType(editForm);
+    const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
 
     const updatedRec = {
       ...selectedRecipe,
       ...editForm,
-      userId: currentUser?.id || selectedRecipe.userId || 'usr_admin_1',
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: selectedRecipe.createdBy || currentUser?.email || targetUserId,
+      created_by: selectedRecipe.created_by || currentUser?.email || targetUserId,
+      creatorName: selectedRecipe.creatorName || currentUser?.name || 'You',
+      creator_name: selectedRecipe.creator_name || currentUser?.name || 'You',
       recipeType: cleanType,
       category: cleanType,
       tags: [cleanType]
@@ -881,13 +904,13 @@ export default function SavedRecipesPage() {
 
     const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Recipe';
     const recId = selectedRecipe?.id;
-    const targetUserId = currentUser?.id || 'usr_admin_1';
+    const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
 
     const formatted = selectedItems.map(i => ({
       id: 'shop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
       userId: targetUserId,
       user_id: targetUserId,
-      createdBy: currentUser?.email || 'user@zecratary.local',
+      createdBy: currentUser?.email || targetUserId,
       creatorName: currentUser?.name || 'User',
       name: i.name,
       item: i.name,
@@ -939,7 +962,6 @@ export default function SavedRecipesPage() {
     alert(alertMsg);
   };
 
-  // Timer controls
   const handleOpenTimerModal = () => {
     const defaultMins = Math.min(60, Math.max(1, selectedRecipe?.cookTimeMinutes || 15));
     setTimerInputMinutes(defaultMins);
@@ -966,12 +988,11 @@ export default function SavedRecipesPage() {
 
     try {
       localStorage.setItem('zecratary_active_timer', JSON.stringify(newTimerState));
-      // Asynchronously record / sync active timer to PostgreSQL backend
       fetch('/api/timer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: currentUser?.id || 'usr_admin_1',
+          userId: currentUser?.id || currentUser?.email || 'usr_admin_1',
           recipeId: selectedRecipe?.id,
           durationMinutes: safeMinutes,
           startedAt: new Date().toISOString()
@@ -1084,7 +1105,6 @@ export default function SavedRecipesPage() {
   const currentTotalServings = baseServings * servingsMultiplier;
   const recipeCategoryBadge = selectedRecipe ? getCleanRecipeType(selectedRecipe) : 'Main Dish';
 
-  // Format MM:SS for countdown timer display
   const formattedCountdown = useMemo(() => {
     if (!activeTimer) return '00:00';
     const mins = Math.floor(activeTimer.remainingSeconds / 60);
@@ -1530,6 +1550,47 @@ export default function SavedRecipesPage() {
         <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
           {t('loadingRecipes') || 'Loading recipes...'}
         </div>
+      ) : recipes.length === 0 ? (
+        <div 
+          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div 
+            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm"
+            style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' }}
+          >
+            <Utensils className="h-6 w-6"/>
+          </div>
+          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
+            {t('noSavedRecipesTitle') || 'No Recipes Yet'}
+          </h3>
+          <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('noSavedRecipesDesc') || 'Recipes imported or created by your account will appear exclusively here.'}
+          </p>
+          <div className="flex justify-center gap-3 pt-2">
+            <Link 
+              href="/import"
+              className="px-4 py-2 rounded-xl text-xs font-bold border transition shadow-sm"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              {t('importRecipe') || 'Import Recipe'}
+            </Link>
+            <Link 
+              href="/manual"
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow-sm"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+            >
+              {t('createRecipe') || 'Create Recipe'}
+            </Link>
+          </div>
+        </div>
       ) : (
         <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-4 sm:gap-5`}>
           {paginatedRecipes.map((r) => {
@@ -1628,6 +1689,18 @@ export default function SavedRecipesPage() {
                       style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       {cardTypeBadge}
+                    </span>
+
+                    {/* Creator Tag Badge */}
+                    <span 
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 border"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {r.creatorName ? `${t('by') || 'By'} ${r.creatorName}` : (t('ownedByYou') || 'Created by you')}
                     </span>
 
                     {(r.rating || 0) > 0 && gridMode !== '5x5' ? (
@@ -1804,6 +1877,21 @@ export default function SavedRecipesPage() {
                           <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
                           <span className="font-bold">{recipeCategoryBadge}</span>
                         </span>
+
+                        {/* Creator Tag in Modal */}
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Users className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">
+                            {selectedRecipe.creatorName ? `${t('creator') || 'Creator'}: ${selectedRecipe.creatorName}` : (t('ownedByYou') || 'Created by you')}
+                          </span>
+                        </span>
                         
                         {/* Modal Header Favorite Button */}
                         <button
@@ -1966,7 +2054,6 @@ export default function SavedRecipesPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {/* Timer Button: Launches 1-60 mins setting popup */}
                       <button
                         type="button"
                         onClick={handleOpenTimerModal}
@@ -2821,7 +2908,7 @@ export default function SavedRecipesPage() {
         </div>
       )}
 
-      {/* TIMER SETTINGS POPUP MODAL (Up to 60 Minutes) */}
+      {/* TIMER SETTINGS POPUP MODAL */}
       {isTimerModalOpen && (
         <div 
           onClick={() => setIsTimerModalOpen(false)}
@@ -2870,7 +2957,6 @@ export default function SavedRecipesPage() {
               </p>
             </div>
 
-            {/* Minutes Display & Steppers */}
             <div 
               className="p-4 rounded-2xl border flex flex-col items-center justify-center gap-3 shadow-inner"
               style={{
@@ -2917,7 +3003,6 @@ export default function SavedRecipesPage() {
                 </button>
               </div>
 
-              {/* Range slider (1 to 60) */}
               <input
                 type="range"
                 min={1}
@@ -2928,7 +3013,6 @@ export default function SavedRecipesPage() {
               />
             </div>
 
-            {/* Quick Presets */}
             <div className="space-y-1.5">
               <span className="text-[11px] font-bold uppercase tracking-wider block" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('quickPresets') || 'Quick Presets'}:
@@ -2956,7 +3040,6 @@ export default function SavedRecipesPage() {
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div className="flex justify-end gap-2.5 pt-2">
               <button
                 type="button"
@@ -3001,7 +3084,6 @@ export default function SavedRecipesPage() {
             color: 'var(--color-text)'
           }}
         >
-          {/* Pulsing Timer Icon or Bell */}
           <div 
             className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md shrink-0 transition"
             style={{
@@ -3016,7 +3098,6 @@ export default function SavedRecipesPage() {
             )}
           </div>
 
-          {/* Time & Recipe Meta */}
           <div className="space-y-0.5 pr-1">
             <div className="flex items-center gap-2">
               <span className="text-xl font-black tracking-tight tabular-nums" style={{ color: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-text)' }}>
@@ -3034,7 +3115,6 @@ export default function SavedRecipesPage() {
             </p>
           </div>
 
-          {/* Controls: Pause/Resume & Dismiss/Reset */}
           <div className="flex items-center gap-1.5 pl-1 border-l" style={{ borderColor: 'var(--color-border)' }}>
             {activeTimer.remainingSeconds > 0 && (
               <button
