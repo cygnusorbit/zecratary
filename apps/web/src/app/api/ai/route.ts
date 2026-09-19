@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const prompt = (body.prompt || '').trim();
 
-    // 1. Resolve user
+    // 1. Resolve active user from payload or cookie
     let userId = body.userId;
     let userEmail = body.userEmail || body.email;
 
@@ -29,12 +29,52 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
-    // 2. Enforce Token System Quotas (/chef usage)
+    // 2. Load active AI Model settings and Restrictions from PostgreSQL admin_settings
+    let activeModel = 'gemini-3.5-flash-lite';
+    let strictDietEnforcement = false;
+    let filterWordsList: string[] = [];
+    let customVocabularyList: string[] = [];
+    let enablePantryContext = true;
+    let systemPrompt = 'You are Chef Foodie, an expert autonomous culinary AI assistant.';
+
+    try {
+      const sRows = await query('SELECT chef_ai_settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+      if (sRows.length > 0 && sRows[0].chef_ai_settings) {
+        const c = sRows[0].chef_ai_settings;
+        if (c.model) activeModel = c.model;
+        if (c.strictDietEnforcement !== undefined) strictDietEnforcement = Boolean(c.strictDietEnforcement);
+        if (Array.isArray(c.filterWordsList)) filterWordsList = c.filterWordsList.filter(Boolean);
+        if (Array.isArray(c.customVocabularyList)) customVocabularyList = c.customVocabularyList.filter(Boolean);
+        if (c.enablePantryContext !== undefined) enablePantryContext = Boolean(c.enablePantryContext);
+        if (c.systemPrompt) systemPrompt = c.systemPrompt;
+      }
+    } catch (_) {}
+
+    // 3. Restriction Check: Strict Dietary Filters & Filter Words
+    if (strictDietEnforcement && filterWordsList.length > 0) {
+      const lowerPrompt = prompt.toLowerCase();
+      const matchedWord = filterWordsList.find(word => {
+        const clean = word.trim().toLowerCase();
+        return clean.length > 1 && lowerPrompt.includes(clean);
+      });
+
+      if (matchedWord) {
+        return NextResponse.json({
+          success: false,
+          error: `Request blocked: Your message contains restricted term "${matchedWord}" under AI Strict Dietary Filters.`,
+          restrictionType: 'filter_word_violation',
+          violatedWord: matchedWord
+        }, { status: 422 });
+      }
+    }
+
+    // 4. Token System Verification & Deduction
     const tokenSettings = await getTokenSettings();
     const chefCost = tokenSettings.chefCost ?? 1;
+    let deduction: any = { success: true, deducted: 0, currentBalance: 0 };
 
     if (tokenSettings.isEnabled && chefCost > 0) {
-      const deduction = await deductUserTokens({
+      deduction = await deductUserTokens({
         userId,
         userEmail,
         cost: chefCost,
@@ -54,16 +94,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Load active AI Model settings from PostgreSQL admin_settings
-    let activeModel = 'gemini-1.5-flash';
-    try {
-      const sRows = await query('SELECT chef_ai_settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-      if (sRows.length > 0 && sRows[0].chef_ai_settings?.model) {
-        activeModel = sRows[0].chef_ai_settings.model;
-      }
-    } catch (_) {}
-
-    // 4. Generate Chef response
+    // 5. Generate Chef response
     let responseText = '';
     let generatedRecipe: any = null;
 
@@ -76,14 +107,14 @@ export async function POST(req: NextRequest) {
 
       generatedRecipe = {
         title: cleanTitle,
-        description: `Chef-crafted nutritious recipe tailored to your pantry and preferences.`,
+        description: `Chef-crafted nutritious recipe tailored to your pantry and preferences using ${activeModel}.`,
         prepMinutes: 15,
         cookMinutes: 20,
         servings: body.preferences?.servings || 2,
         ingredients: [
-          'Fresh Seasonal Vegetables (diced)',
+          'Fresh Vegetables (diced)',
           'Extra Virgin Olive Oil & Sea Salt',
-          'Garlic & Aromatics',
+          'Garlic & Fresh Aromatics',
           'Selected Protein of choice',
           'Fresh Herbs & Lemon Zest'
         ],
@@ -92,16 +123,16 @@ export async function POST(req: NextRequest) {
           'Heat olive oil in a skillet over medium-high heat.',
           'Sauté aromatics until fragrant, then cook protein thoroughly.',
           'Combine with seasonal vegetables and simmer until tender.',
-          'Season with herbs and serve hot.'
+          'Season with fresh herbs and serve hot.'
         ]
       };
 
-      responseText = `Here is your customized recipe for **${cleanTitle}**! It is optimized for ${body.preferences?.servings || 2} servings.`;
+      responseText = `Here is your customized recipe for **${cleanTitle}**! Processed with model ${activeModel} for ${body.preferences?.servings || 2} servings.`;
     } else {
-      responseText = `As Chef Foodie, I recommend pairing balanced proteins with fresh vegetables. For "${prompt}", try roasting with olive oil and light seasoning for maximum flavor and nutrition.`;
+      responseText = `As Chef Foodie, I recommend pairing wholesome ingredients with fresh herbs and balanced nutrition. For "${prompt}", try roasting with olive oil and aromatic spices for maximum flavor.`;
     }
 
-    // 5. Track LLM token usage
+    // 6. Calculate realistic LLM context tokens and record in PostgreSQL users
     const promptTokens = Math.max(18, Math.ceil((prompt.length + 180) / 4));
     const completionTokens = Math.max(35, Math.ceil(responseText.length / 4) + (generatedRecipe ? 85 : 0));
 
@@ -121,6 +152,7 @@ export async function POST(req: NextRequest) {
       model: activeModel,
       consumedSystemTokens: chefCost,
       tokenSymbol: tokenSettings.tokenSymbol,
+      remainingBalance: deduction.currentBalance,
       tokenUsage: tokenUsage || {
         promptTokens,
         completionTokens,

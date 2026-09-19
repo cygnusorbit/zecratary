@@ -26,7 +26,6 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Sync monthly plan grant if due
     if (userId || email) {
       await syncUserMonthlyTokens(userId, email);
     }
@@ -34,16 +33,46 @@ export async function GET(req: NextRequest) {
     const settings = await getTokenSettings();
     const balance = await getUserTokenBalance(userId, email);
 
-    // Fetch recent transactions
+    // Fetch AI settings and restrictions from PostgreSQL admin_settings
+    let aiSettings = {
+      model: 'gemini-3.5-flash-lite',
+      provider: 'gemini',
+      enableWebSearch: true,
+      strictDietEnforcement: false,
+      filterWordsList: [] as string[],
+      customVocabularyList: [] as string[],
+      maxTokens: 4096
+    };
+
+    try {
+      const sRows = await query('SELECT chef_ai_settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+      if (sRows.length > 0 && sRows[0].chef_ai_settings) {
+        const c = sRows[0].chef_ai_settings;
+        aiSettings = {
+          model: c.model || 'gemini-3.5-flash-lite',
+          provider: c.provider || 'gemini',
+          enableWebSearch: c.enableWebSearch !== false,
+          strictDietEnforcement: Boolean(c.strictDietEnforcement),
+          filterWordsList: Array.isArray(c.filterWordsList) ? c.filterWordsList : [],
+          customVocabularyList: Array.isArray(c.customVocabularyList) ? c.customVocabularyList : [],
+          maxTokens: Number(c.maxTokens) || 4096
+        };
+      }
+    } catch (dbErr) {
+      console.warn('Could not read chef_ai_settings:', dbErr);
+    }
+
     let transactions: any[] = [];
     if (userId || email) {
-      transactions = await query(`
-        SELECT id, amount, balance_after, type, description, created_at
-        FROM token_transactions
-        WHERE user_id = $1 OR LOWER(user_email) = LOWER($2)
-        ORDER BY created_at DESC
-        LIMIT 10
-      `, [userId || 'none', email || 'none']);
+      try {
+        transactions = await query(`
+          SELECT id, amount, balance_after, type, description, created_at
+          FROM token_transactions
+          WHERE user_id = $1 OR LOWER(user_email) = LOWER($2)
+          ORDER BY created_at DESC
+          LIMIT 10
+        `, [userId || 'none', email || 'none']);
+      } catch (_) {}
     }
 
     return NextResponse.json({
@@ -59,6 +88,7 @@ export async function GET(req: NextRequest) {
       },
       packages: settings.packages,
       isEnabled: settings.isEnabled,
+      aiSettings,
       transactions
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {

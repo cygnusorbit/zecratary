@@ -8,10 +8,11 @@ import {
   Calendar, CalendarPlus, X, ArrowLeftRight, Utensils, Loader2, User as UserIcon, 
   Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
   ChevronLeft, ChevronRight, Search, Heart, Copy, ShoppingCart, Dices, 
-  CheckCircle2, Layers, HelpCircle
+  CheckCircle2, Layers, HelpCircle, Coins, Cpu, ShieldAlert, AlertTriangle
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import TokenPurchaseModal from '@/components/TokenPurchaseModal';
 
 interface MealItem {
   id: string;
@@ -103,11 +104,23 @@ export default function ChefChatPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const ideasInputRef = useRef<HTMLInputElement>(null);
 
-  // AI Settings State synchronized with /admin/ai-settings
+  // Synced from /admin/ai-settings (PostgreSQL backed)
   const [questionnaireSections, setQuestionnaireSections] = useState<any[]>(DEFAULT_SECTIONS);
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-3.5-flash-lite');
+  const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
+  const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
+  const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
+
+  // Token System Telemetry Synced with /admin/token-setting
+  const [tokenBalance, setTokenBalance] = useState<number>(0);
+  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [tokenName, setTokenName] = useState<string>('Foodie Token');
+  const [chefCost, setChefCost] = useState<number>(1);
+  const [tokenPackages, setTokenPackages] = useState<any[]>([]);
+  const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
   // Preferences State
   const [showPreferences, setShowPreferences] = useState(false);
@@ -165,40 +178,62 @@ export default function ChefChatPage() {
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Synchronize Multi-Topic Questionnaire from /admin/ai-settings
-  const loadAdminAiSettings = useCallback(() => {
-    if (typeof window === 'undefined') return;
+  // Synchronize Token Telemetry and AI Settings from Server
+  const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
-      const raw = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
-          const active = parsed.sections.filter((s: any) => s.enabled !== false);
-          const sectionsToUse = active.length > 0 ? active : parsed.sections;
-          setQuestionnaireSections(sectionsToUse);
-          const allQs = sectionsToUse.flatMap((s: any) => s.questions || []);
-          setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
-        } else {
-          setQuestionnaireSections(DEFAULT_SECTIONS);
-          setWizardQuestionsList(DEFAULT_SECTIONS.flatMap(s => s.questions));
+      const active = currentUserRef.current || getCurrentUser();
+      const queryParam = active?.id ? `?userId=${active.id}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
+      
+      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
+      const data = await res.json();
+
+      if (data.success) {
+        setTokenBalance(Number(data.balance ?? 0));
+        setTokenSymbol(data.tokenSymbol || '🪙');
+        setTokenName(data.tokenName || 'Foodie Token');
+        setChefCost(Number(data.costs?.chef ?? 1));
+        if (Array.isArray(data.packages)) {
+          setTokenPackages(data.packages);
         }
-        if (parsed.resultDisplayMode) {
-          setResultDisplayMode(parsed.resultDisplayMode);
+
+        if (data.aiSettings) {
+          setActiveAiModel(data.aiSettings.model || 'gemini-3.5-flash-lite');
+          setStrictDietEnforcement(Boolean(data.aiSettings.strictDietEnforcement));
+          setFilterWordsList(Array.isArray(data.aiSettings.filterWordsList) ? data.aiSettings.filterWordsList : []);
         }
-      } else {
-        setQuestionnaireSections(DEFAULT_SECTIONS);
-        setWizardQuestionsList(DEFAULT_SECTIONS.flatMap(s => s.questions));
       }
-    } catch (_) {
-      setQuestionnaireSections(DEFAULT_SECTIONS);
-      setWizardQuestionsList(DEFAULT_SECTIONS.flatMap(s => s.questions));
+
+      // Also retrieve full questionnaire topics and display mode from /api/admin/settings
+      try {
+        const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
+        const sData = await sRes.json();
+        const chefCfg = sData?.chefAiSettings || sData;
+        if (chefCfg) {
+          if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
+            const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
+            const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
+            setQuestionnaireSections(toUse);
+            const allQs = toUse.flatMap((s: any) => s.questions || []);
+            setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
+          }
+          if (chefCfg.resultDisplayMode) {
+            setResultDisplayMode(chefCfg.resultDisplayMode);
+          }
+          if (chefCfg.enablePantryContext !== undefined) {
+            setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
+          }
+        }
+      } catch (_) {}
+
+    } catch (err) {
+      console.warn('Failed to fetch /chef telemetry:', err);
     }
   }, []);
 
-  // Day / Night Theme Application
+  // Theme Synchronizer
   const applySavedTheme = useCallback(() => {
     try {
       window.dispatchEvent(new Event('zecratary_theme_updated'));
@@ -207,26 +242,28 @@ export default function ChefChatPage() {
 
   useEffect(() => {
     applySavedTheme();
-    loadAdminAiSettings();
+    fetchTokenAndAiTelemetry();
 
     window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
-    window.addEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
-    window.addEventListener('storage', applySavedTheme);
-    window.addEventListener('storage', loadAdminAiSettings);
+    window.addEventListener('zecratary_admin_settings_updated', fetchTokenAndAiTelemetry);
+    window.addEventListener('zecratary_engine_config_updated', fetchTokenAndAiTelemetry);
+    window.addEventListener('zecratary_chef_ai_settings_updated', fetchTokenAndAiTelemetry);
+    window.addEventListener('zecratary_users_updated', fetchTokenAndAiTelemetry);
+    window.addEventListener('storage', fetchTokenAndAiTelemetry);
 
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
-      window.removeEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
-      window.removeEventListener('storage', applySavedTheme);
-      window.removeEventListener('storage', loadAdminAiSettings);
+      window.removeEventListener('zecratary_admin_settings_updated', fetchTokenAndAiTelemetry);
+      window.removeEventListener('zecratary_engine_config_updated', fetchTokenAndAiTelemetry);
+      window.removeEventListener('zecratary_chef_ai_settings_updated', fetchTokenAndAiTelemetry);
+      window.removeEventListener('zecratary_users_updated', fetchTokenAndAiTelemetry);
+      window.removeEventListener('storage', fetchTokenAndAiTelemetry);
     };
-  }, [applySavedTheme, loadAdminAiSettings]);
+  }, [applySavedTheme, fetchTokenAndAiTelemetry]);
 
   const getUserKey = useCallback((user: User | null) => {
     if (!user) return 'guest';
@@ -241,11 +278,7 @@ export default function ChefChatPage() {
       const adminRecipesRaw = localStorage.getItem('zecratary_admin_recipes') || '[]';
       const savedRecipesRaw = localStorage.getItem('zecratary_saved_recipes') || '[]';
 
-      const parsedAll = JSON.parse(allRecipesRaw);
-      const parsedAdmin = JSON.parse(adminRecipesRaw);
-      const parsedSaved = JSON.parse(savedRecipesRaw);
-
-      const combinedCatalog = [...parsedAll, ...parsedAdmin, ...parsedSaved];
+      const combinedCatalog = [...JSON.parse(allRecipesRaw), ...JSON.parse(adminRecipesRaw), ...JSON.parse(savedRecipesRaw)];
 
       const currentUserId = user?.id;
       const currentUserEmail = user?.email?.toLowerCase().trim();
@@ -409,7 +442,7 @@ export default function ChefChatPage() {
       loadScopedData(active);
       loadUserChatState(active);
       loadUserPreferences(active);
-      loadAdminAiSettings();
+      fetchTokenAndAiTelemetry();
     };
 
     window.addEventListener('storage', handleSync);
@@ -418,8 +451,6 @@ export default function ChefChatPage() {
     window.addEventListener('zecratary_pantry_updated', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_login_success', handleSync);
-    window.addEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
-    window.addEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -428,10 +459,8 @@ export default function ChefChatPage() {
       window.removeEventListener('zecratary_pantry_updated', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('zecratary_login_success', handleSync);
-      window.removeEventListener('zecratary_engine_config_updated', loadAdminAiSettings);
-      window.removeEventListener('zecratary_chef_ai_settings_updated', loadAdminAiSettings);
     };
-  }, [loadScopedData, loadUserChatState, loadUserPreferences, loadAdminAiSettings, t]);
+  }, [loadScopedData, loadUserChatState, loadUserPreferences, fetchTokenAndAiTelemetry, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -509,7 +538,11 @@ export default function ChefChatPage() {
       { 
         id: 'ast_' + Date.now(), 
         role: 'assistant', 
-        content: `📋 **${sec.topicTitle}**\n${sec.description || ''}\n\n**Step 1 of ${qList.length}:**\n${qList[0]}` 
+        content: `📋 **${sec.topicTitle}**
+${sec.description || ''}
+
+**Step 1 of ${qList.length}:**
+${qList[0]}` 
       }
     ]);
   };
@@ -530,7 +563,9 @@ export default function ChefChatPage() {
       { 
         id: 'ast_' + Date.now(), 
         role: 'assistant', 
-        content: `Starting complete meal plan intake wizard (**Step 1 of ${qList.length}**):\n\n${qList[0]}` 
+        content: `Starting complete meal plan intake wizard (**Step 1 of ${qList.length}**):
+
+${qList[0]}` 
       }
     ]);
   };
@@ -643,7 +678,7 @@ export default function ChefChatPage() {
       const { dayName, dateStr } = getDayDetails(i, startDateAnswer);
       const recipe = pool[i % (pool.length || 1)] || {
         title: `${theme.replace(/-/g, ' ')} ${normalizedType} Bowl`,
-        description: 'Chef-curated nutritious preparation suited to your diet.',
+        description: `Chef-curated nutritious preparation suited to your diet via ${activeAiModel}.`,
         prep: 15,
         cook: 20,
         image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
@@ -667,7 +702,7 @@ export default function ChefChatPage() {
       });
     }
 
-    const formattedTheme = theme.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const formattedTheme = theme.replace(/-/g, ' ').replace(/\w/g, c => c.toUpperCase());
     const formattedMealType = normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1);
 
     return {
@@ -682,6 +717,26 @@ export default function ChefChatPage() {
   const handleSend = async (customText?: string) => {
     const textToSend = (customText !== undefined ? customText : prompt).trim();
     if (!textToSend || loading) return;
+
+    // 1. Restriction Check: Client-side dietary filter word verification
+    if (strictDietEnforcement && filterWordsList.length > 0) {
+      const lower = textToSend.toLowerCase();
+      const matchedFilter = filterWordsList.find(word => {
+        const clean = word.trim().toLowerCase();
+        return clean.length > 1 && lower.includes(clean);
+      });
+      if (matchedFilter) {
+        showToast(`⚠️ Dietary restriction: "${matchedFilter}" is prohibited by AI Settings.`);
+        return;
+      }
+    }
+
+    // 2. Token Balance Verification before invocation
+    if (tokenBalance < chefCost) {
+      showToast(`Insufficient ${tokenName}. Required: ${chefCost} ${tokenSymbol}, Balance: ${tokenBalance} ${tokenSymbol}`);
+      setIsTokenPurchaseOpen(true);
+      return;
+    }
 
     const userMsg: ChatMessage = { id: 'usr_' + Date.now(), role: 'user', content: textToSend };
     updateMessages(prev => [...prev, userMsg]);
@@ -724,7 +779,8 @@ export default function ChefChatPage() {
             {
               id: 'ast_' + Date.now(),
               role: 'assistant',
-              content: `**Step ${nextIdx + 1} of ${wizardQuestionsList.length}:**\n${wizardQuestionsList[nextIdx]}`
+              content: `**Step ${nextIdx + 1} of ${wizardQuestionsList.length}:**
+${wizardQuestionsList[nextIdx]}`
             }
           ]);
           setLoading(false);
@@ -759,36 +815,68 @@ export default function ChefChatPage() {
     }
 
     try {
-      let storedAiSettings = {};
-      try {
-        const raw = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
-        if (raw) storedAiSettings = JSON.parse(raw);
-      } catch (_) {}
-
+      const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: textToSend,
+          userId: activeAuth?.id,
+          userEmail: activeAuth?.email,
+          source: 'chef',
           preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
-          aiSettings: storedAiSettings,
-          pantry: pantryIngredientsList
+          pantry: enablePantryContext ? pantryIngredientsList : []
         })
       });
 
       const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        if (data.insufficientTokens) {
+          setIsTokenPurchaseOpen(true);
+        }
+        throw new Error(data.error || 'Chef Foodie could not generate a response.');
+      }
+
+      // Update Token Balance
+      if (typeof data.remainingBalance === 'number') {
+        setTokenBalance(data.remainingBalance);
+      } else {
+        setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens || chefCost)));
+      }
+
+      if (data.consumedSystemTokens) {
+        showToast(`Consumed ${data.consumedSystemTokens} ${tokenSymbol}`);
+      }
+
+      // Sync user token metrics to profile
+      if (data.tokenUsage && activeAuth) {
+        try {
+          const fresh = { 
+            ...activeAuth, 
+            tokenUsage: data.tokenUsage, 
+            promptTokens: data.tokenUsage.promptTokens, 
+            completionTokens: data.tokenUsage.completionTokens, 
+            totalTokens: data.tokenUsage.totalTokens, 
+            requestCount: data.tokenUsage.requestCount 
+          };
+          localStorage.setItem('zecratary_current_user', JSON.stringify(fresh));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+        } catch (_) {}
+      }
+
       if (data.recipe) {
         updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', recipe: data.recipe }]);
       } else {
         updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: data.reply || data.response || "Here are culinary suggestions tailored to your preferences." }]);
       }
-    } catch (_) {
+    } catch (err: any) {
       updateMessages(prev => [
         ...prev,
         {
           id: 'ast_' + Date.now(),
           role: 'assistant',
-          content: `Noted: "${textToSend}". Let me know if you would like me to build this into a multi-day plan!`
+          content: `⚠️ ${err.message || 'Error occurred while contacting Chef Foodie.'}`
         }
       ]);
     } finally {
@@ -1241,7 +1329,48 @@ export default function ChefChatPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
+            {/* Active AI Model Badge Synced from /admin/ai-settings */}
+            <div 
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title="Active Model configured in /admin/ai-settings"
+            >
+              <Cpu className="h-3.5 w-3.5 text-orange-400" />
+              <span className="font-mono">{activeAiModel}</span>
+            </div>
+
+            {/* Strict Dietary Filter Indicator */}
+            {strictDietEnforcement && (
+              <div 
+                className="hidden md:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+                title={`Strict dietary filters enforced with ${filterWordsList.length} avoided terms.`}
+              >
+                <ShieldAlert className="h-3 w-3" />
+                <span>{t('strictFiltersBadge', 'Strict Filters Active')}</span>
+              </div>
+            )}
+
+            {/* Live Token Wallet & Top Up */}
+            <div 
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-sm"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <Coins className="h-4 w-4 text-amber-500" />
+              <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
+                {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTokenPurchaseOpen(true)}
+                className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {t('topUpBtn', 'Top Up')}
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => setShowPreferences(true)}
@@ -1325,7 +1454,7 @@ export default function ChefChatPage() {
               className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-primary)',
+                borderColor: 'var(--color-border)',
                 color: 'var(--color-primary)'
               }}
             >
@@ -1480,7 +1609,7 @@ export default function ChefChatPage() {
                               <button
                                 type="button"
                                 onClick={() => openSwapMeal(m.id, meal, m.plan!)}
-                                className="font-bold hover:underline"
+                                className="font-bold hover:underline cursor-pointer"
                                 style={{ color: 'var(--color-primary)' }}
                               >
                                 Swap
@@ -1493,7 +1622,7 @@ export default function ChefChatPage() {
                         <button
                           type="button"
                           onClick={() => handleCreatePlan(m.plan!)}
-                          className="w-full py-2.5 rounded-xl text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          className="w-full py-2.5 rounded-xl text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md hover:brightness-110"
                           style={{ backgroundColor: 'var(--color-emerald)' }}
                         >
                           <CalendarPlus className="h-4 w-4" /> Create Plan
@@ -1522,7 +1651,7 @@ export default function ChefChatPage() {
                         <button
                           type="button"
                           onClick={() => handleCopyPlan(m.plan!)}
-                          className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                          className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
                           style={{
                             backgroundColor: 'var(--color-inner-dark)',
                             borderColor: 'var(--color-border)',
@@ -1565,7 +1694,7 @@ export default function ChefChatPage() {
                               <button
                                 type="button"
                                 onClick={() => openSwapMeal(m.id, meal, m.plan!)}
-                                className="px-3 py-1.5 rounded-lg border font-bold text-xs shadow-sm"
+                                className="px-3 py-1.5 rounded-lg border font-bold text-xs shadow-sm cursor-pointer"
                                 style={{
                                   backgroundColor: 'var(--color-inner-dark)',
                                   borderColor: 'var(--color-border)',
@@ -1582,7 +1711,7 @@ export default function ChefChatPage() {
                         <button
                           type="button"
                           onClick={() => handleCreatePlan(m.plan!)}
-                          className="w-full py-3 rounded-2xl text-white font-extrabold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
+                          className="w-full py-3 rounded-2xl text-white font-extrabold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg hover:brightness-110"
                           style={{ backgroundColor: 'var(--color-emerald)' }}
                         >
                           <CalendarPlus className="h-4 w-4" /> Create & Sync Plan
@@ -1874,7 +2003,7 @@ export default function ChefChatPage() {
         <div ref={chatEndRef} />
       </div>
 
-      {/* Suggested Topic Buttons Bar (Accessible even during ongoing chat) */}
+      {/* Suggested Topic Buttons Bar */}
       {wizardStep === null && activeQuestionnaireSections.length > 0 && (
         <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0">
           <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1901,7 +2030,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* Input Prompt Box */}
+      {/* Input Prompt Box with Token Consumption Indication */}
       <div 
         className="border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
@@ -1914,21 +2043,38 @@ export default function ChefChatPage() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={t('askPromptPlaceholder') || 'Ask about recipes, cooking tips, ingredients...'}
+          placeholder={`${t('askPromptPlaceholder', 'Ask about recipes, cooking tips, ingredients...')} (${chefCost} ${tokenSymbol})`}
           className="bg-transparent border-none text-sm px-3.5 flex-1 outline-none font-normal"
           style={{ color: 'var(--color-text)' }}
         />
-        <button
-          type="button"
-          onClick={() => handleSend()}
-          disabled={loading || !prompt.trim()}
-          className="disabled:opacity-40 text-white p-2.5 rounded-xl transition cursor-pointer shadow-md"
-          style={{ backgroundColor: 'var(--color-primary)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-        >
-          <Send className="h-4 w-4" />
-        </button>
+        
+        {/* Token Cost Pill & Send Action */}
+        <div className="flex items-center gap-1.5 pr-1">
+          <span 
+            className="text-[10px] font-mono font-bold px-2 py-1 rounded-lg border hidden sm:inline-block"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
+            }}
+            title={`Each message deducts ${chefCost} ${tokenName}`}
+          >
+            {chefCost} {tokenSymbol}
+          </span>
+
+          <button
+            type="button"
+            onClick={() => handleSend()}
+            disabled={loading || !prompt.trim()}
+            className="disabled:opacity-40 text-white p-2.5 rounded-xl transition cursor-pointer shadow-md flex items-center gap-1"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+            title={`Send message (${chefCost} ${tokenSymbol})`}
+          >
+            <Send className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {/* 1. BATCH COOK MODAL */}
@@ -3005,6 +3151,20 @@ export default function ChefChatPage() {
           </div>
         </div>
       )}
+
+      {/* 4. TOKEN PURCHASE MODAL */}
+      <TokenPurchaseModal
+        isOpen={isTokenPurchaseOpen}
+        onClose={() => setIsTokenPurchaseOpen(false)}
+        userId={currentUserRef.current?.id || currentUser?.id}
+        userEmail={currentUserRef.current?.email || currentUser?.email}
+        tokenSymbol={tokenSymbol}
+        packages={tokenPackages}
+        onPurchased={(newBal) => {
+          setTokenBalance(newBal);
+          showToast(`Tokens added! New balance: ${newBal} ${tokenSymbol}`);
+        }}
+      />
 
     </div>
   );
