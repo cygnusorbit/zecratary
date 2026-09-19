@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.4.9",
+  "version": "7.5.0",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.4.9",
+  "version": "7.5.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32230,52 +32230,92 @@ const calculateRenewalExpiry = (startDate: Date = new Date(), interval?: 'MONTH'
 const detectUserSocialProviders = (u: any): SocialProvider[] => {
   if (!u) return [];
   const providers = new Set<SocialProvider>();
-  
-  if (Array.isArray(u.linkedProviders)) {
-    u.linkedProviders.forEach((p: string) => {
-      const low = String(p).toLowerCase();
-      if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
-    });
-  }
-  if (Array.isArray(u.linked_providers)) {
-    u.linked_providers.forEach((p: string) => {
-      const low = String(p).toLowerCase();
-      if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
-    });
-  }
 
-  const mainProv = String(u.provider || u.authProvider || u.socialProvider || u.loginMethod || '').toLowerCase();
+  const parseProviderList = (val: any) => {
+    if (!val) return;
+    if (Array.isArray(val)) {
+      val.forEach((p: any) => {
+        const low = String(p).toLowerCase().trim();
+        if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
+      });
+      return;
+    }
+    if (typeof val === 'string') {
+      let str = val.trim();
+      if (str.startsWith('{') && str.endsWith('}')) {
+        str = str.slice(1, -1);
+      }
+      if (str.startsWith('[') && str.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(str);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((p: any) => {
+              const low = String(p).toLowerCase().trim();
+              if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
+            });
+            return;
+          }
+        } catch (_) {}
+      }
+      str.split(',').forEach(item => {
+        const clean = item.replace(/["'{}]/g, '').toLowerCase().trim();
+        if (clean === 'google' || clean === 'facebook' || clean === 'apple') {
+          providers.add(clean as SocialProvider);
+        }
+      });
+    }
+  };
+
+  parseProviderList(u.linkedProviders);
+  parseProviderList(u.linked_providers);
+
+  const mainProv = String(
+    u.provider || u.authProvider || u.auth_provider || 
+    u.socialProvider || u.social_provider || 
+    u.oauthProvider || u.oauth_provider || 
+    u.loginMethod || u.login_method || ''
+  ).toLowerCase();
   if (mainProv.includes('google')) providers.add('google');
   if (mainProv.includes('facebook')) providers.add('facebook');
   if (mainProv.includes('apple')) providers.add('apple');
 
   const uid = String(u.id || '').toLowerCase();
-  if (uid.includes('google')) providers.add('google');
-  if (uid.includes('facebook')) providers.add('facebook');
-  if (uid.includes('apple')) providers.add('apple');
+  if (uid.startsWith('usr_g_') || uid.startsWith('usr_goog') || uid.startsWith('g_') || uid.includes('google')) providers.add('google');
+  if (uid.startsWith('usr_fb_') || uid.startsWith('usr_f_') || uid.startsWith('fb_') || uid.includes('facebook')) providers.add('facebook');
+  if (uid.startsWith('usr_apple') || uid.startsWith('usr_a_') || uid.startsWith('apple_') || uid.includes('apple')) providers.add('apple');
 
-  if (u.googleId) providers.add('google');
-  if (u.facebookId) providers.add('facebook');
-  if (u.appleId) providers.add('apple');
+  if (u.googleId || u.google_id || u.google_sub) providers.add('google');
+  if (u.facebookId || u.facebook_id || u.facebook_sub) providers.add('facebook');
+  if (u.appleId || u.apple_id || u.apple_sub) providers.add('apple');
 
   return Array.from(providers);
 };
 
 const getActiveLoginProvider = (u: any): SocialProvider | null => {
   if (!u) return null;
-  const mainProv = String(u.provider || u.authProvider || u.socialProvider || u.loginMethod || '').toLowerCase();
+  const mainProv = String(
+    u.provider || u.authProvider || u.auth_provider || 
+    u.socialProvider || u.social_provider || 
+    u.oauthProvider || u.oauth_provider || 
+    u.loginMethod || u.login_method || ''
+  ).toLowerCase();
   if (mainProv.includes('google')) return 'google';
   if (mainProv.includes('facebook')) return 'facebook';
   if (mainProv.includes('apple')) return 'apple';
 
   const uid = String(u.id || '').toLowerCase();
-  if (uid.startsWith('usr_google') || uid.includes('google')) return 'google';
-  if (uid.startsWith('usr_facebook') || uid.includes('facebook')) return 'facebook';
-  if (uid.startsWith('usr_apple') || uid.includes('apple')) return 'apple';
+  if (uid.startsWith('usr_g_') || uid.startsWith('usr_goog') || uid.startsWith('g_') || uid.includes('google')) return 'google';
+  if (uid.startsWith('usr_fb_') || uid.startsWith('usr_f_') || uid.startsWith('fb_') || uid.includes('facebook')) return 'facebook';
+  if (uid.startsWith('usr_apple') || uid.startsWith('usr_a_') || uid.startsWith('apple_') || uid.includes('apple')) return 'apple';
 
-  if (u.googleId) return 'google';
-  if (u.facebookId) return 'facebook';
-  if (u.appleId) return 'apple';
+  if (u.googleId || u.google_id || u.google_sub) return 'google';
+  if (u.facebookId || u.facebook_id || u.facebook_sub) return 'facebook';
+  if (u.appleId || u.apple_id || u.apple_sub) return 'apple';
+
+  const detected = detectUserSocialProviders(u);
+  if (detected.length > 0 && (!u.password || u.password === '')) {
+    return detected[0];
+  }
 
   return null;
 };
@@ -32684,11 +32724,12 @@ export default function ProfilePage() {
             const cookieData = JSON.parse(decodeURIComponent(match[1]));
             if (cookieData && (cookieData.email || cookieData.id)) {
               active = {
+                ...cookieData,
                 id: cookieData.id || 'usr_standard_default',
                 name: cookieData.name || 'Standard User',
                 email: cookieData.email || 'user@foodieprep.com',
                 role: cookieData.role || 'user',
-                subscriptionPlan: 'taster'
+                subscriptionPlan: cookieData.subscriptionPlan || cookieData.subscription_plan || 'taster'
               };
               if (typeof window !== 'undefined') {
                 localStorage.setItem('zecratary_current_user', JSON.stringify(active));
@@ -32728,8 +32769,32 @@ export default function ProfilePage() {
       } catch (_) {}
 
       const detectedSocial = detectUserSocialProviders(matchedUser);
+      const activeSocial = getActiveLoginProvider(matchedUser);
+      if (activeSocial && !detectedSocial.includes(activeSocial)) {
+        detectedSocial.push(activeSocial);
+      }
       matchedUser.linkedProviders = detectedSocial;
       matchedUser.linked_providers = detectedSocial;
+      if (activeSocial && !matchedUser.provider && !matchedUser.authProvider) {
+        matchedUser.provider = activeSocial;
+        matchedUser.authProvider = activeSocial;
+      }
+
+      if (activeSocial && (!active?.linkedProviders?.includes(activeSocial) || !active?.linked_providers?.includes(activeSocial))) {
+        try {
+          fetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...matchedUser,
+              linkedProviders: detectedSocial,
+              linked_providers: detectedSocial,
+              auth_provider: activeSocial,
+              provider: activeSocial
+            })
+          }).catch(() => {});
+        } catch (_) {}
+      }
 
       try {
         const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
@@ -33504,8 +33569,8 @@ export default function ProfilePage() {
               )
             }
           ]).map(({ id: provId, name: provName, renderIcon }) => {
-            const isLinked = Boolean(user.linkedProviders?.includes(provId));
             const isPrimary = activeLoginProvider === provId;
+            const isLinked = Boolean(user.linkedProviders?.includes(provId)) || isPrimary;
 
             return (
               <div 
@@ -33522,10 +33587,10 @@ export default function ProfilePage() {
                     <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>{provName}</span>
                     <span className={`text-[10px] font-semibold ${isLinked ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
                       {isPrimary 
-                        ? (t('connectedLoginMethod') || 'Connected (Login Method)') 
+                        ? (t('linkedLoginMethod') || t('connectedLoginMethod') || 'Linked (Login Method)') 
                         : isLinked 
-                        ? (t('connected') || 'Connected') 
-                        : (t('notLinked') || 'Not linked')}
+                        ? (t('linked') || t('connected') || 'Linked') 
+                        : (t('notLinked') || 'Not Linked')}
                     </span>
                   </div>
                 </div>
@@ -36238,36 +36303,104 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/languages/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { NextResponse } from 'next/server';
+import { Pool } from 'pg';
 
-export const dynamic = 'force-dynamic';
+let pool: Pool | null = null;
 
-export async function GET() {
+function getDbPool() {
+  if (!pool) {
+    const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+    if (connectionString) {
+      pool = new Pool({ connectionString });
+    }
+  }
+  return pool;
+}
+
+async function initTranslationsTable(client: any) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS app_translations (
+      lang_code VARCHAR(10) PRIMARY KEY,
+      lang_name VARCHAR(100) NOT NULL,
+      dictionary JSONB NOT NULL DEFAULT '{}',
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+}
+
+// GET: Retrieve custom phrases for a language (or all)
+export async function GET(request: Request) {
   try {
-    const rows = await query('SELECT supported_languages FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-    const languages = rows[0]?.supported_languages || [];
-    return NextResponse.json({ success: true, languages }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    const { searchParams } = new URL(request.url);
+    const code = searchParams.get('code');
+    const db = getDbPool();
+
+    if (db) {
+      const client = await db.connect();
+      try {
+        await initTranslationsTable(client);
+        if (code) {
+          const res = await client.query('SELECT dictionary FROM app_translations WHERE lang_code = $1', [code.toLowerCase().trim()]);
+          const dictionary = res.rows[0]?.dictionary || {};
+          return NextResponse.json({ success: true, code, dictionary });
+        } else {
+          const res = await client.query('SELECT lang_code, lang_name, dictionary FROM app_translations');
+          const records: Record<string, any> = {};
+          res.rows.forEach(r => { records[r.lang_code] = r.dictionary; });
+          return NextResponse.json({ success: true, translations: records });
+        }
+      } finally {
+        client.release();
+      }
+    }
+
+    return NextResponse.json({ success: true, translations: {}, fallback: true });
+  } catch (error: any) {
+    console.error('[API /api/admin/languages GET error]:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+// POST: Upsert custom words into PostgreSQL
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
-    const languages = body.languages || body;
+    const body = await request.json();
+    const { code, name, dictionary } = body;
 
-    await query(`
-      UPDATE admin_settings SET
-        supported_languages = $1::jsonb,
-        updated_at = NOW()
-      WHERE id = 'primary_settings'
-    `, [JSON.stringify(languages)]);
+    if (!code) {
+      return NextResponse.json({ success: false, error: 'Language code is required' }, { status: 400 });
+    }
 
-    return NextResponse.json({ success: true, message: 'Languages updated in PostgreSQL.' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    const cleanCode = code.toLowerCase().trim();
+    const cleanName = (name || cleanCode).trim();
+    const dictObj = dictionary || {};
+
+    const db = getDbPool();
+    if (db) {
+      const client = await db.connect();
+      try {
+        await initTranslationsTable(client);
+        await client.query(`
+          INSERT INTO app_translations (lang_code, lang_name, dictionary, updated_at)
+          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+          ON CONFLICT (lang_code) 
+          DO UPDATE SET 
+            lang_name = EXCLUDED.lang_name,
+            dictionary = EXCLUDED.dictionary,
+            updated_at = CURRENT_TIMESTAMP;
+        `, [cleanCode, cleanName, JSON.stringify(dictObj)]);
+        
+        return NextResponse.json({ success: true, message: `Translations for ${cleanCode} stored in PostgreSQL` });
+      } finally {
+        client.release();
+      }
+    }
+
+    return NextResponse.json({ success: true, message: 'Processed without PostgreSQL connection' });
+  } catch (error: any) {
+    console.error('[API /api/admin/languages POST error]:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
@@ -43845,7 +43978,6 @@ interface SocialProvidersConfig {
   appleEnabled: boolean;
 }
 
-// Synchronize all storage keys and cookie names simultaneously
 function persistSessionUniversally(user: any) {
   if (typeof window === 'undefined' || !user) return;
   try {
@@ -43914,7 +44046,27 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { t } = useTranslation();
+  const langContext = useTranslation();
+  const rawT = langContext?.t;
+  const currentLangCode = langContext?.locale || langContext?.currentLanguage || 'en';
+
+  // Dynamic server-backed custom dictionary cache
+  const [dynamicDict, setDynamicDict] = useState<Record<string, string>>({});
+  const [, setRerenderTrigger] = useState(0);
+
+  // Translation helper resolving: PostgreSQL dynamic phrases -> Context t() -> Fallback
+  const t = useCallback((key: string, fallback?: string): string => {
+    if (dynamicDict && dynamicDict[key]) {
+      return dynamicDict[key];
+    }
+    if (typeof rawT === 'function') {
+      const translated = rawT(key, fallback);
+      if (translated && translated !== key) {
+        return translated;
+      }
+    }
+    return fallback || key;
+  }, [dynamicDict, rawT]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43922,7 +44074,6 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [isDayMode, setIsDayMode] = useState(false);
 
   const isRedirectingRef = useRef(false);
   const hasExchangedCodeRef = useRef(false);
@@ -43936,13 +44087,43 @@ function LoginForm() {
   });
   const [socialLoaded, setSocialLoaded] = useState(false);
 
-  // 1. Theme Synchronization
+  // 1. Dynamic PostgreSQL Dictionary Hydration
+  const loadDynamicDictionary = useCallback(async () => {
+    try {
+      const activeLocale = currentLangCode || 'en';
+      const res = await fetch(`/api/admin/languages?code=${encodeURIComponent(activeLocale)}`, {
+        cache: 'no-store'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.dictionary) {
+          setDynamicDict(data.dictionary);
+        }
+      }
+    } catch (_) {}
+  }, [currentLangCode]);
+
+  useEffect(() => {
+    loadDynamicDictionary();
+    const handleDictionarySync = () => {
+      loadDynamicDictionary();
+      setRerenderTrigger(v => v + 1);
+    };
+
+    window.addEventListener('zecratary_languages_updated', handleDictionarySync);
+    window.addEventListener('zecratary_dictionary_updated', handleDictionarySync);
+    window.addEventListener('zecratary_language_changed', handleDictionarySync);
+
+    return () => {
+      window.removeEventListener('zecratary_languages_updated', handleDictionarySync);
+      window.removeEventListener('zecratary_dictionary_updated', handleDictionarySync);
+      window.removeEventListener('zecratary_language_changed', handleDictionarySync);
+    };
+  }, [loadDynamicDictionary]);
+
+  // 2. Theme Synchronization
   const syncTheme = useCallback(() => {
     try {
-      if (typeof document !== 'undefined') {
-        const isDark = document.documentElement.classList.contains('dark');
-        setIsDayMode(!isDark);
-      }
       const storedColors = typeof window !== 'undefined'
         ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
         : null;
@@ -43977,7 +44158,7 @@ function LoginForm() {
     };
   }, [syncTheme]);
 
-  // 2. Google Identity Services (GIS)
+  // 3. Google Identity Services (GIS)
   useEffect(() => {
     if (typeof window !== 'undefined' && !document.getElementById('google-gsi-client')) {
       const script = document.createElement('script');
@@ -43989,39 +44170,39 @@ function LoginForm() {
     }
   }, []);
 
-  // 3. Automated Code Exchange
+  // 4. Automated Code Exchange
   useEffect(() => {
     const code = searchParams.get('code');
     const state = searchParams.get('state');
     if (code && !hasExchangedCodeRef.current) {
       hasExchangedCodeRef.current = true;
       setLoading(true);
-      setSuccessMsg(t('loginSuccess') || 'Signing in with Google...');
+      setSuccessMsg(t('loginSuccessGoogle', 'Signing in with Google...'));
       const target = `/api/auth/callback/google?code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ''}`;
       window.location.replace(target);
     }
-  }, [searchParams]);
+  }, [searchParams, t]);
 
-  // 4. Map Error Parameters
+  // 5. Map Error Parameters
   useEffect(() => {
     const err = searchParams.get('error');
     if (err) {
       setLoading(false);
       if (err === 'missing_google_client_id') {
-        setErrorMsg(t('missingGoogleClientId') || 'Google Client ID is not configured. Please add your OAuth Client ID in /admin/social-login-setting.');
+        setErrorMsg(t('missingGoogleClientId', 'Google Client ID is not configured. Please add your OAuth Client ID in /admin/social-login-setting.'));
       } else if (err === 'missing_google_client_secret') {
-        setErrorMsg(t('missingGoogleClientSecret') || 'Google Client Secret is not configured in /admin/social-login-setting. Click Google to sign in directly.');
+        setErrorMsg(t('missingGoogleClientSecret', 'Google Client Secret is not configured in /admin/social-login-setting. Click Google to sign in directly.'));
       } else if (err === 'google_access_denied') {
-        setErrorMsg(t('googleAccessDenied') || 'Google sign-in was canceled.');
+        setErrorMsg(t('googleAccessDenied', 'Google sign-in was canceled.'));
       } else if (err === 'token_exchange_failed' || err === 'oauth_handshake_error') {
-        setErrorMsg(t('oauthHandshakeError') || 'Server OAuth handshake was interrupted. Click below to sign in directly with Google.');
+        setErrorMsg(t('oauthHandshakeError', 'Server OAuth handshake was interrupted. Click below to sign in directly with Google.'));
       } else {
-        setErrorMsg(t('loginError') || `Authentication error: ${err}`);
+        setErrorMsg(t('loginErrorGeneric', `Authentication error: ${err}`));
       }
     }
-  }, [searchParams]);
+  }, [searchParams, t]);
 
-  // 5. Fetch Server Settings
+  // 6. Fetch Server Social Settings
   const fetchSocialConfig = useCallback(async () => {
     if (isFetchingSocialRef.current) return;
     isFetchingSocialRef.current = true;
@@ -44086,7 +44267,7 @@ function LoginForm() {
     };
   }, [fetchSocialConfig]);
 
-  // 6. User Session Verification & Navigation Guard
+  // 7. Session Verification Guard
   const verifySession = useCallback(() => {
     if (isRedirectingRef.current) return;
     initAuthStorage();
@@ -44103,14 +44284,13 @@ function LoginForm() {
       return;
     }
 
-    // Session bounce detection
     try {
       const now = Date.now();
       const lastTs = parseInt(sessionStorage.getItem('zec_login_bounce_ts') || '0', 10);
       const count = parseInt(sessionStorage.getItem('zec_login_bounce_count') || '0', 10);
       if (now - lastTs < 3000) {
         if (count >= 2) {
-          console.warn('[login] Redirection bounce suppressed to protect server.');
+          console.warn('[login] Redirection bounce suppressed.');
           sessionStorage.removeItem('zec_login_bounce_ts');
           sessionStorage.removeItem('zec_login_bounce_count');
           return;
@@ -44144,14 +44324,14 @@ function LoginForm() {
     };
   }, [verifySession]);
 
-  // 7. Standard Credentials Login
+  // 8. Credentials Submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
     if (!email.trim() || !password) {
-      setErrorMsg(t('fillRequiredFields') || 'Please provide both email and password.');
+      setErrorMsg(t('fillRequiredFields', 'Please provide both email and password.'));
       return;
     }
 
@@ -44159,7 +44339,7 @@ function LoginForm() {
     try {
       const user = await Promise.resolve(loginUser(email.trim(), password));
       if (user) {
-        setSuccessMsg(t('loginSuccess') || 'Signing in...');
+        setSuccessMsg(t('loginSuccess', 'Signing in...'));
         persistSessionUniversally(user);
         window.dispatchEvent(new Event('zecratary_auth_changed'));
 
@@ -44170,16 +44350,16 @@ function LoginForm() {
           window.location.replace(dest);
         }, 300);
       } else {
-        setErrorMsg(t('invalidCredentials') || 'Invalid email or password.');
+        setErrorMsg(t('invalidCredentials', 'Invalid email or password.'));
         setLoading(false);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || (t('loginError') || 'Failed to sign in. Please try again.'));
+      setErrorMsg(err.message || t('loginError', 'Failed to sign in. Please try again.'));
       setLoading(false);
     }
   };
 
-  // 8. Google Sign-In with GIS Popup & Direct Navigation
+  // 9. GIS Authentication Trigger
   const handleSocialClick = (provider: 'google' | 'facebook' | 'apple') => {
     const rawCb = searchParams.get('callbackUrl');
     const dest = sanitizeDestination(rawCb, 'user');
@@ -44217,7 +44397,7 @@ function LoginForm() {
                     if (sessionData.success && sessionData.user) {
                       persistSessionUniversally(sessionData.user);
                       window.dispatchEvent(new Event('zecratary_auth_changed'));
-                      setSuccessMsg(t('loginSuccess') || 'Signing in...');
+                      setSuccessMsg(t('loginSuccess', 'Signing in...'));
 
                       const finalTarget = sanitizeDestination(sessionData.redirectUrl || dest, sessionData.user.role);
 
@@ -44229,7 +44409,7 @@ function LoginForm() {
                   }
                 } catch (fetchErr: any) {
                   console.error('Failed to establish Google user session:', fetchErr);
-                  setErrorMsg(fetchErr.message || 'Unable to retrieve user information from Google.');
+                  setErrorMsg(fetchErr.message || t('retrieveGoogleUserError', 'Unable to retrieve user information from Google.'));
                 }
               }
               setLoading(false);
@@ -44269,24 +44449,24 @@ function LoginForm() {
         <div 
           className="inline-flex items-center justify-center w-12 h-12 rounded-2xl shadow-md border mb-2 transition-colors duration-200"
           style={{
-            backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-            borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)',
-            color: 'var(--color-primary, #E05638)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)',
+            color: 'var(--color-primary)'
           }}
         >
           <ChefHat className="h-6 w-6" />
         </div>
         <h1 
           className="text-2xl sm:text-3xl font-black tracking-tight transition-colors duration-200"
-          style={{ color: isDayMode ? '#0f172a' : 'var(--color-text, #ffffff)' }}
+          style={{ color: 'var(--color-text)' }}
         >
-          {t('signInTitle') || 'Welcome Back'}
+          {t('signInTitle', 'Welcome Back')}
         </h1>
         <p 
           className="text-xs sm:text-sm transition-colors duration-200"
-          style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
+          style={{ color: 'var(--color-text-secondary)' }}
         >
-          {t('signInSubtitle') || 'Enter your credentials to access your meal assistant.'}
+          {t('signInSubtitle', 'Enter your credentials to access your meal assistant.')}
         </p>
       </div>
 
@@ -44294,8 +44474,8 @@ function LoginForm() {
       <div 
         className="border rounded-3xl p-6 sm:p-8 shadow-2xl transition-colors duration-200"
         style={{
-          backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-          borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)'
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
         }}
       >
         {/* Status Alerts */}
@@ -44303,9 +44483,9 @@ function LoginForm() {
           <div 
             className="mb-5 p-3.5 border rounded-2xl text-xs font-semibold flex items-start gap-2.5 shadow-xs animate-in fade-in transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#fef2f2' : 'rgba(127, 29, 29, 0.3)',
-              borderColor: isDayMode ? '#fca5a5' : '#991b1b',
-              color: isDayMode ? '#991b1b' : '#fca5a5'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'rgba(239, 68, 68, 0.4)',
+              color: '#ef4444'
             }}
           >
             <AlertCircle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
@@ -44316,9 +44496,9 @@ function LoginForm() {
                   <Link 
                     href="/admin/social-login-setting"
                     className="inline-flex items-center gap-1 font-bold underline hover:opacity-80"
-                    style={{ color: 'var(--color-primary, #E05638)' }}
+                    style={{ color: 'var(--color-primary)' }}
                   >
-                    <span>Configure Google OAuth</span>
+                    <span>{t('configureGoogleOAuth', 'Configure Google OAuth')}</span>
                     <ExternalLink className="h-3 w-3" />
                   </Link>
                 </div>
@@ -44331,9 +44511,9 @@ function LoginForm() {
           <div 
             className="mb-5 p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in transition-colors duration-200"
             style={{
-              backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.2)',
-              borderColor: isDayMode ? '#a7f3d0' : 'var(--color-emerald, #10b981)',
-              color: isDayMode ? '#047857' : 'var(--color-emerald, #10b981)'
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
             }}
           >
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
@@ -44346,27 +44526,27 @@ function LoginForm() {
           <div>
             <label 
               className="block font-bold mb-1.5 transition-colors duration-200"
-              style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
+              style={{ color: 'var(--color-text)' }}
             >
-              {t('emailLabel') || 'Email Address'}
+              {t('emailLabel', 'Email Address')}
             </label>
             <div className="relative">
               <Mail 
                 className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none transition-colors duration-200" 
-                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} 
+                style={{ color: 'var(--color-text-secondary)' }} 
               />
               <input 
                 type="email"
                 required
                 autoComplete="email"
-                placeholder="you@example.com"
+                placeholder={t('emailPlaceholder', 'you@example.com')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full border rounded-xl pl-10 pr-3 py-2.5 outline-none font-medium transition-colors duration-200"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               />
             </div>
@@ -44376,43 +44556,43 @@ function LoginForm() {
             <div className="flex items-center justify-between mb-1.5">
               <label 
                 className="block font-bold transition-colors duration-200"
-                style={{ color: isDayMode ? '#334155' : '#cbd5e1' }}
+                style={{ color: 'var(--color-text)' }}
               >
-                {t('passwordLabel') || 'Password'}
+                {t('passwordLabel', 'Password')}
               </label>
               <Link 
                 href="/forgot-password"
                 className="text-[11px] font-semibold hover:underline"
-                style={{ color: 'var(--color-primary, #E05638)' }}
+                style={{ color: 'var(--color-primary)' }}
               >
-                {t('forgotPassword') || 'Forgot password?'}
+                {t('forgotPassword', 'Forgot password?')}
               </Link>
             </div>
             <div className="relative">
               <Lock 
                 className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none transition-colors duration-200" 
-                style={{ color: isDayMode ? '#94a3b8' : '#64748b' }} 
+                style={{ color: 'var(--color-text-secondary)' }} 
               />
               <input 
                 type={showPassword ? 'text' : 'password'}
                 required
                 autoComplete="current-password"
-                placeholder="••••••••••••"
+                placeholder={t('passwordPlaceholder', '••••••••••••')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none font-mono transition-colors duration-200"
                 style={{
-                  backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                  borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                  color: isDayMode ? '#0f172a' : '#ffffff'
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               />
               <button 
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-2.5 cursor-pointer hover:opacity-80 transition"
-                style={{ color: isDayMode ? '#64748b' : '#94a3b8' }}
-                aria-label="Toggle password visibility"
+                style={{ color: 'var(--color-text-secondary)' }}
+                aria-label={t('togglePasswordVisibility', 'Toggle password visibility')}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
@@ -44423,13 +44603,15 @@ function LoginForm() {
             type="submit"
             disabled={loading}
             className="w-full py-3 mt-2 rounded-xl text-xs font-bold text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover, #c94529)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             {loading ? (
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
             ) : (
               <>
-                <span>{t('signInBtn') || 'Sign In'}</span>
+                <span>{t('signInBtn', 'Sign In')}</span>
                 <ArrowRight className="h-4 w-4" />
               </>
             )}
@@ -44442,16 +44624,16 @@ function LoginForm() {
             <div className="relative flex items-center justify-center">
               <div 
                 className="w-full border-t transition-colors duration-200"
-                style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+                style={{ borderColor: 'var(--color-border)' }}
               />
               <span 
                 className="absolute px-3 text-[11px] font-bold uppercase tracking-wider transition-colors duration-200"
                 style={{ 
-                  backgroundColor: isDayMode ? '#ffffff' : 'var(--color-card, #0b0f17)',
-                  color: isDayMode ? '#94a3b8' : '#64748b' 
+                  backgroundColor: 'var(--color-card)',
+                  color: 'var(--color-text-secondary)' 
                 }}
               >
-                {t('orContinueWith') || 'Or continue with'}
+                {t('orContinueWith', 'Or continue with')}
               </span>
             </div>
 
@@ -44467,11 +44649,11 @@ function LoginForm() {
                   onClick={() => handleSocialClick('google')}
                   className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs disabled:opacity-50"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  title={t('signInWithGoogle') || 'Sign in with Google'}
+                  title={t('signInWithGoogle', 'Sign in with Google')}
                 >
                   <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z" />
@@ -44479,7 +44661,7 @@ function LoginForm() {
                     <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.98 0 12s.45 3.82 1.25 5.42l4.03-3.15z" />
                     <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
                   </svg>
-                  <span>Google</span>
+                  <span>{t('googleProvider', 'Google')}</span>
                 </button>
               )}
 
@@ -44490,16 +44672,16 @@ function LoginForm() {
                   onClick={() => handleSocialClick('facebook')}
                   className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs disabled:opacity-50"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  title={t('signInWithFacebook') || 'Sign in with Facebook'}
+                  title={t('signInWithFacebook', 'Sign in with Facebook')}
                 >
                   <svg className="w-4 h-4 text-[#1877F2] fill-current shrink-0" viewBox="0 0 24 24">
                     <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
                   </svg>
-                  <span>Facebook</span>
+                  <span>{t('facebookProvider', 'Facebook')}</span>
                 </button>
               )}
 
@@ -44510,16 +44692,16 @@ function LoginForm() {
                   onClick={() => handleSocialClick('apple')}
                   className="py-2.5 px-3 border rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer hover:opacity-85 shadow-xs disabled:opacity-50"
                   style={{
-                    backgroundColor: isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)',
-                    borderColor: isDayMode ? '#cbd5e1' : 'var(--color-border, #1e293b)',
-                    color: isDayMode ? '#0f172a' : '#ffffff'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                  title={t('signInWithApple') || 'Sign in with Apple'}
+                  title={t('signInWithApple', 'Sign in with Apple')}
                 >
                   <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
                     <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 0.92-2.85-.9.04-2 0.6-2.65 1.35-.58.66-1.09 1.73-.95 2.76.99.08 2.05-.51 2.68-1.26z" />
                   </svg>
-                  <span>Apple</span>
+                  <span>{t('appleProvider', 'Apple')}</span>
                 </button>
               )}
             </div>
@@ -44529,20 +44711,20 @@ function LoginForm() {
         {/* Footer Navigation */}
         <div 
           className="mt-6 pt-4 border-t text-center text-xs transition-colors duration-200"
-          style={{ borderColor: isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)' }}
+          style={{ borderColor: 'var(--color-border)' }}
         >
           <span 
             className="transition-colors duration-200"
-            style={{ color: isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)' }}
+            style={{ color: 'var(--color-text-secondary)' }}
           >
-            {t('noAccountPrompt') || "Don't have an account?"}{' '}
+            {t('noAccountPrompt', "Don't have an account?")}{' '}
           </span>
           <Link 
             href="/register"
             className="font-bold hover:underline"
-            style={{ color: 'var(--color-primary, #E05638)' }}
+            style={{ color: 'var(--color-primary)' }}
           >
-            {t('signUpPrompt') || 'Sign up for free'}
+            {t('signUpPrompt', 'Sign up for free')}
           </Link>
         </div>
       </div>
@@ -44557,7 +44739,7 @@ export default function LoginPage() {
         <div className="flex items-center justify-center">
           <div 
             className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-            style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }}
+            style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}
           />
         </div>
       }>
