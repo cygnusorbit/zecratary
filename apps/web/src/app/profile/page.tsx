@@ -266,9 +266,29 @@ const extractUserTokenUsage = (u: any, planLimit: number = 50000, planFreq: 'onc
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { t } = useTranslation();
+  const langContext = useTranslation();
+  const rawT = langContext?.t;
+  const currentLangCode = langContext?.locale || langContext?.currentLanguage || 'en';
+
+  // Dynamic server-backed custom dictionary cache (from PostgreSQL)
+  const [dynamicDict, setDynamicDict] = useState<Record<string, string>>({});
+  const [, setRerenderTrigger] = useState(0);
+
+  // Translation helper resolving: PostgreSQL dynamic phrases -> Context t() -> Fallback
+  const t = useCallback((key: string, fallback?: string): string => {
+    if (dynamicDict && dynamicDict[key]) {
+      return dynamicDict[key];
+    }
+    if (typeof rawT === 'function') {
+      const translated = rawT(key, fallback);
+      if (translated && translated !== key) {
+        return translated;
+      }
+    }
+    return fallback || key;
+  }, [dynamicDict, rawT]);
+
   const [user, setUserState] = useState<ExtendedUser | null>(null);
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -302,6 +322,41 @@ export default function ProfilePage() {
 
   const activeLoginProvider = useMemo(() => getActiveLoginProvider(user), [user]);
 
+  // 1. PostgreSQL Dynamic Localization Hydration & Global Events
+  const loadDynamicDictionary = useCallback(async () => {
+    try {
+      const activeLocale = currentLangCode || 'en';
+      const res = await fetch(`/api/admin/languages?code=${encodeURIComponent(activeLocale)}`, {
+        cache: 'no-store'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.dictionary) {
+          setDynamicDict(data.dictionary);
+        }
+      }
+    } catch (_) {}
+  }, [currentLangCode]);
+
+  useEffect(() => {
+    loadDynamicDictionary();
+    const handleDictionarySync = () => {
+      loadDynamicDictionary();
+      setRerenderTrigger(v => v + 1);
+    };
+
+    window.addEventListener('zecratary_languages_updated', handleDictionarySync);
+    window.addEventListener('zecratary_dictionary_updated', handleDictionarySync);
+    window.addEventListener('zecratary_language_changed', handleDictionarySync);
+
+    return () => {
+      window.removeEventListener('zecratary_languages_updated', handleDictionarySync);
+      window.removeEventListener('zecratary_dictionary_updated', handleDictionarySync);
+      window.removeEventListener('zecratary_language_changed', handleDictionarySync);
+    };
+  }, [loadDynamicDictionary]);
+
+  // 2. Dynamic Theme & Settings Synchronization
   const applySavedTheme = useCallback(async () => {
     if (isFetchingThemeRef.current) return;
     isFetchingThemeRef.current = true;
@@ -311,9 +366,6 @@ export default function ProfilePage() {
         const data = await res.json();
         if (data.success && data.settings) {
           const s = data.settings;
-          const isDay = s.themeMode === 'light' || s.themeMode === 'day';
-          setIsDayMode(isDay);
-
           if (s.themeColors) {
             const root = document.documentElement;
             if (s.themeColors.primary || s.themeColors.primaryColor) {
@@ -338,9 +390,6 @@ export default function ProfilePage() {
       }
 
       if (typeof window !== 'undefined') {
-        const mode = localStorage.getItem('zecratary_theme_mode');
-        if (mode) setIsDayMode(mode === 'light' || mode === 'day');
-
         const aiConfigRaw = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
         if (aiConfigRaw) {
           try {
@@ -765,7 +814,7 @@ export default function ProfilePage() {
   reloadUserRef.current = reloadActiveUser;
 
   useEffect(() => {
-    document.title = `${t('accountProfileTitle') || 'Account Profile'} - Zecratary`;
+    document.title = `${t('accountProfileTitle', 'Account Profile')} - Zecratary`;
   }, [t]);
 
   useEffect(() => {
@@ -800,6 +849,7 @@ export default function ProfilePage() {
 
     const isLinked = Boolean(user.linkedProviders?.includes(provider));
     const isLoginMethod = activeLoginProvider === provider;
+    const provName = provider.charAt(0).toUpperCase() + provider.slice(1);
 
     if (!isLinked) {
       try {
@@ -815,7 +865,7 @@ export default function ProfilePage() {
               : Boolean(socialCfg.appleEnabled);
 
             if (!isEnabled) {
-              setError(`${provider.toUpperCase()} connection is currently disabled by administrator.`);
+              setError(t('socialProviderDisabled', `${provName} connection is currently disabled by administrator.`));
               setProcessingSocial(null);
               return;
             }
@@ -831,22 +881,22 @@ export default function ProfilePage() {
       const hasPassword = Boolean(user.password && user.password.length >= 4);
 
       if (isLoginMethod && !hasPassword && otherLinked.length === 0) {
-        setError(`Cannot unlink ${provider.toUpperCase()}: This is your active social login method. Please set a password first before disconnecting.`);
+        setError(t('cannotUnlinkActiveLogin', `Cannot unlink ${provName}: This is your active social login method. Please set a password first before disconnecting.`));
         setProcessingSocial(null);
         return;
       }
       if (updatedLinked.length === 1 && !hasPassword) {
-        setError(`Cannot unlink ${provider.toUpperCase()}: this is your only login method. Set a password first.`);
+        setError(t('cannotUnlinkOnlyLogin', `Cannot unlink ${provName}: This is your only login method. Set a password first.`));
         setProcessingSocial(null);
         return;
       }
       updatedLinked = otherLinked;
-      setSuccessMsg(`Unlinked ${provider.toUpperCase()} account successfully.`);
+      setSuccessMsg(t('unlinkedSocialSuccess', `Unlinked ${provName} account successfully.`));
     } else {
       if (!updatedLinked.includes(provider)) {
         updatedLinked.push(provider);
       }
-      setSuccessMsg(`Successfully connected and linked ${provider.toUpperCase()}!`);
+      setSuccessMsg(t('linkedSocialSuccess', `Successfully connected and linked ${provName}!`));
     }
 
     const updatedUser: ExtendedUser = {
@@ -882,8 +932,14 @@ export default function ProfilePage() {
     const matched = plans.find(p => checkIsCurrentPlan(p));
     if (matched) {
       const isAnnual = matched.interval === 'YEAR' || matched.slug.includes('annual');
+      const intervalText = matched.isFree 
+        ? ` (${t('freePlanLabel', 'Free')})` 
+        : isAnnual 
+        ? ` (${t('annualPlanLabel', 'Annual')})` 
+        : ` (${t('monthlyPlanLabel', 'Monthly')})`;
+
       return {
-        label: `${matched.name}${matched.isFree ? ' (Free)' : isAnnual ? ' (Annual)' : ' (Monthly)'}`,
+        label: `${matched.name}${intervalText}`,
         bg: 'var(--color-inner-dark)',
         border: matched.isFree ? 'var(--color-emerald)' : isAnnual ? '#3b82f6' : 'var(--color-primary)',
         color: matched.isFree ? 'var(--color-emerald)' : isAnnual ? '#60a5fa' : 'var(--color-primary)',
@@ -894,7 +950,7 @@ export default function ProfilePage() {
 
     if (!planKey || planKey === 'free' || planKey.includes('free') || planKey === 'taster') {
       return {
-        label: t('freeTierNoExpiry') || 'Taster (Free)',
+        label: t('freeTierNoExpiry', 'Taster (Free)'),
         bg: 'var(--color-inner-dark)',
         border: 'var(--color-emerald)',
         color: 'var(--color-emerald)',
@@ -929,17 +985,17 @@ export default function ProfilePage() {
     const cleanEmail = email.trim().toLowerCase();
 
     if (!cleanName || !cleanEmail) {
-      setError(t('nameAndEmailRequired') || 'Full Name and Email Address are required.');
+      setError(t('nameAndEmailRequired', 'Full Name and Email Address are required.'));
       return;
     }
 
     if (password || confirmPassword) {
       if (password.length < 4) {
-        setError(t('passwordLengthError') || 'New password must be at least 4 characters long.');
+        setError(t('passwordLengthError', 'New password must be at least 4 characters long.'));
         return;
       }
       if (password !== confirmPassword) {
-        setError(t('passwordMismatchError') || 'New password and confirmation password do not match.');
+        setError(t('passwordMismatchError', 'New password and confirmation password do not match.'));
         return;
       }
     }
@@ -970,13 +1026,13 @@ export default function ProfilePage() {
     setConfirmPassword('');
 
     window.dispatchEvent(new Event('zecratary_users_updated'));
-    setSuccessMsg(t('profileSavedSuccess') || 'Your profile changes have been saved successfully!');
+    setSuccessMsg(t('profileSavedSuccess', 'Your profile changes have been saved successfully!'));
     setTimeout(() => setSuccessMsg(''), 4000);
   };
 
   const handleDeleteAccount = async () => {
     if (!user) return;
-    if (!confirm(t('confirmDeleteAccount') || 'Are you sure you want to permanently delete your account and all associated data? This action cannot be undone.')) {
+    if (!confirm(t('confirmDeleteAccount', 'Are you sure you want to permanently delete your account and all associated data? This action cannot be undone.'))) {
       return;
     }
     try {
@@ -992,9 +1048,18 @@ export default function ProfilePage() {
       logoutUser();
       router.replace('/login');
     } catch (err: any) {
-      alert('Failed to delete account: ' + (err?.message || 'Server error'));
+      alert(t('deleteAccountFailed', 'Failed to delete account: ') + (err?.message || 'Server error'));
     }
   };
+
+  const getReimburseScheduleText = useCallback((freq: string) => {
+    switch(freq) {
+      case 'once': return t('reimburseOnceSchedule', 'Reimbursed: Once (Non-recurring)');
+      case 'weekly': return t('reimburseWeeklySchedule', 'Reimbursed: Every Week from purchase date');
+      case 'monthly': return t('reimburseMonthlySchedule', 'Reimbursed: Every Month from purchase date');
+      default: return t('reimburseMonthlyDefault', 'Reimbursed: Monthly');
+    }
+  }, [t]);
 
   if (!user) {
     return (
@@ -1016,15 +1081,6 @@ export default function ProfilePage() {
     : tokenUsage.monthlyLimit > 0 
       ? Math.min(Math.round((tokenUsage.totalTokens / tokenUsage.monthlyLimit) * 100), 100) 
       : 100;
-
-  const getReimburseScheduleText = (freq: string) => {
-    switch(freq) {
-      case 'once': return 'Reimbursed: Once (Non-recurring)';
-      case 'weekly': return 'Reimbursed: Every Week from purchase date';
-      case 'monthly': return 'Reimbursed: Every Month from purchase date';
-      default: return 'Reimbursed: Monthly';
-    }
-  };
 
   return (
     <div 
@@ -1050,10 +1106,10 @@ export default function ProfilePage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-             {t('accountProfileTitle') || 'Account Profile'}
+             {t('accountProfileTitle', 'Account Profile')}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('accountProfileSubtitle') || 'Manage your credentials, active AI token quotas, and subscription plan'}
+            {t('accountProfileSubtitle', 'Manage your credentials, active AI token quotas, and subscription plan')}
           </p>
         </div>
 
@@ -1068,7 +1124,7 @@ export default function ProfilePage() {
                 color: 'var(--color-text)'
               }}
             >
-              <Key className="h-3.5 w-3.5 text-orange-400" /> Social Settings
+              <Key className="h-3.5 w-3.5 text-orange-400" /> {t('socialSettings', 'Social Settings')}
             </Link>
             <Link
               href="/admin"
@@ -1079,7 +1135,7 @@ export default function ProfilePage() {
                 color: 'var(--color-text)'
               }}
             >
-              <Shield className="h-3.5 w-3.5 text-emerald-400" /> {t('adminAccess') || 'Admin Access'}
+              <Shield className="h-3.5 w-3.5 text-emerald-400" /> {t('adminAccess', 'Admin Access')}
             </Link>
             <Link
               href="/admin/plans"
@@ -1090,14 +1146,21 @@ export default function ProfilePage() {
                 color: 'var(--color-text)'
               }}
             >
-              <Zap className="h-3.5 w-3.5 text-orange-400" /> {t('subscriptionPlans') || 'Subscription Plans'}
+              <Zap className="h-3.5 w-3.5 text-orange-400" /> {t('subscriptionPlans', 'Subscription Plans')}
             </Link>
           </div>
         )}
       </div>
 
       {error && (
-        <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-2xl text-xs text-red-300 font-semibold flex items-center gap-2 shadow-lg">
+        <div 
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'rgba(239, 68, 68, 0.4)',
+            color: '#ef4444'
+          }}
+        >
           <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
           <span>{error}</span>
         </div>
@@ -1159,11 +1222,11 @@ export default function ProfilePage() {
             <div className="text-left sm:text-right text-[11px] space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
               <div className="flex sm:justify-end items-center gap-1.5">
                 <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                <span>{t('joinedPrefix') || 'Joined: '} {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : (t('activeStatus') || 'Active')}</span>
+                <span>{t('joinedPrefix', 'Joined: ')} {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : t('activeStatus', 'Active')}</span>
               </div>
               
               <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
-                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{t('activeMembershipLabel') || 'Membership:'}</span>
+                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{t('activeMembershipLabel', 'Membership:')}</span>
                 <span 
                   className="font-bold px-2.5 py-0.5 rounded-full text-[10px] uppercase border shadow-sm inline-flex items-center gap-1"
                   style={{
@@ -1180,11 +1243,11 @@ export default function ProfilePage() {
               {activeExpiryDate ? (
                 <div className="flex sm:justify-end items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold pt-0.5">
                   <Clock className="h-3 w-3" />
-                  <span>{t('renewalExpiryPrefix') || 'Expiry: '} {new Date(activeExpiryDate).toLocaleDateString()}</span>
+                  <span>{t('renewalExpiryPrefix', 'Expiry: ')} {new Date(activeExpiryDate).toLocaleDateString()}</span>
                 </div>
               ) : (
                 <div className="flex sm:justify-end items-center gap-1 text-[11px] italic pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  <span>{t('freeTierNoExpiry') || 'Free Tier'}</span>
+                  <span>{t('freeTierNoExpiry', 'Free Tier')}</span>
                 </div>
               )}
             </div>
@@ -1193,7 +1256,7 @@ export default function ProfilePage() {
           <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{t('fullNameLabel') || 'Full Name *'}</label>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{t('fullNameLabel', 'Full Name *')}</label>
                 <div className="relative">
                   <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
@@ -1201,7 +1264,7 @@ export default function ProfilePage() {
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Jordan Smith"
+                    placeholder={t('namePlaceholder', 'e.g. Jordan Smith')}
                     className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -1215,7 +1278,7 @@ export default function ProfilePage() {
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{t('emailAddressLabel') || 'Email Address *'}</label>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{t('emailAddressLabel', 'Email Address *')}</label>
                 <div className="relative">
                   <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
@@ -1223,7 +1286,7 @@ export default function ProfilePage() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@example.com"
+                    placeholder={t('emailPlaceholder', 'name@example.com')}
                     className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -1240,7 +1303,7 @@ export default function ProfilePage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('newPasswordLabel') || 'New Password'} <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>{t('leaveBlankCurrentPass') || '(leave blank)'}</span>
+                  {t('newPasswordLabel', 'New Password')} <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>{t('leaveBlankCurrentPass', '(leave blank)')}</span>
                 </label>
                 <div className="relative">
                   <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
@@ -1264,7 +1327,7 @@ export default function ProfilePage() {
 
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('confirmPasswordLabel') || 'Confirm Password'} <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>{t('repeatNewPass') || '(repeat)'}</span>
+                  {t('confirmPasswordLabel', 'Confirm Password')} <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>{t('repeatNewPass', '(repeat)')}</span>
                 </label>
                 <div className="relative">
                   <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
@@ -1301,15 +1364,16 @@ export default function ProfilePage() {
                   color: '#ef4444'
                 }}
               >
-                <LogOut className="h-4 w-4 text-red-500" /> {t('signOutBtn') || 'Sign Out'}
+                <LogOut className="h-4 w-4 text-red-500" /> {t('signOutBtn', 'Sign Out')}
               </button>
 
               <button
                 type="button"
                 onClick={handleDeleteAccount}
                 className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs text-red-400 hover:text-red-300 border-red-900/60 hover:bg-red-950/30"
+                style={{ backgroundColor: 'var(--color-inner-dark)' }}
               >
-                Delete Account
+                {t('deleteAccountBtn', 'Delete Account')}
               </button>
 
               <button
@@ -1319,7 +1383,7 @@ export default function ProfilePage() {
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
               >
-                <Check className="h-4 w-4" /> {t('saveProfileBtn') || 'Save Profile'}
+                <Check className="h-4 w-4" /> {t('saveProfileBtn', 'Save Profile')}
               </button>
             </div>
           </form>
@@ -1336,7 +1400,7 @@ export default function ProfilePage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <h2 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <Cpu className="h-5 w-5 text-orange-400" /> AI Token Usage & Quota
+                <Cpu className="h-5 w-5 text-orange-400" /> {t('aiTokenUsageQuotaTitle', 'AI Token Usage & Quota')}
               </h2>
               <span 
                 className="text-[10px] font-mono px-2.5 py-1 rounded-lg border font-bold shadow-xs"
@@ -1352,11 +1416,13 @@ export default function ProfilePage() {
 
             <div className="space-y-3">
               <div className="flex justify-between items-baseline">
-                <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Token Allocation Limit</span>
+                <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('tokenAllocationLimitLabel', 'Token Allocation Limit')}
+                </span>
                 <span className="text-sm font-black font-mono" style={{ color: 'var(--color-text)' }}>
                   {tokenUsage.totalTokens.toLocaleString()}{' '}
                   <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    / {isUnlimited ? '∞ Unlimited' : tokenUsage.monthlyLimit.toLocaleString()}
+                    / {isUnlimited ? t('unlimitedTokensLabel', '∞ Unlimited') : tokenUsage.monthlyLimit.toLocaleString()}
                   </span>
                 </span>
               </div>
@@ -1378,8 +1444,12 @@ export default function ProfilePage() {
               </div>
 
               <div className="flex justify-between text-[11px]">
-                <span style={{ color: 'var(--color-text-secondary)' }}>{isUnlimited ? 'Unlimited Tokens Tier' : `${tokenPercentage}% of quota used`}</span>
-                <span className="text-emerald-500 dark:text-emerald-400 font-semibold">{tokenUsage.requestCount} AI Requests</span>
+                <span style={{ color: 'var(--color-text-secondary)' }}>
+                  {isUnlimited ? t('unlimitedTokensTier', 'Unlimited Tokens Tier') : `${tokenPercentage}% ${t('ofQuotaUsed', 'of quota used')}`}
+                </span>
+                <span className="text-emerald-500 dark:text-emerald-400 font-semibold">
+                  {tokenUsage.requestCount} {t('aiRequestsCountLabel', 'AI Requests')}
+                </span>
               </div>
             </div>
 
@@ -1391,9 +1461,15 @@ export default function ProfilePage() {
                   borderColor: 'var(--color-border)'
                 }}
               >
-                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: 'var(--color-text-secondary)' }}>Prompt Input</span>
-                <span className="text-base font-black font-mono" style={{ color: 'var(--color-text)' }}>{tokenUsage.promptTokens.toLocaleString()}</span>
-                <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>Tokens (User & Context)</span>
+                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('promptInputLabel', 'Prompt Input')}
+                </span>
+                <span className="text-base font-black font-mono" style={{ color: 'var(--color-text)' }}>
+                  {tokenUsage.promptTokens.toLocaleString()}
+                </span>
+                <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('tokensUserContextDesc', 'Tokens (User & Context)')}
+                </span>
               </div>
 
               <div 
@@ -1403,9 +1479,15 @@ export default function ProfilePage() {
                   borderColor: 'var(--color-border)'
                 }}
               >
-                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: 'var(--color-text-secondary)' }}>Completion Output</span>
-                <span className="text-base font-black text-emerald-500 dark:text-emerald-400 font-mono">{tokenUsage.completionTokens.toLocaleString()}</span>
-                <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>Tokens (Generated Reply)</span>
+                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('completionOutputLabel', 'Completion Output')}
+                </span>
+                <span className="text-base font-black text-emerald-500 dark:text-emerald-400 font-mono">
+                  {tokenUsage.completionTokens.toLocaleString()}
+                </span>
+                <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('tokensGeneratedReplyDesc', 'Tokens (Generated Reply)')}
+                </span>
               </div>
             </div>
           </div>
@@ -1420,14 +1502,14 @@ export default function ProfilePage() {
           >
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1.5 font-bold" style={{ color: 'var(--color-text)' }}>
-                <Repeat className="h-3.5 w-3.5 text-orange-400" /> Reimburse Schedule
+                <Repeat className="h-3.5 w-3.5 text-orange-400" /> {t('reimburseScheduleTitle', 'Reimburse Schedule')}
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold uppercase bg-orange-500/10 text-orange-400 border border-orange-500/20">
                 {tokenUsage.reimburseFrequency || 'monthly'}
               </span>
             </div>
             <p className="leading-relaxed">
-              {getReimburseScheduleText(tokenUsage.reimburseFrequency)}. Quotas are automatically reimbursed based on your plan tier and purchase cycle.
+              {getReimburseScheduleText(tokenUsage.reimburseFrequency)}. {t('quotasReimbursedDesc', 'Quotas are automatically reimbursed based on your plan tier and purchase cycle.')}
             </p>
           </div>
         </div>
@@ -1445,10 +1527,10 @@ export default function ProfilePage() {
         <div className="border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
           <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
             <Link2 className="h-5 w-5 text-[var(--color-primary)]" />
-            Connected Social Accounts
+            {t('connectedSocialAccountsTitle', 'Connected Social Accounts')}
           </h2>
           <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            Link external identities (Google, Facebook, Apple) to enable seamless one-click sign in.
+            {t('connectedSocialAccountsSubtitle', 'Link external identities (Google, Facebook, Apple) to enable seamless one-click sign in.')}
           </p>
         </div>
 
@@ -1500,13 +1582,15 @@ export default function ProfilePage() {
                 <div className="flex items-center gap-3">
                   {renderIcon()}
                   <div>
-                    <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>{provName}</span>
+                    <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                      {t(provId + 'Provider', provName)}
+                    </span>
                     <span className={`text-[10px] font-semibold ${isLinked ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
                       {isPrimary 
-                        ? (t('linkedLoginMethod') || t('connectedLoginMethod') || 'Linked (Login Method)') 
+                        ? t('linkedLoginMethod', 'Linked (Login Method)') 
                         : isLinked 
-                        ? (t('linked') || t('connected') || 'Linked') 
-                        : (t('notLinked') || 'Not Linked')}
+                        ? t('linked', 'Linked') 
+                        : t('notLinked', 'Not Linked')}
                     </span>
                   </div>
                 </div>
@@ -1528,11 +1612,11 @@ export default function ProfilePage() {
                     <RefreshCw className="h-3 w-3 animate-spin" />
                   ) : isLinked ? (
                     <>
-                      <Unlink className="h-3 w-3" /> {t('unlinkBtn') || 'Unlink'}
+                      <Unlink className="h-3 w-3" /> {t('unlinkBtn', 'Unlink')}
                     </>
                   ) : (
                     <>
-                      <Link2 className="h-3 w-3" /> {t('linkBtn') || 'Link'}
+                      <Link2 className="h-3 w-3" /> {t('linkBtn', 'Link')}
                     </>
                   )}
                 </button>

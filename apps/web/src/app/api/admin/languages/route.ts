@@ -24,7 +24,6 @@ async function initTranslationsTable(client: any) {
   `);
 }
 
-// GET: Retrieve custom phrases for a language (or all)
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -57,7 +56,6 @@ export async function GET(request: Request) {
   }
 }
 
-// POST: Upsert custom words into PostgreSQL
 export async function POST(request: Request) {
   try {
     const body = await request.json();
