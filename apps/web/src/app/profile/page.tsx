@@ -146,52 +146,92 @@ const calculateRenewalExpiry = (startDate: Date = new Date(), interval?: 'MONTH'
 const detectUserSocialProviders = (u: any): SocialProvider[] => {
   if (!u) return [];
   const providers = new Set<SocialProvider>();
-  
-  if (Array.isArray(u.linkedProviders)) {
-    u.linkedProviders.forEach((p: string) => {
-      const low = String(p).toLowerCase();
-      if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
-    });
-  }
-  if (Array.isArray(u.linked_providers)) {
-    u.linked_providers.forEach((p: string) => {
-      const low = String(p).toLowerCase();
-      if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
-    });
-  }
 
-  const mainProv = String(u.provider || u.authProvider || u.socialProvider || u.loginMethod || '').toLowerCase();
+  const parseProviderList = (val: any) => {
+    if (!val) return;
+    if (Array.isArray(val)) {
+      val.forEach((p: any) => {
+        const low = String(p).toLowerCase().trim();
+        if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
+      });
+      return;
+    }
+    if (typeof val === 'string') {
+      let str = val.trim();
+      if (str.startsWith('{') && str.endsWith('}')) {
+        str = str.slice(1, -1);
+      }
+      if (str.startsWith('[') && str.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(str);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((p: any) => {
+              const low = String(p).toLowerCase().trim();
+              if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
+            });
+            return;
+          }
+        } catch (_) {}
+      }
+      str.split(',').forEach(item => {
+        const clean = item.replace(/["'{}]/g, '').toLowerCase().trim();
+        if (clean === 'google' || clean === 'facebook' || clean === 'apple') {
+          providers.add(clean as SocialProvider);
+        }
+      });
+    }
+  };
+
+  parseProviderList(u.linkedProviders);
+  parseProviderList(u.linked_providers);
+
+  const mainProv = String(
+    u.provider || u.authProvider || u.auth_provider || 
+    u.socialProvider || u.social_provider || 
+    u.oauthProvider || u.oauth_provider || 
+    u.loginMethod || u.login_method || ''
+  ).toLowerCase();
   if (mainProv.includes('google')) providers.add('google');
   if (mainProv.includes('facebook')) providers.add('facebook');
   if (mainProv.includes('apple')) providers.add('apple');
 
   const uid = String(u.id || '').toLowerCase();
-  if (uid.includes('google')) providers.add('google');
-  if (uid.includes('facebook')) providers.add('facebook');
-  if (uid.includes('apple')) providers.add('apple');
+  if (uid.startsWith('usr_g_') || uid.startsWith('usr_goog') || uid.startsWith('g_') || uid.includes('google')) providers.add('google');
+  if (uid.startsWith('usr_fb_') || uid.startsWith('usr_f_') || uid.startsWith('fb_') || uid.includes('facebook')) providers.add('facebook');
+  if (uid.startsWith('usr_apple') || uid.startsWith('usr_a_') || uid.startsWith('apple_') || uid.includes('apple')) providers.add('apple');
 
-  if (u.googleId) providers.add('google');
-  if (u.facebookId) providers.add('facebook');
-  if (u.appleId) providers.add('apple');
+  if (u.googleId || u.google_id || u.google_sub) providers.add('google');
+  if (u.facebookId || u.facebook_id || u.facebook_sub) providers.add('facebook');
+  if (u.appleId || u.apple_id || u.apple_sub) providers.add('apple');
 
   return Array.from(providers);
 };
 
 const getActiveLoginProvider = (u: any): SocialProvider | null => {
   if (!u) return null;
-  const mainProv = String(u.provider || u.authProvider || u.socialProvider || u.loginMethod || '').toLowerCase();
+  const mainProv = String(
+    u.provider || u.authProvider || u.auth_provider || 
+    u.socialProvider || u.social_provider || 
+    u.oauthProvider || u.oauth_provider || 
+    u.loginMethod || u.login_method || ''
+  ).toLowerCase();
   if (mainProv.includes('google')) return 'google';
   if (mainProv.includes('facebook')) return 'facebook';
   if (mainProv.includes('apple')) return 'apple';
 
   const uid = String(u.id || '').toLowerCase();
-  if (uid.startsWith('usr_google') || uid.includes('google')) return 'google';
-  if (uid.startsWith('usr_facebook') || uid.includes('facebook')) return 'facebook';
-  if (uid.startsWith('usr_apple') || uid.includes('apple')) return 'apple';
+  if (uid.startsWith('usr_g_') || uid.startsWith('usr_goog') || uid.startsWith('g_') || uid.includes('google')) return 'google';
+  if (uid.startsWith('usr_fb_') || uid.startsWith('usr_f_') || uid.startsWith('fb_') || uid.includes('facebook')) return 'facebook';
+  if (uid.startsWith('usr_apple') || uid.startsWith('usr_a_') || uid.startsWith('apple_') || uid.includes('apple')) return 'apple';
 
-  if (u.googleId) return 'google';
-  if (u.facebookId) return 'facebook';
-  if (u.appleId) return 'apple';
+  if (u.googleId || u.google_id || u.google_sub) return 'google';
+  if (u.facebookId || u.facebook_id || u.facebook_sub) return 'facebook';
+  if (u.appleId || u.apple_id || u.apple_sub) return 'apple';
+
+  const detected = detectUserSocialProviders(u);
+  if (detected.length > 0 && (!u.password || u.password === '')) {
+    return detected[0];
+  }
 
   return null;
 };
@@ -600,11 +640,12 @@ export default function ProfilePage() {
             const cookieData = JSON.parse(decodeURIComponent(match[1]));
             if (cookieData && (cookieData.email || cookieData.id)) {
               active = {
+                ...cookieData,
                 id: cookieData.id || 'usr_standard_default',
                 name: cookieData.name || 'Standard User',
                 email: cookieData.email || 'user@foodieprep.com',
                 role: cookieData.role || 'user',
-                subscriptionPlan: 'taster'
+                subscriptionPlan: cookieData.subscriptionPlan || cookieData.subscription_plan || 'taster'
               };
               if (typeof window !== 'undefined') {
                 localStorage.setItem('zecratary_current_user', JSON.stringify(active));
@@ -644,8 +685,32 @@ export default function ProfilePage() {
       } catch (_) {}
 
       const detectedSocial = detectUserSocialProviders(matchedUser);
+      const activeSocial = getActiveLoginProvider(matchedUser);
+      if (activeSocial && !detectedSocial.includes(activeSocial)) {
+        detectedSocial.push(activeSocial);
+      }
       matchedUser.linkedProviders = detectedSocial;
       matchedUser.linked_providers = detectedSocial;
+      if (activeSocial && !matchedUser.provider && !matchedUser.authProvider) {
+        matchedUser.provider = activeSocial;
+        matchedUser.authProvider = activeSocial;
+      }
+
+      if (activeSocial && (!active?.linkedProviders?.includes(activeSocial) || !active?.linked_providers?.includes(activeSocial))) {
+        try {
+          fetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...matchedUser,
+              linkedProviders: detectedSocial,
+              linked_providers: detectedSocial,
+              auth_provider: activeSocial,
+              provider: activeSocial
+            })
+          }).catch(() => {});
+        } catch (_) {}
+      }
 
       try {
         const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
@@ -1420,8 +1485,8 @@ export default function ProfilePage() {
               )
             }
           ]).map(({ id: provId, name: provName, renderIcon }) => {
-            const isLinked = Boolean(user.linkedProviders?.includes(provId));
             const isPrimary = activeLoginProvider === provId;
+            const isLinked = Boolean(user.linkedProviders?.includes(provId)) || isPrimary;
 
             return (
               <div 
@@ -1438,10 +1503,10 @@ export default function ProfilePage() {
                     <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>{provName}</span>
                     <span className={`text-[10px] font-semibold ${isLinked ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
                       {isPrimary 
-                        ? (t('connectedLoginMethod') || 'Connected (Login Method)') 
+                        ? (t('linkedLoginMethod') || t('connectedLoginMethod') || 'Linked (Login Method)') 
                         : isLinked 
-                        ? (t('connected') || 'Connected') 
-                        : (t('notLinked') || 'Not linked')}
+                        ? (t('linked') || t('connected') || 'Linked') 
+                        : (t('notLinked') || 'Not Linked')}
                     </span>
                   </div>
                 </div>
