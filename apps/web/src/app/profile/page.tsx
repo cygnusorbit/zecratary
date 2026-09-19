@@ -14,8 +14,38 @@ import { useTranslation } from '@/components/LanguageProvider';
 
 type SocialProvider = 'google' | 'facebook' | 'apple';
 
+interface TokenUsageData {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  requestCount: number;
+  monthlyLimit: number;
+  reimburseFrequency: 'once' | 'weekly' | 'monthly';
+}
+
 interface ExtendedUser extends User {
   linkedProviders?: SocialProvider[];
+  linked_providers?: SocialProvider[];
+  provider?: string;
+  authProvider?: string;
+  socialProvider?: string;
+  loginMethod?: string;
+  googleId?: string;
+  facebookId?: string;
+  appleId?: string;
+  tokenUsage?: Partial<TokenUsageData>;
+  token_usage?: Partial<TokenUsageData>;
+  promptTokens?: number;
+  prompt_tokens?: number;
+  completionTokens?: number;
+  completion_tokens?: number;
+  totalTokens?: number;
+  total_tokens?: number;
+  requestCount?: number;
+  request_count?: number;
+  aiRequestsCount?: number;
+  planExpiryDate?: string;
+  expiryDate?: string;
 }
 
 interface SubscriptionPlanItem {
@@ -55,15 +85,6 @@ interface PaymentTransaction {
   expiryDate?: string;
 }
 
-interface TokenUsageData {
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  requestCount: number;
-  monthlyLimit: number;
-  reimburseFrequency: 'once' | 'weekly' | 'monthly';
-}
-
 const SYSTEM_DEFAULT_FREE_PLAN: SubscriptionPlanItem = {
   id: 'preset_taster',
   name: 'Taster',
@@ -88,7 +109,7 @@ const SYSTEM_DEFAULT_FREE_PLAN: SubscriptionPlanItem = {
   recipeLibraryLimit: 25,
   socialScrapeLimit: 5,
   canViewMacros: false,
-  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
+  allowedAiModels: 'gemini-1.5-flash,gpt-3.5-turbo',
   tokenLimit: 50000,
   tokenReimburseFrequency: 'monthly'
 };
@@ -122,6 +143,87 @@ const calculateRenewalExpiry = (startDate: Date = new Date(), interval?: 'MONTH'
   return d.toISOString();
 };
 
+const detectUserSocialProviders = (u: any): SocialProvider[] => {
+  if (!u) return [];
+  const providers = new Set<SocialProvider>();
+  
+  if (Array.isArray(u.linkedProviders)) {
+    u.linkedProviders.forEach((p: string) => {
+      const low = String(p).toLowerCase();
+      if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
+    });
+  }
+  if (Array.isArray(u.linked_providers)) {
+    u.linked_providers.forEach((p: string) => {
+      const low = String(p).toLowerCase();
+      if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
+    });
+  }
+
+  const mainProv = String(u.provider || u.authProvider || u.socialProvider || u.loginMethod || '').toLowerCase();
+  if (mainProv.includes('google')) providers.add('google');
+  if (mainProv.includes('facebook')) providers.add('facebook');
+  if (mainProv.includes('apple')) providers.add('apple');
+
+  const uid = String(u.id || '').toLowerCase();
+  if (uid.includes('google')) providers.add('google');
+  if (uid.includes('facebook')) providers.add('facebook');
+  if (uid.includes('apple')) providers.add('apple');
+
+  if (u.googleId) providers.add('google');
+  if (u.facebookId) providers.add('facebook');
+  if (u.appleId) providers.add('apple');
+
+  return Array.from(providers);
+};
+
+const getActiveLoginProvider = (u: any): SocialProvider | null => {
+  if (!u) return null;
+  const mainProv = String(u.provider || u.authProvider || u.socialProvider || u.loginMethod || '').toLowerCase();
+  if (mainProv.includes('google')) return 'google';
+  if (mainProv.includes('facebook')) return 'facebook';
+  if (mainProv.includes('apple')) return 'apple';
+
+  const uid = String(u.id || '').toLowerCase();
+  if (uid.startsWith('usr_google') || uid.includes('google')) return 'google';
+  if (uid.startsWith('usr_facebook') || uid.includes('facebook')) return 'facebook';
+  if (uid.startsWith('usr_apple') || uid.includes('apple')) return 'apple';
+
+  if (u.googleId) return 'google';
+  if (u.facebookId) return 'facebook';
+  if (u.appleId) return 'apple';
+
+  return null;
+};
+
+const extractUserTokenUsage = (u: any, planLimit: number = 50000, planFreq: 'once' | 'weekly' | 'monthly' = 'monthly'): TokenUsageData => {
+  if (!u) {
+    return {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      requestCount: 0,
+      monthlyLimit: planLimit,
+      reimburseFrequency: planFreq
+    };
+  }
+
+  const tu = u.tokenUsage || u.token_usage || {};
+  const promptTokens = Number(tu.promptTokens ?? u.promptTokens ?? u.prompt_tokens ?? 0);
+  const completionTokens = Number(tu.completionTokens ?? u.completionTokens ?? u.completion_tokens ?? 0);
+  const totalTokens = Number(tu.totalTokens ?? u.totalTokens ?? u.total_tokens ?? (promptTokens + completionTokens));
+  const requestCount = Number(tu.requestCount ?? u.requestCount ?? u.request_count ?? u.aiRequestsCount ?? 0);
+
+  return {
+    promptTokens: isNaN(promptTokens) ? 0 : promptTokens,
+    completionTokens: isNaN(completionTokens) ? 0 : completionTokens,
+    totalTokens: isNaN(totalTokens) ? 0 : totalTokens,
+    requestCount: isNaN(requestCount) ? 0 : requestCount,
+    monthlyLimit: planLimit,
+    reimburseFrequency: planFreq
+  };
+};
+
 export default function ProfilePage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -149,16 +251,17 @@ export default function ProfilePage() {
   const [currencySymbol, setCurrencySymbol] = useState('$');
 
   const [tokenUsage, setTokenUsage] = useState<TokenUsageData>({
-    promptTokens: 1420,
-    completionTokens: 850,
-    totalTokens: 2270,
-    requestCount: 14,
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    requestCount: 0,
     monthlyLimit: 50000,
     reimburseFrequency: 'monthly'
   });
   const [activeModelName, setActiveModelName] = useState('gemini-1.5-flash');
 
-  // Load and apply system theme without self-feeding event dispatches
+  const activeLoginProvider = useMemo(() => getActiveLoginProvider(user), [user]);
+
   const applySavedTheme = useCallback(async () => {
     if (isFetchingThemeRef.current) return;
     isFetchingThemeRef.current = true;
@@ -233,10 +336,10 @@ export default function ProfilePage() {
     };
   }, []);
 
-  const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem): boolean => {
-    if (!user) return false;
+  const checkIsCurrentPlan = useCallback((plan: SubscriptionPlanItem, targetUser: any = user): boolean => {
+    if (!targetUser) return false;
 
-    const rawUser = user as any;
+    const rawUser = targetUser as any;
     const userPlanRaw = rawUser.subscriptionPlan || rawUser.planSlug || rawUser.planId || rawUser.subscriptionTier || '';
     const cleanUserPlan = sanitizeSinglePlan(userPlanRaw);
     const planSlug = sanitizeSinglePlan(plan.slug);
@@ -265,37 +368,37 @@ export default function ProfilePage() {
     return false;
   }, [user]);
 
-  const syncActivePlanTokens = useCallback((activeUserPlanSlug: string, currentPlans: SubscriptionPlanItem[]) => {
+  const syncActivePlanTokens = useCallback((activeUserPlanSlug: string, currentPlans: SubscriptionPlanItem[], targetUser: any = user) => {
     const cleanSlug = sanitizeSinglePlan(activeUserPlanSlug).toLowerCase();
     const matchedPlan = currentPlans.find(p => 
       p.slug.toLowerCase() === cleanSlug || 
       p.id.toLowerCase() === cleanSlug ||
       p.slug.toLowerCase().replace(/-(monthly|annual|free)$/i, '') === cleanSlug.replace(/-(monthly|annual|free)$/i, '')
-    );
+    ) || SYSTEM_DEFAULT_FREE_PLAN;
 
-    let assignedLimit = 50000;
-    let assignedFrequency: 'once' | 'weekly' | 'monthly' = 'monthly';
+    const assignedLimit = matchedPlan.tokenLimit !== undefined 
+      ? Number(matchedPlan.tokenLimit) 
+      : (matchedPlan.isFree ? 50000 : 1000000);
+    const assignedFrequency = matchedPlan.tokenReimburseFrequency || 'monthly';
 
-    if (matchedPlan) {
-      if (matchedPlan.tokenLimit !== undefined) {
-        assignedLimit = matchedPlan.tokenLimit;
-      }
-      if (matchedPlan.tokenReimburseFrequency) {
-        assignedFrequency = matchedPlan.tokenReimburseFrequency;
+    if (matchedPlan.allowedAiModels) {
+      const models = Array.isArray(matchedPlan.allowedAiModels) 
+        ? matchedPlan.allowedAiModels 
+        : String(matchedPlan.allowedAiModels).split(',').map(m => m.trim());
+      if (models.length > 0 && models[0]) {
+        setActiveModelName(models[0]);
       }
     }
 
     setTokenUsage(prev => {
-      if (prev.monthlyLimit === assignedLimit && prev.reimburseFrequency === assignedFrequency) {
-        return prev;
-      }
+      const userSpecificTokens = extractUserTokenUsage(targetUser, assignedLimit, assignedFrequency);
       return {
-        ...prev,
+        ...userSpecificTokens,
         monthlyLimit: assignedLimit,
         reimburseFrequency: assignedFrequency
       };
     });
-  }, []);
+  }, [user]);
 
   const syncPlansFromAdmin = useCallback(async () => {
     if (isFetchingPlansRef.current) return;
@@ -470,7 +573,7 @@ export default function ProfilePage() {
       try {
         const u = JSON.parse(rawUser);
         const uPlan = sanitizeSinglePlan(u.subscriptionPlan || u.subscriptionTier || u.planSlug || '');
-        syncActivePlanTokens(uPlan, dynamicPlans);
+        syncActivePlanTokens(uPlan, dynamicPlans, u);
       } catch (_) {}
     }
   }, [currencySymbol, syncActivePlanTokens]);
@@ -540,13 +643,9 @@ export default function ProfilePage() {
         }
       } catch (_) {}
 
-      if (!matchedUser.linkedProviders) {
-        const initialLinked: SocialProvider[] = [];
-        if (matchedUser.id.startsWith('usr_google_')) initialLinked.push('google');
-        if (matchedUser.id.startsWith('usr_facebook_')) initialLinked.push('facebook');
-        if (matchedUser.id.startsWith('usr_apple_')) initialLinked.push('apple');
-        matchedUser.linkedProviders = initialLinked;
-      }
+      const detectedSocial = detectUserSocialProviders(matchedUser);
+      matchedUser.linkedProviders = detectedSocial;
+      matchedUser.linked_providers = detectedSocial;
 
       try {
         const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
@@ -588,7 +687,7 @@ export default function ProfilePage() {
       } catch (_) {}
 
       const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).planSlug || 'taster');
-      syncActivePlanTokens(userPlan, plansRef.current);
+      syncActivePlanTokens(userPlan, plansRef.current, matchedUser);
     } finally {
       isFetchingProfileRef.current = false;
     }
@@ -600,12 +699,10 @@ export default function ProfilePage() {
   const reloadUserRef = useRef(reloadActiveUser);
   reloadUserRef.current = reloadActiveUser;
 
-  // Isolated title update
   useEffect(() => {
     document.title = `${t('accountProfileTitle') || 'Account Profile'} - Zecratary`;
   }, [t]);
 
-  // Mount-only lifecycle effect with 300ms debounced event listeners
   useEffect(() => {
     syncPlansRef.current();
     reloadUserRef.current();
@@ -619,11 +716,13 @@ export default function ProfilePage() {
     };
 
     window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_users_updated', handleDebouncedSync);
     window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
 
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_users_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
     };
   }, []);
@@ -635,24 +734,60 @@ export default function ProfilePage() {
     setSuccessMsg('');
 
     const isLinked = Boolean(user.linkedProviders?.includes(provider));
+    const isLoginMethod = activeLoginProvider === provider;
+
+    if (!isLinked) {
+      try {
+        const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
+        if (sRes.ok) {
+          const sData = await sRes.json();
+          const socialCfg = sData?.settings?.socialLogin || sData?.socialLogin;
+          if (socialCfg) {
+            const isEnabled = provider === 'google' 
+              ? socialCfg.googleEnabled !== false 
+              : provider === 'facebook' 
+              ? Boolean(socialCfg.facebookEnabled) 
+              : Boolean(socialCfg.appleEnabled);
+
+            if (!isEnabled) {
+              setError(`${provider.toUpperCase()} connection is currently disabled by administrator.`);
+              setProcessingSocial(null);
+              return;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
     let updatedLinked = [...(user.linkedProviders || [])];
 
     if (isLinked) {
-      if (updatedLinked.length === 1 && !user.password) {
+      const otherLinked = updatedLinked.filter(p => p !== provider);
+      const hasPassword = Boolean(user.password && user.password.length >= 4);
+
+      if (isLoginMethod && !hasPassword && otherLinked.length === 0) {
+        setError(`Cannot unlink ${provider.toUpperCase()}: This is your active social login method. Please set a password first before disconnecting.`);
+        setProcessingSocial(null);
+        return;
+      }
+      if (updatedLinked.length === 1 && !hasPassword) {
         setError(`Cannot unlink ${provider.toUpperCase()}: this is your only login method. Set a password first.`);
         setProcessingSocial(null);
         return;
       }
-      updatedLinked = updatedLinked.filter(p => p !== provider);
+      updatedLinked = otherLinked;
       setSuccessMsg(`Unlinked ${provider.toUpperCase()} account successfully.`);
     } else {
-      updatedLinked.push(provider);
+      if (!updatedLinked.includes(provider)) {
+        updatedLinked.push(provider);
+      }
       setSuccessMsg(`Successfully connected and linked ${provider.toUpperCase()}!`);
     }
 
     const updatedUser: ExtendedUser = {
       ...user,
-      linkedProviders: updatedLinked
+      linkedProviders: updatedLinked,
+      linked_providers: updatedLinked
     };
 
     try {
@@ -671,6 +806,7 @@ export default function ProfilePage() {
     setCurrentUser(updatedUser);
     setUserState(updatedUser);
     setProcessingSocial(null);
+    window.dispatchEvent(new Event('zecratary_users_updated'));
     setTimeout(() => setSuccessMsg(''), 4000);
   };
 
@@ -768,6 +904,7 @@ export default function ProfilePage() {
     setPassword('');
     setConfirmPassword('');
 
+    window.dispatchEvent(new Event('zecratary_users_updated'));
     setSuccessMsg(t('profileSavedSuccess') || 'Your profile changes have been saved successfully!');
     setTimeout(() => setSuccessMsg(''), 4000);
   };
@@ -808,8 +945,12 @@ export default function ProfilePage() {
   const PlanHeaderIcon = userPlanBadge.icon;
   const activeExpiryDate = (user as any).planExpiryDate || (user as any).expiryDate;
 
-  const isUnlimited = tokenUsage.monthlyLimit === -1;
-  const tokenPercentage = isUnlimited ? 5 : Math.min(Math.round((tokenUsage.totalTokens / tokenUsage.monthlyLimit) * 100), 100);
+  const isUnlimited = tokenUsage.monthlyLimit === -1 || tokenUsage.monthlyLimit >= 999999999;
+  const tokenPercentage = isUnlimited 
+    ? 0 
+    : tokenUsage.monthlyLimit > 0 
+      ? Math.min(Math.round((tokenUsage.totalTokens / tokenUsage.monthlyLimit) * 100), 100) 
+      : 100;
 
   const getReimburseScheduleText = (freq: string) => {
     switch(freq) {
@@ -1221,7 +1362,7 @@ export default function ProfilePage() {
               </span>
             </div>
             <p className="leading-relaxed">
-              {getReimburseScheduleText(tokenUsage.reimburseFrequency)}. Quotas are automatically reimbursed based on your initial subscription purchase date.
+              {getReimburseScheduleText(tokenUsage.reimburseFrequency)}. Quotas are automatically reimbursed based on your plan tier and purchase cycle.
             </p>
           </div>
         </div>
@@ -1247,146 +1388,92 @@ export default function ProfilePage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-          {/* Google */}
-          <div 
-            className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="flex items-center gap-3">
-              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-              </svg>
-              <div>
-                <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>Google</span>
-                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('google') ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
-                  {user.linkedProviders?.includes('google') ? 'Connected' : 'Not linked'}
-                </span>
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={processingSocial !== null}
-              onClick={() => handleToggleSocialLink('google')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
-                user.linkedProviders?.includes('google')
-                  ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
-                  : 'text-white shadow-xs'
-              }`}
-              style={{
-                backgroundColor: user.linkedProviders?.includes('google') ? 'transparent' : 'var(--color-primary)'
-              }}
-            >
-              {processingSocial === 'google' ? (
-                <RefreshCw className="h-3 w-3 animate-spin" />
-              ) : user.linkedProviders?.includes('google') ? (
-                <>
-                  <Unlink className="h-3 w-3" /> Unlink
-                </>
-              ) : (
-                <>
-                  <Link2 className="h-3 w-3" /> Link
-                </>
-              )}
-            </button>
-          </div>
+          {([
+            {
+              id: 'google' as SocialProvider,
+              name: 'Google',
+              renderIcon: () => (
+                <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+              )
+            },
+            {
+              id: 'facebook' as SocialProvider,
+              name: 'Facebook',
+              renderIcon: () => (
+                <svg className="w-5 h-5 fill-current text-blue-600 shrink-0" viewBox="0 0 24 24">
+                  <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.312h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
+                </svg>
+              )
+            },
+            {
+              id: 'apple' as SocialProvider,
+              name: 'Apple',
+              renderIcon: () => (
+                <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24">
+                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.56.64-1.06 1.7-0.93 2.73 1.02.08 2.05-.48 2.66-1.23z" />
+                </svg>
+              )
+            }
+          ]).map(({ id: provId, name: provName, renderIcon }) => {
+            const isLinked = Boolean(user.linkedProviders?.includes(provId));
+            const isPrimary = activeLoginProvider === provId;
 
-          {/* Facebook */}
-          <div 
-            className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="flex items-center gap-3">
-              <svg className="w-5 h-5 fill-current text-blue-600 shrink-0" viewBox="0 0 24 24">
-                <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.312h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
-              </svg>
-              <div>
-                <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>Facebook</span>
-                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('facebook') ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
-                  {user.linkedProviders?.includes('facebook') ? 'Connected' : 'Not linked'}
-                </span>
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={processingSocial !== null}
-              onClick={() => handleToggleSocialLink('facebook')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
-                user.linkedProviders?.includes('facebook')
-                  ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
-                  : 'text-white shadow-xs'
-              }`}
-              style={{
-                backgroundColor: user.linkedProviders?.includes('facebook') ? 'transparent' : 'var(--color-primary)'
-              }}
-            >
-              {processingSocial === 'facebook' ? (
-                <RefreshCw className="h-3 w-3 animate-spin" />
-              ) : user.linkedProviders?.includes('facebook') ? (
-                <>
-                  <Unlink className="h-3 w-3" /> Unlink
-                </>
-              ) : (
-                <>
-                  <Link2 className="h-3 w-3" /> Link
-                </>
-              )}
-            </button>
-          </div>
+            return (
+              <div 
+                key={provId}
+                className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
+                }}
+              >
+                <div className="flex items-center gap-3">
+                  {renderIcon()}
+                  <div>
+                    <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>{provName}</span>
+                    <span className={`text-[10px] font-semibold ${isLinked ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
+                      {isPrimary 
+                        ? (t('connectedLoginMethod') || 'Connected (Login Method)') 
+                        : isLinked 
+                        ? (t('connected') || 'Connected') 
+                        : (t('notLinked') || 'Not linked')}
+                    </span>
+                  </div>
+                </div>
 
-          {/* Apple */}
-          <div 
-            className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="flex items-center gap-3">
-              <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24">
-                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.56.64-1.06 1.7-0.93 2.73 1.02.08 2.05-.48 2.66-1.23z" />
-              </svg>
-              <div>
-                <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>Apple</span>
-                <span className={`text-[10px] font-semibold ${user.linkedProviders?.includes('apple') ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
-                  {user.linkedProviders?.includes('apple') ? 'Connected' : 'Not linked'}
-                </span>
+                <button
+                  type="button"
+                  disabled={processingSocial !== null}
+                  onClick={() => handleToggleSocialLink(provId)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                    isLinked
+                      ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
+                      : 'text-white shadow-xs'
+                  }`}
+                  style={{
+                    backgroundColor: isLinked ? 'transparent' : 'var(--color-primary)'
+                  }}
+                >
+                  {processingSocial === provId ? (
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                  ) : isLinked ? (
+                    <>
+                      <Unlink className="h-3 w-3" /> {t('unlinkBtn') || 'Unlink'}
+                    </>
+                  ) : (
+                    <>
+                      <Link2 className="h-3 w-3" /> {t('linkBtn') || 'Link'}
+                    </>
+                  )}
+                </button>
               </div>
-            </div>
-            <button
-              type="button"
-              disabled={processingSocial !== null}
-              onClick={() => handleToggleSocialLink('apple')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
-                user.linkedProviders?.includes('apple')
-                  ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
-                  : 'text-white shadow-xs'
-              }`}
-              style={{
-                backgroundColor: user.linkedProviders?.includes('apple') ? 'transparent' : 'var(--color-primary)'
-              }}
-            >
-              {processingSocial === 'apple' ? (
-                <RefreshCw className="h-3 w-3 animate-spin" />
-              ) : user.linkedProviders?.includes('apple') ? (
-                <>
-                  <Unlink className="h-3 w-3" /> Unlink
-                </>
-              ) : (
-                <>
-                  <Link2 className="h-3 w-3" /> Link
-                </>
-              )}
-            </button>
-          </div>
+            );
+          })}
         </div>
       </div>
 
