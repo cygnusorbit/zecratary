@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.5.4",
+  "version": "7.5.5",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.5.4",
+  "version": "7.5.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17352,1977 +17352,720 @@ export default function ChefAISettingsPage() {
 
 ## File: `apps/web/src/app/admin/plans/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
-import { useState, useEffect, useCallback, useRef } from 'react';
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { 
-  PlusCircle, PackageCheck, Zap, Trash2, Sparkles, AlertCircle, 
-  Check, Shield, CheckCircle2, Eye, RefreshCw, Edit3, DollarSign, Copy, Plus, Calendar, Tag, Star, Cpu, Bot, X, Layers, Hash
+  ArrowLeft, Plus, Check, Trash2, Edit3, Sparkles, 
+  RefreshCw, CheckCircle2, AlertCircle, Shield, 
+  Coins, Zap, Eye, Save, Layers, ArrowRight
 } from 'lucide-react';
-import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
-import { 
-  purgeLegacyBrowserAdminStorage, 
-  fetchServerAdminSettings, 
-  persistServerAdminSettings 
-} from '@/lib/adminSync';
 
-interface SubscriptionPackageConfig {
+interface PlanConfig {
   id: string;
+  name: string;
+  slug: string;
   planGroupId?: string;
   monthlyPlanId?: string;
   annualPlanId?: string;
-  name: string;
-  slug: string;
-  isFree: boolean;
-  isDefault?: boolean;
   monthlyPriceDollars: number;
   annualPriceDollars: number;
-  monthlyBadge: string;
-  annualBadge: string;
-  trialBadge: string;
-  descriptionMonthly: string;
-  descriptionAnnual: string;
-  buttonText: string;
-  aiRecipeLimit: number;
-  recipeLibraryLimit: number;
-  socialScrapeLimit: number;
-  canViewMacros: boolean;
-  allowedAiModels: string;
-  featuresText: string;
+  monthlyBadge?: string;
+  annualBadge?: string;
+  trialBadge?: string;
+  descriptionMonthly?: string;
+  descriptionAnnual?: string;
+  features: string[];
   tokenLimit: number;
-  tokenReimburseFrequency: 'once' | 'weekly' | 'monthly';
+  aiRecipeLimit?: number;
+  recipeLibraryLimit?: number;
+  socialScrapeLimit?: number;
+  canViewMacros?: boolean;
+  allowedAiModels?: string;
+  isFree?: boolean;
+  isDefault?: boolean;
 }
 
-const BLANK_NEW_PLAN: SubscriptionPackageConfig = {
-  id: '',
-  planGroupId: '',
-  monthlyPlanId: '',
-  annualPlanId: '',
-  name: '',
-  slug: '',
-  isFree: false,
-  isDefault: false,
-  monthlyPriceDollars: 12.99,
-  annualPriceDollars: 99.99,
-  monthlyBadge: '',
-  annualBadge: 'Save 35%',
-  trialBadge: '14-Day Free Trial',
-  descriptionMonthly: 'Full kitchen access, billed monthly',
-  descriptionAnnual: 'Best value for avid cooks, billed annually',
-  buttonText: 'Choose Plan',
-  aiRecipeLimit: 50,
-  recipeLibraryLimit: 100,
-  socialScrapeLimit: 25,
-  canViewMacros: true,
-  allowedAiModels: 'gemini-3.6-flash,gpt-4o-mini',
-  featuresText: 'AI-powered recipe generation\nUnlimited cookbook library\nAutomated nutritional analysis\nMeal planner synchronization',
-  tokenLimit: 100000,
-  tokenReimburseFrequency: 'monthly',
-};
-
-const DEFAULT_PRESET_TASTER: SubscriptionPackageConfig = {
-  id: 'preset_taster',
-  planGroupId: 'group_taster',
-  monthlyPlanId: 'preset_taster_monthly',
-  annualPlanId: 'preset_taster_annual',
-  name: 'Taster',
-  slug: 'taster',
-  isFree: true,
-  isDefault: true,
-  monthlyPriceDollars: 0,
-  annualPriceDollars: 0,
-  monthlyBadge: '',
-  annualBadge: '',
-  trialBadge: '',
-  descriptionMonthly: 'Free tier with limited features',
-  descriptionAnnual: 'Free tier with limited features',
-  buttonText: 'Manage',
-  aiRecipeLimit: 5,
-  recipeLibraryLimit: 25,
-  socialScrapeLimit: 5,
-  canViewMacros: false,
-  allowedAiModels: 'gemini-3.5-flash-lite,gpt-3.5-turbo',
-  featuresText: 'Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition',
-  tokenLimit: 50000,
-  tokenReimburseFrequency: 'monthly',
-};
-
-const DEFAULT_PRESET_NUTRITION_PRO: SubscriptionPackageConfig = {
-  id: 'preset_nutrition_pro',
-  planGroupId: 'group_nutrition_pro',
-  monthlyPlanId: 'plan_nutrition_pro_monthly',
-  annualPlanId: 'plan_nutrition_pro_annual',
-  name: 'Nutrition Pro',
-  slug: 'nutrition-pro',
-  isFree: false,
-  isDefault: false,
-  monthlyPriceDollars: 8.99,
-  annualPriceDollars: 59.99,
-  monthlyBadge: 'Billed Immediately',
-  annualBadge: 'Save 44%',
-  trialBadge: '7-Day Free Trial',
-  descriptionMonthly: 'Full premium access, billed monthly',
-  descriptionAnnual: 'Best value - all premium features, billed annually',
-  buttonText: 'Choose Plan',
-  aiRecipeLimit: -1,
-  recipeLibraryLimit: -1,
-  socialScrapeLimit: -1,
-  canViewMacros: true,
-  allowedAiModels: 'gemini-3.6-flash,gpt-4o',
-  featuresText: 'Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, cholesterol, carbohydrates)',
-  tokenLimit: 1000000,
-  tokenReimburseFrequency: 'monthly',
-};
-
-const GEMINI_MODEL_VERSIONS = [
-  { value: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
-  { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' },
-  { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Fast)' },
-  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Deep Reasoning)' },
-  { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (Standard)' },
-  { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
-];
-
-const OPENAI_MODEL_VERSIONS = [
-  { value: 'gpt-4o', label: 'GPT-4o (Advanced Reasoning)' },
-  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo (High Speed)' },
-];
-
-export default function AdminSubscriptionPlans() {
-  const langContext = useTranslation();
-  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
-
-  const [mounted, setMounted] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [packages, setPackages] = useState<SubscriptionPackageConfig[]>([]);
-  const isFetchingPackagesRef = useRef(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [isFree, setIsFree] = useState(false);
-  const [form, setForm] = useState<SubscriptionPackageConfig>({ ...DEFAULT_PRESET_NUTRITION_PRO });
-  const [loading, setLoading] = useState(false);
+export default function AdminPlansPage() {
+  const { t } = useTranslation();
+  
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
-  const [previewTab, setPreviewTab] = useState<'monthly' | 'annual'>('annual');
-  const [settingsFilter, setSettingsFilter] = useState<'both' | 'monthly' | 'annual'>('both');
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [successMsg, setSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const [activeSettingsModel, setActiveSettingsModel] = useState<string>('gemini-3.6-flash');
-  const [selectedAiProvider, setSelectedAiProvider] = useState<'gemini' | 'openai'>('gemini');
-  const [selectedAiVersion, setSelectedAiVersion] = useState<string>('gemini-3.6-flash');
+  const [plans, setPlans] = useState<PlanConfig[]>([]);
+  const [previewInterval, setPreviewInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
 
+  // Token Identity from Settings
+  const [tokenSymbol, setTokenSymbol] = useState('🪙');
+  const [tokenName, setTokenName] = useState('Tokens');
+
+  // Plan Form State
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [slug, setSlug] = useState('');
+  const [planGroupId, setPlanGroupId] = useState('');
+  const [monthlyPlanId, setMonthlyPlanId] = useState('');
+  const [annualPlanId, setAnnualPlanId] = useState('');
+  const [monthlyPrice, setMonthlyPrice] = useState<number>(8.99);
+  const [annualPrice, setAnnualPrice] = useState<number>(59.99);
+  const [tokenLimit, setTokenLimit] = useState<number>(500);
+  const [monthlyBadge, setMonthlyBadge] = useState('');
+  const [annualBadge, setAnnualBadge] = useState('Best Value');
+  const [trialBadge, setTrialBadge] = useState('');
+  const [descriptionMonthly, setDescriptionMonthly] = useState('');
+  const [descriptionAnnual, setDescriptionAnnual] = useState('');
+  const [featuresText, setFeaturesText] = useState('Personal recipe library\nSmart ingredient repurposing\nAutomated shopping list creation');
+  const [isFree, setIsFree] = useState(false);
+
+  // Sync token settings identity
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const syncWithAiSettings = useCallback(async () => {
-    try {
-      const serverData = await fetchServerAdminSettings();
-      if (serverData) {
-        const c = serverData.chefAiSettings || serverData.aiSettings || serverData;
-        const resolvedModel = c.model || serverData.aiModel;
-        if (resolvedModel) {
-          setActiveSettingsModel(resolvedModel);
-          if (c.provider === 'openai' || resolvedModel.startsWith('gpt')) {
-            setSelectedAiProvider('openai');
-            setSelectedAiVersion(resolvedModel);
-          } else {
-            setSelectedAiProvider('gemini');
-            setSelectedAiVersion(resolvedModel);
-          }
+    fetch('/api/admin/token-settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data.settings) {
+          if (data.settings.tokenSymbol) setTokenSymbol(data.settings.tokenSymbol);
+          if (data.settings.tokenName) setTokenName(data.settings.tokenName);
         }
-      }
-    } catch (_) {}
+      })
+      .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    syncWithAiSettings();
-    window.addEventListener('zecratary_settings_updated', syncWithAiSettings);
-    window.addEventListener('zecratary_engine_config_updated', syncWithAiSettings);
-    window.addEventListener('zecratary_admin_settings_updated', syncWithAiSettings);
-    return () => {
-      window.removeEventListener('zecratary_settings_updated', syncWithAiSettings);
-      window.removeEventListener('zecratary_engine_config_updated', syncWithAiSettings);
-      window.removeEventListener('zecratary_admin_settings_updated', syncWithAiSettings);
-    };
-  }, [syncWithAiSettings]);
-
-  const applySavedTheme = useCallback(() => {
+  const fetchPlans = useCallback(async () => {
+    setLoading(true);
     try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (_) {}
-  }, []);
-
-  useEffect(() => {
-    applySavedTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('storage', applySavedTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('storage', applySavedTheme);
-    };
-  }, [applySavedTheme]);
-
-  const fetchPackages = useCallback(async () => {
-    if (isFetchingPackagesRef.current) return;
-    isFetchingPackagesRef.current = true;
-    try {
-      purgeLegacyBrowserAdminStorage();
-      try {
-        const res = await fetch('/api/admin/plans', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json().catch(() => null);
-          const serverConfigs = Array.isArray(data) ? data : (data?.packages || data?.plans || data?.configs);
-          if (Array.isArray(serverConfigs) && serverConfigs.length > 0) {
-            const hasTaster = serverConfigs.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster');
-            let list = hasTaster ? serverConfigs : [{ ...DEFAULT_PRESET_TASTER }, ...serverConfigs];
-
-            list = list.map((p: any) => {
-              const cleanSlug = (p.slug || p.id || 'plan').replace(/-(monthly|annual)$/, '');
-              return {
-                ...p,
-                planGroupId: p.planGroupId || ('group_' + cleanSlug),
-                monthlyPlanId: p.monthlyPlanId || (p.isFree ? p.id : `${p.id || cleanSlug}_monthly`),
-                annualPlanId: p.annualPlanId || (p.isFree ? p.id : `${p.id || cleanSlug}_annual`),
-                featuresText: typeof p.featuresText === 'string' && p.featuresText
-                  ? p.featuresText
-                  : (Array.isArray(p.features) ? p.features.join('\n') : (p.descriptionMonthly || '')),
-                allowedAiModels: Array.isArray(p.allowedAiModels)
-                  ? p.allowedAiModels.join(',')
-                  : (p.allowedAiModels || 'gemini-3.6-flash'),
-                tokenLimit: p.tokenLimit !== undefined ? p.tokenLimit : (p.slug === 'taster' ? 50000 : 500000),
-                tokenReimburseFrequency: p.tokenReimburseFrequency || 'monthly',
-                isDefault: p.slug === 'taster' || p.id === 'preset_taster',
-              };
-            });
-
-            setPackages(prev => JSON.stringify(prev) === JSON.stringify(list) ? prev : list);
-            return;
-          }
-        }
-      } catch (e) {
-        console.error('Failed to fetch packages from server:', e);
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.configs)) {
+        setPlans(data.configs);
       }
-      setPackages([{ ...DEFAULT_PRESET_TASTER }]);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to fetch plans');
     } finally {
-      isFetchingPackagesRef.current = false;
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (!mounted) return;
-    document.title = `${t('subscriptionPlansTitle', 'Subscription Plans')} - FoodiePrep Admin`;
-  }, [mounted, t]);
+    fetchPlans();
+  }, [fetchPlans]);
 
-  useEffect(() => {
-    if (!mounted) return;
-    initAuthStorage();
-    const u = getCurrentUser();
-    setCurrentUser(u);
-    fetchPackages();
-
-    let debounceTimer: NodeJS.Timeout | null = null;
-    const handleSync = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        fetchPackages();
-      }, 300);
-    };
-
-    window.addEventListener('zecratary_plans_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
-
-    return () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      window.removeEventListener('zecratary_plans_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
-    };
-  }, [mounted, fetchPackages]);
-
-  const handleSetDefaultPlan = async (targetPkg: SubscriptionPackageConfig) => {
-    const isTaster = targetPkg.id === 'preset_taster' || targetPkg.slug === 'taster';
-    if (!isTaster) {
-      alert(t('tasterPermanentDefaultAlert', 'The Taster plan (ID: preset_taster) is permanently locked as the system default plan and cannot be changed.'));
-      return;
+  const handleSlugChange = (val: string) => {
+    const clean = val.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    setSlug(clean);
+    if (!editingId) {
+      setPlanGroupId(`group_${clean}`);
+      setMonthlyPlanId(`plan_${clean}_monthly`);
+      setAnnualPlanId(`plan_${clean}_annual`);
     }
-
-    const updated = packages.map((p) => ({
-      ...p,
-      isDefault: p.id === 'preset_taster' || p.slug === 'taster',
-    }));
-
-    setPackages(updated);
-
-    await persistServerAdminSettings({
-      defaultPlanSlug: 'taster',
-      subscriptionPlans: updated
-    });
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_plans_updated'));
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-    }
-
-    setFeedback({
-      type: 'success',
-      msg: `"${DEFAULT_PRESET_TASTER.name}" ${t('permanentDefaultConfirmed', 'is permanently locked as the default plan for new registrations!')}`,
-    });
   };
 
-  const handleStartNewPlan = () => {
-    const timestamp = Date.now();
+  const handleEdit = (p: PlanConfig) => {
+    setEditingId(p.id);
+    setName(p.name);
+    setSlug(p.slug);
+    setPlanGroupId(p.planGroupId || `group_${p.slug}`);
+    setMonthlyPlanId(p.monthlyPlanId || `plan_${p.slug}_monthly`);
+    setAnnualPlanId(p.annualPlanId || `plan_${p.slug}_annual`);
+    setMonthlyPrice(p.monthlyPriceDollars);
+    setAnnualPrice(p.annualPriceDollars);
+    setTokenLimit(p.tokenLimit ?? 500);
+    setMonthlyBadge(p.monthlyBadge || '');
+    setAnnualBadge(p.annualBadge || '');
+    setTrialBadge(p.trialBadge || '');
+    setDescriptionMonthly(p.descriptionMonthly || '');
+    setDescriptionAnnual(p.descriptionAnnual || '');
+    setFeaturesText(Array.isArray(p.features) ? p.features.join('\n') : '');
+    setIsFree(Boolean(p.isFree));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const resetForm = () => {
     setEditingId(null);
+    setName('');
+    setSlug('');
+    setPlanGroupId('');
+    setMonthlyPlanId('');
+    setAnnualPlanId('');
+    setMonthlyPrice(8.99);
+    setAnnualPrice(59.99);
+    setTokenLimit(500);
+    setMonthlyBadge('');
+    setAnnualBadge('Best Value');
+    setTrialBadge('');
+    setDescriptionMonthly('');
+    setDescriptionAnnual('');
+    setFeaturesText('Personal recipe library\nSmart ingredient repurposing\nAutomated shopping list creation');
     setIsFree(false);
-    setForm({
-      ...BLANK_NEW_PLAN,
-      id: 'plan_' + timestamp,
-      planGroupId: 'group_' + timestamp,
-      monthlyPlanId: 'plan_' + timestamp + '_monthly',
-      annualPlanId: 'plan_' + timestamp + '_annual',
-      slug: '',
-      allowedAiModels: activeSettingsModel || 'gemini-3.6-flash',
-      featuresText: BLANK_NEW_PLAN.featuresText
-    });
-  };
-
-  const handleApplyPreset = (preset: SubscriptionPackageConfig) => {
-    const timestamp = Date.now();
-    setEditingId(null);
-    setIsFree(preset.isFree);
-    const cleanSlug = preset.slug || preset.name.toLowerCase().replace(/\s+/g, '-');
-    setForm({ 
-      ...preset, 
-      id: 'plan_' + timestamp,
-      planGroupId: 'group_' + cleanSlug,
-      monthlyPlanId: preset.monthlyPlanId || ('plan_' + cleanSlug + '_monthly'),
-      annualPlanId: preset.annualPlanId || ('plan_' + cleanSlug + '_annual'),
-      slug: cleanSlug,
-      featuresText: preset.featuresText || (Array.isArray((preset as any).features) ? (preset as any).features.join('\n') : '')
-    });
-  };
-
-  const handleEditPackage = (pkg: SubscriptionPackageConfig) => {
-    const targetIdentifier = pkg.id || pkg.slug;
-    const planIsFree = Boolean(pkg.isFree || (Number(pkg.monthlyPriceDollars) === 0 && Number(pkg.annualPriceDollars) === 0));
-    
-    const safeFeatures = typeof pkg.featuresText === 'string' && pkg.featuresText
-      ? pkg.featuresText
-      : (Array.isArray((pkg as any).features) ? (pkg as any).features.join('\n') : (pkg.descriptionMonthly || ''));
-
-    const safeAiModels = Array.isArray(pkg.allowedAiModels)
-      ? (pkg.allowedAiModels as string[]).join(',')
-      : (typeof pkg.allowedAiModels === 'string' && pkg.allowedAiModels
-          ? pkg.allowedAiModels
-          : (activeSettingsModel || 'gemini-3.6-flash'));
-
-    const baseSlug = (pkg.slug || pkg.id || 'plan').replace(/-(monthly|annual)$/, '');
-
-    setEditingId(targetIdentifier);
-    setIsFree(planIsFree);
-    setForm({ 
-      ...pkg, 
-      planGroupId: pkg.planGroupId || ('group_' + baseSlug),
-      monthlyPlanId: pkg.monthlyPlanId || (planIsFree ? pkg.id : `${pkg.id || baseSlug}_monthly`),
-      annualPlanId: pkg.annualPlanId || (planIsFree ? pkg.id : `${pkg.id || baseSlug}_annual`),
-      featuresText: safeFeatures,
-      allowedAiModels: safeAiModels,
-      isFree: planIsFree,
-      tokenLimit: pkg.tokenLimit !== undefined ? pkg.tokenLimit : 100000,
-      tokenReimburseFrequency: pkg.tokenReimburseFrequency || 'monthly',
-    });
-  };
-
-  const handleAddAiModel = (modelVal: string) => {
-    if (!modelVal) return;
-    const current = Array.isArray(form.allowedAiModels)
-      ? [...form.allowedAiModels]
-      : (typeof form.allowedAiModels === 'string' && form.allowedAiModels.trim()
-          ? form.allowedAiModels.split(',').map((s) => s.trim()).filter(Boolean)
-          : []);
-    if (!current.includes(modelVal)) {
-      const updated = [...current, modelVal].join(',');
-      setForm({ ...form, allowedAiModels: updated });
-    }
-  };
-
-  const handleRemoveAiModel = (modelVal: string) => {
-    const current = Array.isArray(form.allowedAiModels)
-      ? [...form.allowedAiModels]
-      : (typeof form.allowedAiModels === 'string' && form.allowedAiModels.trim()
-          ? form.allowedAiModels.split(',').map((s) => s.trim()).filter(Boolean)
-          : []);
-    const updated = current.filter((m) => m !== modelVal).join(',');
-    setForm({ ...form, allowedAiModels: updated });
   };
 
   const handleSavePlan = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setFeedback(null);
-
-    const rawFeaturesText = typeof form.featuresText === 'string'
-      ? form.featuresText
-      : (Array.isArray((form as any).features) ? (form as any).features.join('\n') : '');
-
-    const parsedFeatures = rawFeaturesText
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-
-    const cleanSlug = (form.slug || form.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/^-|-$/g, '').replace(/-(monthly|annual)$/, '');
-    const planId = editingId ? (form.id || editingId) : (form.id || 'plan_' + Date.now());
-
-    const planGroupId = form.planGroupId?.trim() || ('group_' + (cleanSlug || planId));
-    const monthlyPlanId = form.monthlyPlanId?.trim() || (isFree ? planId : `${planId}_monthly`);
-    const annualPlanId = form.annualPlanId?.trim() || (isFree ? planId : `${planId}_annual`);
-
-    const rawAllowedModels = Array.isArray(form.allowedAiModels)
-      ? form.allowedAiModels
-      : (typeof form.allowedAiModels === 'string' && form.allowedAiModels.trim()
-          ? form.allowedAiModels.split(',').map((m) => m.trim()).filter(Boolean)
-          : [activeSettingsModel || 'gemini-3.6-flash']);
-
-    const isTaster = planId === 'preset_taster' || cleanSlug === 'taster';
-
-    const payload = {
-      ...form,
-      id: planId,
-      planGroupId,
-      monthlyPlanId,
-      annualPlanId,
-      slug: cleanSlug,
-      isFree,
-      isDefault: isTaster,
-      monthlyPriceDollars: isFree ? 0 : Number(form.monthlyPriceDollars) || 0,
-      annualPriceDollars: isFree ? 0 : Number(form.annualPriceDollars) || 0,
-      tokenLimit: Number(form.tokenLimit) || 100000,
-      tokenReimburseFrequency: form.tokenReimburseFrequency || 'monthly',
-      features: parsedFeatures,
-      featuresText: parsedFeatures.join('\n'),
-      allowedAiModels: rawAllowedModels,
-    };
+    setSaving(true);
+    setErrorMsg('');
+    setSuccessMsg('');
 
     try {
-      await fetch('/api/admin/plans', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const updatedPlanItem: SubscriptionPackageConfig = {
-        ...payload,
-        allowedAiModels: Array.isArray(rawAllowedModels) ? rawAllowedModels.join(',') : rawAllowedModels,
+      const parsedFeatures = featuresText.split('\n').map(s => s.trim()).filter(Boolean);
+      const payload = {
+        id: editingId || slug || `plan_${Date.now()}`,
+        name,
+        slug,
+        planGroupId,
+        monthlyPlanId,
+        annualPlanId,
+        monthlyPriceDollars: Number(monthlyPrice),
+        annualPriceDollars: Number(annualPrice),
+        tokenLimit: Number(tokenLimit),
+        monthlyBadge,
+        annualBadge,
+        trialBadge,
+        descriptionMonthly,
+        descriptionAnnual,
+        features: parsedFeatures,
+        isFree
       };
 
-      let updatedList = [...packages];
-      const matchIndex = updatedList.findIndex((p) => 
-        (editingId && (p.id === editingId || p.slug === editingId)) ||
-        (p.id && p.id === planId) ||
-        (p.slug && p.slug === cleanSlug)
-      );
+      const res = await fetch('/api/admin/plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
-      if (matchIndex >= 0) {
-        updatedList[matchIndex] = updatedPlanItem;
-      } else {
-        updatedList.push(updatedPlanItem);
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed saving plan configuration');
       }
 
-      updatedList = updatedList.map((p) => ({ ...p, isDefault: p.id === 'preset_taster' || p.slug === 'taster' }));
-      setPackages(updatedList);
-
-      await persistServerAdminSettings({ subscriptionPlans: updatedList });
-
+      setSuccessMsg(t('planSavedSuccess', 'Subscription Plan & Token Quotas saved and synchronized with PostgreSQL!'));
+      resetForm();
+      fetchPlans();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_plans_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
-
-      setFeedback({
-        type: 'success',
-        msg: `"${updatedPlanItem.name}" ${t('packageSavedSuccess', 'package configuration saved successfully!')}`,
-      });
-      
-      handleStartNewPlan();
-    } catch (e: any) {
-      setFeedback({ type: 'error', msg: e.message || t('errorSavingPlan', 'Error saving plan configuration.') });
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error occurred while saving');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  const handleDeletePackage = async (pkg: SubscriptionPackageConfig) => {
-    if (pkg.slug === 'taster' || pkg.id === 'preset_taster') {
-      alert(t('tasterCannotDeleteAlert', 'The Taster plan is required as the default free fallback and cannot be deleted.'));
+  const handleDeletePlan = async (p: PlanConfig) => {
+    if (p.isDefault || p.slug === 'taster' || p.id === 'preset_taster') {
+      alert(t('cannotDeleteDefaultPlan', 'The default free plan (Taster) is required by the system and cannot be deleted.'));
       return;
     }
 
-    if (!confirm(`${t('confirmDelete', 'Are you sure you want to delete package')} "${pkg.name}"?`)) return;
+    const confirmMsg = `${t('confirmDeletePlan', 'Are you sure you want to permanently delete plan')} "${p.name}"? ${t('actionCannotBeUndone', 'This action cannot be undone.')}`;
+    if (!confirm(confirmMsg)) return;
 
-    const targetKey = pkg.id || pkg.slug;
-    setDeletingId(targetKey);
-    setFeedback(null);
+    setDeletingId(p.id);
+    setErrorMsg('');
+    setSuccessMsg('');
 
     try {
-      const updated = packages.filter((p) => {
-        const isMatchId = pkg.id && (p.id === pkg.id || p.slug === pkg.id);
-        const isMatchSlug = pkg.slug && (p.slug === pkg.slug || p.id === pkg.slug);
-        return !(isMatchId || isMatchSlug);
-      }).map((p) => ({
-        ...p,
-        isDefault: p.slug === 'taster' || p.id === 'preset_taster',
-      }));
-
-      setPackages(updated);
-
-      if (editingId === targetKey || editingId === pkg.id || editingId === pkg.slug || form.slug === pkg.slug) {
-        handleStartNewPlan();
-      }
-
       const queryParams = new URLSearchParams();
-      if (pkg.id) queryParams.set('id', pkg.id);
-      if (pkg.slug) queryParams.set('slug', pkg.slug);
+      if (p.id) queryParams.set('id', p.id);
+      if (p.slug) queryParams.set('slug', p.slug);
 
-      const delRes = await fetch(`/api/admin/plans?${queryParams.toString()}`, { 
+      const res = await fetch(`/api/admin/plans?${queryParams.toString()}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: pkg.id, slug: pkg.slug })
+        body: JSON.stringify({ id: p.id, slug: p.slug })
       });
 
-      if (!delRes.ok) {
-        const errData = await delRes.json().catch(() => null);
-        throw new Error(errData?.error || 'Failed to delete plan from database.');
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || t('failedDeletePlan', 'Failed to delete plan from database.'));
       }
 
-      await persistServerAdminSettings({ subscriptionPlans: updated });
+      setPlans(prev => prev.filter(item => item.id !== p.id && item.slug !== p.slug));
+
+      if (editingId === p.id || editingId === p.slug) {
+        resetForm();
+      }
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_plans_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
 
-      setFeedback({ type: 'success', msg: `"${pkg.name}" ${t('packageDeletedSuccess', 'package deleted successfully.')}` });
-    } catch (e: any) {
-      setFeedback({ type: 'error', msg: e.message || t('errorDeletingPlan', 'Error deleting package.') });
-      await fetchPackages();
+      setSuccessMsg(`"${p.name}" ${t('planDeletedSuccess', 'has been permanently deleted from PostgreSQL.')}`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || t('errorDeletingPlan', 'Error deleting plan.'));
+      fetchPlans();
     } finally {
       setDeletingId(null);
     }
   };
 
-  if (!mounted) {
-    return <div className="max-w-7xl mx-auto p-8 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('loadingPlans', 'Loading subscription plans...')}</div>;
-  }
-
-  const currentFeaturesList = (typeof form.featuresText === 'string'
-    ? form.featuresText
-    : (Array.isArray((form as any).features) ? (form as any).features.join('\n') : '')
-  ).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-
-  const currentAllowedModels = Array.isArray(form.allowedAiModels)
-    ? form.allowedAiModels
-    : (typeof form.allowedAiModels === 'string' && form.allowedAiModels.trim()
-        ? form.allowedAiModels.split(',').map((s: string) => s.trim()).filter(Boolean)
-        : []);
-
-  const annualMonthlyEquivalent = form.annualPriceDollars > 0 ? (form.annualPriceDollars / 12).toFixed(2) : '0.00';
-  const calculatedSavings = form.monthlyPriceDollars > 0 && form.annualPriceDollars > 0
-    ? Math.max(0, Math.round((1 - (form.annualPriceDollars / (form.monthlyPriceDollars * 12))) * 100))
-    : 0;
-
-  const buttonLabel = loading
-    ? t('savingPackageBtn', 'Saving Package...')
-    : editingId
-    ? t('updateSubscriptionPackageBtn', 'Update Subscription Package')
-    : isFree
-    ? t('createPublishFreeBtn', 'Create & Publish Free Plan')
-    : t('createPublishPackageBtn', 'Create & Publish Package');
-
-  const isCreateMode = !editingId;
-  const submitButtonBg = isCreateMode ? 'var(--color-emerald, #10b981)' : 'var(--color-primary, #E05638)';
-  const submitButtonHoverBg = isCreateMode ? 'var(--color-primary-hover, #c94529)' : 'var(--color-primary-hover, #c94529)';
-
-  const getReimburseLabel = (freq: string) => {
-    switch (freq) {
-      case 'once': return 'Once (Non-recurring)';
-      case 'weekly': return 'Weekly';
-      case 'monthly': return 'Monthly';
-      default: return 'Monthly';
-    }
-  };
-
   return (
     <div 
-      className="max-w-7xl mx-auto space-y-8 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 sm:px-6 pt-4 font-sans transition-colors duration-200 min-h-screen"
+      style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
     >
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div className="space-y-1">
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('subscriptionPlansTitle', 'Subscription Plans')}
-          </h1>
+          <div className="flex items-center gap-2">
+            <Link 
+              href="/admin" 
+              className="p-1.5 rounded-lg border hover:opacity-80 transition"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              <Zap className="h-6 w-6 text-orange-400" /> {t('adminPlansTitle', 'Subscription Plans & Token Allocations')}
+            </h1>
+          </div>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('subscriptionPlansSubtitle', 'Manage plan pricing, usage quotas, token availability, reimburse schedule, and subscriber packages')}
+            {t('adminPlansSubtitle', 'Configure subscription intervals, group identifiers, and automated AI token purchase grants.')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={handleStartNewPlan}
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-          >
-            <Plus className="h-4 w-4" /> {t('addNewPlanBtn', 'Add New Plan')}
-          </button>
+        <div className="flex items-center gap-2">
           <Link
-            href="/admin"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
+            href="/admin/token-setting"
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
-            <Shield className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('adminSettingsBtn', 'Admin Settings')}
+            <Coins className="h-3.5 w-3.5 text-amber-500" /> {t('viewTokenTransactions', 'Token Transactions Ledger')}
           </Link>
         </div>
       </div>
 
-      <div 
-        className="p-4 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm transition-colors duration-200"
-        style={{
-          backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
-        }}
-      >
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-            {t('quickFillPresets', 'Quick-Fill Presets:')}
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => handleApplyPreset(DEFAULT_PRESET_TASTER)}
-            className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            {t('presetTasterBtn', 'Preset: Taster (Free)')}
-          </button>
-          <button
-            type="button"
-            onClick={() => handleApplyPreset(DEFAULT_PRESET_NUTRITION_PRO)}
-            className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-primary)',
-              color: 'var(--color-primary)'
-            }}
-          >
-            {t('presetNutritionProBtn', 'Preset: Nutrition Pro')}
-          </button>
-          <button
-            type="button"
-            onClick={handleStartNewPlan}
-            className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-emerald)',
-              color: 'var(--color-emerald)'
-            }}
-          >
-            {t('presetBlankBtn', 'Blank Custom Plan')}
-          </button>
-        </div>
-      </div>
-
-      {feedback && (
-        <div
-          className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 border shadow-xs animate-in fade-in"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
-            color: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
-          }}
+      {/* Notifications */}
+      {errorMsg && (
+        <div 
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
+          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }}
         >
-          {feedback.type === 'success' ? <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} /> : <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />}
-          <span>{feedback.msg}</span>
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{errorMsg}</span>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {successMsg && (
+        <div 
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
+          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
+      {/* Main Grid: Editor & Live Preview */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Plan Configuration Form */}
         <form 
-          onSubmit={handleSavePlan} 
-          className="lg:col-span-6 border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
+          onSubmit={handleSavePlan}
+          className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
         >
           <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-            <div className="flex items-center gap-2">
-              <PlusCircle className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-              <div>
-                <h2 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
-                  {editingId ? `${t('editPlanPrefix', 'Edit Plan:')} ${form.name || t('planNameLabel', 'Plan')}` : t('addNewPlanTitle', 'Add New Subscription Plan')}
-                </h2>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[10px] font-mono font-bold" style={{ color: 'var(--color-primary)' }}>
-                    Group: {form.planGroupId || form.id || 'new'}
+            <h2 className="text-sm font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <Edit3 className="h-4 w-4 text-orange-400" />
+              <span>{editingId ? t('editPlanHeader', 'Edit Subscription Plan') : t('createNewPlanHeader', 'Create New Plan')}</span>
+            </h2>
+            {editingId && (
+              <div className="flex items-center gap-3">
+                {editingId !== 'preset_taster' && slug !== 'taster' && (
+                  <button
+                    type="button"
+                    disabled={deletingId === editingId}
+                    onClick={() => {
+                      const matched = plans.find(p => p.id === editingId || p.slug === editingId);
+                      if (matched) handleDeletePlan(matched);
+                    }}
+                    className="text-xs text-red-400 hover:text-red-300 cursor-pointer font-bold flex items-center gap-1 transition"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>{t('deletePlan', 'Delete Plan')}</span>
+                  </button>
+                )}
+                <button 
+                  type="button" 
+                  onClick={resetForm} 
+                  className="text-xs text-slate-400 hover:text-slate-200 cursor-pointer font-bold transition"
+                >
+                  {t('cancelEdit', 'Cancel Edit')}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('planNameLabel', 'Plan Name *')}
+              </label>
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Nutrition Pro"
+                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none transition"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('planSlugLabel', 'Plan Slug *')}
+              </label>
+              <input
+                type="text"
+                required
+                value={slug}
+                onChange={(e) => handleSlugChange(e.target.value)}
+                placeholder="e.g. nutrition-pro"
+                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none transition"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+          </div>
+
+          {/* Group & Interval Identifiers */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <div className="space-y-1">
+              <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('planGroupIdLabel', 'Plan Group ID')}
+              </label>
+              <input
+                type="text"
+                value={planGroupId}
+                onChange={(e) => setPlanGroupId(e.target.value)}
+                className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('monthlyPlanIdLabel', 'Monthly Plan ID')}
+              </label>
+              <input
+                type="text"
+                value={monthlyPlanId}
+                onChange={(e) => setMonthlyPlanId(e.target.value)}
+                className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('annualPlanIdLabel', 'Annual Plan ID')}
+              </label>
+              <input
+                type="text"
+                value={annualPlanId}
+                onChange={(e) => setAnnualPlanId(e.target.value)}
+                className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+          </div>
+
+          {/* Pricing & AI Token Allowance */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('monthlyPriceLabel', 'Monthly Price ($ USD)')}
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={monthlyPrice}
+                onChange={(e) => setMonthlyPrice(parseFloat(e.target.value) || 0)}
+                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('annualPriceLabel', 'Annual Price ($ USD)')}
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={annualPrice}
+                onChange={(e) => setAnnualPrice(parseFloat(e.target.value) || 0)}
+                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            {/* AI Token Allowance on Purchase */}
+            <div className="space-y-1">
+              <label className="block text-xs font-bold flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
+                <span>{t('tokenAllowanceLabel', 'Token Grant on Purchase')}</span>
+                <span className="text-amber-500 font-bold">{tokenSymbol}</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={tokenLimit}
+                onChange={(e) => setTokenLimit(Math.max(0, parseInt(e.target.value) || 0))}
+                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-black outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+          </div>
+
+          <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('tokenGrantHelp', 'When a user purchases this plan, these tokens are credited to their balance and an audit record appears on /admin/token-setting.')}
+          </p>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('planFeaturesListLabel', 'Plan Features (One per line)')}
+            </label>
+            <textarea
+              rows={3}
+              value={featuresText}
+              onChange={(e) => setFeaturesText(e.target.value)}
+              className="w-full border rounded-xl p-3 text-xs font-medium outline-none transition"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            <label className="flex items-center gap-2 text-xs font-bold cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isFree}
+                onChange={(e) => setIsFree(e.target.checked)}
+                className="rounded accent-emerald-500 w-4 h-4"
+              />
+              <span>{t('isFreeTierLabel', 'Mark as Free Tier')}</span>
+            </label>
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-6 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+            >
+              {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              <span>{editingId ? t('updatePlanBtn', 'Update Plan & Tokens') : t('createPlanBtn', 'Create Plan & Publish')}</span>
+            </button>
+          </div>
+        </form>
+
+        {/* Live Mockup Preview */}
+        <div 
+          className="lg:col-span-5 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 flex flex-col justify-between"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-2">
+                <Eye className="h-4 w-4 text-emerald-400" />
+                <h3 className="text-sm font-black" style={{ color: 'var(--color-text)' }}>
+                  {t('planCardMockup', 'Live Card Mockup')}
+                </h3>
+              </div>
+              <div className="flex p-0.5 rounded-lg border text-[10px] font-bold" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <button
+                  type="button"
+                  onClick={() => setPreviewInterval('MONTH')}
+                  className={`px-2 py-1 rounded-md transition ${previewInterval === 'MONTH' ? 'bg-primary text-white' : 'text-slate-400'}`}
+                >
+                  Monthly
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewInterval('YEAR')}
+                  className={`px-2 py-1 rounded-md transition ${previewInterval === 'YEAR' ? 'bg-primary text-white' : 'text-slate-400'}`}
+                >
+                  Annual
+                </button>
+              </div>
+            </div>
+
+            {/* Mockup Card */}
+            <div 
+              className="p-5 rounded-2xl border space-y-4 relative shadow-inner"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-lg font-black" style={{ color: 'var(--color-text)' }}>
+                    {name || 'Plan Preview'}
+                  </h4>
+                  <p className="text-[10px] font-mono text-slate-400">
+                    ID: {previewInterval === 'MONTH' ? (monthlyPlanId || 'plan_monthly') : (annualPlanId || 'plan_annual')}
+                  </p>
+                </div>
+                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                  {previewInterval === 'MONTH' ? (monthlyBadge || 'Monthly') : (annualBadge || 'Annual')}
+                </span>
+              </div>
+
+              {/* Price & Token Allowance Display */}
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-black" style={{ color: 'var(--color-text)' }}>
+                  ${previewInterval === 'MONTH' ? monthlyPrice.toFixed(2) : annualPrice.toFixed(2)}
+                </span>
+                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  /{previewInterval === 'MONTH' ? 'mo' : 'yr'}
+                </span>
+              </div>
+
+              {/* Token Allocation Badge in Card */}
+              <div className="flex items-center gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+                <Coins className="h-4 w-4 text-amber-500 shrink-0" />
+                <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                  <span>+{tokenLimit.toLocaleString()} {tokenSymbol}</span>{' '}
+                  <span className="text-[10px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('creditedUponPurchase', 'credited instantly on purchase')}
                   </span>
                 </div>
               </div>
-            </div>
 
-            <div className="flex items-center gap-2">
-              {editingId && (
-                <button
-                  type="button"
-                  onClick={handleStartNewPlan}
-                  className="text-[10px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  {t('clearNewBtn', 'Clear / New')}
-                </button>
-              )}
-              <div 
-                className="flex items-center gap-1 p-1 rounded-xl border transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsFree(true);
-                    setForm({ ...form, isFree: true, monthlyPriceDollars: 0, annualPriceDollars: 0 });
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                    isFree 
-                      ? 'bg-[var(--color-emerald)] text-white shadow-sm' 
-                      : ''
-                  }`}
-                  style={!isFree ? { color: 'var(--color-text-secondary)' } : undefined}
-                >
-                  {t('freeTierToggle', 'Free Plan')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsFree(false);
-                    setForm({ ...form, isFree: false });
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                    !isFree 
-                      ? 'bg-[var(--color-primary)] text-white shadow-sm' 
-                      : ''
-                  }`}
-                  style={isFree ? { color: 'var(--color-text-secondary)' } : undefined}
-                >
-                  {t('paidTierToggle', 'Paid Plan')}
-                </button>
-              </div>
+              {/* Features snippet */}
+              <ul className="space-y-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {featuresText.split('\n').slice(0, 4).map((f, i) => (
+                  <li key={i} className="flex items-center gap-2">
+                    <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                    <span>{f}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('planNameLabel', 'Plan Name')}
-              </label>
-              <input
-                type="text"
-                required
-                value={form.name}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const autoSlug = val.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-                  setForm(prev => ({
-                    ...prev,
-                    name: val,
-                    slug: form.slug && editingId ? form.slug : autoSlug,
-                    planGroupId: editingId ? prev.planGroupId : (prev.planGroupId || `group_${autoSlug}`),
-                    monthlyPlanId: editingId ? prev.monthlyPlanId : (prev.monthlyPlanId || `plan_${autoSlug}_monthly`),
-                    annualPlanId: editingId ? prev.annualPlanId : (prev.annualPlanId || `plan_${autoSlug}_annual`),
-                  }));
-                }}
-                placeholder={t('planNamePlaceholder', 'e.g. Starter, Family Pro, Unlimited')}
-                className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              />
-            </div>
-
-            <div>
-              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('slugLabel', 'Slug Identifier')}
-              </label>
-              <input
-                type="text"
-                required
-                value={form.slug}
-                onChange={(e) => {
-                  const s = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-                  setForm(prev => ({
-                    ...prev,
-                    slug: s,
-                    ...(!editingId ? {
-                      planGroupId: `group_${s}`,
-                      monthlyPlanId: `plan_${s}_monthly`,
-                      annualPlanId: `plan_${s}_annual`
-                    } : {})
-                  }));
-                }}
-                placeholder={t('slugPlaceholder', 'e.g. starter-plan')}
-                className="w-full border rounded-xl p-2.5 text-xs font-mono outline-none transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              />
-            </div>
-
-            <div>
-              <label className="text-xs uppercase font-bold block mb-1 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
-                <span>{t('planGroupIdLabel', 'Plan Group ID')}</span>
-                <Layers className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-              </label>
-              <input
-                type="text"
-                required
-                value={form.planGroupId || ''}
-                onChange={(e) => setForm({ ...form, planGroupId: e.target.value.trim() })}
-                placeholder="e.g. group_nutrition_pro"
-                className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              />
-            </div>
+          <div className="pt-2 border-t text-[11px] flex items-center justify-between" style={{ borderColor: 'var(--color-border)' }}>
+            <span style={{ color: 'var(--color-text-secondary)' }}>Parent Group: {planGroupId || 'None'}</span>
+            <span className="font-mono text-emerald-400 font-bold">PostgreSQL Synced</span>
           </div>
+        </div>
+      </div>
 
-          {/* TOKEN AVAILABILITY & REIMBURSE SCHEDULE */}
-          <div 
-            className="p-4 rounded-2xl border space-y-3 transition shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-              <Cpu className="h-4 w-4" /> Token Availability & Reimburse Schedule
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              <div>
-                <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                  Token Limit (Availability)
-                </label>
-                <input
-                  type="number"
-                  value={form.tokenLimit}
-                  onChange={(e) => setForm({ ...form, tokenLimit: parseInt(e.target.value) || 0 })}
-                  placeholder="e.g. 50000"
-                  className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                />
-                <span className="text-[10px] block mt-1" style={{ color: 'var(--color-text-secondary)' }}>(-1 for unlimited tokens)</span>
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                  Token Reimburse Frequency
-                </label>
-                <select
-                  value={form.tokenReimburseFrequency}
-                  onChange={(e) => setForm({ ...form, tokenReimburseFrequency: e.target.value as any })}
-                  className="w-full border rounded-xl p-2.5 text-xs font-bold outline-none transition cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <option value="once" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Once (Non-recurring)</option>
-                  <option value="weekly" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Every Week (From purchase date)</option>
-                  <option value="monthly" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Every Month (From purchase date)</option>
-                </select>
-                <span className="text-[10px] block mt-1" style={{ color: 'var(--color-text-secondary)' }}>Quota refresh schedule</span>
-              </div>
-            </div>
+      {/* System Plans List with Token Badges & Actions */}
+      <div 
+        className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex items-center gap-2">
+            <Layers className="h-4 w-4 text-orange-400" />
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('publishedPlansTable', 'Configured Subscription Plans in PostgreSQL')}
+            </h2>
           </div>
+          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full border" style={{ borderColor: 'var(--color-border)' }}>
+            {plans.length} {t('plansCount', 'Plans')}
+          </span>
+        </div>
 
-          {/* ALLOWED AI MODELS DROPDOWN & BUTTON PICKER */}
-          <div 
-            className="p-4 rounded-2xl border space-y-3 transition shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <label className="text-xs uppercase font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                <Bot className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                {t('allowedAiModelsLabel', 'Allowed AI Models')}
-              </label>
-
-              {activeSettingsModel && (
-                <button
-                  type="button"
-                  onClick={() => handleAddAiModel(activeSettingsModel)}
-                  className="text-[10px] font-mono px-2 py-0.5 rounded-md border cursor-pointer transition flex items-center gap-1 font-bold shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-primary)',
-                    color: 'var(--color-primary)'
-                  }}
-                  title="Click to sync and add active model configured in /admin/ai-settings"
-                >
-                  <Sparkles className="h-3 w-3" /> Sync Active: {activeSettingsModel}
-                </button>
-              )}
-            </div>
-
-            <div>
-              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                1. Choose AI Model Provider
-              </span>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedAiProvider('gemini');
-                    setSelectedAiVersion(GEMINI_MODEL_VERSIONS[0]?.value || 'gemini-3.6-flash');
-                  }}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs`}
-                  style={selectedAiProvider === 'gemini' ? {
-                    backgroundColor: 'var(--color-primary)',
-                    color: '#ffffff',
-                    borderColor: 'var(--color-primary)'
-                  } : {
-                    backgroundColor: 'var(--color-card)',
-                    color: 'var(--color-text-secondary)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  <Bot className="h-3.5 w-3.5" /> Google Gemini
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedAiProvider('openai');
-                    setSelectedAiVersion(OPENAI_MODEL_VERSIONS[0]?.value || 'gpt-4o');
-                  }}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs`}
-                  style={selectedAiProvider === 'openai' ? {
-                    backgroundColor: 'var(--color-emerald)',
-                    color: '#ffffff',
-                    borderColor: 'var(--color-emerald)'
-                  } : {
-                    backgroundColor: 'var(--color-card)',
-                    color: 'var(--color-text-secondary)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  <Zap className="h-3.5 w-3.5" /> OpenAI GPT
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                2. Choose AI Version (Synced from /admin/ai-settings)
-              </span>
-              <div className="flex gap-2">
-                <select
-                  value={selectedAiVersion}
-                  onChange={(e) => setSelectedAiVersion(e.target.value)}
-                  className="flex-1 border rounded-xl px-3 py-2 text-xs font-medium outline-none transition cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  {(selectedAiProvider === 'gemini' ? GEMINI_MODEL_VERSIONS : OPENAI_MODEL_VERSIONS).map((m) => (
-                    <option key={m.value} value={m.value} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                      {m.label} {m.value === activeSettingsModel ? '★ [Active]' : ''}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => handleAddAiModel(selectedAiVersion)}
-                  className="px-4 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1 shadow-md cursor-pointer transition shrink-0"
-                  style={{ backgroundColor: selectedAiProvider === 'gemini' ? 'var(--color-primary)' : 'var(--color-emerald)' }}
-                >
-                  <Plus className="h-3.5 w-3.5" /> Add
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <span className="text-[10px] uppercase font-bold block mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                Configured Allowed Models for this plan:
-              </span>
-              {currentAllowedModels.length === 0 ? (
-                <span className="text-[11px] text-red-500 italic block">No models assigned yet. Select a version above and click 'Add'.</span>
+        <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                <th className="p-3.5">Plan Name / Slug</th>
+                <th className="p-3.5">Interval IDs</th>
+                <th className="p-3.5">Pricing</th>
+                <th className="p-3.5">AI Token Allowance</th>
+                <th className="p-3.5 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-xs font-bold text-slate-400">
+                    <RefreshCw className="h-4 w-4 animate-spin inline mr-2 text-primary" /> Loading plans...
+                  </td>
+                </tr>
+              ) : plans.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-xs text-slate-400">
+                    No subscription plans configured yet.
+                  </td>
+                </tr>
               ) : (
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  {currentAllowedModels.map((modelName) => {
-                    const isGem = modelName.includes('gemini');
-                    return (
-                      <span
-                        key={modelName}
-                        className="border px-2.5 py-1 rounded-lg text-xs font-mono font-semibold flex items-center gap-1.5 shadow-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: isGem ? 'var(--color-primary)' : 'var(--color-emerald)',
-                          color: isGem ? 'var(--color-primary)' : 'var(--color-emerald)'
-                        }}
-                      >
-                        {modelName}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveAiModel(modelName)}
-                          className="hover:opacity-75 transition cursor-pointer p-0.5"
-                          title={`Remove ${modelName}`}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {!isFree ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between border-b pb-2 pt-1" style={{ borderColor: 'var(--color-border)' }}>
-                <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                  <DollarSign className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('pricingDisplaySettings', 'Pricing & Billing Display Settings')}
-                </span>
-
-                <div 
-                  className="p-1 rounded-xl border flex items-center gap-1 transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setSettingsFilter('both')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
-                      settingsFilter === 'both' ? 'bg-slate-700 text-white shadow-sm' : ''
-                    }`}
-                    style={settingsFilter !== 'both' ? { color: 'var(--color-text-secondary)' } : undefined}
-                  >
-                    {t('viewBothBtn', 'View Both')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSettingsFilter('monthly')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
-                      settingsFilter === 'monthly' ? 'bg-[var(--color-primary)] text-white shadow-sm' : ''
-                    }`}
-                    style={settingsFilter !== 'monthly' ? { color: 'var(--color-text-secondary)' } : undefined}
-                  >
-                    {t('monthlyBtn', 'Monthly')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSettingsFilter('annual')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
-                      settingsFilter === 'annual' ? 'bg-[var(--color-emerald)] text-white shadow-sm' : ''
-                    }`}
-                    style={settingsFilter !== 'annual' ? { color: 'var(--color-text-secondary)' } : undefined}
-                  >
-                    {t('annualBtn', 'Annual')}
-                  </button>
-                </div>
-              </div>
-
-              {/* MONTHLY SETTINGS BLOCK WITH SEPARATE MONTHLY PLAN ID */}
-              {(settingsFilter === 'both' || settingsFilter === 'monthly') && (
-                <div 
-                  className="p-4 rounded-2xl border space-y-3 relative transition shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                        {t('monthlySubscriptionTitle', 'Monthly Subscription Settings')}
-                      </span>
-                    </div>
-                    <span 
-                      className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-primary)',
-                        color: 'var(--color-primary)'
-                      }}
-                    >
-                      {t('billedEveryMonth', 'Billed Every Month')}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                    <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                        {t('monthlyPlanIdLabel', 'Monthly Plan ID')}
-                      </label>
-                      <input
-                        type="text"
-                        required={!isFree}
-                        value={form.monthlyPlanId || ''}
-                        onChange={(e) => setForm({ ...form, monthlyPlanId: e.target.value.trim() })}
-                        placeholder="plan_xxx_monthly"
-                        className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                        {t('monthlyPriceLabel', 'Monthly Price ($)')}
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={form.monthlyPriceDollars}
-                        onChange={(e) => setForm({ ...form, monthlyPriceDollars: parseFloat(e.target.value) || 0 })}
-                        placeholder="8.99"
-                        className="w-full border rounded-xl p-2.5 text-xs font-bold outline-none transition"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                        {t('badgeOptional', 'Badge Text (Optional)')}
-                      </label>
-                      <input
-                        type="text"
-                        value={form.monthlyBadge}
-                        onChange={(e) => setForm({ ...form, monthlyBadge: e.target.value })}
-                        placeholder="e.g. Billed Immediately"
-                        className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                      {t('subtextTagline', 'Subtext / Tagline')}
-                    </label>
-                    <input
-                      type="text"
-                      value={form.descriptionMonthly}
-                      onChange={(e) => setForm({ ...form, descriptionMonthly: e.target.value })}
-                      placeholder="e.g. Full kitchen access, billed monthly"
-                      className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* ANNUAL SETTINGS BLOCK WITH SEPARATE ANNUAL PLAN ID */}
-              {(settingsFilter === 'both' || settingsFilter === 'annual') && (
-                <div 
-                  className="p-4 rounded-2xl border space-y-3 relative transition shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                        {t('annualSubscriptionTitle', 'Annual Subscription Settings')}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      {calculatedSavings > 0 && (
-                        <span 
-                          className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-emerald)',
-                            color: 'var(--color-emerald)'
-                          }}
-                        >
-                          {t('savesBadge', `Saves ${calculatedSavings}%`).replace('{percent}', calculatedSavings.toString())}
-                        </span>
-                      )}
-                      <span 
-                        className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          color: 'var(--color-text-secondary)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        {t('moEqBadge', `$${annualMonthlyEquivalent}/mo eq.`).replace('{amount}', annualMonthlyEquivalent)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
-                    <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                        {t('annualPlanIdLabel', 'Annual Plan ID')}
-                      </label>
-                      <input
-                        type="text"
-                        required={!isFree}
-                        value={form.annualPlanId || ''}
-                        onChange={(e) => setForm({ ...form, annualPlanId: e.target.value.trim() })}
-                        placeholder="plan_xxx_annual"
-                        className="w-full border rounded-xl p-2.5 text-xs font-mono font-bold outline-none transition"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                        {t('annualPriceLabel', 'Annual Price ($)')}
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={form.annualPriceDollars}
-                        onChange={(e) => setForm({ ...form, annualPriceDollars: parseFloat(e.target.value) || 0 })}
-                        placeholder="59.99"
-                        className="w-full border rounded-xl p-2.5 text-xs font-bold outline-none transition"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                        {t('discountBadge', 'Discount Badge')}
-                      </label>
-                      <input
-                        type="text"
-                        value={form.annualBadge}
-                        onChange={(e) => setForm({ ...form, annualBadge: e.target.value })}
-                        placeholder="e.g. Save 44%"
-                        className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                        {t('trialBadgeLabel', 'Trial Badge')}
-                      </label>
-                      <input
-                        type="text"
-                        value={form.trialBadge}
-                        onChange={(e) => setForm({ ...form, trialBadge: e.target.value })}
-                        placeholder="e.g. 7-Day Free Trial"
-                        className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-bold block mb-1" style={{ color: 'var(--color-text)' }}>
-                      {t('annualSubtext', 'Annual Subtext')}
-                    </label>
-                    <input
-                      type="text"
-                      value={form.descriptionAnnual}
-                      onChange={(e) => setForm({ ...form, descriptionAnnual: e.target.value })}
-                      placeholder="e.g. Best value - all premium features, billed annually"
-                      className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div 
-                className="p-3.5 border rounded-2xl text-xs flex items-center justify-between shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-emerald)',
-                  color: 'var(--color-emerald)'
-                }}
-              >
-                <span>{t('zeroCostPlanNotice', 'This is a free plan package. Pricing fields are automatically set to $0.')}</span>
-              </div>
-
-              <div>
-                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('freePlanDescLabel', 'Free Plan Description / Subtitle')}
-                </label>
-                <input
-                  type="text"
-                  value={form.descriptionMonthly}
-                  onChange={(e) => setForm({ ...form, descriptionMonthly: e.target.value, descriptionAnnual: e.target.value })}
-                  placeholder={t('freePlanDescPlaceholder', 'e.g. Free tier with limited features')}
-                  className="w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 text-xs pt-1">
-            <div>
-              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('buttonLabelField', 'Button Label')}</label>
-              <input
-                type="text"
-                value={form.buttonText}
-                onChange={(e) => setForm({ ...form, buttonText: e.target.value })}
-                placeholder="Choose Plan"
-                className="w-full border rounded-xl p-2 text-xs outline-none transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              />
-            </div>
-            <div>
-              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('aiRecipeLimitField', 'AI Recipe Limit')}</label>
-              <input
-                type="number"
-                value={form.aiRecipeLimit}
-                onChange={(e) => setForm({ ...form, aiRecipeLimit: parseInt(e.target.value) || 0 })}
-                className="w-full border rounded-xl p-2 text-xs outline-none transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              />
-              <span className="text-[10px] block mt-1 leading-tight" style={{ color: 'var(--color-text-secondary)' }}>{t('recipeLimitHint', '(-1 for unlimited)')}</span>
-            </div>
-            <div>
-              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('libraryMaxField', 'Library Max')}</label>
-              <input
-                type="number"
-                value={form.recipeLibraryLimit}
-                onChange={(e) => setForm({ ...form, recipeLibraryLimit: parseInt(e.target.value) || 0 })}
-                className="w-full border rounded-xl p-2 text-xs outline-none transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              />
-              <span className="text-[10px] block mt-1 leading-tight" style={{ color: 'var(--color-text-secondary)' }}>{t('libraryLimitHint', '(-1 for unlimited)')}</span>
-            </div>
-            <div>
-              <label className="uppercase font-bold block mb-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('scrapeLimitField', 'Scrape Limit')}</label>
-              <input
-                type="number"
-                value={form.socialScrapeLimit}
-                onChange={(e) => setForm({ ...form, socialScrapeLimit: parseInt(e.target.value) || 0 })}
-                className="w-full border rounded-xl p-2 text-xs outline-none transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              />
-              <span className="text-[10px] block mt-1 leading-tight" style={{ color: 'var(--color-text-secondary)' }}>{t('scrapeLimitHint', '(-1 for unlimited)')}</span>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs uppercase font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('featuresChecklistLabel', 'Features Checklist (One per line)')}
-              </label>
-              <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{currentFeaturesList.length} {t('itemsCountSuffix', 'items')}</span>
-            </div>
-            <textarea
-              rows={4}
-              value={form.featuresText || ''}
-              onChange={(e) => setForm({ ...form, featuresText: e.target.value })}
-              placeholder="Unlimited AI-powered recipe generation&#10;Unlimited recipe library&#10;Comprehensive nutritional analysis"
-              className="w-full border rounded-xl p-2.5 text-xs outline-none transition font-sans"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            />
-            <span className="text-[10px] block mt-1 leading-tight" style={{ color: 'var(--color-text-secondary)' }}>{t('onePerLineNote', 'Each line will render with a checkmark on the pricing card.')}</span>
-          </div>
-
-          <div className="flex items-center gap-2 pt-1">
-            <input
-              type="checkbox"
-              id="macros_box"
-              checked={form.canViewMacros}
-              onChange={(e) => setForm({ ...form, canViewMacros: e.target.checked })}
-              className="rounded w-4 h-4 cursor-pointer accent-[var(--color-primary)]"
-            />
-            <label htmlFor="macros_box" className="text-xs cursor-pointer select-none" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('unlockMacrosLabel', 'Unlock detailed macro analysis (calories, protein, carbs, fat, etc.)')}
-            </label>
-          </div>
-
-          <button
-            key={buttonLabel}
-            type="submit"
-            disabled={loading || !form.name.trim()}
-            className="w-full text-white font-bold py-3 rounded-2xl transition text-xs shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-            style={{ backgroundColor: submitButtonBg }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = submitButtonHoverBg; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = submitButtonBg; }}
-          >
-            <Sparkles className="h-4 w-4" />
-            {buttonLabel}
-          </button>
-        </form>
-
-        <div className="lg:col-span-6 space-y-6">
-          {/* SYSTEM PACKAGES LIST */}
-          <div 
-            className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <PackageCheck className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} />
-                {t('systemPackagesList', 'System Plans List')} ({packages.length})
-              </h2>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleStartNewPlan}
-                  className="text-xs font-bold flex items-center gap-1 transition cursor-pointer"
-                  style={{ color: 'var(--color-emerald)' }}
-                >
-                  <Plus className="h-3.5 w-3.5" /> {t('newTierBtn', 'New Plan')}
-                </button>
-                <button
-                  type="button"
-                  onClick={fetchPackages}
-                  className="text-xs font-bold flex items-center gap-1 transition ml-2 cursor-pointer"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {packages.length === 0 ? (
-                <div 
-                  className="text-xs py-8 text-center rounded-2xl border"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
-                  }}
-                >
-                  {t('noPackagesConfigured', 'No subscription plans configured.')}
-                </div>
-              ) : (
-                packages.map((pkg) => {
-                  const cardIdentifier = pkg.id || pkg.slug;
-                  const isTaster = pkg.slug === 'taster' || pkg.id === 'preset_taster';
-                  const modelsList = Array.isArray(pkg.allowedAiModels)
-                    ? pkg.allowedAiModels
-                    : (typeof pkg.allowedAiModels === 'string' && pkg.allowedAiModels.trim()
-                        ? pkg.allowedAiModels.split(',').map((m: string) => m.trim()).filter(Boolean)
-                        : []);
-
-                  const effectiveGroupId = pkg.planGroupId || ('group_' + (pkg.slug || pkg.id));
-                  const effectiveMonthlyId = pkg.monthlyPlanId || (pkg.isFree ? pkg.id : `${pkg.id || pkg.slug}_monthly`);
-                  const effectiveAnnualId = pkg.annualPlanId || (pkg.isFree ? pkg.id : `${pkg.id || pkg.slug}_annual`);
-
+                plans.map((p) => {
+                  const isProtected = p.isDefault || p.slug === 'taster' || p.id === 'preset_taster';
                   return (
-                    <div
-                      key={cardIdentifier}
-                      className="p-4 rounded-2xl border flex items-center justify-between transition shadow-xs cursor-pointer"
-                      onClick={() => handleEditPackage(pkg)}
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: editingId === cardIdentifier 
-                          ? 'var(--color-primary)' 
-                          : 'var(--color-border)'
-                      }}
-                    >
-                      <div className="space-y-1.5 min-w-0 flex-1 pr-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{pkg.name}</span>
-                          
-                          {/* PLAN GROUP ID BADGE */}
-                          <span 
-                            className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text-secondary)'
-                            }}
-                            title={`Plan Group: ${effectiveGroupId}`}
+                    <tr key={p.id} className="hover:bg-slate-500/5 transition">
+                      <td className="p-3.5">
+                        <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{p.name}</div>
+                        <div className="text-[10px] font-mono text-slate-400">{p.slug}</div>
+                      </td>
+
+                      <td className="p-3.5">
+                        <div className="space-y-0.5 text-[10px] font-mono">
+                          <div className="text-blue-400">M: {p.monthlyPlanId || `plan_${p.slug}_monthly`}</div>
+                          <div className="text-purple-400">A: {p.annualPlanId || `plan_${p.slug}_annual`}</div>
+                        </div>
+                      </td>
+
+                      <td className="p-3.5 font-mono font-bold">
+                        {p.isFree ? (
+                          <span className="text-emerald-400 font-bold">Free</span>
+                        ) : (
+                          <div>
+                            <div>${p.monthlyPriceDollars.toFixed(2)}/mo</div>
+                            <div className="text-slate-400 text-[10px]">${p.annualPriceDollars.toFixed(2)}/yr</div>
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="p-3.5">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-500 border border-amber-500/20 font-mono">
+                          <Coins className="h-3 w-3" /> +{(p.tokenLimit ?? 500).toLocaleString()} {tokenSymbol}
+                        </span>
+                      </td>
+
+                      <td className="p-3.5 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(p)}
+                            className="px-3 py-1.5 rounded-lg border text-xs font-bold transition hover:opacity-80 cursor-pointer flex items-center gap-1"
+                            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
                           >
-                            Group: {effectiveGroupId}
-                          </span>
+                            <Edit3 className="h-3.5 w-3.5" />
+                            <span>{t('edit', 'Edit')}</span>
+                          </button>
 
-                          {/* SEPARATE MONTHLY & ANNUAL PLAN ID BADGES */}
-                          {!pkg.isFree && (
-                            <>
-                              <span 
-                                className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-primary)',
-                                  color: 'var(--color-primary)'
-                                }}
-                                title={`Monthly Plan ID: ${effectiveMonthlyId}`}
-                              >
-                                Monthly: {effectiveMonthlyId}
-                              </span>
-
-                              <span 
-                                className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border shadow-xs"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-emerald)',
-                                  color: 'var(--color-emerald)'
-                                }}
-                                title={`Annual Plan ID: ${effectiveAnnualId}`}
-                              >
-                                Annual: {effectiveAnnualId}
-                              </span>
-                            </>
-                          )}
-                          
-                          {pkg.isDefault ? (
-                            <span 
-                              className="text-[10px] border px-2 py-0.5 rounded-full font-black uppercase flex items-center gap-1 shadow-xs"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-primary)',
-                                color: 'var(--color-primary)'
-                              }}
-                              title={t('currentDefaultPlanTooltip', 'Current Default Plan for new user signups')}
+                          {!isProtected && (
+                            <button
+                              type="button"
+                              disabled={deletingId === p.id}
+                              onClick={() => handleDeletePlan(p)}
+                              className="px-2.5 py-1.5 rounded-lg border text-xs font-bold transition hover:bg-red-950/20 text-red-400 border-red-900/40 hover:text-red-300 cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                              style={{ backgroundColor: 'var(--color-inner-dark)' }}
+                              title={t('deletePlan', 'Delete Plan')}
                             >
-                              {t('defaultSystemPlan', 'DEFAULT SYSTEM PLAN')}
-                            </span>
-                          ) : null}
-
-                          {pkg.isFree ? (
-                            <span 
-                              className="text-[10px] border px-2 py-0.5 rounded-full font-bold uppercase shadow-xs"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-emerald)',
-                                color: 'var(--color-emerald)'
-                              }}
-                            >
-                              {t('freeBadge', 'FREE')}
-                            </span>
-                          ) : (
-                            <div className="flex items-center gap-1.5">
-                              <span 
-                                className="text-[10px] border px-2 py-0.5 rounded-full font-bold shadow-xs"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-primary)',
-                                  color: 'var(--color-primary)'
-                                }}
-                              >
-                                ${pkg.monthlyPriceDollars.toFixed(2)}{t('perMonth', '/month')}
-                              </span>
-                              <span 
-                                className="text-[10px] border px-2 py-0.5 rounded-full font-bold shadow-xs"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-emerald)',
-                                  color: 'var(--color-emerald)'
-                                }}
-                              >
-                                ${pkg.annualPriceDollars.toFixed(2)}{t('perYear', '/year')}
-                              </span>
-                            </div>
+                              {deletingId === p.id ? (
+                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                              <span className="hidden sm:inline">{t('delete', 'Delete')}</span>
+                            </button>
                           )}
                         </div>
-
-                        <div className="text-xs space-x-2" style={{ color: 'var(--color-text-secondary)' }}>
-                          <span>{pkg.aiRecipeLimit === -1 ? t('unlimitedLabel', 'Unlimited') : pkg.aiRecipeLimit} AI recipes</span>
-                          <span>•</span>
-                          <span className="font-mono font-semibold" style={{ color: 'var(--color-primary)' }}>
-                            {pkg.tokenLimit === -1 ? 'Unlimited Tokens' : `${(pkg.tokenLimit || 0).toLocaleString()} tokens`} ({getReimburseLabel(pkg.tokenReimburseFrequency)})
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                          {modelsList.map((m) => {
-                            const isGem = m.includes('gemini');
-                            return (
-                              <span
-                                key={m}
-                                className="text-[9px] font-mono px-1.5 py-0.2 rounded border"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: isGem ? 'var(--color-primary)' : 'var(--color-emerald)',
-                                  color: isGem ? 'var(--color-primary)' : 'var(--color-emerald)'
-                                }}
-                              >
-                                {m}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          disabled={!isTaster}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSetDefaultPlan(pkg);
-                          }}
-                          className={`p-2 rounded-xl border transition flex items-center gap-1 shadow-xs ${
-                            isTaster
-                              ? 'cursor-default'
-                              : 'opacity-35 cursor-not-allowed'
-                          }`}
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: isTaster ? 'var(--color-primary)' : 'var(--color-border)',
-                            color: isTaster ? 'var(--color-primary)' : 'var(--color-text-secondary)'
-                          }}
-                          title={
-                            isTaster
-                              ? t('tasterPermanentDefaultTooltip', 'The Taster plan (ID: preset_taster) is permanently locked as the system default plan')
-                              : t('tasterLockedDefaultTooltip', 'The Taster plan (ID: preset_taster) is permanently locked as the default plan')
-                          }
-                        >
-                          <Star className={`h-4 w-4 ${isTaster ? 'fill-current' : ''}`} style={{ color: isTaster ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEditPackage(pkg);
-                          }}
-                          className="p-2 rounded-xl border transition cursor-pointer shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                          title={t('editPlanTooltip', 'Edit Plan')}
-                        >
-                          <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={isTaster || deletingId === cardIdentifier}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeletePackage(pkg);
-                          }}
-                          className={`p-2 rounded-xl border transition shadow-xs ${
-                            isTaster
-                              ? 'opacity-35 cursor-not-allowed'
-                              : 'hover:text-red-500 cursor-pointer'
-                          }`}
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text-secondary)'
-                          }}
-                          title={isTaster ? t('tasterPermanentProtected', 'Taster plan is permanently protected') : t('deletePackageTooltip', 'Delete Plan')}
-                        >
-                          {deletingId === cardIdentifier ? (
-                            <RefreshCw className="h-4 w-4 animate-spin text-red-500" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
+                      </td>
+                    </tr>
                   );
                 })
               )}
-            </div>
-          </div>
-
-          {/* LIVE CARD MOCKUP PREVIEW */}
-          <div 
-            className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                {t('liveCardMockup', 'Live Card Mockup Preview')}
-              </h2>
-
-              <div 
-                className="rounded-full p-1 border shadow-xs flex items-center transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setPreviewTab('monthly')}
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
-                    previewTab === 'monthly' ? 'bg-[var(--color-primary)] text-white shadow-sm' : ''
-                  }`}
-                  style={previewTab !== 'monthly' ? { color: 'var(--color-text-secondary)' } : undefined}
-                >
-                  {t('monthlyBtn', 'Monthly')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreviewTab('annual')}
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
-                    previewTab === 'annual' ? 'bg-[var(--color-primary)] text-white shadow-sm' : ''
-                  }`}
-                  style={previewTab !== 'annual' ? { color: 'var(--color-text-secondary)' } : undefined}
-                >
-                  {t('annualBtn', 'Annual')}
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-3xl p-7 border-2 relative transition shadow-md"
-              style={{ 
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: isFree ? 'var(--color-primary)' : 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              {!isFree && previewTab === 'annual' && form.annualBadge && (
-                <div className="absolute -top-3.5 right-6 px-3.5 py-1 rounded-full text-[11px] font-black text-white shadow-md" style={{ backgroundColor: 'var(--color-emerald)' }}>
-                  {form.annualBadge}
-                </div>
-              )}
-
-              <div className="space-y-3.5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-2xl font-black" style={{ color: 'var(--color-emerald)' }}>
-                      {form.name || t('planNameLabel', 'Plan Name')}
-                    </h3>
-                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
-                        Group: {form.planGroupId || form.id || form.slug}
-                      </span>
-                      {!isFree && previewTab === 'monthly' && (
-                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
-                          Monthly Plan ID: {form.monthlyPlanId || `${form.id || form.slug}_monthly`}
-                        </span>
-                      )}
-                      {!isFree && previewTab === 'annual' && (
-                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-emerald)' }}>
-                          Annual Plan ID: {form.annualPlanId || `${form.id || form.slug}_annual`}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border font-mono" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
-                    {form.tokenLimit === -1 ? 'Unlimited Tokens' : `${(form.tokenLimit || 0).toLocaleString()} tokens`} ({getReimburseLabel(form.tokenReimburseFrequency)})
-                  </span>
-                </div>
-
-                {isFree ? (
-                  <div>
-                    <div className="text-4xl font-black" style={{ color: 'var(--color-primary)' }}>
-                      {t('freeMockupText', 'Free')}
-                    </div>
-                    <p className="text-xs font-medium mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      {form.descriptionMonthly || t('defaultFreeDesc', 'Free plan with limited features')}
-                    </p>
-                  </div>
-                ) : previewTab === 'monthly' ? (
-                  <div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-4xl font-black" style={{ color: 'var(--color-primary)' }}>
-                        ${form.monthlyPriceDollars.toFixed(2)}
-                      </span>
-                      <span className="text-base font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('perMonth', '/month')}
-                      </span>
-                    </div>
-
-                    <div className="text-[11px] font-bold uppercase tracking-wide mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('usdCurrency', 'USD')}
-                    </div>
-
-                    {form.monthlyBadge && (
-                      <div className="mt-2 inline-block px-3 py-1 rounded-full text-[11px] font-bold text-white shadow-sm"
-                        style={{ backgroundColor: 'var(--color-primary)' }}
-                      >
-                        {form.monthlyBadge}
-                      </div>
-                    )}
-
-                    <p className="text-xs font-medium mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-                      {form.descriptionMonthly || t('defaultMonthlyDesc', 'Full kitchen access, billed monthly')}
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-4xl font-black" style={{ color: 'var(--color-primary)' }}>
-                        ${form.annualPriceDollars.toFixed(2)}
-                      </span>
-                      <span className="text-base font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('perYear', '/year')}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 text-xs font-bold mt-1" style={{ color: 'var(--color-text)' }}>
-                      <span>${annualMonthlyEquivalent}{t('perMonth', '/month')}</span>
-                      <span className="line-through font-normal" style={{ color: 'var(--color-text-secondary)' }}>
-                        ${form.monthlyPriceDollars.toFixed(2)}{t('perMonth', '/month')}
-                      </span>
-                    </div>
-
-                    <div className="text-[11px] font-bold uppercase tracking-wide mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('usdCurrency', 'USD')}
-                    </div>
-
-                    {form.trialBadge && (
-                      <div className="mt-2 inline-block px-3 py-1 rounded-full text-[11px] font-bold text-white shadow-sm" style={{ backgroundColor: '#2563eb' }}>
-                        {form.trialBadge}
-                      </div>
-                    )}
-
-                    <p className="text-xs font-medium mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-                      {form.descriptionAnnual || t('defaultAnnualDesc', 'Best value - all premium features, billed annually')}
-                    </p>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-1 flex-wrap pt-1">
-                  <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>Allowed AI Models:</span>
-                  {currentAllowedModels.map((m) => (
-                    <span key={m} className="text-[10px] font-mono px-2 py-0.5 rounded-full border font-bold" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                      {m}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="pt-2 space-y-2 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
-                  {currentFeaturesList.map((feature, i) => (
-                    <div key={i} className="flex items-start gap-2.5">
-                      <Check className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
-                      <span className="leading-snug">{feature}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="pt-4">
-                  <button
-                    type="button"
-                    className="w-full py-3 rounded-2xl text-xs font-bold text-white transition shadow-md cursor-pointer"
-                    style={{ backgroundColor: isFree ? 'var(--color-primary)' : 'var(--color-emerald)' }}
-                  >
-                    {form.buttonText || (isFree ? t('manageDefaultBtn', 'Manage') : t('choosePlanDefaultBtn', 'Choose Plan'))}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -24004,7 +22747,7 @@ export default function AdminPaymentPage() {
 ```typescript
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { 
   Coins, Sparkles, Plus, Trash2, Save, ArrowLeft,
@@ -24012,7 +22755,7 @@ import {
   ChefHat, DownloadCloud, FileText, Camera, Tag, DollarSign,
   Search, Filter, ArrowUpRight, ArrowDownLeft, Calendar, User as UserIcon,
   Clock, Activity, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Columns3, Check, SlidersHorizontal, Eye, EyeOff, Wallet
+  Columns3, Check, SlidersHorizontal, Eye, EyeOff, Wallet, CheckSquare, Square
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -24102,6 +22845,12 @@ export default function AdminTokenSettingPage() {
     totalTransactions: 0
   });
 
+  // Selection & Deletion State
+  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
+  const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
+
   // Table Column Visibility Controller
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const columnPickerRef = useRef<HTMLDivElement | null>(null);
@@ -24150,7 +22899,7 @@ export default function AdminTokenSettingPage() {
       const target = prev.find(c => c.key === key);
       const activeCount = prev.filter(c => c.visible).length;
       if (target?.visible && activeCount <= 1) {
-        return prev; // Guard: At least 1 column must stay visible
+        return prev;
       }
       const updated = prev.map(c => c.key === key ? { ...c, visible: !c.visible } : c);
       try {
@@ -24234,6 +22983,107 @@ export default function AdminTokenSettingPage() {
     }
   }, [activeTab, fetchTransactions, txPage, txLimit]);
 
+  // Select / Select All Calculation for the Current Page
+  const allOnPageSelected = useMemo(() => {
+    return transactions.length > 0 && transactions.every(tx => selectedTxIds.includes(tx.id));
+  }, [transactions, selectedTxIds]);
+
+  const someOnPageSelected = useMemo(() => {
+    return transactions.some(tx => selectedTxIds.includes(tx.id)) && !allOnPageSelected;
+  }, [transactions, selectedTxIds, allOnPageSelected]);
+
+  useEffect(() => {
+    if (selectAllCheckboxRef.current) {
+      selectAllCheckboxRef.current.indeterminate = someOnPageSelected;
+    }
+  }, [someOnPageSelected]);
+
+  const handleToggleSelectAll = () => {
+    if (allOnPageSelected) {
+      const pageIds = new Set(transactions.map(tx => tx.id));
+      setSelectedTxIds(prev => prev.filter(id => !pageIds.has(id)));
+    } else {
+      const pageIds = transactions.map(tx => tx.id);
+      setSelectedTxIds(prev => Array.from(new Set([...prev, ...pageIds])));
+    }
+  };
+
+  const handleToggleSelectOne = (id: string) => {
+    setSelectedTxIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  // Delete Individual Transaction
+  const handleDeleteTransaction = async (id: string, description?: string) => {
+    const confirmMsg = t('confirmDeleteTokenTx', 'Are you sure you want to permanently delete this token transaction record?');
+    if (!window.confirm(confirmMsg)) return;
+
+    setDeletingTxId(id);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const res = await fetch(`/api/admin/token-transactions?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete transaction');
+      }
+
+      setSelectedTxIds(prev => prev.filter(item => item !== id));
+      setSuccessMsg(t('tokenTxDeletedSuccess', 'Transaction record deleted successfully from PostgreSQL.'));
+      await fetchTransactions(txPage, txLimit);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_tokens_updated'));
+        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+      }
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to delete transaction');
+    } finally {
+      setDeletingTxId(null);
+    }
+  };
+
+  // Bulk Delete Selected Transactions
+  const handleBulkDeleteTransactions = async () => {
+    if (selectedTxIds.length === 0) return;
+    const confirmTmpl = t('confirmBulkDeleteTokenTxs', 'Are you sure you want to permanently delete {count} selected transaction(s)? This action cannot be undone.');
+    if (!window.confirm(confirmTmpl.replace('{count}', String(selectedTxIds.length)))) return;
+
+    setBulkDeleting(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const res = await fetch('/api/admin/token-transactions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedTxIds })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete selected transactions');
+      }
+
+      const count = selectedTxIds.length;
+      setSelectedTxIds([]);
+      setSuccessMsg(t('bulkTokenTxDeletedSuccess', `Successfully deleted ${count} transaction record(s) from PostgreSQL.`));
+      await fetchTransactions(txPage, txLimit);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_tokens_updated'));
+        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+      }
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to delete selected transactions');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setSuccessMsg('');
@@ -24262,6 +23112,10 @@ export default function AdminTokenSettingPage() {
       }
 
       setSuccessMsg(t('tokenSettingsSavedSuccess', 'Token configuration saved and synchronized with PostgreSQL!'));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
       setErrorMsg(err.message || 'Error occurred while saving');
@@ -24318,6 +23172,13 @@ export default function AdminTokenSettingPage() {
         </span>
       );
     }
+    if (type === 'plan_purchase') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          <Layers className="h-3 w-3" /> Plan Purchase
+        </span>
+      );
+    }
     if (type === 'plan_monthly_grant') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
@@ -24332,7 +23193,6 @@ export default function AdminTokenSettingPage() {
     );
   };
 
-  // Pagination Window Calculator
   const getPageNumbers = () => {
     const pages: number[] = [];
     const maxVisible = 5;
@@ -24897,7 +23757,8 @@ export default function AdminTokenSettingPage() {
                   <option value="all">All Services & Sources</option>
                   <option value="chef">/chef (AI Chat)</option>
                   <option value="import">/import (All Types)</option>
-                  <option value="purchase">Package Purchases</option>
+                  <option value="purchase">All Purchases (Plans & Packages)</option>
+                  <option value="plan_purchase">Plan Purchases</option>
                   <option value="grant">Monthly Plan Grants</option>
                 </select>
               </div>
@@ -25006,11 +23867,66 @@ export default function AdminTokenSettingPage() {
               </div>
             </div>
 
-            {/* Transactions Table with Dynamic Columns and Colspan */}
+            {/* Bulk Actions Banner */}
+            {selectedTxIds.length > 0 && (
+              <div 
+                className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'rgba(239, 68, 68, 0.4)'
+                }}
+              >
+                <div className="flex items-center gap-2 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span>{selectedTxIds.length} {t('transactionsSelected', 'transaction(s) selected')}</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTxIds([])}
+                    className="px-3 py-1.5 rounded-xl border text-xs font-semibold hover:opacity-80 transition cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    {t('clearSelection', 'Clear Selection')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={bulkDeleting}
+                    onClick={handleBulkDeleteTransactions}
+                    className="px-4 py-1.5 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  >
+                    {bulkDeleting ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                    <span>{t('deleteSelectedCount', `Delete Selected (${selectedTxIds.length})`)}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Transactions Table with Checkbox, Dynamic Columns and Actions */}
             <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                    {/* Select All Checkbox Header */}
+                    <th className="p-3.5 w-10 text-center">
+                      <input
+                        ref={selectAllCheckboxRef}
+                        type="checkbox"
+                        checked={allOnPageSelected}
+                        onChange={handleToggleSelectAll}
+                        className="w-4 h-4 rounded accent-primary cursor-pointer align-middle"
+                        title={t('selectAllTooltip', 'Select all transactions on this page')}
+                      />
+                    </th>
                     {isColVisible('user') && <th className="p-3.5">{t('colUser', 'User')}</th>}
                     {isColVisible('user_total_tokens') && <th className="p-3.5">{t('colUserTotalTokens', 'User Total Tokens')}</th>}
                     {isColVisible('service') && <th className="p-3.5">{t('colService', 'Service / Operation')}</th>}
@@ -25018,12 +23934,13 @@ export default function AdminTokenSettingPage() {
                     {isColVisible('balance_after') && <th className="p-3.5">{t('colBalanceAfter', 'Balance After')}</th>}
                     {isColVisible('description') && <th className="p-3.5">{t('colDescription', 'Description')}</th>}
                     {isColVisible('created_at') && <th className="p-3.5">{t('colTimestamp', 'Timestamp')}</th>}
+                    <th className="p-3.5 text-right w-16">{t('colActions', 'Actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
                   {txLoading ? (
                     <tr>
-                      <td colSpan={activeColumnCount} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={activeColumnCount + 2} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         <div className="flex items-center justify-center gap-2">
                           <RefreshCw className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} />
                           <span>{t('loadingLedger', 'Loading token transaction ledger...')}</span>
@@ -25032,19 +23949,30 @@ export default function AdminTokenSettingPage() {
                     </tr>
                   ) : transactions.length === 0 ? (
                     <tr>
-                      <td colSpan={activeColumnCount} className="p-8 text-center text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={activeColumnCount + 2} className="p-8 text-center text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                         {t('noTransactionsFound', 'No transactions recorded matching your search parameters.')}
                       </td>
                     </tr>
                   ) : (
                     transactions.map((tx) => {
                       const isNegative = tx.amount < 0;
+                      const isSelected = selectedTxIds.includes(tx.id);
                       return (
                         <tr 
                           key={tx.id} 
-                          className="hover:bg-slate-500/5 transition font-medium"
+                          className={`transition font-medium ${isSelected ? 'bg-primary/10' : 'hover:bg-slate-500/5'}`}
                           style={{ color: 'var(--color-text)' }}
                         >
+                          {/* Row Selection Checkbox */}
+                          <td className="p-3.5 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectOne(tx.id)}
+                              className="w-4 h-4 rounded accent-primary cursor-pointer align-middle"
+                            />
+                          </td>
+
                           {/* User Column */}
                           {isColVisible('user') && (
                             <td className="p-3.5">
@@ -25104,6 +24032,23 @@ export default function AdminTokenSettingPage() {
                               {new Date(tx.created_at).toLocaleString()}
                             </td>
                           )}
+
+                          {/* Actions Column */}
+                          <td className="p-3.5 text-right">
+                            <button
+                              type="button"
+                              disabled={deletingTxId === tx.id}
+                              onClick={() => handleDeleteTransaction(tx.id, tx.description)}
+                              className="p-1.5 rounded-lg border text-red-400 hover:text-red-300 border-red-900/40 hover:bg-red-950/20 transition cursor-pointer disabled:opacity-50"
+                              title={t('deleteTransactionTooltip', 'Delete Transaction')}
+                            >
+                              {deletingTxId === tx.id ? (
+                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </td>
                         </tr>
                       );
                     })
@@ -25130,7 +24075,6 @@ export default function AdminTokenSettingPage() {
 
               {/* Page Button Bar */}
               <div className="flex items-center gap-1.5">
-                {/* First Page Button */}
                 <button
                   type="button"
                   disabled={txPage <= 1 || txLoading}
@@ -25142,7 +24086,6 @@ export default function AdminTokenSettingPage() {
                   <ChevronsLeft className="h-4 w-4" />
                 </button>
 
-                {/* Previous Page Button */}
                 <button
                   type="button"
                   disabled={txPage <= 1 || txLoading}
@@ -25154,7 +24097,6 @@ export default function AdminTokenSettingPage() {
                   <ChevronLeft className="h-4 w-4" />
                 </button>
 
-                {/* Page Number Buttons */}
                 {getPageNumbers().map((num) => (
                   <button
                     key={num}
@@ -25175,7 +24117,6 @@ export default function AdminTokenSettingPage() {
                   </button>
                 ))}
 
-                {/* Next Page Button */}
                 <button
                   type="button"
                   disabled={txPage >= txTotalPages || txLoading}
@@ -25187,7 +24128,6 @@ export default function AdminTokenSettingPage() {
                   <ChevronRight className="h-4 w-4" />
                 </button>
 
-                {/* Last Page Button */}
                 <button
                   type="button"
                   disabled={txPage >= txTotalPages || txLoading}
@@ -33460,7 +32400,10 @@ import {
   User as UserIcon, Mail, Lock, CheckCircle, 
   AlertCircle, Calendar, LogOut, Check,
   Zap, Sparkles, RefreshCw, Shield,
-  Clock, Cpu, Repeat, Link2, Unlink, Key
+  Clock, Coins, Link2, Unlink, Key, ArrowRight,
+  ChefHat, DownloadCloud, DollarSign, Layers, 
+  ArrowDownLeft, ArrowUpRight, Activity, Wallet,
+  Search, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -33473,7 +32416,20 @@ interface TokenUsageData {
   totalTokens: number;
   requestCount: number;
   monthlyLimit: number;
-  reimburseFrequency: 'once' | 'weekly' | 'monthly';
+}
+
+interface TokenSettingIdentity {
+  tokenName: string;
+  tokenSymbol: string;
+}
+
+interface UserTokenTransaction {
+  id: string;
+  amount: number;
+  balance_after: number;
+  type: string;
+  description: string;
+  created_at: string;
 }
 
 interface ExtendedUser extends User {
@@ -33486,6 +32442,8 @@ interface ExtendedUser extends User {
   googleId?: string;
   facebookId?: string;
   appleId?: string;
+  token_balance?: number;
+  tokenBalance?: number;
   tokenUsage?: Partial<TokenUsageData>;
   token_usage?: Partial<TokenUsageData>;
   promptTokens?: number;
@@ -33519,7 +32477,6 @@ interface SubscriptionPlanItem {
   features?: string[];
   isFree?: boolean;
   tokenLimit?: number;
-  tokenReimburseFrequency?: 'once' | 'weekly' | 'monthly';
 }
 
 interface PaymentTransaction {
@@ -33563,8 +32520,7 @@ const SYSTEM_DEFAULT_FREE_PLAN: SubscriptionPlanItem = {
   socialScrapeLimit: 5,
   canViewMacros: false,
   allowedAiModels: 'gemini-1.5-flash,gpt-3.5-turbo',
-  tokenLimit: 50000,
-  tokenReimburseFrequency: 'monthly'
+  tokenLimit: 50000
 };
 
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
@@ -33689,15 +32645,14 @@ const getActiveLoginProvider = (u: any): SocialProvider | null => {
   return null;
 };
 
-const extractUserTokenUsage = (u: any, planLimit: number = 50000, planFreq: 'once' | 'weekly' | 'monthly' = 'monthly'): TokenUsageData => {
+const extractUserTokenUsage = (u: any, planLimit: number = 50000): TokenUsageData => {
   if (!u) {
     return {
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
       requestCount: 0,
-      monthlyLimit: planLimit,
-      reimburseFrequency: planFreq
+      monthlyLimit: planLimit
     };
   }
 
@@ -33712,8 +32667,7 @@ const extractUserTokenUsage = (u: any, planLimit: number = 50000, planFreq: 'onc
     completionTokens: isNaN(completionTokens) ? 0 : completionTokens,
     totalTokens: isNaN(totalTokens) ? 0 : totalTokens,
     requestCount: isNaN(requestCount) ? 0 : requestCount,
-    monthlyLimit: planLimit,
-    reimburseFrequency: planFreq
+    monthlyLimit: planLimit
   };
 };
 
@@ -33741,6 +32695,9 @@ export default function ProfilePage() {
     return fallback || key;
   }, [dynamicDict, rawT]);
 
+  // Tab Navigation: 'overview' | 'transactions'
+  const [activeTab, setActiveTab] = useState<'overview' | 'transactions'>('overview');
+
   const [user, setUserState] = useState<ExtendedUser | null>(null);
 
   const [name, setName] = useState('');
@@ -33763,19 +32720,45 @@ export default function ProfilePage() {
 
   const [currencySymbol, setCurrencySymbol] = useState('$');
 
+  // Token usage state
   const [tokenUsage, setTokenUsage] = useState<TokenUsageData>({
     promptTokens: 0,
     completionTokens: 0,
     totalTokens: 0,
     requestCount: 0,
-    monthlyLimit: 50000,
-    reimburseFrequency: 'monthly'
+    monthlyLimit: 50000
   });
-  const [activeModelName, setActiveModelName] = useState('gemini-1.5-flash');
+
+  // Token identity synchronized from /admin/token-setting
+  const [tokenIdentity, setTokenIdentity] = useState<TokenSettingIdentity>({
+    tokenName: 'Tokens',
+    tokenSymbol: '🪙'
+  });
+
+  // 1. Owner Token Balance State (Real-time balance from PostgreSQL users.token_balance)
+  const [ownerTokenBalance, setOwnerTokenBalance] = useState<number>(0);
+
+  // 2. Token Transactions & Summary State for Overview Card Preview
+  const [recentTransactions, setRecentTransactions] = useState<UserTokenTransaction[]>([]);
+  const [txSummaryStats, setTxSummaryStats] = useState({
+    totalDeducted: 0,
+    totalGranted: 0,
+    totalEvents: 0
+  });
+
+  // 3. User Dedicated "Token Transactions" Tab State
+  const [tabTransactions, setTabTransactions] = useState<UserTokenTransaction[]>([]);
+  const [tabLoading, setTabLoading] = useState(false);
+  const [tabSearch, setTabSearch] = useState('');
+  const [tabTypeFilter, setTabTypeFilter] = useState('all');
+  const [tabPage, setTabPage] = useState(1);
+  const [tabLimit, setTabLimit] = useState(10);
+  const [tabTotalPages, setTabTotalPages] = useState(1);
+  const [tabTotalCount, setTabTotalCount] = useState(0);
 
   const activeLoginProvider = useMemo(() => getActiveLoginProvider(user), [user]);
 
-  // 1. PostgreSQL Dynamic Localization Hydration & Global Events
+  // Dynamic Localization Hydration & Global Events
   const loadDynamicDictionary = useCallback(async () => {
     try {
       const activeLocale = currentLangCode || 'en';
@@ -33809,7 +32792,121 @@ export default function ProfilePage() {
     };
   }, [loadDynamicDictionary]);
 
-  // 2. Dynamic Theme & Settings Synchronization
+  // Synchronize Token Identity & Settings with /admin/token-setting
+  const syncTokenSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/token-setting', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const cfg = data.settings || data.config || data;
+        if (cfg) {
+          setTokenIdentity({
+            tokenName: cfg.tokenName || cfg.name || 'Tokens',
+            tokenSymbol: cfg.tokenSymbol || cfg.symbol || '🪙'
+          });
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  // Fetch Overview Token Balance & Summary from PostgreSQL
+  const fetchOverviewTokenData = useCallback(async (targetUser: any) => {
+    if (!targetUser?.id && !targetUser?.email) return;
+    try {
+      const queryParam = targetUser.id 
+        ? `?userId=${encodeURIComponent(targetUser.id)}&email=${encodeURIComponent(targetUser.email || '')}&limit=5`
+        : `?email=${encodeURIComponent(targetUser.email || '')}&limit=5`;
+      
+      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (typeof data.balance === 'number') {
+            setOwnerTokenBalance(data.balance);
+          }
+          if (data.tokenSymbol || data.tokenName) {
+            setTokenIdentity({
+              tokenName: data.tokenName || 'Tokens',
+              tokenSymbol: data.tokenSymbol || '🪙'
+            });
+          }
+          const txList: UserTokenTransaction[] = Array.isArray(data.transactions) ? data.transactions : [];
+          setRecentTransactions(txList);
+
+          if (data.stats) {
+            setTxSummaryStats({
+              totalDeducted: Number(data.stats.totalDeducted || 0),
+              totalGranted: Number(data.stats.totalGranted || 0),
+              totalEvents: Number(data.stats.totalEvents || data.totalCount || 0)
+            });
+          }
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  // Fetch Paginated User Transactions for "Token Transactions" Tab
+  const fetchTabTransactions = useCallback(async (pageToLoad = 1, limitToUse = tabLimit) => {
+    if (!user?.id && !user?.email) return;
+    setTabLoading(true);
+    try {
+      const params = new URLSearchParams({
+        userId: user.id || '',
+        email: user.email || '',
+        page: String(pageToLoad),
+        limit: String(limitToUse),
+        search: tabSearch,
+        type: tabTypeFilter
+      });
+
+      const res = await fetch(`/api/tokens?${params.toString()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setTabTransactions(data.transactions || []);
+          setTabTotalCount(data.totalCount || 0);
+          setTabTotalPages(data.totalPages || 1);
+          setTabPage(data.page || 1);
+          if (typeof data.balance === 'number') {
+            setOwnerTokenBalance(data.balance);
+          }
+          if (data.stats) {
+            setTxSummaryStats({
+              totalDeducted: Number(data.stats.totalDeducted || 0),
+              totalGranted: Number(data.stats.totalGranted || 0),
+              totalEvents: Number(data.stats.totalEvents || data.totalCount || 0)
+            });
+          }
+        }
+      }
+    } catch (_) {
+    } finally {
+      setTabLoading(false);
+    }
+  }, [user, tabSearch, tabTypeFilter, tabLimit]);
+
+  useEffect(() => {
+    if (activeTab === 'transactions') {
+      fetchTabTransactions(tabPage, tabLimit);
+    }
+  }, [activeTab, fetchTabTransactions, tabPage, tabLimit]);
+
+  useEffect(() => {
+    syncTokenSettings();
+    const handleTokenSettingsUpdate = () => {
+      syncTokenSettings();
+      if (user) {
+        fetchOverviewTokenData(user);
+        if (activeTab === 'transactions') fetchTabTransactions(tabPage, tabLimit);
+      }
+    };
+    window.addEventListener('zecratary_token_settings_updated', handleTokenSettingsUpdate);
+    return () => {
+      window.removeEventListener('zecratary_token_settings_updated', handleTokenSettingsUpdate);
+    };
+  }, [syncTokenSettings, fetchOverviewTokenData, fetchTabTransactions, user, activeTab, tabPage, tabLimit]);
+
+  // Dynamic Theme & Settings Synchronization
   const applySavedTheme = useCallback(async () => {
     if (isFetchingThemeRef.current) return;
     isFetchingThemeRef.current = true;
@@ -33839,16 +32936,6 @@ export default function ProfilePage() {
             };
             setCurrencySymbol(symbols[s.currency] || '$');
           }
-        }
-      }
-
-      if (typeof window !== 'undefined') {
-        const aiConfigRaw = localStorage.getItem('zecratary_chef_ai_settings') || localStorage.getItem('zecratary_engine_config');
-        if (aiConfigRaw) {
-          try {
-            const aiCfg = JSON.parse(aiConfigRaw);
-            if (aiCfg.model) setActiveModelName(aiCfg.model);
-          } catch (_) {}
         }
       }
     } catch (_) {
@@ -33921,23 +33008,12 @@ export default function ProfilePage() {
     const assignedLimit = matchedPlan.tokenLimit !== undefined 
       ? Number(matchedPlan.tokenLimit) 
       : (matchedPlan.isFree ? 50000 : 1000000);
-    const assignedFrequency = matchedPlan.tokenReimburseFrequency || 'monthly';
-
-    if (matchedPlan.allowedAiModels) {
-      const models = Array.isArray(matchedPlan.allowedAiModels) 
-        ? matchedPlan.allowedAiModels 
-        : String(matchedPlan.allowedAiModels).split(',').map(m => m.trim());
-      if (models.length > 0 && models[0]) {
-        setActiveModelName(models[0]);
-      }
-    }
 
     setTokenUsage(prev => {
-      const userSpecificTokens = extractUserTokenUsage(targetUser, assignedLimit, assignedFrequency);
+      const userSpecificTokens = extractUserTokenUsage(targetUser, assignedLimit);
       return {
         ...userSpecificTokens,
-        monthlyLimit: assignedLimit,
-        reimburseFrequency: assignedFrequency
+        monthlyLimit: assignedLimit
       };
     });
   }, [user]);
@@ -33996,7 +33072,6 @@ export default function ProfilePage() {
         descriptionAnnual: SYSTEM_DEFAULT_FREE_PLAN.description,
         features: SYSTEM_DEFAULT_FREE_PLAN.features,
         tokenLimit: SYSTEM_DEFAULT_FREE_PLAN.tokenLimit,
-        tokenReimburseFrequency: SYSTEM_DEFAULT_FREE_PLAN.tokenReimburseFrequency,
         aiRecipeLimit: SYSTEM_DEFAULT_FREE_PLAN.aiRecipeLimit,
         recipeLibraryLimit: SYSTEM_DEFAULT_FREE_PLAN.recipeLibraryLimit,
         socialScrapeLimit: SYSTEM_DEFAULT_FREE_PLAN.socialScrapeLimit,
@@ -34026,7 +33101,6 @@ export default function ProfilePage() {
       const rawSlug = (cfg.slug || cfg.id || cfg.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
       const cleanBaseSlug = rawSlug.replace(/-(monthly|annual|free)$/i, '');
       const tokenLimit = cfg.tokenLimit !== undefined ? Number(cfg.tokenLimit) : (isFree ? 50000 : 1000000);
-      const tokenReimburseFrequency = cfg.tokenReimburseFrequency || 'monthly';
 
       if (isFree) {
         const freeSlug = cleanBaseSlug || 'taster';
@@ -34047,8 +33121,7 @@ export default function ProfilePage() {
           socialScrapeLimit: cfg.socialScrapeLimit,
           canViewMacros: Boolean(cfg.canViewMacros),
           allowedAiModels: cfg.allowedAiModels,
-          tokenLimit,
-          tokenReimburseFrequency,
+          tokenLimit
         });
       } else {
         const hasMonthly = cfg.monthlyPriceDollars !== undefined && cfg.monthlyPriceDollars !== null && Number(cfg.monthlyPriceDollars) > 0;
@@ -34074,8 +33147,7 @@ export default function ProfilePage() {
             socialScrapeLimit: cfg.socialScrapeLimit,
             canViewMacros: Boolean(cfg.canViewMacros),
             allowedAiModels: cfg.allowedAiModels,
-            tokenLimit,
-            tokenReimburseFrequency,
+            tokenLimit
           });
         }
 
@@ -34099,8 +33171,7 @@ export default function ProfilePage() {
             socialScrapeLimit: cfg.socialScrapeLimit,
             canViewMacros: Boolean(cfg.canViewMacros),
             allowedAiModels: cfg.allowedAiModels,
-            tokenLimit,
-            tokenReimburseFrequency,
+            tokenLimit
           });
         }
       }
@@ -34180,7 +33251,8 @@ export default function ProfilePage() {
               ...active,
               ...fresh,
               subscriptionPlan: authoritativePlan,
-              planSlug: authoritativePlan
+              planSlug: authoritativePlan,
+              token_balance: fresh.token_balance ?? fresh.tokenBalance ?? (active as any)?.token_balance
             };
           }
         }
@@ -34248,6 +33320,10 @@ export default function ProfilePage() {
       setName(prev => (prev === (matchedUser.name || '') ? prev : (matchedUser.name || '')));
       setEmail(prev => (prev === (matchedUser.email || '') ? prev : (matchedUser.email || '')));
 
+      if (matchedUser.token_balance !== undefined) {
+        setOwnerTokenBalance(Number(matchedUser.token_balance));
+      }
+
       try {
         localStorage.setItem('zecratary_current_user', JSON.stringify(matchedUser));
         localStorage.setItem('zecratary_user', JSON.stringify(matchedUser));
@@ -34255,10 +33331,12 @@ export default function ProfilePage() {
 
       const userPlan = sanitizeSinglePlan((matchedUser as any).subscriptionPlan || (matchedUser as any).planSlug || 'taster');
       syncActivePlanTokens(userPlan, plansRef.current, matchedUser);
+
+      fetchOverviewTokenData(matchedUser);
     } finally {
       isFetchingProfileRef.current = false;
     }
-  }, [router, syncActivePlanTokens]);
+  }, [router, syncActivePlanTokens, fetchOverviewTokenData]);
 
   const syncPlansRef = useRef(syncPlansFromAdmin);
   syncPlansRef.current = syncPlansFromAdmin;
@@ -34285,12 +33363,14 @@ export default function ProfilePage() {
     window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
     window.addEventListener('zecratary_users_updated', handleDebouncedSync);
     window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_token_settings_updated', handleDebouncedSync);
 
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_users_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleDebouncedSync);
     };
   }, []);
 
@@ -34505,14 +33585,65 @@ export default function ProfilePage() {
     }
   };
 
-  const getReimburseScheduleText = useCallback((freq: string) => {
-    switch(freq) {
-      case 'once': return t('reimburseOnceSchedule', 'Reimbursed: Once (Non-recurring)');
-      case 'weekly': return t('reimburseWeeklySchedule', 'Reimbursed: Every Week from purchase date');
-      case 'monthly': return t('reimburseMonthlySchedule', 'Reimbursed: Every Month from purchase date');
-      default: return t('reimburseMonthlyDefault', 'Reimbursed: Monthly');
+  // Service Badge renderer matching /admin/token-setting
+  const renderServiceBadge = (type: string) => {
+    if (type === 'usage_chef') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-orange-500/10 text-orange-500 border border-orange-500/20">
+          <ChefHat className="h-3 w-3" /> /chef AI Chat
+        </span>
+      );
     }
-  }, [t]);
+    if (type.startsWith('usage_import')) {
+      const sub = type.replace('usage_import_', '');
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+          <DownloadCloud className="h-3 w-3" /> /import ({sub.toUpperCase()})
+        </span>
+      );
+    }
+    if (type === 'package_purchase') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-400 border border-blue-500/20">
+          <DollarSign className="h-3 w-3" /> Package Purchase
+        </span>
+      );
+    }
+    if (type === 'plan_purchase') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          <Layers className="h-3 w-3" /> Plan Purchase
+        </span>
+      );
+    }
+    if (type === 'plan_monthly_grant') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          <Layers className="h-3 w-3" /> Monthly Grant
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-slate-500/10 text-slate-400 border border-slate-500/20">
+        <Activity className="h-3 w-3" /> {type.replace('_', ' ')}
+      </span>
+    );
+  };
+
+  // Pagination Window Calculator
+  const getPageNumbers = () => {
+    const pages: number[] = [];
+    const maxVisible = 5;
+    let start = Math.max(1, tabPage - Math.floor(maxVisible / 2));
+    let end = Math.min(tabTotalPages, start + maxVisible - 1);
+    if (end - start + 1 < maxVisible) {
+      start = Math.max(1, end - maxVisible + 1);
+    }
+    for (let i = start; i <= end; i++) {
+      pages.push(i);
+    }
+    return pages;
+  };
 
   if (!user) {
     return (
@@ -34556,6 +33687,7 @@ export default function ProfilePage() {
         }
       `}} />
 
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
@@ -34567,7 +33699,18 @@ export default function ProfilePage() {
         </div>
 
         {user.role === 'admin' && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Link
+              href="/admin/token-setting"
+              className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <Coins className="h-3.5 w-3.5 text-amber-500" /> {t('tokenSettings', 'Token Settings')}
+            </Link>
             <Link
               href="/admin/social-login-setting"
               className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
@@ -34605,6 +33748,7 @@ export default function ProfilePage() {
         )}
       </div>
 
+      {/* Notifications */}
       {error && (
         <div 
           className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
@@ -34633,451 +33777,879 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* USER DETAILS & TOKEN USAGE GRID */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* MAIN PROFILE CARD */}
-        <div 
-          className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6" style={{ borderColor: 'var(--color-border)' }}>
-            <div className="flex items-center gap-4">
-              <div 
-                className="w-14 h-14 rounded-2xl border flex items-center justify-center text-xl font-black shadow-inner"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-primary)'
-                }}
-              >
-                {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>{user.name}</h1>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                    {user.role}
-                  </span>
-                </div>
-                <p className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>{user.email}</p>
-                {user.id && (
-                  <p className="text-[11px] font-mono tracking-tight" style={{ color: 'var(--color-text-secondary)' }}>
-                    ID: {user.id}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="text-left sm:text-right text-[11px] space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
-              <div className="flex sm:justify-end items-center gap-1.5">
-                <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                <span>{t('joinedPrefix', 'Joined: ')} {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : t('activeStatus', 'Active')}</span>
-              </div>
-              
-              <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
-                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{t('activeMembershipLabel', 'Membership:')}</span>
-                <span 
-                  className="font-bold px-2.5 py-0.5 rounded-full text-[10px] uppercase border shadow-sm inline-flex items-center gap-1"
-                  style={{
-                    backgroundColor: userPlanBadge.bg,
-                    borderColor: userPlanBadge.border,
-                    color: userPlanBadge.color
-                  }}
-                >
-                  <PlanHeaderIcon className="h-3 w-3 shrink-0" />
-                  {userPlanBadge.label}
-                </span>
-              </div>
-
-              {activeExpiryDate ? (
-                <div className="flex sm:justify-end items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold pt-0.5">
-                  <Clock className="h-3 w-3" />
-                  <span>{t('renewalExpiryPrefix', 'Expiry: ')} {new Date(activeExpiryDate).toLocaleDateString()}</span>
-                </div>
-              ) : (
-                <div className="flex sm:justify-end items-center gap-1 text-[11px] italic pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  <span>{t('freeTierNoExpiry', 'Free Tier')}</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{t('fullNameLabel', 'Full Name *')}</label>
-                <div className="relative">
-                  <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder={t('namePlaceholder', 'e.g. Jordan Smith')}
-                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{t('emailAddressLabel', 'Email Address *')}</label>
-                <div className="relative">
-                  <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder={t('emailPlaceholder', 'name@example.com')}
-                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('newPasswordLabel', 'New Password')} <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>{t('leaveBlankCurrentPass', '(leave blank)')}</span>
-                </label>
-                <div className="relative">
-                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('confirmPasswordLabel', 'Confirm Password')} <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>{t('repeatNewPass', '(repeat)')}</span>
-                </label>
-                <div className="relative">
-                  <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  logoutUser();
-                  router.replace('/login');
-                }}
-                className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'rgba(239, 68, 68, 0.4)',
-                  color: '#ef4444'
-                }}
-              >
-                <LogOut className="h-4 w-4 text-red-500" /> {t('signOutBtn', 'Sign Out')}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDeleteAccount}
-                className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs text-red-400 hover:text-red-300 border-red-900/60 hover:bg-red-950/30"
-                style={{ backgroundColor: 'var(--color-inner-dark)' }}
-              >
-                {t('deleteAccountBtn', 'Delete Account')}
-              </button>
-
-              <button
-                type="submit"
-                className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-              >
-                <Check className="h-4 w-4" /> {t('saveProfileBtn', 'Save Profile')}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        {/* AI TOKEN USAGE & CONSUMPTION CARD */}
-        <div 
-          className="lg:col-span-5 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          <div className="space-y-4">
-            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <Cpu className="h-5 w-5 text-orange-400" /> {t('aiTokenUsageQuotaTitle', 'AI Token Usage & Quota')}
-              </h2>
-              <span 
-                className="text-[10px] font-mono px-2.5 py-1 rounded-lg border font-bold shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: '#f97316'
-                }}
-              >
-                {activeModelName}
-              </span>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex justify-between items-baseline">
-                <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('tokenAllocationLimitLabel', 'Token Allocation Limit')}
-                </span>
-                <span className="text-sm font-black font-mono" style={{ color: 'var(--color-text)' }}>
-                  {tokenUsage.totalTokens.toLocaleString()}{' '}
-                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    / {isUnlimited ? t('unlimitedTokensLabel', '∞ Unlimited') : tokenUsage.monthlyLimit.toLocaleString()}
-                  </span>
-                </span>
-              </div>
-
-              <div 
-                className="border rounded-full h-3.5 overflow-hidden p-0.5 shadow-inner"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <div 
-                  className="h-full rounded-full transition-all duration-500" 
-                  style={{ 
-                    width: isUnlimited ? '100%' : `${tokenPercentage}%`,
-                    backgroundColor: isUnlimited ? 'var(--color-emerald)' : tokenPercentage > 85 ? '#ef4444' : tokenPercentage > 60 ? '#f59e0b' : 'var(--color-primary)'
-                  }}
-                />
-              </div>
-
-              <div className="flex justify-between text-[11px]">
-                <span style={{ color: 'var(--color-text-secondary)' }}>
-                  {isUnlimited ? t('unlimitedTokensTier', 'Unlimited Tokens Tier') : `${tokenPercentage}% ${t('ofQuotaUsed', 'of quota used')}`}
-                </span>
-                <span className="text-emerald-500 dark:text-emerald-400 font-semibold">
-                  {tokenUsage.requestCount} {t('aiRequestsCountLabel', 'AI Requests')}
-                </span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <div 
-                className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('promptInputLabel', 'Prompt Input')}
-                </span>
-                <span className="text-base font-black font-mono" style={{ color: 'var(--color-text)' }}>
-                  {tokenUsage.promptTokens.toLocaleString()}
-                </span>
-                <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('tokensUserContextDesc', 'Tokens (User & Context)')}
-                </span>
-              </div>
-
-              <div 
-                className="border rounded-2xl p-3.5 space-y-1 shadow-inner"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <span className="text-[10px] uppercase tracking-wider font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('completionOutputLabel', 'Completion Output')}
-                </span>
-                <span className="text-base font-black text-emerald-500 dark:text-emerald-400 font-mono">
-                  {tokenUsage.completionTokens.toLocaleString()}
-                </span>
-                <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('tokensGeneratedReplyDesc', 'Tokens (Generated Reply)')}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div 
-            className="p-4 rounded-2xl border text-[11px] space-y-2 shadow-inner"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-secondary)'
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 font-bold" style={{ color: 'var(--color-text)' }}>
-                <Repeat className="h-3.5 w-3.5 text-orange-400" /> {t('reimburseScheduleTitle', 'Reimburse Schedule')}
-              </span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold uppercase bg-orange-500/10 text-orange-400 border border-orange-500/20">
-                {tokenUsage.reimburseFrequency || 'monthly'}
-              </span>
-            </div>
-            <p className="leading-relaxed">
-              {getReimburseScheduleText(tokenUsage.reimburseFrequency)}. {t('quotasReimbursedDesc', 'Quotas are automatically reimbursed based on your plan tier and purchase cycle.')}
-            </p>
-          </div>
-        </div>
-
-      </div>
-
-      {/* CONNECTED SOCIAL ACCOUNTS */}
+      {/* TAB NAVIGATION: "Profile Overview" vs "Token Transactions" */}
       <div 
-        className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
+        className="flex p-1.5 rounded-2xl border transition-colors duration-200"
         style={{
-          backgroundColor: 'var(--color-card)',
+          backgroundColor: 'var(--color-inner-dark)',
           borderColor: 'var(--color-border)'
         }}
       >
-        <div className="border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-          <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-            <Link2 className="h-5 w-5 text-[var(--color-primary)]" />
-            {t('connectedSocialAccountsTitle', 'Connected Social Accounts')}
-          </h2>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('connectedSocialAccountsSubtitle', 'Link external identities (Google, Facebook, Apple) to enable seamless one-click sign in.')}
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveTab('overview')}
+          className="flex-1 py-2.5 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
+          style={activeTab === 'overview' ? {
+            backgroundColor: 'var(--color-card)',
+            color: 'var(--color-emerald)',
+            borderColor: 'var(--color-emerald)',
+            borderWidth: '1px',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+          } : {
+            color: 'var(--color-text-secondary)'
+          }}
+        >
+          <UserIcon className="h-4 w-4" />
+          <span>{t('profileOverviewTab', 'Profile Overview')}</span>
+        </button>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-          {([
-            {
-              id: 'google' as SocialProvider,
-              name: 'Google',
-              renderIcon: () => (
-                <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                </svg>
-              )
-            },
-            {
-              id: 'facebook' as SocialProvider,
-              name: 'Facebook',
-              renderIcon: () => (
-                <svg className="w-5 h-5 fill-current text-blue-600 shrink-0" viewBox="0 0 24 24">
-                  <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.312h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
-                </svg>
-              )
-            },
-            {
-              id: 'apple' as SocialProvider,
-              name: 'Apple',
-              renderIcon: () => (
-                <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24">
-                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.56.64-1.06 1.7-0.93 2.73 1.02.08 2.05-.48 2.66-1.23z" />
-                </svg>
-              )
-            }
-          ]).map(({ id: provId, name: provName, renderIcon }) => {
-            const isPrimary = activeLoginProvider === provId;
-            const isLinked = Boolean(user.linkedProviders?.includes(provId)) || isPrimary;
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('transactions');
+            fetchTabTransactions(1, tabLimit);
+          }}
+          className="flex-1 py-2.5 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
+          style={activeTab === 'transactions' ? {
+            backgroundColor: 'var(--color-card)',
+            color: 'var(--color-emerald)',
+            borderColor: 'var(--color-emerald)',
+            borderWidth: '1px',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+          } : {
+            color: 'var(--color-text-secondary)'
+          }}
+        >
+          <Coins className="h-4 w-4 text-amber-500" />
+          <span>{t('tokenTransactionsTab', 'Token Transactions')}</span>
+          {txSummaryStats.totalEvents > 0 && (
+            <span className="ml-1 text-[10px] font-mono px-2 py-0.5 rounded-full border bg-primary/10" style={{ borderColor: 'var(--color-border)' }}>
+              {txSummaryStats.totalEvents}
+            </span>
+          )}
+        </button>
+      </div>
 
-            return (
-              <div 
-                key={provId}
-                className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <div className="flex items-center gap-3">
-                  {renderIcon()}
-                  <div>
-                    <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                      {t(provId + 'Provider', provName)}
-                    </span>
-                    <span className={`text-[10px] font-semibold ${isLinked ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
-                      {isPrimary 
-                        ? t('linkedLoginMethod', 'Linked (Login Method)') 
-                        : isLinked 
-                        ? t('linked', 'Linked') 
-                        : t('notLinked', 'Not Linked')}
-                    </span>
+      {/* ========================================================================= */}
+      {/* TAB 1: PROFILE OVERVIEW (Credentials, Token Balance & Socials)            */}
+      {/* ========================================================================= */}
+      {activeTab === 'overview' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* USER DETAILS & TOKEN BALANCE / SUMMARY GRID */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            {/* MAIN PROFILE CARD */}
+            <div 
+              className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex items-center gap-4">
+                  <div 
+                    className="w-14 h-14 rounded-2xl border flex items-center justify-center text-xl font-black shadow-inner"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>{user.name}</h1>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                        {user.role}
+                      </span>
+                    </div>
+                    <p className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>{user.email}</p>
+                    {user.id && (
+                      <p className="text-[11px] font-mono tracking-tight" style={{ color: 'var(--color-text-secondary)' }}>
+                        ID: {user.id}
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  disabled={processingSocial !== null}
-                  onClick={() => handleToggleSocialLink(provId)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
-                    isLinked
-                      ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
-                      : 'text-white shadow-xs'
-                  }`}
+                <div className="text-left sm:text-right text-[11px] space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  <div className="flex sm:justify-end items-center gap-1.5">
+                    <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                    <span>{t('joinedPrefix', 'Joined: ')} {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : t('activeStatus', 'Active')}</span>
+                  </div>
+                  
+                  <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
+                    <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{t('activeMembershipLabel', 'Membership:')}</span>
+                    <span 
+                      className="font-bold px-2.5 py-0.5 rounded-full text-[10px] uppercase border shadow-sm inline-flex items-center gap-1"
+                      style={{
+                        backgroundColor: userPlanBadge.bg,
+                        borderColor: userPlanBadge.border,
+                        color: userPlanBadge.color
+                      }}
+                    >
+                      <PlanHeaderIcon className="h-3 w-3 shrink-0" />
+                      {userPlanBadge.label}
+                    </span>
+                  </div>
+
+                  {activeExpiryDate ? (
+                    <div className="flex sm:justify-end items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold pt-0.5">
+                      <Clock className="h-3 w-3" />
+                      <span>{t('renewalExpiryPrefix', 'Expiry: ')} {new Date(activeExpiryDate).toLocaleDateString()}</span>
+                    </div>
+                  ) : (
+                    <div className="flex sm:justify-end items-center gap-1 text-[11px] italic pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span>{t('freeTierNoExpiry', 'Free Tier')}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{t('fullNameLabel', 'Full Name *')}</label>
+                    <div className="relative">
+                      <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
+                      <input
+                        type="text"
+                        required
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder={t('namePlaceholder', 'e.g. Jordan Smith')}
+                        className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                        onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                        onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{t('emailAddressLabel', 'Email Address *')}</label>
+                    <div className="relative">
+                      <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder={t('emailPlaceholder', 'name@example.com')}
+                        className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                        onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                        onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('newPasswordLabel', 'New Password')} <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>{t('leaveBlankCurrentPass', '(leave blank)')}</span>
+                    </label>
+                    <div className="relative">
+                      <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                        onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                        onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('confirmPasswordLabel', 'Confirm Password')} <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>{t('repeatNewPass', '(repeat)')}</span>
+                    </label>
+                    <div className="relative">
+                      <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="profile-input w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none transition font-bold"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                        onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                        onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      logoutUser();
+                      router.replace('/login');
+                    }}
+                    className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'rgba(239, 68, 68, 0.4)',
+                      color: '#ef4444'
+                    }}
+                  >
+                    <LogOut className="h-4 w-4 text-red-500" /> {t('signOutBtn', 'Sign Out')}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDeleteAccount}
+                    className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs text-red-400 hover:text-red-300 border-red-900/60 hover:bg-red-950/30"
+                    style={{ backgroundColor: 'var(--color-inner-dark)' }}
+                  >
+                    {t('deleteAccountBtn', 'Delete Account')}
+                  </button>
+
+                  <button
+                    type="submit"
+                    className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                  >
+                    <Check className="h-4 w-4" /> {t('saveProfileBtn', 'Save Profile')}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* TOKEN BALANCE & SUMMARY CARD */}
+            <div 
+              className="lg:col-span-5 border rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl transition-colors duration-200 flex flex-col justify-between"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="space-y-4">
+                {/* Header: "Token Balance & Summary" */}
+                <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+                  <h2 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                    <Coins className="h-5 w-5 text-amber-500 shrink-0" />
+                    <span>{t('tokenBalanceAndSummaryTitle', 'Token Balance & Summary')}</span>
+                  </h2>
+                  <span 
+                    className="text-[10px] font-mono px-2.5 py-1 rounded-lg border font-bold shadow-xs uppercase tracking-wider"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    {tokenIdentity.tokenName}
+                  </span>
+                </div>
+
+                {/* 1. Show Owner Token Balance */}
+                <div 
+                  className="border rounded-2xl p-4 space-y-2.5 shadow-inner"
                   style={{
-                    backgroundColor: isLinked ? 'transparent' : 'var(--color-primary)'
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
-                  {processingSocial === provId ? (
-                    <RefreshCw className="h-3 w-3 animate-spin" />
-                  ) : isLinked ? (
-                    <>
-                      <Unlink className="h-3 w-3" /> {t('unlinkBtn', 'Unlink')}
-                    </>
-                  ) : (
-                    <>
-                      <Link2 className="h-3 w-3" /> {t('linkBtn', 'Link')}
-                    </>
-                  )}
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      <Wallet className="h-4 w-4 text-amber-500" />
+                      <span>{t('ownerTokenBalanceLabel', 'Owner Token Balance')}</span>
+                    </span>
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                      {t('walletActive', 'Wallet Active')}
+                    </span>
+                  </div>
+
+                  <div className="flex items-baseline gap-2 pt-0.5">
+                    <span className="text-3xl font-black font-mono" style={{ color: 'var(--color-emerald)' }}>
+                      {ownerTokenBalance.toLocaleString()}
+                    </span>
+                    <span className="text-base font-black text-amber-500 font-mono">
+                      {tokenIdentity.tokenSymbol}
+                    </span>
+                    <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                      {tokenIdentity.tokenName}
+                    </span>
+                  </div>
+
+                  {/* Plan Allocation & Capacity Progress Bar */}
+                  <div className="space-y-1.5 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                    <div className="flex justify-between items-center text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span>{t('planAllowanceLimit', 'Plan Allowance Quota:')}</span>
+                      <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>
+                        {isUnlimited ? t('unlimitedTokensLabel', '∞ Unlimited') : `${tokenUsage.monthlyLimit.toLocaleString()} ${tokenIdentity.tokenSymbol}`}
+                      </span>
+                    </div>
+
+                    <div 
+                      className="border rounded-full h-2.5 overflow-hidden p-0.5 shadow-inner"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div 
+                        className="h-full rounded-full transition-all duration-500" 
+                        style={{ 
+                          width: isUnlimited ? '100%' : `${tokenPercentage}%`,
+                          backgroundColor: isUnlimited ? 'var(--color-emerald)' : tokenPercentage > 85 ? '#ef4444' : tokenPercentage > 60 ? '#f59e0b' : 'var(--color-primary)'
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Token Transaction Summary */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                      <Activity className="h-3.5 w-3.5 text-purple-400" />
+                      <span>{t('tokenTransactionSummaryTitle', 'Token Transaction Summary')}</span>
+                    </span>
+                    <span className="text-[10px] font-mono font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                      {txSummaryStats.totalEvents} {t('eventsLogged', 'logged')}
+                    </span>
+                  </div>
+
+                  {/* Summary 3-KPI Row matching /admin/token-setting */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div 
+                      className="border rounded-xl p-2.5 space-y-0.5 shadow-inner text-center"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center justify-center gap-1 text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                        <ArrowDownLeft className="h-3 w-3 text-red-500" />
+                        <span>{t('consumed', 'Consumed')}</span>
+                      </div>
+                      <div className="text-xs font-black font-mono text-red-400">
+                        -{txSummaryStats.totalDeducted.toLocaleString()} {tokenIdentity.tokenSymbol}
+                      </div>
+                    </div>
+
+                    <div 
+                      className="border rounded-xl p-2.5 space-y-0.5 shadow-inner text-center"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center justify-center gap-1 text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                        <ArrowUpRight className="h-3 w-3 text-emerald-500" />
+                        <span>{t('granted', 'Granted')}</span>
+                      </div>
+                      <div className="text-xs font-black font-mono text-emerald-400">
+                        +{txSummaryStats.totalGranted.toLocaleString()} {tokenIdentity.tokenSymbol}
+                      </div>
+                    </div>
+
+                    <div 
+                      className="border rounded-xl p-2.5 space-y-0.5 shadow-inner text-center"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center justify-center gap-1 text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                        <Activity className="h-3 w-3 text-purple-400" />
+                        <span>{t('events', 'Events')}</span>
+                      </div>
+                      <div className="text-xs font-black font-mono" style={{ color: 'var(--color-text)' }}>
+                        {txSummaryStats.totalEvents}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Recent Activity List */}
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[11px] font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('recentTokenActivity', 'Recent Token Activity')}
+                    </span>
+
+                    {recentTransactions.length === 0 ? (
+                      <div 
+                        className="p-3.5 rounded-xl border text-center text-xs font-medium"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
+                        }}
+                      >
+                        {t('noTokenTransactionsYet', 'No token transactions recorded yet. Use /chef or /import to begin!')}
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+                        {recentTransactions.slice(0, 4).map((tx) => {
+                          const isNegative = Number(tx.amount) < 0;
+                          return (
+                            <div 
+                              key={tx.id}
+                              className="p-2.5 rounded-xl border flex items-center justify-between text-xs transition"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)'
+                              }}
+                            >
+                              <div className="space-y-0.5">
+                                <div>{renderServiceBadge(tx.type)}</div>
+                                <div className="text-[10px] font-mono opacity-70 truncate max-w-[170px]" style={{ color: 'var(--color-text-secondary)' }} title={tx.description}>
+                                  {tx.description || new Date(tx.created_at).toLocaleDateString()}
+                                </div>
+                              </div>
+
+                              <div className="text-right">
+                                <span className={`font-mono font-black text-xs ${isNegative ? 'text-red-400' : 'text-emerald-400'}`}>
+                                  {isNegative ? '' : '+'}{tx.amount} {tokenIdentity.tokenSymbol}
+                                </span>
+                                <div className="text-[10px] font-mono opacity-60" style={{ color: 'var(--color-text-secondary)' }}>
+                                  Bal: {tx.balance_after}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Action: Switches to Token Transactions Tab */}
+              <div className="pt-2 border-t flex items-center justify-between" style={{ borderColor: 'var(--color-border)' }}>
+                <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {txSummaryStats.totalEvents} {t('totalLedgerItems', 'transactions in ledger')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('transactions');
+                    fetchTabTransactions(1, tabLimit);
+                  }}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-amber-500 hover:text-amber-400 transition cursor-pointer"
+                >
+                  <span>{t('viewAllTransactionsBtn', 'View Full Ledger in Tab')}</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
                 </button>
               </div>
-            );
-          })}
+            </div>
+
+          </div>
+
+          {/* CONNECTED SOCIAL ACCOUNTS */}
+          <div 
+            className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Link2 className="h-5 w-5 text-[var(--color-primary)]" />
+                {t('connectedSocialAccountsTitle', 'Connected Social Accounts')}
+              </h2>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('connectedSocialAccountsSubtitle', 'Link external identities (Google, Facebook, Apple) to enable seamless one-click sign in.')}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+              {([
+                {
+                  id: 'google' as SocialProvider,
+                  name: 'Google',
+                  renderIcon: () => (
+                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                    </svg>
+                  )
+                },
+                {
+                  id: 'facebook' as SocialProvider,
+                  name: 'Facebook',
+                  renderIcon: () => (
+                    <svg className="w-5 h-5 fill-current text-blue-600 shrink-0" viewBox="0 0 24 24">
+                      <path d="M22.675 0h-21.35c-.732 0-1.325.593-1.325 1.325v21.351c0 .731.593 1.324 1.325 1.324h11.495v-9.294h-3.128v-3.622h3.128v-2.671c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.312h3.587l-.467 3.622h-3.12v9.293h6.116c.73 0 1.323-.593 1.323-1.325v-21.35c0-.732-.593-1.325-1.325-1.325z" />
+                    </svg>
+                  )
+                },
+                {
+                  id: 'apple' as SocialProvider,
+                  name: 'Apple',
+                  renderIcon: () => (
+                    <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24">
+                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.56.64-1.06 1.7-0.93 2.73 1.02.08 2.05-.48 2.66-1.23z" />
+                    </svg>
+                  )
+                }
+              ]).map(({ id: provId, name: provName, renderIcon }) => {
+                const isPrimary = activeLoginProvider === provId;
+                const isLinked = Boolean(user.linkedProviders?.includes(provId)) || isPrimary;
+
+                return (
+                  <div 
+                    key={provId}
+                    className="border rounded-2xl p-4 flex items-center justify-between shadow-xs transition"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)'
+                    }}
+                  >
+                    <div className="flex items-center gap-3">
+                      {renderIcon()}
+                      <div>
+                        <span className="block font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                          {t(provId + 'Provider', provName)}
+                        </span>
+                        <span className={`text-[10px] font-semibold ${isLinked ? 'text-[var(--color-emerald)]' : 'text-slate-500'}`}>
+                          {isPrimary 
+                            ? t('linkedLoginMethod', 'Linked (Login Method)') 
+                            : isLinked 
+                            ? t('linked', 'Linked') 
+                            : t('notLinked', 'Not Linked')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={processingSocial !== null}
+                      onClick={() => handleToggleSocialLink(provId)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                        isLinked
+                          ? 'border border-red-900/40 text-red-400 hover:bg-red-950/20'
+                          : 'text-white shadow-xs'
+                      }`}
+                      style={{
+                        backgroundColor: isLinked ? 'transparent' : 'var(--color-primary)'
+                      }}
+                    >
+                      {processingSocial === provId ? (
+                        <RefreshCw className="h-3 w-3 animate-spin" />
+                      ) : isLinked ? (
+                        <>
+                          <Unlink className="h-3 w-3" /> {t('unlinkBtn', 'Unlink')}
+                        </>
+                      ) : (
+                        <>
+                          <Link2 className="h-3 w-3" /> {t('linkBtn', 'Link')}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 2: USER TOKEN TRANSACTIONS AUDIT LEDGER WITH PAGINATION               */}
+      {/* ========================================================================= */}
+      {activeTab === 'transactions' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Summary KPI Cards for Logged-In User */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="border rounded-2xl p-4 shadow-md space-y-1" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center justify-between text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                <span>{t('myWalletBalance', 'My Token Balance')}</span>
+                <Wallet className="h-4 w-4 text-amber-500" />
+              </div>
+              <div className="text-2xl font-black font-mono text-emerald-400">
+                {ownerTokenBalance.toLocaleString()} <span className="text-xs text-amber-500">{tokenIdentity.tokenSymbol}</span>
+              </div>
+              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Available for /chef and /import</p>
+            </div>
+
+            <div className="border rounded-2xl p-4 shadow-md space-y-1" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center justify-between text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                <span>{t('totalDeductions', 'Total Consumed')}</span>
+                <ArrowDownLeft className="h-4 w-4 text-red-500" />
+              </div>
+              <div className="text-2xl font-black font-mono text-red-400">
+                -{txSummaryStats.totalDeducted.toLocaleString()} <span className="text-xs text-amber-500">{tokenIdentity.tokenSymbol}</span>
+              </div>
+              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Tokens debited on AI operations</p>
+            </div>
+
+            <div className="border rounded-2xl p-4 shadow-md space-y-1" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center justify-between text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                <span>{t('totalGranted', 'Total Granted / Bought')}</span>
+                <ArrowUpRight className="h-4 w-4 text-emerald-500" />
+              </div>
+              <div className="text-2xl font-black font-mono text-emerald-400">
+                +{txSummaryStats.totalGranted.toLocaleString()} <span className="text-xs text-amber-500">{tokenIdentity.tokenSymbol}</span>
+              </div>
+              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>From plans, grants & packages</p>
+            </div>
+
+            <div className="border rounded-2xl p-4 shadow-md space-y-1" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center justify-between text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                <span>{t('totalEvents', 'Total Transactions')}</span>
+                <Activity className="h-4 w-4 text-purple-400" />
+              </div>
+              <div className="text-2xl font-black font-mono" style={{ color: 'var(--color-text)' }}>
+                {tabTotalCount.toLocaleString()}
+              </div>
+              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Immutable ledger rows in PostgreSQL</p>
+            </div>
+          </div>
+
+          {/* Filtering and Search Controls */}
+          <div 
+            className="border rounded-3xl p-5 shadow-xl space-y-4"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              {/* Search Bar */}
+              <div className="relative flex-1 w-full">
+                <Search className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
+                <input
+                  type="text"
+                  value={tabSearch}
+                  onChange={(e) => {
+                    setTabSearch(e.target.value);
+                    setTabPage(1);
+                  }}
+                  placeholder={t('searchMyTransactionsPlaceholder', 'Search by description or transaction ID...')}
+                  className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-xs font-semibold outline-none transition"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              {/* Service Filter */}
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <Filter className="h-4 w-4 shrink-0 text-amber-500" />
+                <select
+                  value={tabTypeFilter}
+                  onChange={(e) => {
+                    setTabTypeFilter(e.target.value);
+                    setTabPage(1);
+                  }}
+                  className="w-full sm:w-48 border rounded-xl px-3 py-2.5 text-xs font-bold outline-none cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  <option value="all">All Services & Sources</option>
+                  <option value="chef">/chef (AI Chat)</option>
+                  <option value="import">/import (All Types)</option>
+                  <option value="purchase">All Purchases (Plans & Packages)</option>
+                  <option value="plan_purchase">Plan Purchases</option>
+                  <option value="grant">Monthly Plan Grants</option>
+                </select>
+              </div>
+
+              {/* Items per page selector */}
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <span className="text-xs font-bold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('rowsLabel', 'Rows:')}
+                </span>
+                <select
+                  value={tabLimit}
+                  onChange={(e) => {
+                    const newLimit = parseInt(e.target.value, 10);
+                    setTabLimit(newLimit);
+                    setTabPage(1);
+                  }}
+                  className="border rounded-xl px-3 py-2.5 text-xs font-bold outline-none cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  <option value="10">10</option>
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                </select>
+              </div>
+
+              {/* Refresh Button */}
+              <button
+                type="button"
+                onClick={() => fetchTabTransactions(tabPage, tabLimit)}
+                disabled={tabLoading}
+                className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition hover:opacity-80 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${tabLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+                <span>{t('refreshBtn', 'Refresh')}</span>
+              </button>
+            </div>
+
+            {/* Transactions Table */}
+            <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                    <th className="p-3.5">Service / Operation</th>
+                    <th className="p-3.5">Amount</th>
+                    <th className="p-3.5">Balance After</th>
+                    <th className="p-3.5">Description</th>
+                    <th className="p-3.5">Timestamp</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+                  {tabLoading ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                        <div className="flex items-center justify-center gap-2">
+                          <RefreshCw className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} />
+                          <span>{t('loadingLedger', 'Loading your token transactions...')}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : tabTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                        {t('noTransactionsFound', 'No transactions recorded matching your search parameters.')}
+                      </td>
+                    </tr>
+                  ) : (
+                    tabTransactions.map((tx) => {
+                      const isNegative = Number(tx.amount) < 0;
+                      return (
+                        <tr 
+                          key={tx.id} 
+                          className="hover:bg-slate-500/5 transition font-medium"
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          <td className="p-3.5">
+                            {renderServiceBadge(tx.type)}
+                          </td>
+
+                          <td className="p-3.5">
+                            <span className={`font-mono font-black text-xs ${isNegative ? 'text-red-400' : 'text-emerald-400'}`}>
+                              {isNegative ? '' : '+'}{tx.amount} {tokenIdentity.tokenSymbol}
+                            </span>
+                          </td>
+
+                          <td className="p-3.5 font-mono text-xs font-bold">
+                            {tx.balance_after} <span className="text-amber-500">{tokenIdentity.tokenSymbol}</span>
+                          </td>
+
+                          <td className="p-3.5 max-w-[280px] truncate text-[11px]" style={{ color: 'var(--color-text-secondary)' }} title={tx.description}>
+                            {tx.description || '-'}
+                          </td>
+
+                          <td className="p-3.5 font-mono text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                            {new Date(tx.created_at).toLocaleString()}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t text-xs" style={{ borderColor: 'var(--color-border)' }}>
+              <span style={{ color: 'var(--color-text-secondary)' }}>
+                {t('showing', 'Showing')}{' '}
+                <strong style={{ color: 'var(--color-text)' }}>
+                  {tabTotalCount > 0 ? (tabPage - 1) * tabLimit + 1 : 0}
+                </strong>{' '}
+                -{' '}
+                <strong style={{ color: 'var(--color-text)' }}>
+                  {Math.min(tabPage * tabLimit, tabTotalCount)}
+                </strong>{' '}
+                {t('of', 'of')}{' '}
+                <strong style={{ color: 'var(--color-text)' }}>{tabTotalCount}</strong>{' '}
+                {t('transactionsLabel', 'transactions')}
+              </span>
+
+              {/* Page Buttons */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={tabPage <= 1 || tabLoading}
+                  onClick={() => setTabPage(1)}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  title="First Page"
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </button>
+
+                <button
+                  type="button"
+                  disabled={tabPage <= 1 || tabLoading}
+                  onClick={() => setTabPage(p => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  title="Previous Page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+
+                {getPageNumbers().map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => setTabPage(num)}
+                    className="min-w-[28px] h-7 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-sm"
+                    style={tabPage === num ? {
+                      backgroundColor: 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)',
+                      color: '#ffffff'
+                    } : {
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    {num}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  disabled={tabPage >= tabTotalPages || tabLoading}
+                  onClick={() => setTabPage(p => Math.min(tabTotalPages, p + 1))}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  title="Next Page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+
+                <button
+                  type="button"
+                  disabled={tabPage >= tabTotalPages || tabLoading}
+                  onClick={() => setTabPage(tabTotalPages)}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  title="Last Page"
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
@@ -36630,65 +36202,78 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { initTokenTables } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureIntervalIdColumns() {
+async function initPlansTable() {
   try {
     await query(`
-      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS plan_group_id VARCHAR(120);
-      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_plan_id VARCHAR(120);
-      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_plan_id VARCHAR(120);
+      CREATE TABLE IF NOT EXISTS subscription_plans (
+        id VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        slug VARCHAR(100) UNIQUE NOT NULL,
+        plan_group_id VARCHAR(100),
+        monthly_plan_id VARCHAR(100),
+        annual_plan_id VARCHAR(100),
+        monthly_price_dollars NUMERIC(10, 2) DEFAULT 0,
+        annual_price_dollars NUMERIC(10, 2) DEFAULT 0,
+        monthly_badge VARCHAR(100) DEFAULT '',
+        annual_badge VARCHAR(100) DEFAULT '',
+        trial_badge VARCHAR(100) DEFAULT '',
+        description_monthly TEXT,
+        description_annual TEXT,
+        features JSONB DEFAULT '[]'::jsonb,
+        token_limit INTEGER DEFAULT 500,
+        ai_recipe_limit INTEGER DEFAULT 50,
+        recipe_library_limit INTEGER DEFAULT 250,
+        social_scrape_limit INTEGER DEFAULT 20,
+        can_view_macros BOOLEAN DEFAULT true,
+        allowed_ai_models VARCHAR(255) DEFAULT 'gemini-1.5-flash,gpt-3.5-turbo',
+        is_free BOOLEAN DEFAULT false,
+        is_default BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
     `);
-  } catch (_) {}
-}
-
-function getCanonicalSlug(rawSlug: string): string {
-  if (!rawSlug) return 'taster';
-  const clean = rawSlug.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
-  return clean.replace(/-(monthly|annual)$/, '');
+    await query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 500;`);
+  } catch (err) {
+    console.warn('initPlansTable warning:', err);
+  }
 }
 
 export async function GET() {
   try {
-    await ensureIntervalIdColumns();
+    await initPlansTable();
+    try { await initTokenTables(); } catch (_) {}
 
-    const rows = await query(`
-      SELECT 
-        id,
-        name,
-        slug,
-        is_free AS "isFree",
-        is_default AS "isDefault",
-        COALESCE(monthly_price_dollars, 0)::float AS "monthlyPriceDollars",
-        COALESCE(annual_price_dollars, 0)::float AS "annualPriceDollars",
-        monthly_badge AS "monthlyBadge",
-        annual_badge AS "annualBadge",
-        trial_badge AS "trialBadge",
-        description_monthly AS "descriptionMonthly",
-        description_annual AS "descriptionAnnual",
-        button_text AS "buttonText",
-        ai_recipe_limit AS "aiRecipeLimit",
-        recipe_library_limit AS "recipeLibraryLimit",
-        social_scrape_limit AS "socialScrapeLimit",
-        can_view_macros AS "canViewMacros",
-        allowed_ai_models AS "allowedAiModels",
-        features,
-        token_limit AS "tokenLimit",
-        token_reimburse_frequency AS "tokenReimburseFrequency",
-        COALESCE(plan_group_id, 'group_' || slug, id) AS "planGroupId",
-        COALESCE(monthly_plan_id, id || '_monthly', slug || '_monthly') AS "monthlyPlanId",
-        COALESCE(annual_plan_id, id || '_annual', slug || '_annual') AS "annualPlanId",
-        updated_at AS "updatedAt"
-      FROM subscription_plans
-      WHERE slug NOT LIKE '%-monthly' AND slug NOT LIKE '%-annual'
-      ORDER BY monthly_price_dollars ASC
-    `);
+    const rows = await query(`SELECT * FROM subscription_plans ORDER BY is_free DESC, monthly_price_dollars ASC`);
+    const mapped = rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      slug: r.slug,
+      planGroupId: r.plan_group_id || `group_${r.slug}`,
+      monthlyPlanId: r.monthly_plan_id || `plan_${r.slug}_monthly`,
+      annualPlanId: r.annual_plan_id || `plan_${r.slug}_annual`,
+      monthlyPriceDollars: Number(r.monthly_price_dollars ?? 0),
+      annualPriceDollars: Number(r.annual_price_dollars ?? 0),
+      monthlyBadge: r.monthly_badge || '',
+      annualBadge: r.annual_badge || '',
+      trialBadge: r.trial_badge || '',
+      descriptionMonthly: r.description_monthly || '',
+      descriptionAnnual: r.description_annual || '',
+      features: Array.isArray(r.features) ? r.features : (typeof r.features === 'string' ? JSON.parse(r.features) : []),
+      tokenLimit: Number(r.token_limit ?? 500),
+      aiRecipeLimit: Number(r.ai_recipe_limit ?? 50),
+      recipeLibraryLimit: Number(r.recipe_library_limit ?? 250),
+      socialScrapeLimit: Number(r.social_scrape_limit ?? 20),
+      canViewMacros: Boolean(r.can_view_macros),
+      allowedAiModels: r.allowed_ai_models || 'gemini-1.5-flash,gpt-3.5-turbo',
+      isFree: Boolean(r.is_free),
+      isDefault: Boolean(r.is_default)
+    }));
 
-    return NextResponse.json(
-      { success: true, plans: rows, packages: rows, configs: rows },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } }
-    );
+    return NextResponse.json({ success: true, configs: mapped }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -36696,120 +36281,80 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureIntervalIdColumns();
+    await initPlansTable();
+    try { await initTokenTables(); } catch (_) {}
     const body = await req.json();
-    const plans = Array.isArray(body) ? body : (body.plans || body.packages || [body]);
 
-    for (const p of plans) {
-      if (!p) continue;
-      const rawSlug = (p.slug || p.id || p.name || 'plan').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-');
-      const canonicalSlug = getCanonicalSlug(rawSlug);
-      const targetId = p.id || canonicalSlug;
-      const isDefault = canonicalSlug === 'taster' || targetId === 'preset_taster';
+    const id = String(body.id || body.slug || `plan_${Date.now()}`).trim();
+    const name = String(body.name || 'Custom Plan').trim();
+    const slug = String(body.slug || id).toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
+    const planGroupId = String(body.planGroupId || `group_${slug}`).trim();
+    const monthlyPlanId = String(body.monthlyPlanId || `plan_${slug}_monthly`).trim();
+    const annualPlanId = String(body.annualPlanId || `plan_${slug}_annual`).trim();
 
-      const planGroupId = p.planGroupId || ('group_' + canonicalSlug);
-      const monthlyPlanId = p.monthlyPlanId || (p.isFree ? targetId : `${targetId}_monthly`);
-      const annualPlanId = p.annualPlanId || (p.isFree ? targetId : `${targetId}_annual`);
+    const monthlyPrice = Number(body.monthlyPriceDollars || 0);
+    const annualPrice = Number(body.annualPriceDollars || 0);
+    const tokenLimit = Number(body.tokenLimit ?? 500);
 
-      const existing = await query(
-        'SELECT id, slug FROM subscription_plans WHERE id = $1 OR slug = $2 OR slug = $3 LIMIT 1',
-        [targetId, canonicalSlug, rawSlug]
-      );
+    const isFree = Boolean(body.isFree || (monthlyPrice === 0 && annualPrice === 0));
+    const features = JSON.stringify(Array.isArray(body.features) ? body.features : []);
 
-      if (existing.length > 0) {
-        const rowId = existing[0].id;
-        await query(`
-          UPDATE subscription_plans SET
-            name = $1,
-            slug = $2,
-            is_free = $3,
-            is_default = $4,
-            monthly_price_dollars = $5,
-            annual_price_dollars = $6,
-            monthly_badge = $7,
-            annual_badge = $8,
-            trial_badge = $9,
-            description_monthly = $10,
-            description_annual = $11,
-            button_text = $12,
-            ai_recipe_limit = $13,
-            recipe_library_limit = $14,
-            social_scrape_limit = $15,
-            can_view_macros = $16,
-            allowed_ai_models = $17,
-            features = $18::jsonb,
-            token_limit = $19,
-            token_reimburse_frequency = $20,
-            plan_group_id = $21,
-            monthly_plan_id = $22,
-            annual_plan_id = $23,
-            updated_at = NOW()
-          WHERE id = $24
-        `, [
-          p.name,
-          canonicalSlug,
-          Boolean(p.isFree),
-          isDefault,
-          Number(p.monthlyPriceDollars) || 0,
-          Number(p.annualPriceDollars) || 0,
-          p.monthlyBadge || '',
-          p.annualBadge || '',
-          p.trialBadge || '',
-          p.descriptionMonthly || '',
-          p.descriptionAnnual || '',
-          p.buttonText || 'Choose Plan',
-          p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5,
-          p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
-          p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5,
-          Boolean(p.canViewMacros),
-          Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
-          JSON.stringify(p.features || []),
-          Number(p.tokenLimit) || 50000,
-          p.tokenReimburseFrequency || 'monthly',
-          planGroupId,
-          monthlyPlanId,
-          annualPlanId,
-          rowId
-        ]);
-      } else {
-        await query(`
-          INSERT INTO subscription_plans (
-            id, name, slug, is_free, is_default, monthly_price_dollars, annual_price_dollars,
-            monthly_badge, annual_badge, trial_badge, description_monthly, description_annual,
-            button_text, ai_recipe_limit, recipe_library_limit, social_scrape_limit,
-            can_view_macros, allowed_ai_models, features, token_limit, token_reimburse_frequency,
-            plan_group_id, monthly_plan_id, annual_plan_id, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, $22, $23, $24, NOW())
-        `, [
-          targetId,
-          p.name,
-          canonicalSlug,
-          Boolean(p.isFree),
-          isDefault,
-          Number(p.monthlyPriceDollars) || 0,
-          Number(p.annualPriceDollars) || 0,
-          p.monthlyBadge || '',
-          p.annualBadge || '',
-          p.trialBadge || '',
-          p.descriptionMonthly || '',
-          p.descriptionAnnual || '',
-          p.buttonText || 'Choose Plan',
-          p.aiRecipeLimit !== undefined ? p.aiRecipeLimit : 5,
-          p.recipeLibraryLimit !== undefined ? p.recipeLibraryLimit : 25,
-          p.socialScrapeLimit !== undefined ? p.socialScrapeLimit : 5,
-          Boolean(p.canViewMacros),
-          Array.isArray(p.allowedAiModels) ? p.allowedAiModels.join(',') : (p.allowedAiModels || 'gemini-3.6-flash'),
-          JSON.stringify(p.features || []),
-          Number(p.tokenLimit) || 50000,
-          p.tokenReimburseFrequency || 'monthly',
-          planGroupId,
-          monthlyPlanId,
-          annualPlanId
-        ]);
-      }
-    }
+    await query(`
+      INSERT INTO subscription_plans (
+        id, name, slug, plan_group_id, monthly_plan_id, annual_plan_id,
+        monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge, trial_badge,
+        description_monthly, description_annual, features, token_limit,
+        ai_recipe_limit, recipe_library_limit, social_scrape_limit, can_view_macros,
+        allowed_ai_models, is_free, is_default, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        slug = EXCLUDED.slug,
+        plan_group_id = EXCLUDED.plan_group_id,
+        monthly_plan_id = EXCLUDED.monthly_plan_id,
+        annual_plan_id = EXCLUDED.annual_plan_id,
+        monthly_price_dollars = EXCLUDED.monthly_price_dollars,
+        annual_price_dollars = EXCLUDED.annual_price_dollars,
+        monthly_badge = EXCLUDED.monthly_badge,
+        annual_badge = EXCLUDED.annual_badge,
+        trial_badge = EXCLUDED.trial_badge,
+        description_monthly = EXCLUDED.description_monthly,
+        description_annual = EXCLUDED.description_annual,
+        features = EXCLUDED.features,
+        token_limit = EXCLUDED.token_limit,
+        ai_recipe_limit = EXCLUDED.ai_recipe_limit,
+        recipe_library_limit = EXCLUDED.recipe_library_limit,
+        social_scrape_limit = EXCLUDED.social_scrape_limit,
+        can_view_macros = EXCLUDED.can_view_macros,
+        allowed_ai_models = EXCLUDED.allowed_ai_models,
+        is_free = EXCLUDED.is_free,
+        is_default = EXCLUDED.is_default,
+        updated_at = NOW();
+    `, [
+      id, name, slug, planGroupId, monthlyPlanId, annualPlanId,
+      monthlyPrice, annualPrice, body.monthlyBadge || '', body.annualBadge || '', body.trialBadge || '',
+      body.descriptionMonthly || '', body.descriptionAnnual || '', features, tokenLimit,
+      body.aiRecipeLimit || 50, body.recipeLibraryLimit || 250, body.socialScrapeLimit || 20,
+      Boolean(body.canViewMacros), body.allowedAiModels || 'gemini-1.5-flash,gpt-3.5-turbo',
+      isFree, Boolean(body.isDefault)
+    ]);
 
-    return NextResponse.json({ success: true, message: 'Plan groups and interval IDs synchronized successfully in PostgreSQL.' });
+    // Synchronize plan allocation in token_settings
+    try {
+      await query(`
+        UPDATE token_settings
+        SET plan_allocations = jsonb_set(
+          COALESCE(plan_allocations, '{}'::jsonb),
+          ARRAY[$1],
+          to_jsonb($2::int)
+        )
+        WHERE id = 'default_settings';
+      `, [slug, tokenLimit]);
+    } catch (_) {}
+
+    return NextResponse.json({ success: true, message: 'Plan saved and synchronized successfully' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -36817,6 +36362,9 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    await initPlansTable();
+    try { await initTokenTables(); } catch (_) {}
+
     const { searchParams } = new URL(req.url);
     let id = searchParams.get('id');
     let slug = searchParams.get('slug');
@@ -36836,16 +36384,72 @@ export async function DELETE(req: NextRequest) {
     const targetSlug = (slug || '').toLowerCase().trim();
     const targetId = (id || '').trim();
 
+    // Guard against deleting the default Taster tier
     if (targetSlug === 'taster' || targetId === 'preset_taster' || targetId === 'taster') {
       return NextResponse.json({ success: false, error: 'Cannot delete the system default Taster plan.' }, { status: 400 });
     }
 
+    // 1. Relational Safety: Reassign existing users to 'taster'
+    if (targetSlug) {
+      await query("UPDATE users SET subscription_plan = 'taster' WHERE subscription_plan = $1 OR subscription_plan LIKE $2", [targetSlug, `${targetSlug}-%`]);
+      await query("UPDATE payment_transactions SET plan_slug = NULL WHERE plan_slug = $1 OR plan_slug LIKE $2", [targetSlug, `${targetSlug}-%`]);
+    }
+    if (targetId && targetId !== targetSlug) {
+      await query("UPDATE users SET subscription_plan = 'taster' WHERE subscription_plan = $1", [targetId]);
+      await query("UPDATE payment_transactions SET plan_slug = NULL WHERE plan_slug = $1", [targetId]);
+    }
+
+    // 2. Remove plan allocation from token_settings
+    try {
+      if (targetSlug) {
+        await query(`
+          UPDATE token_settings
+          SET plan_allocations = plan_allocations - $1
+          WHERE id = 'default_settings';
+        `, [targetSlug]);
+      }
+    } catch (_) {}
+
+    // 3. Delete row from subscription_plans in PostgreSQL
     await query(`
       DELETE FROM subscription_plans 
       WHERE id = $1 OR slug = $2 OR id = $3 OR slug = $4
     `, [targetId, targetSlug, targetSlug, targetId]);
 
-    return NextResponse.json({ success: true, message: 'Plan permanently deleted from PostgreSQL.' });
+    // 4. Return remaining plans directly from PostgreSQL
+    const rows = await query(`SELECT * FROM subscription_plans ORDER BY is_free DESC, monthly_price_dollars ASC`);
+    const mapped = rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      slug: r.slug,
+      planGroupId: r.plan_group_id || `group_${r.slug}`,
+      monthlyPlanId: r.monthly_plan_id || `plan_${r.slug}_monthly`,
+      annualPlanId: r.annual_plan_id || `plan_${r.slug}_annual`,
+      monthlyPriceDollars: Number(r.monthly_price_dollars ?? 0),
+      annualPriceDollars: Number(r.annual_price_dollars ?? 0),
+      monthlyBadge: r.monthly_badge || '',
+      annualBadge: r.annual_badge || '',
+      trialBadge: r.trial_badge || '',
+      descriptionMonthly: r.description_monthly || '',
+      descriptionAnnual: r.description_annual || '',
+      features: Array.isArray(r.features) ? r.features : (typeof r.features === 'string' ? JSON.parse(r.features) : []),
+      tokenLimit: Number(r.token_limit ?? 500),
+      aiRecipeLimit: Number(r.ai_recipe_limit ?? 50),
+      recipeLibraryLimit: Number(r.recipe_library_limit ?? 250),
+      socialScrapeLimit: Number(r.social_scrape_limit ?? 20),
+      canViewMacros: Boolean(r.can_view_macros),
+      allowedAiModels: r.allowed_ai_models || 'gemini-1.5-flash,gpt-3.5-turbo',
+      isFree: Boolean(r.is_free),
+      isDefault: Boolean(r.is_default)
+    }));
+
+    return NextResponse.json({
+      success: true,
+      message: 'Plan deleted successfully from PostgreSQL.',
+      configs: mapped
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -36960,6 +36564,7 @@ export async function PUT(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/payment/route.ts`
 ```typescript
+import { grantPlanTokensOnPurchase } from '@/lib/tokenService';
 async function ensurePaymentSchema() {
   try {
     await query(`
@@ -37256,6 +36861,12 @@ export async function POST(req: NextRequest) {
             newTx.expiryDate || null,
             newTx.createdAt || new Date().toISOString()
           ]);
+    // Automatically grant plan tokens and record audit in token_transactions on /admin/token-setting
+    try {
+      await grantPlanTokensOnPurchase(customerEmail, planSlug, { orderId: txId, planName });
+    } catch (tokenErr) {
+      console.warn('Auto grant tokens on payment warning:', tokenErr);
+    }
 
           // Update user's active plan in PostgreSQL
           const userPlanToAssign = isPaidSuccess ? planSlug : 'taster';
@@ -37439,6 +37050,69 @@ export async function DELETE(req: NextRequest) {
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message || 'Failed to delete transaction' }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/token-setting/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { getTokenSettings, saveTokenSettings, initTokenTables } from '@/lib/tokenService';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  try {
+    await initTokenTables();
+    const settings = await getTokenSettings();
+
+    let plans: any[] = [];
+    try {
+      plans = await query('SELECT id, slug, name, monthly_tokens, token_limit FROM subscription_plans ORDER BY created_at ASC');
+    } catch (_) {}
+
+    return NextResponse.json({
+      success: true,
+      settings,
+      plans
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { tokenName, tokenSymbol, chefCost, importUrlCost, importTextCost, importPhotoCost, packages, isEnabled, planAllocations } = body;
+
+    const updated = await saveTokenSettings({
+      tokenName: tokenName?.trim() || 'Foodie Token',
+      tokenSymbol: tokenSymbol?.trim() || '🪙',
+      chefCost: Math.max(0, parseInt(chefCost ?? 1, 10)),
+      importUrlCost: Math.max(0, parseInt(importUrlCost ?? 2, 10)),
+      importTextCost: Math.max(0, parseInt(importTextCost ?? 1, 10)),
+      importPhotoCost: Math.max(0, parseInt(importPhotoCost ?? 3, 10)),
+      packages: Array.isArray(packages) ? packages : undefined,
+      isEnabled: Boolean(isEnabled),
+      planAllocations: planAllocations || {}
+    });
+
+    if (planAllocations && typeof planAllocations === 'object') {
+      for (const [slug, amount] of Object.entries(planAllocations)) {
+        await query('UPDATE subscription_plans SET monthly_tokens = $1, token_limit = $1 WHERE slug = $2', [Math.max(0, Number(amount)), slug]);
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Token settings successfully persisted to PostgreSQL.',
+      settings: updated
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -37989,7 +37663,9 @@ export async function GET(req: NextRequest) {
       } else if (type === 'import') {
         whereClauses.push(`tt.type LIKE 'usage_import%'`);
       } else if (type === 'purchase') {
-        params.push('package_purchase');
+        whereClauses.push(`(tt.type = 'package_purchase' OR tt.type = 'plan_purchase')`);
+      } else if (type === 'plan_purchase') {
+        params.push('plan_purchase');
         whereClauses.push(`tt.type = $${params.length}`);
       } else if (type === 'grant') {
         params.push('plan_monthly_grant');
@@ -38026,7 +37702,6 @@ export async function GET(req: NextRequest) {
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `, dataParams);
 
-    // Summary Statistics for Ledger
     const statsRows = await query(`
       SELECT 
         COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_deducted,
@@ -38057,6 +37732,187 @@ export async function GET(req: NextRequest) {
         totalTransactions: Number(stats.total_txs)
       }
     }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await initTokenTables();
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let ids: string[] = [];
+
+    if (id) {
+      ids = [id];
+    } else {
+      try {
+        const body = await req.json();
+        if (Array.isArray(body?.ids)) {
+          ids = body.ids.filter(Boolean);
+        } else if (body?.id) {
+          ids = [body.id];
+        }
+      } catch (_) {}
+    }
+
+    if (!ids || ids.length === 0) {
+      return NextResponse.json({ success: false, error: 'No transaction ID(s) provided for deletion' }, { status: 400 });
+    }
+
+    await query(`DELETE FROM token_transactions WHERE id = ANY($1)`, [ids]);
+
+    return NextResponse.json({
+      success: true,
+      message: `Successfully deleted ${ids.length} transaction record(s) from PostgreSQL.`,
+      deletedCount: ids.length
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/token-transaction/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import { initTokenTables } from '@/lib/tokenService';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  try {
+    await initTokenTables();
+    const { searchParams } = new URL(req.url);
+    const search = searchParams.get('search')?.toLowerCase().trim() || '';
+    const type = searchParams.get('type') || 'all';
+    const limit = Math.min(200, Math.max(5, parseInt(searchParams.get('limit') || '25', 10)));
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const offset = (page - 1) * limit;
+
+    let whereClauses: string[] = [];
+    let params: any[] = [];
+
+    if (search) {
+      params.push(`%${search}%`);
+      whereClauses.push(`(LOWER(tt.user_email) LIKE $${params.length} OR LOWER(tt.user_id) LIKE $${params.length} OR LOWER(tt.description) LIKE $${params.length})`);
+    }
+
+    if (type && type !== 'all') {
+      if (type === 'chef') {
+        params.push('usage_chef');
+        whereClauses.push(`tt.type = $${params.length}`);
+      } else if (type === 'import') {
+        whereClauses.push(`tt.type LIKE 'usage_import%'`);
+      } else if (type === 'purchase') {
+        whereClauses.push(`(tt.type = 'package_purchase' OR tt.type = 'plan_purchase')`);
+      } else if (type === 'plan_purchase') {
+        params.push('plan_purchase');
+        whereClauses.push(`tt.type = $${params.length}`);
+      } else if (type === 'grant') {
+        params.push('plan_monthly_grant');
+        whereClauses.push(`tt.type = $${params.length}`);
+      } else {
+        params.push(type);
+        whereClauses.push(`tt.type = $${params.length}`);
+      }
+    }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const countRows = await query(`SELECT COUNT(*) as count FROM token_transactions tt ${whereSql}`, params);
+    const totalCount = parseInt(countRows[0]?.count || '0', 10);
+
+    const dataParams = [...params, limit, offset];
+    const rows = await query(`
+      SELECT 
+        tt.id, 
+        tt.user_id, 
+        tt.user_email, 
+        tt.amount, 
+        tt.balance_after, 
+        tt.type, 
+        tt.description, 
+        tt.created_at,
+        COALESCE(
+          (SELECT u.token_balance FROM users u WHERE u.id = tt.user_id OR LOWER(u.email) = LOWER(tt.user_email) LIMIT 1),
+          tt.balance_after
+        ) AS user_total_tokens
+      FROM token_transactions tt
+      ${whereSql}
+      ORDER BY tt.created_at DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+    `, dataParams);
+
+    const statsRows = await query(`
+      SELECT 
+        COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_deducted,
+        COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_granted,
+        COUNT(DISTINCT user_email) as active_users,
+        COUNT(*) as total_txs
+      FROM token_transactions
+    `);
+
+    const stats = statsRows[0] || {
+      total_deducted: 0,
+      total_granted: 0,
+      active_users: 0,
+      total_txs: 0
+    };
+
+    return NextResponse.json({
+      success: true,
+      transactions: rows,
+      totalCount,
+      page,
+      limit,
+      totalPages: Math.ceil(totalCount / limit) || 1,
+      stats: {
+        totalDeducted: Number(stats.total_deducted),
+        totalGranted: Number(stats.total_granted),
+        activeUsers: Number(stats.active_users),
+        totalTransactions: Number(stats.total_txs)
+      }
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await initTokenTables();
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let ids: string[] = [];
+
+    if (id) {
+      ids = [id];
+    } else {
+      try {
+        const body = await req.json();
+        if (Array.isArray(body?.ids)) {
+          ids = body.ids.filter(Boolean);
+        } else if (body?.id) {
+          ids = [body.id];
+        }
+      } catch (_) {}
+    }
+
+    if (!ids || ids.length === 0) {
+      return NextResponse.json({ success: false, error: 'No transaction ID(s) provided for deletion' }, { status: 400 });
+    }
+
+    await query(`DELETE FROM token_transactions WHERE id = ANY($1)`, [ids]);
+
+    return NextResponse.json({
+      success: true,
+      message: `Successfully deleted ${ids.length} transaction record(s) from PostgreSQL.`,
+      deletedCount: ids.length
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -38289,17 +38145,16 @@ export async function GET() {
     await initTokenTables();
     const settings = await getTokenSettings();
 
-    // Fetch subscription plans to show monthly inclusions
     let plans: any[] = [];
     try {
-      plans = await query('SELECT id, slug, name, monthly_tokens FROM subscription_plans ORDER BY created_at ASC');
+      plans = await query('SELECT id, slug, name, monthly_tokens, token_limit FROM subscription_plans ORDER BY created_at ASC');
     } catch (_) {}
 
     return NextResponse.json({
       success: true,
       settings,
       plans
-    }, { headers: { 'Cache-Control': 'no-store' } });
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -38318,13 +38173,13 @@ export async function POST(req: NextRequest) {
       importTextCost: Math.max(0, parseInt(importTextCost ?? 1, 10)),
       importPhotoCost: Math.max(0, parseInt(importPhotoCost ?? 3, 10)),
       packages: Array.isArray(packages) ? packages : undefined,
-      isEnabled: Boolean(isEnabled)
+      isEnabled: Boolean(isEnabled),
+      planAllocations: planAllocations || {}
     });
 
-    // Update monthly tokens per plan if provided
     if (planAllocations && typeof planAllocations === 'object') {
       for (const [slug, amount] of Object.entries(planAllocations)) {
-        await query('UPDATE subscription_plans SET monthly_tokens = $1 WHERE slug = $2', [Math.max(0, Number(amount)), slug]);
+        await query('UPDATE subscription_plans SET monthly_tokens = $1, token_limit = $1 WHERE slug = $2', [Math.max(0, Number(amount)), slug]);
       }
     }
 
@@ -42026,133 +41881,152 @@ export async function DELETE(req: NextRequest) {
 ## File: `apps/web/src/app/api/tokens/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { 
-  getTokenSettings, 
-  getUserTokenBalance, 
-  addTokensToUser, 
-  syncUserMonthlyTokens 
-} from '@/lib/tokenService';
 import { query } from '@/lib/db';
+import { getTokenSettings, initTokenTables } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
+    await initTokenTables();
     const { searchParams } = new URL(req.url);
-    let userId = searchParams.get('userId');
-    let email = searchParams.get('email')?.toLowerCase().trim();
+    const userId = searchParams.get('userId')?.trim() || '';
+    const email = searchParams.get('email')?.toLowerCase().trim() || '';
+    const search = searchParams.get('search')?.toLowerCase().trim() || '';
+    const type = searchParams.get('type') || 'all';
+    const limit = Math.min(100, Math.max(5, parseInt(searchParams.get('limit') || '10', 10)));
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const offset = (page - 1) * limit;
 
     if (!userId && !email) {
-      const cookieHeader = req.cookies.get('zecratary_session')?.value;
-      if (cookieHeader) {
-        try {
-          const parsed = JSON.parse(decodeURIComponent(cookieHeader));
-          userId = parsed.id;
-          email = parsed.email?.toLowerCase().trim();
-        } catch (_) {}
-      }
+      return NextResponse.json({ success: false, error: 'User ID or Email is required' }, { status: 400 });
     }
 
-    if (userId || email) {
-      await syncUserMonthlyTokens(userId, email);
+    // 1. Fetch user token balance from users table
+    let balance = 0;
+    let resolvedUser: any = null;
+    if (userId) {
+      const uRows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
+      if (uRows.length > 0) resolvedUser = uRows[0];
+    }
+    if (!resolvedUser && email) {
+      const uRows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]);
+      if (uRows.length > 0) resolvedUser = uRows[0];
     }
 
+    if (resolvedUser) {
+      balance = Number(resolvedUser.token_balance ?? 0);
+    }
+
+    // 2. Fetch Token Identity
     const settings = await getTokenSettings();
-    const balance = await getUserTokenBalance(userId, email);
 
-    // Fetch AI settings and restrictions from PostgreSQL admin_settings
-    let aiSettings = {
-      model: 'gemini-3.5-flash-lite',
-      provider: 'gemini',
-      enableWebSearch: true,
-      strictDietEnforcement: false,
-      filterWordsList: [] as string[],
-      customVocabularyList: [] as string[],
-      maxTokens: 4096
-    };
+    // 3. Build where clauses isolated strictly to this user
+    let whereClauses: string[] = [];
+    let params: any[] = [];
 
-    try {
-      const sRows = await query('SELECT chef_ai_settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-      if (sRows.length > 0 && sRows[0].chef_ai_settings) {
-        const c = sRows[0].chef_ai_settings;
-        aiSettings = {
-          model: c.model || 'gemini-3.5-flash-lite',
-          provider: c.provider || 'gemini',
-          enableWebSearch: c.enableWebSearch !== false,
-          strictDietEnforcement: Boolean(c.strictDietEnforcement),
-          filterWordsList: Array.isArray(c.filterWordsList) ? c.filterWordsList : [],
-          customVocabularyList: Array.isArray(c.customVocabularyList) ? c.customVocabularyList : [],
-          maxTokens: Number(c.maxTokens) || 4096
-        };
+    if (resolvedUser?.id && resolvedUser?.email) {
+      params.push(resolvedUser.id);
+      params.push(resolvedUser.email.toLowerCase());
+      whereClauses.push(`(tt.user_id = $1 OR LOWER(tt.user_email) = $2)`);
+    } else if (userId) {
+      params.push(userId);
+      whereClauses.push(`tt.user_id = $1`);
+    } else {
+      params.push(email);
+      whereClauses.push(`LOWER(tt.user_email) = $1`);
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      whereClauses.push(`(LOWER(tt.description) LIKE $${params.length} OR LOWER(tt.type) LIKE $${params.length} OR LOWER(tt.id) LIKE $${params.length})`);
+    }
+
+    if (type && type !== 'all') {
+      if (type === 'chef') {
+        params.push('usage_chef');
+        whereClauses.push(`tt.type = $${params.length}`);
+      } else if (type === 'import') {
+        whereClauses.push(`tt.type LIKE 'usage_import%'`);
+      } else if (type === 'purchase') {
+        whereClauses.push(`(tt.type = 'package_purchase' OR tt.type = 'plan_purchase')`);
+      } else if (type === 'plan_purchase') {
+        params.push('plan_purchase');
+        whereClauses.push(`tt.type = $${params.length}`);
+      } else if (type === 'grant') {
+        params.push('plan_monthly_grant');
+        whereClauses.push(`tt.type = $${params.length}`);
+      } else {
+        params.push(type);
+        whereClauses.push(`tt.type = $${params.length}`);
       }
-    } catch (dbErr) {
-      console.warn('Could not read chef_ai_settings:', dbErr);
     }
 
-    let transactions: any[] = [];
-    if (userId || email) {
-      try {
-        transactions = await query(`
-          SELECT id, amount, balance_after, type, description, created_at
-          FROM token_transactions
-          WHERE user_id = $1 OR LOWER(user_email) = LOWER($2)
-          ORDER BY created_at DESC
-          LIMIT 10
-        `, [userId || 'none', email || 'none']);
-      } catch (_) {}
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    // 4. Count total matching user transactions
+    const countRows = await query(`SELECT COUNT(*) as count FROM token_transactions tt ${whereSql}`, params);
+    const totalCount = parseInt(countRows[0]?.count || '0', 10);
+
+    // 5. Fetch paginated slice of user transactions
+    const dataParams = [...params, limit, offset];
+    const txRows = await query(`
+      SELECT 
+        tt.id, 
+        tt.user_id, 
+        tt.user_email, 
+        tt.amount, 
+        tt.balance_after, 
+        tt.type, 
+        tt.description, 
+        tt.created_at
+      FROM token_transactions tt
+      ${whereSql}
+      ORDER BY tt.created_at DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+    `, dataParams);
+
+    // 6. Calculate user lifetime stats
+    let userBaseParams: any[] = [];
+    let userBaseWhere = '';
+    if (resolvedUser?.id && resolvedUser?.email) {
+      userBaseParams = [resolvedUser.id, resolvedUser.email.toLowerCase()];
+      userBaseWhere = `WHERE user_id = $1 OR LOWER(user_email) = $2`;
+    } else if (userId) {
+      userBaseParams = [userId];
+      userBaseWhere = `WHERE user_id = $1`;
+    } else {
+      userBaseParams = [email];
+      userBaseWhere = `WHERE LOWER(user_email) = $1`;
     }
+
+    const statsRows = await query(`
+      SELECT 
+        COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_deducted,
+        COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_granted,
+        COUNT(*) as total_txs
+      FROM token_transactions
+      ${userBaseWhere}
+    `, userBaseParams);
+
+    const stats = statsRows[0] || { total_deducted: 0, total_granted: 0, total_txs: 0 };
 
     return NextResponse.json({
       success: true,
       balance,
-      tokenName: settings.tokenName,
-      tokenSymbol: settings.tokenSymbol,
-      costs: {
-        chef: settings.chefCost,
-        importUrl: settings.importUrlCost,
-        importText: settings.importTextCost,
-        importPhoto: settings.importPhotoCost
-      },
-      packages: settings.packages,
-      isEnabled: settings.isEnabled,
-      aiSettings,
-      transactions
-    }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { action, packageId, userId, userEmail } = body;
-
-    const settings = await getTokenSettings();
-
-    if (action === 'purchase') {
-      const pkg = settings.packages.find(p => p.id === packageId);
-      if (!pkg) {
-        return NextResponse.json({ success: false, error: 'Token package not found' }, { status: 404 });
+      tokenName: settings.tokenName || 'Foodie Token',
+      tokenSymbol: settings.tokenSymbol || '🪙',
+      transactions: txRows,
+      totalCount,
+      page,
+      limit,
+      totalPages: Math.ceil(totalCount / limit) || 1,
+      stats: {
+        totalDeducted: Number(stats.total_deducted),
+        totalGranted: Number(stats.total_granted),
+        totalEvents: Number(stats.total_txs)
       }
-
-      const newBalance = await addTokensToUser({
-        userId,
-        userEmail,
-        amount: pkg.tokens,
-        type: 'package_purchase',
-        description: `Purchased ${pkg.name} (+${pkg.tokens} ${settings.tokenSymbol} for $${pkg.price})`
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: `Successfully added ${pkg.tokens} ${settings.tokenSymbol} to your balance!`,
-        newBalance,
-        package: pkg
-      });
-    }
-
-    return NextResponse.json({ success: false, error: 'Invalid token action' }, { status: 400 });
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -42313,6 +42187,7 @@ export async function POST(req: Request) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { grantPlanTokensOnPurchase, getTokenSettings } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
@@ -42321,9 +42196,6 @@ async function ensureBillingSchema() {
     await query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method VARCHAR(64) DEFAULT 'stripe';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(128) DEFAULT 'taster';
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
-
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(128) PRIMARY KEY,
         customer_name VARCHAR(255),
@@ -42343,11 +42215,7 @@ async function ensureBillingSchema() {
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
-
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT TRUE;
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(32) DEFAULT 'MONTH';
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+      CREATE INDEX IF NOT EXISTS idx_payment_transactions_email ON payment_transactions(customer_email);
     `);
   } catch (_) {}
 }
@@ -42358,91 +42226,45 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     let email = searchParams.get('email');
 
-    // If email is not passed via query param, check request headers
+    // Default to first non-admin user if email is not provided
     if (!email) {
-      email = req.headers.get('x-user-email');
-    }
-
-    // Resolve active user from database if still missing
-    let userRow: any = null;
-    if (email) {
       const uRows = await query(`
-        SELECT id, name, email, role, subscription_plan, payment_method, created_at 
-        FROM users 
-        WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) 
-        LIMIT 1
-      `, [email]);
-      if (uRows.length > 0) userRow = uRows[0];
-    }
-
-    if (!userRow) {
-      const anyUserRows = await query(`
-        SELECT id, name, email, role, subscription_plan, payment_method, created_at 
-        FROM users 
+        SELECT email FROM users 
+        WHERE role != 'admin' 
         ORDER BY created_at ASC LIMIT 1
       `);
-      if (anyUserRows.length > 0) {
-        userRow = anyUserRows[0];
-        email = userRow.email;
-      } else {
-        userRow = {
-          id: 'usr_default',
-          name: 'Logged-in User',
-          email: 'jordan@example.com',
-          role: 'user',
-          subscription_plan: 'taster',
-          payment_method: 'stripe'
-        };
-        email = userRow.email;
-      }
+      email = uRows.length > 0 ? uRows[0].email : 'user@foodieprep.com';
     }
-
     const cleanEmail = (email || '').toLowerCase().trim();
 
-    // 1. Fetch User Payment Transactions from PostgreSQL
-    let txRows = await query(`
+    // 1. Fetch User Record
+    const userRows = await query(`
+      SELECT id, name, email, role, subscription_plan, payment_method, token_balance, created_at 
+      FROM users 
+      WHERE LOWER(email) = $1 LIMIT 1
+    `, [cleanEmail]);
+
+    const user = userRows.length > 0 ? userRows[0] : {
+      id: 'usr_default',
+      name: 'Logged-in User',
+      email: cleanEmail,
+      role: 'user',
+      subscription_plan: 'taster',
+      payment_method: 'stripe',
+      token_balance: 100
+    };
+
+    // 2. Fetch User Payment Transactions from PostgreSQL
+    const txRows = await query(`
       SELECT * FROM payment_transactions 
-      WHERE LOWER(TRIM(customer_email)) = $1 
+      WHERE LOWER(customer_email) = $1 
       ORDER BY created_at DESC
     `, [cleanEmail]);
 
-    // 2. Auto-healing: If user has a paid plan but no transaction records yet, seed an initial transaction
-    const userPlan = (userRow.subscription_plan || 'taster').toLowerCase();
-    const isPaidPlan = userPlan !== 'taster' && userPlan !== 'free';
-
-    if (txRows.length === 0 && isPaidPlan) {
-      const isAnnual = userPlan.includes('annual') || userPlan.includes('year');
-      const amount = isAnnual ? 59.99 : 8.99;
-      const interval = isAnnual ? 'YEAR' : 'MONTH';
-      const expDate = new Date();
-      if (isAnnual) expDate.setFullYear(expDate.getFullYear() + 1);
-      else expDate.setMonth(expDate.getMonth() + 1);
-
-      const autoTxId = 'tx_init_' + Math.random().toString(36).substring(2, 9);
-      const planName = userPlan.replace(/-/g, ' ').replace(/\w/g, (c) => c.toUpperCase());
-
-      await query(`
-        INSERT INTO payment_transactions (
-          id, customer_name, customer_email, plan_name, plan_slug, amount,
-          currency, gateway, status, test_mode, is_recurring, recurring_interval,
-          auto_renew, expiry_date, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'USD', 'stripe', 'succeeded', FALSE, TRUE, $7, TRUE, $8, NOW(), NOW())
-      `, [
-        autoTxId, userRow.name || 'Subscriber', cleanEmail,
-        planName, userRow.subscription_plan, amount, interval, expDate.toISOString()
-      ]);
-
-      txRows = await query(`
-        SELECT * FROM payment_transactions 
-        WHERE LOWER(TRIM(customer_email)) = $1 
-        ORDER BY created_at DESC
-      `, [cleanEmail]);
-    }
-
     const transactions = txRows.map((r: any) => ({
       id: r.id,
-      customerName: r.customer_name || userRow.name,
-      customerEmail: r.customer_email || userRow.email,
+      customerName: r.customer_name || user.name,
+      customerEmail: r.customer_email || user.email,
       planName: r.plan_name || 'Subscription',
       planSlug: r.plan_slug || '',
       amount: Number(r.amount) || 0,
@@ -42458,10 +42280,11 @@ export async function GET(req: NextRequest) {
       createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
     }));
 
-    // 3. Fetch Admin Gateway Settings from PostgreSQL
+    // 3. Fetch Admin Gateway & Currency Settings from PostgreSQL
     let gatewayConfig = {
       activeGateway: 'stripe',
       currency: 'USD',
+      currencySymbol: '$',
       testMode: true,
       stripe: { enabled: true },
       paypal: { enabled: true, environment: 'sandbox' },
@@ -42469,7 +42292,7 @@ export async function GET(req: NextRequest) {
     };
 
     try {
-      const settingsRows = await query(`SELECT key, value FROM admin_settings WHERE key IN ('paymentSettings', 'currency')`);
+      const settingsRows = await query(`SELECT key, value FROM admin_settings WHERE key IN ('paymentSettings', 'currency', 'systemSettings')`);
       for (const row of settingsRows) {
         if (row.key === 'paymentSettings') {
           const val = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
@@ -42480,39 +42303,100 @@ export async function GET(req: NextRequest) {
       }
     } catch (_) {}
 
-    // 4. Fetch Available Subscription Plans from PostgreSQL
+    // Currency symbol mapping
+    const symbols: Record<string, string> = {
+      USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
+      JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
+    };
+    gatewayConfig.currencySymbol = symbols[gatewayConfig.currency] || '$';
+
+    // 4. Fetch Token Identity
+    let tokenIdentity = { tokenName: 'Tokens', tokenSymbol: '🪙' };
+    try {
+      const tSettings = await getTokenSettings();
+      if (tSettings) {
+        tokenIdentity.tokenName = tSettings.tokenName || 'Tokens';
+        tokenIdentity.tokenSymbol = tSettings.tokenSymbol || '🪙';
+      }
+    } catch (_) {}
+
+    // 5. Fetch Available Subscription Plans Dynamically from PostgreSQL (subscription_plans)
     let plans: any[] = [];
     try {
       const planRows = await query(`
-        SELECT id, slug, name, monthly_price_dollars, annual_price_dollars, description, is_active 
-        FROM subscription_plans 
-        WHERE is_active = TRUE OR is_active IS NULL
-        ORDER BY monthly_price_dollars ASC
+        SELECT 
+          id, name, slug, plan_group_id, monthly_plan_id, annual_plan_id,
+          monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge, trial_badge,
+          description_monthly, description_annual, features, token_limit,
+          ai_recipe_limit, recipe_library_limit, social_scrape_limit, can_view_macros,
+          allowed_ai_models, is_free, is_default
+        FROM subscription_plans
+        ORDER BY is_free DESC, monthly_price_dollars ASC
       `);
-      if (planRows.length > 0) {
+
+      if (planRows && planRows.length > 0) {
         plans = planRows.map((p: any) => ({
           id: p.id,
-          slug: p.slug,
           name: p.name || p.slug,
-          monthlyPrice: Number(p.monthly_price_dollars) || 0,
-          annualPrice: Number(p.annual_price_dollars) || 0,
-          description: p.description || ''
+          slug: p.slug,
+          planGroupId: p.plan_group_id || `group_${p.slug}`,
+          monthlyPlanId: p.monthly_plan_id || `plan_${p.slug}_monthly`,
+          annualPlanId: p.annual_plan_id || `plan_${p.slug}_annual`,
+          monthlyPrice: Number(p.monthly_price_dollars ?? 0),
+          annualPrice: Number(p.annual_price_dollars ?? 0),
+          monthlyBadge: p.monthly_badge || '',
+          annualBadge: p.annual_badge || '',
+          trialBadge: p.trial_badge || '',
+          description: p.description_monthly || p.description_annual || 'Full plan access',
+          features: Array.isArray(p.features) ? p.features : (typeof p.features === 'string' ? JSON.parse(p.features) : []),
+          tokenLimit: Number(p.token_limit ?? 500),
+          aiRecipeLimit: Number(p.ai_recipe_limit ?? 50),
+          recipeLibraryLimit: Number(p.recipe_library_limit ?? 250),
+          socialScrapeLimit: Number(p.social_scrape_limit ?? 20),
+          canViewMacros: Boolean(p.can_view_macros),
+          allowedAiModels: p.allowed_ai_models || 'gemini-1.5-flash,gpt-3.5-turbo',
+          isFree: Boolean(p.is_free),
+          isDefault: Boolean(p.is_default)
         }));
       }
     } catch (_) {}
 
+    // Dynamic fallback if plans table is currently empty
     if (plans.length === 0) {
       plans = [
-        { id: 'plan_taster', slug: 'taster', name: 'Taster', monthlyPrice: 0, annualPrice: 0, description: 'Starter free tier with standard features' },
-        { id: 'plan_nutrition_pro', slug: 'nutrition-pro', name: 'Nutrition Pro', monthlyPrice: 8.99, annualPrice: 59.99, description: 'Full access to all AI models and high quotas' }
+        {
+          id: 'preset_taster',
+          name: 'Taster',
+          slug: 'taster',
+          monthlyPrice: 0,
+          annualPrice: 0,
+          tokenLimit: 50,
+          description: 'Starter tier with essential recipe creation and AI tools',
+          features: ['5 AI recipes / mo', 'Personal library (25 recipes)', 'Smart repurposing'],
+          isFree: true
+        },
+        {
+          id: 'plan_nutrition_pro',
+          name: 'Nutrition Pro',
+          slug: 'nutrition-pro',
+          monthlyPrice: 8.99,
+          annualPrice: 59.99,
+          tokenLimit: 500,
+          monthlyBadge: 'Popular',
+          annualBadge: 'Best Value',
+          description: 'Full AI capabilities, macro calculation, and high token quotas',
+          features: ['Unlimited AI recipes', 'Macro tracking', '500 AI tokens credited per cycle', 'Priority processing'],
+          isFree: false
+        }
       ];
     }
 
     return NextResponse.json({
       success: true,
-      user: userRow,
+      user,
       transactions,
       gatewayConfig,
+      tokenIdentity,
       plans
     }, {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
@@ -42539,82 +42423,68 @@ export async function POST(req: NextRequest) {
       await query(`
         UPDATE users 
         SET payment_method = $1, updated_at = NOW() 
-        WHERE LOWER(TRIM(email)) = $2
+        WHERE LOWER(email) = $2
       `, [method, email]);
       return NextResponse.json({ success: true, message: 'Payment method successfully updated.' });
     }
 
     // ACTION 2: Cancel Subscription Renewal
-        if (action === 'cancel_subscription') {
-      const email = (body.email || '').toLowerCase().trim();
-      const txId = body.transactionId;
-
-      if (txId) {
-        await query(`
-          UPDATE payment_transactions
-          SET is_recurring = FALSE,
-              auto_renew = FALSE,
-              status = 'canceled',
-              updated_at = NOW()
-          WHERE id = $1
-        `, [txId]);
-      } else if (email) {
-        await query(`
-          UPDATE payment_transactions
-          SET is_recurring = FALSE,
-              auto_renew = FALSE,
-              status = 'canceled',
-              updated_at = NOW()
-          WHERE LOWER(customer_email) = LOWER($1)
-            AND (status IN ('succeeded', 'paid', 'successful', 'canceled'))
-            AND (expiry_date IS NULL OR expiry_date > NOW())
-        `, [email]);
-      }
-
-      if (email) {
-        await query(`
-          UPDATE users
-          SET auto_renew = FALSE,
-              updated_at = NOW()
-          WHERE LOWER(email) = LOWER($1)
-        `, [email]).catch(() => {});
-      }
+    if (action === 'cancel_subscription') {
+      await query(`
+        UPDATE payment_transactions
+        SET auto_renew = FALSE,
+            is_recurring = FALSE,
+            status = 'canceled',
+            updated_at = NOW()
+        WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
+      `, [email]);
 
       return NextResponse.json({
         success: true,
-        message: 'Auto-renewal has been cancelled. Your active paid benefits remain accessible until the end of your billing cycle.'
+        message: 'Subscription renewal cancelled. Access remains active until the end of your billing cycle.'
       });
     }
 
-    // ACTION 3: Upgrade / Downgrade Plan
+    // ACTION 3: Purchase / Upgrade / Switch Plan
     if (action === 'change_plan') {
-      const newPlanSlug = body.planSlug || 'taster';
+      const newPlanSlug = String(body.planSlug || 'taster').toLowerCase().trim();
       const planName = body.planName || 'Plan';
       const amount = Number(body.amount || 0);
       const interval = body.interval === 'YEAR' ? 'YEAR' : 'MONTH';
       const gateway = body.gateway || 'stripe';
       const currency = body.currency || 'USD';
+      const customTokens = Number(body.tokenLimit ?? 0);
 
-      // Mark prior transactions as refunded/cancelled
+      // 1. Mark prior active transactions as refunded/cancelled in PostgreSQL
       await query(`
         UPDATE payment_transactions
         SET status = 'refunded',
             auto_renew = FALSE,
             is_recurring = FALSE,
             updated_at = NOW()
-        WHERE LOWER(TRIM(customer_email)) = $1 AND LOWER(status) IN ('succeeded', 'successful', 'paid', 'active')
+        WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
       `, [email]);
 
+      // 2. Handle Revert to Free Plan
       if (newPlanSlug === 'taster' || newPlanSlug === 'free' || amount === 0) {
         await query(`
           UPDATE users 
           SET subscription_plan = 'taster', updated_at = NOW() 
-          WHERE LOWER(TRIM(email)) = $1
+          WHERE LOWER(email) = $1
         `, [email]);
 
-        return NextResponse.json({ success: true, message: 'Reverted to free plan (Taster).' });
+        // Grant free plan tokens
+        try {
+          await grantPlanTokensOnPurchase(email, 'taster', {
+            planName: 'Taster (Free)',
+            customTokens: customTokens || 50
+          });
+        } catch (_) {}
+
+        return NextResponse.json({ success: true, message: 'Switched to free plan tier (Taster).' });
       }
 
+      // 3. Compute Expiry Date (1 Month or 1 Year)
       const expDate = new Date();
       if (interval === 'YEAR') {
         expDate.setFullYear(expDate.getFullYear() + 1);
@@ -42622,8 +42492,9 @@ export async function POST(req: NextRequest) {
         expDate.setMonth(expDate.getMonth() + 1);
       }
 
-      const txId = 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
 
+      // 4. Record Succeeded Payment Transaction in PostgreSQL
       await query(`
         INSERT INTO payment_transactions (
           id, customer_name, customer_email, plan_name, plan_slug, amount,
@@ -42635,15 +42506,30 @@ export async function POST(req: NextRequest) {
         amount, currency, gateway, interval, expDate.toISOString()
       ]);
 
+      // 5. Update users table subscription_plan
       await query(`
         UPDATE users 
         SET subscription_plan = $1, updated_at = NOW() 
-        WHERE LOWER(TRIM(email)) = $2
+        WHERE LOWER(email) = $2
       `, [newPlanSlug, email]);
+
+      // 6. Grant Tokens and Record Audit Ledger Transaction on /admin/token-setting
+      let tokenGrantResult = null;
+      try {
+        tokenGrantResult = await grantPlanTokensOnPurchase(email, newPlanSlug, {
+          orderId: txId,
+          planName,
+          customTokens: customTokens > 0 ? customTokens : undefined
+        });
+      } catch (tokenErr) {
+        console.warn('grantPlanTokensOnPurchase warning:', tokenErr);
+      }
 
       return NextResponse.json({
         success: true,
-        message: `Plan upgraded successfully to ${planName}!`
+        message: `Plan purchased successfully! Activated ${planName}.`,
+        transactionId: txId,
+        tokenGrant: tokenGrantResult
       });
     }
 
@@ -46294,7 +46180,7 @@ export default function LoginPage() {
 
 ## File: `apps/web/src/app/billing/page.tsx`
 ```typescript
-// @ts-nocheck
+// Generated / Updated by AI Collaborator
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -46315,9 +46201,11 @@ import {
   Sparkles,
   Ban,
   Building,
-  Check
+  Check,
+  Coins,
+  Zap
 } from 'lucide-react';
-import { useTranslation } from '@/context/LanguageContext';
+import { useTranslation } from '@/components/LanguageProvider';
 
 interface Transaction {
   id: string;
@@ -46343,7 +46231,18 @@ interface PlanCatalog {
   name: string;
   monthlyPrice: number;
   annualPrice: number;
+  tokenLimit: number;
+  monthlyBadge?: string;
+  annualBadge?: string;
+  trialBadge?: string;
   description: string;
+  features?: string[];
+  isFree?: boolean;
+}
+
+interface TokenIdentity {
+  tokenName: string;
+  tokenSymbol: string;
 }
 
 export default function UserBillingPage() {
@@ -46358,9 +46257,11 @@ export default function UserBillingPage() {
   const [user, setUser] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [plans, setPlans] = useState<PlanCatalog[]>([]);
+  const [tokenIdentity, setTokenIdentity] = useState<TokenIdentity>({ tokenName: 'Tokens', tokenSymbol: '🪙' });
   const [gatewayConfig, setGatewayConfig] = useState<any>({
     activeGateway: 'stripe',
     currency: 'USD',
+    currencySymbol: '$',
     stripe: { enabled: true },
     paypal: { enabled: true },
     manual: { enabled: true }
@@ -46401,7 +46302,7 @@ export default function UserBillingPage() {
       let emailParam = '';
       if (typeof window !== 'undefined') {
         try {
-          const storedUser = localStorage.getItem('zecratary_user') || localStorage.getItem('user') || localStorage.getItem('currentUser');
+          const storedUser = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
           if (storedUser) {
             const parsed = JSON.parse(storedUser);
             if (parsed?.email) emailParam = `?email=${encodeURIComponent(parsed.email)}`;
@@ -46417,6 +46318,9 @@ export default function UserBillingPage() {
           setTransactions(data.transactions || []);
           setGatewayConfig(data.gatewayConfig || {});
           setPlans(data.plans || []);
+          if (data.tokenIdentity) {
+            setTokenIdentity(data.tokenIdentity);
+          }
           if (data.user?.payment_method) {
             setSelectedMethod(data.user.payment_method);
           }
@@ -46431,6 +46335,22 @@ export default function UserBillingPage() {
 
   useEffect(() => {
     fetchData();
+
+    const handleSyncEvents = () => {
+      fetchData();
+    };
+
+    window.addEventListener('zecratary_payment_updated', handleSyncEvents);
+    window.addEventListener('zecratary_plans_updated', handleSyncEvents);
+    window.addEventListener('zecratary_users_updated', handleSyncEvents);
+    window.addEventListener('zecratary_token_settings_updated', handleSyncEvents);
+
+    return () => {
+      window.removeEventListener('zecratary_payment_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_plans_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_users_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_token_settings_updated', handleSyncEvents);
+    };
   }, [fetchData]);
 
   useEffect(() => {
@@ -46479,7 +46399,14 @@ export default function UserBillingPage() {
 
   const filteredPlans = useMemo(() => {
     const q = planSearch.toLowerCase().trim();
-    return plans.filter((p) => !q || (p.name && p.name.toLowerCase().includes(q)) || (p.description && p.description.toLowerCase().includes(q)));
+    return plans.filter((p) => {
+      if (!q) return true;
+      const matchName = p.name && p.name.toLowerCase().includes(q);
+      const matchDesc = p.description && p.description.toLowerCase().includes(q);
+      const matchSlug = p.slug && p.slug.toLowerCase().includes(q);
+      const matchFeatures = Array.isArray(p.features) && p.features.some(f => f.toLowerCase().includes(q));
+      return matchName || matchDesc || matchSlug || matchFeatures;
+    });
   }, [plans, planSearch]);
 
   const totalPlanPages = Math.max(1, Math.ceil(filteredPlans.length / planPageSize));
@@ -46540,7 +46467,6 @@ export default function UserBillingPage() {
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_payment_updated'));
           window.dispatchEvent(new Event('zecratary_users_updated'));
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
         }
 
         await fetchData();
@@ -46554,12 +46480,15 @@ export default function UserBillingPage() {
     }
   };
 
+  // Handle Switch Plan with Dynamic Token Grant & PostgreSQL sync
   const handleSwitchPlan = async (plan: PlanCatalog, interval: 'MONTH' | 'YEAR') => {
     const amount = interval === 'YEAR' ? plan.annualPrice : plan.monthlyPrice;
     const planSlugWithInterval = plan.slug === 'taster' ? 'taster' : `${plan.slug}-${interval.toLowerCase()}`;
     const planDisplayName = plan.slug === 'taster' ? 'Taster (Free)' : `${plan.name} (${interval === 'YEAR' ? 'Annual' : 'Monthly'})`;
+    const tokensCredited = plan.tokenLimit ?? (plan.slug === 'taster' ? 50 : 500);
 
-    const confirmPrompt = `${t('confirmSwitchPlanPrompt', 'Switch plan to')} ${planDisplayName} ($${amount})?`;
+    const tokenMsg = tokensCredited > 0 ? ` (+${tokensCredited.toLocaleString()} ${tokenIdentity.tokenSymbol})` : '';
+    const confirmPrompt = `${t('confirmSwitchPlanPrompt', 'Purchase and activate')} ${planDisplayName} for ${gatewayConfig.currencySymbol}${amount.toFixed(2)}${tokenMsg}?`;
     if (!window.confirm(confirmPrompt)) return;
 
     setProcessing(true);
@@ -46575,6 +46504,7 @@ export default function UserBillingPage() {
           planName: planDisplayName,
           amount,
           interval,
+          tokenLimit: tokensCredited,
           gateway: selectedMethod,
           currency: gatewayConfig?.currency || 'USD'
         })
@@ -46582,9 +46512,27 @@ export default function UserBillingPage() {
       const data = await res.json();
       if (data.success) {
         setFeedback({ type: 'success', msg: data.message || `Switched plan to ${planDisplayName}` });
-        fetchData();
+
+        // Update local session cache if present
+        try {
+          const raw = localStorage.getItem('zecratary_current_user');
+          if (raw) {
+            const u = JSON.parse(raw);
+            u.subscriptionPlan = planSlugWithInterval;
+            localStorage.setItem('zecratary_current_user', JSON.stringify(u));
+          }
+        } catch (_) {}
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+          window.dispatchEvent(new Event('zecratary_plans_updated'));
+          window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+        }
+
+        await fetchData();
       } else {
-        throw new Error(data.error);
+        throw new Error(data.error || 'Failed to switch subscription plan');
       }
     } catch (err: any) {
       setFeedback({ type: 'error', msg: err.message || 'Failed to switch subscription plan' });
@@ -46628,12 +46576,12 @@ export default function UserBillingPage() {
   };
 
   const isCurrentPlan = (planSlug: string, interval?: 'MONTH' | 'YEAR') => {
-    const userPlan = (user?.subscription_plan || '').toLowerCase();
+    const userPlan = (user?.subscription_plan || '').toLowerCase().trim();
     if (!interval) {
-      return userPlan.includes(planSlug.toLowerCase());
+      return userPlan.includes(planSlug.toLowerCase().trim());
     }
     const expected = planSlug === 'taster' ? 'taster' : `${planSlug}-${interval.toLowerCase()}`;
-    return userPlan === expected;
+    return userPlan === expected || userPlan === planSlug;
   };
 
   return (
@@ -46844,7 +46792,7 @@ export default function UserBillingPage() {
                           <span className="block text-xs font-mono opacity-50" style={{ color: 'var(--color-text-secondary)' }}>{tx.id}</span>
                         </td>
                         <td className="p-4 font-bold" style={{ color: 'var(--color-emerald)' }}>
-                          ${tx.amount.toFixed(2)} <span className="text-xs font-normal opacity-70" style={{ color: 'var(--color-text-secondary)' }}>{tx.currency}</span>
+                          {gatewayConfig.currencySymbol}{tx.amount.toFixed(2)} <span className="text-xs font-normal opacity-70" style={{ color: 'var(--color-text-secondary)' }}>{tx.currency}</span>
                         </td>
                         <td className="p-4 uppercase text-xs font-semibold tracking-wider" style={{ color: 'var(--color-text)' }}>
                           {tx.gateway}
@@ -47036,6 +46984,7 @@ export default function UserBillingPage() {
         {/* TAB 3: SUBSCRIPTIONS */}
         {activeTab === 'subscriptions' && (
           <div className="space-y-6">
+            {/* Current Active Plan Card */}
             <div 
               className="p-6 sm:p-8 rounded-3xl border shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 transition-colors duration-200"
               style={{
@@ -47097,6 +47046,7 @@ export default function UserBillingPage() {
               </div>
             </div>
 
+            {/* Catalog of Subscription Packages synced from /admin/plans */}
             <div 
               id="catalog-table"
               className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6 transition-colors duration-200"
@@ -47111,7 +47061,7 @@ export default function UserBillingPage() {
                     {t('availablePlansTableTitle', 'Subscription Packages Catalog')}
                   </h3>
                   <p className="text-xs opacity-70 mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('availablePlansTableSubtitle', 'Compare tiers and smoothly upgrade or downgrade your active subscription.')}
+                    {t('availablePlansTableSubtitle', 'Compare tiers, token allowances, and smoothly upgrade or switch your subscription.')}
                   </p>
                 </div>
 
@@ -47147,6 +47097,7 @@ export default function UserBillingPage() {
                       }}
                     >
                       <th className="p-4">{t('colPackage', 'Package')}</th>
+                      <th className="p-4">{t('colTokenAllowance', 'AI Token Grant')}</th>
                       <th className="p-4">{t('colDescription', 'Features / Overview')}</th>
                       <th className="p-4">{t('colMonthlyPricing', 'Monthly')}</th>
                       <th className="p-4">{t('colAnnualPricing', 'Annual')}</th>
@@ -47156,31 +47107,65 @@ export default function UserBillingPage() {
                   <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
                     {paginatedPlans.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-8 text-center opacity-50" style={{ color: 'var(--color-text-secondary)' }}>
-                          {t('noPlansFound', 'No subscription plans found.')}
+                        <td colSpan={6} className="p-8 text-center opacity-50" style={{ color: 'var(--color-text-secondary)' }}>
+                          {t('noPlansFound', 'No subscription plans found matching your search.')}
                         </td>
                       </tr>
                     ) : (
                       paginatedPlans.map((plan) => {
                         const monthlyActive = isCurrentPlan(plan.slug, 'MONTH');
                         const annualActive = isCurrentPlan(plan.slug, 'YEAR');
-                        const isFree = plan.slug === 'taster' || plan.monthlyPrice === 0;
+                        const isFree = plan.slug === 'taster' || plan.isFree || (plan.monthlyPrice === 0 && plan.annualPrice === 0);
 
                         return (
                           <tr key={plan.id} className="transition" style={{ backgroundColor: 'transparent' }}>
                             <td className="p-4 font-bold" style={{ color: 'var(--color-text)' }}>
-                              {plan.name}
-                              <span className="block text-xs font-mono opacity-50" style={{ color: 'var(--color-text-secondary)' }}>{plan.slug}</span>
+                              <div className="flex items-center gap-2">
+                                <span>{plan.name}</span>
+                                {plan.annualBadge && (
+                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-primary/10 text-primary border border-primary/20">
+                                    {plan.annualBadge}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="block text-xs font-mono opacity-50" style={{ color: 'var(--color-text-secondary)' }}>
+                                {plan.slug}
+                              </span>
                             </td>
-                            <td className="p-4 text-xs opacity-70 max-w-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                              {plan.description}
+
+                            <td className="p-4">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-500 border border-amber-500/20 font-mono">
+                                <Coins className="h-3.5 w-3.5" />
+                                <span>+{(plan.tokenLimit ?? (isFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol}</span>
+                              </span>
                             </td>
+
+                            <td className="p-4 text-xs opacity-75 max-w-sm space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
+                              <p className="line-clamp-2">{plan.description}</p>
+                              {Array.isArray(plan.features) && plan.features.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                  {plan.features.slice(0, 3).map((feat, fIdx) => (
+                                    <span key={fIdx} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10">
+                                      <Check className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                                      <span>{feat}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+
                             <td className="p-4 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
-                              {plan.monthlyPrice > 0 ? `$${plan.monthlyPrice.toFixed(2)}/mo` : t('freePrice', 'Free')}
+                              {plan.monthlyPrice > 0 
+                                ? `${gatewayConfig.currencySymbol}${plan.monthlyPrice.toFixed(2)}/mo` 
+                                : t('freePrice', 'Free')}
                             </td>
+
                             <td className="p-4 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
-                              {plan.annualPrice > 0 ? `$${plan.annualPrice.toFixed(2)}/yr` : t('freePrice', 'Free')}
+                              {plan.annualPrice > 0 
+                                ? `${gatewayConfig.currencySymbol}${plan.annualPrice.toFixed(2)}/yr` 
+                                : t('freePrice', 'Free')}
                             </td>
+
                             <td className="p-4 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 {isFree ? (
@@ -47190,7 +47175,7 @@ export default function UserBillingPage() {
                                     disabled={monthlyActive || processing}
                                     className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${
                                       monthlyActive
-                                        ? 'opacity-60 cursor-default'
+                                        ? 'opacity-60 cursor-default border'
                                         : 'border hover:bg-emerald-500 hover:text-white'
                                     }`}
                                     style={monthlyActive ? {
@@ -47212,7 +47197,7 @@ export default function UserBillingPage() {
                                       disabled={monthlyActive || processing}
                                       className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${
                                         monthlyActive
-                                          ? 'opacity-60 cursor-default'
+                                          ? 'opacity-60 cursor-default border'
                                           : 'border hover:bg-emerald-500 hover:text-white'
                                       }`}
                                       style={monthlyActive ? {
@@ -47236,7 +47221,7 @@ export default function UserBillingPage() {
                                           : 'text-white shadow-md'
                                       }`}
                                       style={{
-                                        backgroundColor: annualActive ? 'var(--color-emerald)' : 'var(--color-emerald)'
+                                        backgroundColor: 'var(--color-emerald)'
                                       }}
                                     >
                                       {annualActive ? t('annualActive', 'Annual Active') : t('chooseAnnualBtn', 'Annual')}
@@ -49616,6 +49601,7 @@ export interface TokenSettings {
   importTextCost: number;
   importPhotoCost: number;
   packages: TokenPackage[];
+  planAllocations?: { [slug: string]: number };
   isEnabled: boolean;
   updatedAt?: string;
 }
@@ -49642,11 +49628,13 @@ const DEFAULT_SETTINGS: TokenSettings = {
     { id: 'pkg_pro', name: 'Culinary Master', tokens: 500, price: 19.99, badge: 'Popular', isPopular: true },
     { id: 'pkg_buffet', name: 'Executive Chef', tokens: 1500, price: 49.99, badge: 'Best Value' }
   ],
+  planAllocations: {},
   isEnabled: true
 };
 
-export async function initTokenTables() {
+export async function initTokenTables(): Promise<void> {
   try {
+    // 1. Token settings table
     await query(`
       CREATE TABLE IF NOT EXISTS token_settings (
         id VARCHAR(64) PRIMARY KEY,
@@ -49657,13 +49645,25 @@ export async function initTokenTables() {
         import_text_cost INTEGER DEFAULT 1,
         import_photo_cost INTEGER DEFAULT 3,
         packages JSONB DEFAULT '[]'::jsonb,
+        plan_allocations JSONB DEFAULT '{}'::jsonb,
         is_enabled BOOLEAN DEFAULT true,
         updated_at TIMESTAMP DEFAULT NOW()
       );
+    `);
 
+    // Ensure columns exist if table was previously created with fewer columns
+    await query(`
+      ALTER TABLE token_settings 
+      ADD COLUMN IF NOT EXISTS plan_allocations JSONB DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS packages JSONB DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT true;
+    `);
+
+    // 2. Token transactions ledger table
+    await query(`
       CREATE TABLE IF NOT EXISTS token_transactions (
-        id VARCHAR(64) PRIMARY KEY,
-        user_id VARCHAR(64) NOT NULL,
+        id VARCHAR(100) PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL,
         user_email VARCHAR(255),
         amount INTEGER NOT NULL,
         balance_after INTEGER NOT NULL,
@@ -49671,31 +49671,53 @@ export async function initTokenTables() {
         description TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
+    `);
 
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance INTEGER DEFAULT 100;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50);
-      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 100;
+    // 3. User balance columns
+    await query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS token_balance INTEGER DEFAULT 100,
+      ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50);
+    `);
+
+    // 4. Subscription plan token columns
+    await query(`
+      ALTER TABLE subscription_plans 
+      ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 100,
+      ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 500;
+    `);
+
+    // Create indices
+    await query(`
+      CREATE INDEX IF NOT EXISTS idx_token_transactions_email ON token_transactions(user_email);
+      CREATE INDEX IF NOT EXISTS idx_token_transactions_created ON token_transactions(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_token_transactions_type ON token_transactions(type);
     `);
   } catch (err) {
-    console.error('Failed initializing token tables in PostgreSQL:', err);
+    console.warn('initTokenTables warning:', err);
   }
 }
 
 export async function getTokenSettings(): Promise<TokenSettings> {
   await initTokenTables();
   try {
-    const rows = await query('SELECT * FROM token_settings WHERE id = $1 LIMIT 1', ['primary_token_settings']);
-    if (rows.length > 0) {
+    const rows = await query('SELECT * FROM token_settings ORDER BY updated_at DESC LIMIT 1');
+    if (rows && rows.length > 0) {
       const r = rows[0];
       return {
-        id: r.id,
+        id: r.id || 'primary_token_settings',
         tokenName: r.token_name || DEFAULT_SETTINGS.tokenName,
         tokenSymbol: r.token_symbol || DEFAULT_SETTINGS.tokenSymbol,
         chefCost: Number(r.chef_cost ?? DEFAULT_SETTINGS.chefCost),
         importUrlCost: Number(r.import_url_cost ?? DEFAULT_SETTINGS.importUrlCost),
         importTextCost: Number(r.import_text_cost ?? DEFAULT_SETTINGS.importTextCost),
         importPhotoCost: Number(r.import_photo_cost ?? DEFAULT_SETTINGS.importPhotoCost),
-        packages: Array.isArray(r.packages) && r.packages.length > 0 ? r.packages : DEFAULT_SETTINGS.packages,
+        packages: Array.isArray(r.packages) 
+          ? r.packages 
+          : (typeof r.packages === 'string' ? JSON.parse(r.packages) : DEFAULT_SETTINGS.packages),
+        planAllocations: r.plan_allocations 
+          ? (typeof r.plan_allocations === 'string' ? JSON.parse(r.plan_allocations) : r.plan_allocations) 
+          : {},
         isEnabled: Boolean(r.is_enabled ?? true),
         updatedAt: r.updated_at
       };
@@ -49707,17 +49729,22 @@ export async function getTokenSettings(): Promise<TokenSettings> {
 export async function saveTokenSettings(settings: Partial<TokenSettings>): Promise<TokenSettings> {
   await initTokenTables();
   const current = await getTokenSettings();
+  
   const merged: TokenSettings = {
     ...current,
     ...settings,
-    packages: settings.packages || current.packages
+    packages: Array.isArray(settings.packages) ? settings.packages : current.packages,
+    planAllocations: settings.planAllocations || current.planAllocations || {},
+    isEnabled: settings.isEnabled !== undefined ? Boolean(settings.isEnabled) : current.isEnabled
   };
+
+  const idToUse = current.id || 'primary_token_settings';
 
   await query(`
     INSERT INTO token_settings (
       id, token_name, token_symbol, chef_cost, import_url_cost,
-      import_text_cost, import_photo_cost, packages, is_enabled, updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, NOW())
+      import_text_cost, import_photo_cost, packages, plan_allocations, is_enabled, updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, NOW())
     ON CONFLICT (id) DO UPDATE SET
       token_name = EXCLUDED.token_name,
       token_symbol = EXCLUDED.token_symbol,
@@ -49726,10 +49753,11 @@ export async function saveTokenSettings(settings: Partial<TokenSettings>): Promi
       import_text_cost = EXCLUDED.import_text_cost,
       import_photo_cost = EXCLUDED.import_photo_cost,
       packages = EXCLUDED.packages,
+      plan_allocations = EXCLUDED.plan_allocations,
       is_enabled = EXCLUDED.is_enabled,
       updated_at = NOW()
   `, [
-    'primary_token_settings',
+    idToUse,
     merged.tokenName,
     merged.tokenSymbol,
     merged.chefCost,
@@ -49737,6 +49765,7 @@ export async function saveTokenSettings(settings: Partial<TokenSettings>): Promi
     merged.importTextCost,
     merged.importPhotoCost,
     JSON.stringify(merged.packages),
+    JSON.stringify(merged.planAllocations),
     merged.isEnabled
   ]);
 
@@ -49780,7 +49809,6 @@ export async function deductUserTokens({
     return { success: true, deducted: 0, currentBalance: current, tokenSymbol: settings.tokenSymbol };
   }
 
-  // Find user
   let userRow: any = null;
   if (userId) {
     const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
@@ -49806,7 +49834,6 @@ export async function deductUserTokens({
     };
   }
 
-  // Atomically decrement
   const updateRes = await query(`
     UPDATE users 
     SET token_balance = token_balance - $1, updated_at = NOW() 
@@ -49824,7 +49851,7 @@ export async function deductUserTokens({
   }
 
   const newBalance = Number(updateRes[0].token_balance);
-  const txId = 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
 
   try {
     await query(`
@@ -49855,7 +49882,7 @@ export async function addTokensToUser({
   amount: number;
   type: string;
   description: string;
-}) {
+}): Promise<number | null> {
   await initTokenTables();
   let userRow: any = null;
   if (userId) {
@@ -49877,7 +49904,7 @@ export async function addTokensToUser({
   `, [amount, userRow.id]);
 
   const newBalance = Number(updateRes[0].token_balance);
-  const txId = 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
 
   await query(`
     INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
@@ -49887,7 +49914,7 @@ export async function addTokensToUser({
   return newBalance;
 }
 
-export async function syncUserMonthlyTokens(userId?: string | null, userEmail?: string | null) {
+export async function syncUserMonthlyTokens(userId?: string | null, userEmail?: string | null): Promise<void> {
   await initTokenTables();
   try {
     let userRow: any = null;
@@ -49900,18 +49927,19 @@ export async function syncUserMonthlyTokens(userId?: string | null, userEmail?: 
     }
     if (!userRow) return;
 
-    const currentCycle = new Date().toISOString().slice(0, 7); // e.g. "2026-09"
+    const currentCycle = new Date().toISOString().slice(0, 7);
     if (userRow.last_token_grant_cycle === currentCycle) {
-      return; // Already granted for this monthly cycle
+      return;
     }
 
     const planSlug = userRow.subscription_plan || 'taster';
     const planRows = await query('SELECT monthly_tokens, token_limit FROM subscription_plans WHERE slug = $1 LIMIT 1', [planSlug]);
     
-    // Default tokens granted per plan: Free/Taster: 50, Nutrition Pro: 500, Custom: 2000
     let tokensToGrant = 50;
     if (planRows.length > 0 && planRows[0].monthly_tokens) {
       tokensToGrant = Number(planRows[0].monthly_tokens);
+    } else if (planRows.length > 0 && planRows[0].token_limit) {
+      tokensToGrant = Number(planRows[0].token_limit);
     } else if (planSlug.includes('pro')) {
       tokensToGrant = 500;
     }
@@ -49927,6 +49955,95 @@ export async function syncUserMonthlyTokens(userId?: string | null, userEmail?: 
     await query('UPDATE users SET last_token_grant_cycle = $1 WHERE id = $2', [currentCycle, userRow.id]);
   } catch (err) {
     console.error('Failed syncing monthly plan tokens:', err);
+  }
+}
+
+export async function grantPlanTokensOnPurchase(
+  userEmailOrId: string,
+  planSlug: string,
+  options?: { customTokens?: number; orderId?: string; isAnnual?: boolean; planName?: string }
+): Promise<{ success: boolean; tokensGranted: number; newBalance: number; error?: string }> {
+  try {
+    await initTokenTables();
+    const cleanIdent = String(userEmailOrId || '').trim();
+    if (!cleanIdent) return { success: false, tokensGranted: 0, newBalance: 0, error: 'User identifier required' };
+
+    const userRows = await query(`
+      SELECT id, email, token_balance, subscription_plan 
+      FROM users 
+      WHERE LOWER(email) = LOWER($1) OR id = $1 
+      LIMIT 1
+    `, [cleanIdent]);
+
+    if (!userRows || userRows.length === 0) {
+      return { success: false, tokensGranted: 0, newBalance: 0, error: 'User not found in database' };
+    }
+
+    const user = userRows[0];
+    const cleanPlanSlug = String(planSlug || user.subscription_plan || 'taster').toLowerCase().trim();
+    const baseSlug = cleanPlanSlug.replace(/-(monthly|annual|free)$/i, '');
+
+    let tokensToGrant = options?.customTokens ?? 0;
+    let resolvedPlanName = options?.planName || '';
+
+    if (!tokensToGrant || tokensToGrant <= 0) {
+      const planRows = await query(`
+        SELECT name, slug, token_limit, monthly_tokens 
+        FROM subscription_plans 
+        WHERE LOWER(slug) = LOWER($1) OR LOWER(id) = LOWER($1) OR LOWER(slug) = LOWER($2)
+        LIMIT 1
+      `, [cleanPlanSlug, baseSlug]);
+
+      if (planRows && planRows.length > 0) {
+        const p = planRows[0];
+        tokensToGrant = Number(p.token_limit ?? p.monthly_tokens ?? 500);
+        if (!resolvedPlanName) resolvedPlanName = p.name || cleanPlanSlug;
+      } else {
+        const settings = await getTokenSettings();
+        const alloc = settings.planAllocations || {};
+        tokensToGrant = Number(alloc[cleanPlanSlug] ?? alloc[baseSlug] ?? (cleanPlanSlug.includes('pro') ? 500 : 50));
+      }
+    }
+
+    if (!resolvedPlanName) {
+      resolvedPlanName = cleanPlanSlug.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
+    }
+
+    if (tokensToGrant <= 0) {
+      tokensToGrant = cleanPlanSlug.includes('free') || cleanPlanSlug === 'taster' ? 50 : 500;
+    }
+
+    const settings = await getTokenSettings();
+    const symbol = settings.tokenSymbol || '🪙';
+
+    const updateResult = await query(`
+      UPDATE users
+      SET 
+        token_balance = COALESCE(token_balance, 0) + $1,
+        subscription_plan = $2,
+        updated_at = NOW()
+      WHERE id = $3
+      RETURNING token_balance
+    `, [tokensToGrant, cleanPlanSlug, user.id]);
+
+    const newBalance = Number(updateResult[0]?.token_balance ?? ((user.token_balance || 0) + tokensToGrant));
+    const txId = 'tx_plan_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+    const description = `Plan Purchase: ${resolvedPlanName} (+${tokensToGrant.toLocaleString()} ${symbol})${options?.orderId ? ` [Order: ${options.orderId}]` : ''}`;
+
+    await query(`
+      INSERT INTO token_transactions 
+      (id, user_id, user_email, amount, balance_after, type, description, created_at)
+      VALUES ($1, $2, $3, $4, $5, 'plan_purchase', $6, NOW())
+    `, [txId, user.id, user.email, tokensToGrant, newBalance, description]);
+
+    return {
+      success: true,
+      tokensGranted: tokensToGrant,
+      newBalance
+    };
+  } catch (err: any) {
+    console.error('grantPlanTokensOnPurchase error:', err);
+    return { success: false, tokensGranted: 0, newBalance: 0, error: err.message };
   }
 }
 
