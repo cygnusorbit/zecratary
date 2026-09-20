@@ -317,13 +317,11 @@ export default function Sidebar() {
           </span>
         </Link>
         <div className="flex items-center gap-2">
-          {/* Mobile Token Balance Badge */}
           <Link href="/profile" className="flex items-center gap-1 px-2.5 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)]">
             <Coins className="h-3.5 w-3.5 text-amber-500" />
             <span style={{ color: 'var(--color-emerald)' }}>{tokenBalance.toLocaleString()}</span>
           </Link>
 
-          {/* Mobile Lucide User Icon Button with Dropdown */}
           <div className="relative" ref={profileDropdownRef}>
             <button
               type="button"
@@ -334,7 +332,6 @@ export default function Sidebar() {
               <UserIcon className="h-4 w-4" style={iconStyle} />
             </button>
 
-            {/* Mobile Profile Dropdown List */}
             {showProfileMenu && (
               <div 
                 className="absolute right-0 mt-2 w-64 rounded-2xl border p-2.5 space-y-2 shadow-2xl z-50 animate-in fade-in"
@@ -352,7 +349,6 @@ export default function Sidebar() {
                   </div>
                 </div>
 
-                {/* 1. Language */}
                 <div className="px-2 py-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs font-bold">
                     <Languages className="h-3.5 w-3.5" style={iconStyle} />
@@ -372,7 +368,6 @@ export default function Sidebar() {
                   </select>
                 </div>
 
-                {/* 2. Day/Dark Mode */}
                 <button
                   type="button"
                   onClick={toggleThemeMode}
@@ -385,7 +380,6 @@ export default function Sidebar() {
                   <span className="text-[10px] opacity-60 font-mono">{isDarkMode ? 'Dark' : 'Day'}</span>
                 </button>
 
-                {/* 3. Billing */}
                 <Link
                   href="/billing"
                   onClick={() => setShowProfileMenu(false)}
@@ -395,7 +389,6 @@ export default function Sidebar() {
                   <span>{t('billing') || 'Billing'}</span>
                 </Link>
 
-                {/* 4. Contact */}
                 <Link
                   href="/contacts"
                   onClick={() => setShowProfileMenu(false)}
@@ -405,7 +398,6 @@ export default function Sidebar() {
                   <span>{t('contactUs') || 'Contact'}</span>
                 </Link>
 
-                {/* 5. Logout */}
                 <button
                   type="button"
                   onClick={() => {
@@ -435,8 +427,19 @@ export default function Sidebar() {
         </div>
       </header>
 
-      {/* DESKTOP TOP BAR */}
-      <div className="hidden md:flex fixed top-0 right-0 left-0 md:left-64 z-30 h-16 bg-[var(--color-card)] border-b border-[var(--color-border)] px-6 items-center justify-between transition-all duration-300">
+      {/* DESKTOP TOP BAR (PROTECTED ID, FIXED 64PX, PERFECT VERTICAL CENTERING) */}
+      <div 
+        id="zecratary-desktop-topbar"
+        className={`hidden md:flex fixed top-0 right-0 z-30 h-16 bg-[var(--color-card)] border-b border-[var(--color-border)] px-6 items-center justify-between transition-all duration-300 ${
+          showCollapsed ? 'left-20' : 'left-64'
+        }`}
+        style={{
+          height: '4rem',
+          paddingTop: 0,
+          paddingBottom: 0,
+          boxSizing: 'border-box'
+        }}
+      >
         <div className="flex items-center gap-3">
           <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]" style={{ color: 'var(--color-primary)' }}>
             {pathname === '/' ? 'Dashboard' : pathname.replace('/', '').toUpperCase()}
@@ -467,7 +470,7 @@ export default function Sidebar() {
                 setShowNotifications(!showNotifications);
                 setShowProfileMenu(false);
               }}
-              className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer"
+              className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="Notifications"
             >
               <Bell className="h-4 w-4" style={iconStyle} />
@@ -527,13 +530,11 @@ export default function Sidebar() {
               <UserIcon className="h-4 w-4" style={iconStyle} />
             </button>
 
-            {/* Profile Dropdown Menu */}
             {showProfileMenu && (
               <div 
                 className="absolute right-0 mt-2 w-72 rounded-2xl border p-3 space-y-2 shadow-2xl z-50 animate-in fade-in"
                 style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
               >
-                {/* Profile Header */}
                 <Link
                   href="/profile"
                   onClick={() => setShowProfileMenu(false)}
@@ -553,7 +554,6 @@ export default function Sidebar() {
                 </Link>
 
                 <div className="space-y-1 pt-1">
-                  {/* 1. Language Selector */}
                   <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
                     <div className="flex items-center gap-2 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
                       <Languages className="w-4 h-4" style={iconStyle} />
@@ -573,7 +573,6 @@ export default function Sidebar() {
                     </select>
                   </div>
 
-                  {/* 2. Day / Dark Mode Toggle */}
                   <button
                     type="button"
                     onClick={toggleThemeMode}
@@ -589,7 +588,6 @@ export default function Sidebar() {
                     </span>
                   </button>
 
-                  {/* 3. Billing */}
                   <Link
                     href="/billing"
                     onClick={() => setShowProfileMenu(false)}
@@ -600,7 +598,6 @@ export default function Sidebar() {
                     <span>{t('billing') || 'Billing'}</span>
                   </Link>
 
-                  {/* 4. Contact */}
                   <Link
                     href="/contacts"
                     onClick={() => setShowProfileMenu(false)}
@@ -608,10 +605,9 @@ export default function Sidebar() {
                     style={{ color: 'var(--color-text)' }}
                   >
                     <Mail className="h-4 w-4" style={iconStyle} />
-                    <span>{t('contactUs') || 'Contact'}</span>
+                    <span>{t('contactUs') || 'Contact Us'}</span>
                   </Link>
 
-                  {/* 5. Logout */}
                   <button
                     type="button"
                     onClick={() => {

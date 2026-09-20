@@ -21,7 +21,7 @@ export default function RootLayout({
         <LanguageProvider>
           <ThemeInitializer />
         <Sidebar />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 w-full min-w-0">
+        <main className="md:pt-20 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 w-full min-w-0">
           {children}
         </main>
         </LanguageProvider>

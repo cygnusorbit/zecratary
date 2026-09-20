@@ -182,3 +182,23 @@ html, body {
   font-family: var(--font-family-base) !important;
   letter-spacing: var(--font-letter-spacing, normal);
 }
+
+/* --- Desktop Top Bar Page Clearance --- */
+@media (min-width: 768px) {
+  /* Only apply top clearance to page content */
+  main,
+  [role="main"],
+  .main-content,
+  #main-content,
+  body > div > div.flex-1,
+  body > div > main {
+    padding-top: 5rem !important; /* 80px: 64px top bar + 16px buffer */
+  }
+
+  /* Strictly immunize top bar from any padding-top displacement */
+  #zecratary-desktop-topbar {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    height: 4rem !important;
+  }
+}
