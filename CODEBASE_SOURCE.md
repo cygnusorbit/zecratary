@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.5.5",
+  "version": "7.5.6",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.5.5",
+  "version": "7.5.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -22755,7 +22755,7 @@ import {
   ChefHat, DownloadCloud, FileText, Camera, Tag, DollarSign,
   Search, Filter, ArrowUpRight, ArrowDownLeft, Calendar, User as UserIcon,
   Clock, Activity, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Columns3, Check, SlidersHorizontal, Eye, EyeOff, Wallet, CheckSquare, Square
+  Columns3, Check, SlidersHorizontal, Eye, EyeOff, Wallet, ArrowRight
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -22773,6 +22773,14 @@ interface SubscriptionPlan {
   slug: string;
   name: string;
   monthly_tokens?: number;
+  token_limit?: number;
+  tokenLimit?: number;
+  is_free?: boolean;
+  isFree?: boolean;
+  monthly_price_dollars?: number;
+  annual_price_dollars?: number;
+  monthlyPriceDollars?: number;
+  annualPriceDollars?: number;
 }
 
 interface TokenTransaction {
@@ -22825,7 +22833,7 @@ export default function AdminTokenSettingPage() {
   // Packages
   const [packages, setPackages] = useState<TokenPackage[]>([]);
   
-  // Subscription Plan Monthly Tokens
+  // Subscription Plan Monthly Tokens (Synchronized with /admin/plans)
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [planAllocations, setPlanAllocations] = useState<{ [slug: string]: number }>({});
 
@@ -22916,15 +22924,15 @@ export default function AdminTokenSettingPage() {
 
   const activeColumnCount = columns.filter(c => c.visible).length;
 
-  useEffect(() => {
-    fetchSettings();
-  }, []);
-
-  const fetchSettings = async () => {
+  // Dynamic Settings and Plans Fetching (Direct from /api/admin/plans & PostgreSQL)
+  const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/token-settings');
+      // 1. Fetch token settings
+      const res = await fetch('/api/admin/token-settings', { cache: 'no-store' });
       const data = await res.json();
+      let activeAllocations: { [slug: string]: number } = {};
+
       if (data.success && data.settings) {
         setTokenName(data.settings.tokenName || 'Foodie Token');
         setTokenSymbol(data.settings.tokenSymbol || '🪙');
@@ -22934,21 +22942,90 @@ export default function AdminTokenSettingPage() {
         setImportTextCost(data.settings.importTextCost ?? 1);
         setImportPhotoCost(data.settings.importPhotoCost ?? 3);
         setPackages(data.settings.packages || []);
+        if (data.settings.planAllocations && typeof data.settings.planAllocations === 'object') {
+          activeAllocations = { ...data.settings.planAllocations };
+        }
       }
-      if (data.plans) {
-        setPlans(data.plans);
-        const map: { [slug: string]: number } = {};
-        data.plans.forEach((p: SubscriptionPlan) => {
-          map[p.slug] = p.monthly_tokens ?? (p.slug.includes('pro') ? 500 : 50);
+
+      // 2. Fetch authoritative plans directly from /api/admin/plans
+      let dynamicPlans: SubscriptionPlan[] = [];
+      try {
+        const plansRes = await fetch('/api/admin/plans', { cache: 'no-store' });
+        if (plansRes.ok) {
+          const plansData = await plansRes.json();
+          const list = Array.isArray(plansData.configs) ? plansData.configs : Array.isArray(plansData) ? plansData : [];
+          if (list.length > 0) {
+            dynamicPlans = list.map((p: any) => {
+              const assignedLimit = Number(p.tokenLimit ?? p.token_limit ?? 500);
+              return {
+                id: p.id,
+                slug: p.slug,
+                name: p.name,
+                token_limit: assignedLimit,
+                monthly_tokens: assignedLimit,
+                tokenLimit: assignedLimit,
+                is_free: Boolean(p.isFree ?? p.is_free),
+                isFree: Boolean(p.isFree ?? p.is_free),
+                monthly_price_dollars: Number(p.monthlyPriceDollars ?? p.monthly_price_dollars ?? 0),
+                annual_price_dollars: Number(p.annualPriceDollars ?? p.annual_price_dollars ?? 0)
+              };
+            });
+          }
+        }
+      } catch (_) {}
+
+      // Fallback to data.plans from token-settings if needed
+      if (dynamicPlans.length === 0 && Array.isArray(data.plans) && data.plans.length > 0) {
+        dynamicPlans = data.plans.map((p: any) => {
+          const assignedLimit = Number(p.token_limit ?? p.monthly_tokens ?? 500);
+          return {
+            id: p.id,
+            slug: p.slug,
+            name: p.name,
+            token_limit: assignedLimit,
+            monthly_tokens: assignedLimit,
+            tokenLimit: assignedLimit,
+            is_free: Boolean(p.is_free ?? p.isFree),
+            isFree: Boolean(p.is_free ?? p.isFree),
+            monthly_price_dollars: Number(p.monthly_price_dollars ?? 0),
+            annual_price_dollars: Number(p.annual_price_dollars ?? 0)
+          };
         });
-        setPlanAllocations(map);
       }
+
+      setPlans(dynamicPlans);
+
+      // Build consolidated allocation map prioritizing plan's token_limit from /admin/plans
+      const map: { [slug: string]: number } = {};
+      dynamicPlans.forEach((p: SubscriptionPlan) => {
+        const val = p.token_limit ?? p.tokenLimit ?? p.monthly_tokens ?? activeAllocations[p.slug] ?? (p.is_free || p.isFree ? 50 : 500);
+        map[p.slug] = Number(val);
+      });
+      setPlanAllocations(map);
+
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to fetch token settings');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
+
+    // Automatically re-sync whenever plans are updated in /admin/plans
+    const handlePlansUpdated = () => {
+      fetchSettings();
+    };
+
+    window.addEventListener('zecratary_plans_updated', handlePlansUpdated);
+    window.addEventListener('zecratary_token_settings_updated', handlePlansUpdated);
+
+    return () => {
+      window.removeEventListener('zecratary_plans_updated', handlePlansUpdated);
+      window.removeEventListener('zecratary_token_settings_updated', handlePlansUpdated);
+    };
+  }, [fetchSettings]);
 
   const fetchTransactions = useCallback(async (pageToLoad = 1, limitToUse = txLimit) => {
     setTxLoading(true);
@@ -23015,7 +23092,7 @@ export default function AdminTokenSettingPage() {
   };
 
   // Delete Individual Transaction
-  const handleDeleteTransaction = async (id: string, description?: string) => {
+  const handleDeleteTransaction = async (id: string) => {
     const confirmMsg = t('confirmDeleteTokenTx', 'Are you sure you want to permanently delete this token transaction record?');
     if (!window.confirm(confirmMsg)) return;
 
@@ -23111,9 +23188,10 @@ export default function AdminTokenSettingPage() {
         throw new Error(data.error || 'Failed saving token configurations');
       }
 
-      setSuccessMsg(t('tokenSettingsSavedSuccess', 'Token configuration saved and synchronized with PostgreSQL!'));
+      setSuccessMsg(t('tokenSettingsSavedSuccess', 'Token configurations & Plan Allocations saved and synchronized with PostgreSQL!'));
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_plans_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
       setTimeout(() => setSuccessMsg(''), 4000);
@@ -23621,49 +23699,92 @@ export default function AdminTokenSettingPage() {
             </div>
           </div>
 
-          {/* Section 4: Subscription Plan Monthly Grants */}
+          {/* Section 4: Subscription Plan Monthly Grants (Dynamically Synced with /admin/plans) */}
           <div 
             className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <Layers className="h-4 w-4 text-purple-400" />
-              <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                {t('planMonthlyGrantsHeading', 'Subscription Plan Monthly Included Tokens')}
-              </h2>
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 text-purple-400" />
+                <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                  {t('planMonthlyGrantsHeading', 'Subscription Plan Monthly Included Tokens')}
+                </h2>
+              </div>
+              <Link
+                href="/admin/plans"
+                className="text-xs font-bold text-amber-500 hover:text-amber-400 flex items-center gap-1 transition"
+              >
+                <span>{t('managePlansLink', 'Manage in /admin/plans')}</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
             </div>
 
             <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('planMonthlyGrantsSubtitle', 'Subscribers automatically receive these tokens every recurring monthly billing cycle.')}
+              {t('planMonthlyGrantsSubtitle', 'Subscribers automatically receive these tokens every recurring monthly billing cycle. Values dynamically synchronize with /admin/plans and PostgreSQL.')}
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {plans.map((p) => (
-                <div 
-                  key={p.slug}
-                  className="p-4 rounded-2xl border space-y-2"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            {plans.length === 0 ? (
+              <div 
+                className="p-6 rounded-2xl border text-center text-xs space-y-2"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <p style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('noPlansToAllocate', 'No subscription plans found in database.')}
+                </p>
+                <Link
+                  href="/admin/plans"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{p.name || p.slug}</span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-primary/10" style={{ borderColor: 'var(--color-border)' }}>
-                      {p.slug}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 pt-1">
-                    <input
-                      type="number"
-                      min="0"
-                      value={planAllocations[p.slug] ?? 50}
-                      onChange={(e) => setPlanAllocations({ ...planAllocations, [p.slug]: parseInt(e.target.value) || 0 })}
-                      className="w-24 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
-                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                    />
-                    <span className="text-xs font-bold text-amber-500">{tokenSymbol} / month</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>{t('createPlanPrompt', 'Configure Plans in /admin/plans')}</span>
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {plans.map((p) => {
+                  const isFree = Boolean(p.is_free || p.isFree || (Number(p.monthly_price_dollars || p.monthlyPriceDollars || 0) === 0 && Number(p.annual_price_dollars || p.annualPriceDollars || 0) === 0));
+                  const mPrice = Number(p.monthly_price_dollars ?? p.monthlyPriceDollars ?? 0);
+                  const currentAlloc = planAllocations[p.slug] ?? p.token_limit ?? p.tokenLimit ?? (isFree ? 50 : 500);
+
+                  return (
+                    <div 
+                      key={p.slug || p.id}
+                      className="p-4 rounded-2xl border space-y-2.5 shadow-inner transition"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{p.name || p.slug}</span>
+                          <span className="text-[10px] font-mono opacity-60" style={{ color: 'var(--color-text-secondary)' }}>
+                            {isFree ? t('freeTier', 'Free Tier') : `$${mPrice.toFixed(2)}/mo`}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-primary/10 font-bold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
+                          {p.slug}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <input
+                          type="number"
+                          min="0"
+                          value={currentAlloc}
+                          onChange={(e) => setPlanAllocations(prev => ({
+                            ...prev,
+                            [p.slug]: Math.max(0, parseInt(e.target.value) || 0)
+                          }))}
+                          className="w-28 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
+                          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                        />
+                        <span className="text-xs font-bold text-amber-500 font-mono">{tokenSymbol} / mo</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -23916,7 +24037,6 @@ export default function AdminTokenSettingPage() {
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                    {/* Select All Checkbox Header */}
                     <th className="p-3.5 w-10 text-center">
                       <input
                         ref={selectAllCheckboxRef}
@@ -23963,7 +24083,6 @@ export default function AdminTokenSettingPage() {
                           className={`transition font-medium ${isSelected ? 'bg-primary/10' : 'hover:bg-slate-500/5'}`}
                           style={{ color: 'var(--color-text)' }}
                         >
-                          {/* Row Selection Checkbox */}
                           <td className="p-3.5 text-center">
                             <input
                               type="checkbox"
@@ -23973,7 +24092,6 @@ export default function AdminTokenSettingPage() {
                             />
                           </td>
 
-                          {/* User Column */}
                           {isColVisible('user') && (
                             <td className="p-3.5">
                               <div className="font-bold truncate max-w-[180px]" title={tx.user_email}>
@@ -23985,7 +24103,6 @@ export default function AdminTokenSettingPage() {
                             </td>
                           )}
 
-                          {/* User Total Token Column */}
                           {isColVisible('user_total_tokens') && (
                             <td className="p-3.5">
                               <div className="flex items-center gap-1.5 font-mono font-black text-xs" style={{ color: 'var(--color-text)' }}>
@@ -23996,14 +24113,12 @@ export default function AdminTokenSettingPage() {
                             </td>
                           )}
 
-                          {/* Service / Operation */}
                           {isColVisible('service') && (
                             <td className="p-3.5">
                               {renderServiceBadge(tx.type)}
                             </td>
                           )}
 
-                          {/* Amount */}
                           {isColVisible('amount') && (
                             <td className="p-3.5">
                               <span className={`font-mono font-black text-xs ${isNegative ? 'text-red-400' : 'text-emerald-400'}`}>
@@ -24012,33 +24127,29 @@ export default function AdminTokenSettingPage() {
                             </td>
                           )}
 
-                          {/* Balance After */}
                           {isColVisible('balance_after') && (
                             <td className="p-3.5 font-mono text-xs font-bold">
                               {tx.balance_after} <span className="text-amber-500">{tokenSymbol}</span>
                             </td>
                           )}
 
-                          {/* Description */}
                           {isColVisible('description') && (
                             <td className="p-3.5 max-w-[240px] truncate text-[11px]" style={{ color: 'var(--color-text-secondary)' }} title={tx.description}>
                               {tx.description || '-'}
                             </td>
                           )}
 
-                          {/* Timestamp */}
                           {isColVisible('created_at') && (
                             <td className="p-3.5 font-mono text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
                               {new Date(tx.created_at).toLocaleString()}
                             </td>
                           )}
 
-                          {/* Actions Column */}
                           <td className="p-3.5 text-right">
                             <button
                               type="button"
                               disabled={deletingTxId === tx.id}
-                              onClick={() => handleDeleteTransaction(tx.id, tx.description)}
+                              onClick={() => handleDeleteTransaction(tx.id)}
                               className="p-1.5 rounded-lg border text-red-400 hover:text-red-300 border-red-900/40 hover:bg-red-950/20 transition cursor-pointer disabled:opacity-50"
                               title={t('deleteTransactionTooltip', 'Delete Transaction')}
                             >
@@ -37070,7 +37181,27 @@ export async function GET() {
 
     let plans: any[] = [];
     try {
-      plans = await query('SELECT id, slug, name, monthly_tokens, token_limit FROM subscription_plans ORDER BY created_at ASC');
+      const planRows = await query(`
+        SELECT id, slug, name, token_limit, monthly_tokens, is_free, monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge 
+        FROM subscription_plans 
+        ORDER BY is_free DESC, monthly_price_dollars ASC
+      `);
+
+      plans = planRows.map((p: any) => {
+        const tokenLimit = Number(p.token_limit ?? p.monthly_tokens ?? settings.planAllocations?.[p.slug] ?? (p.is_free ? 50 : 500));
+        return {
+          id: p.id,
+          slug: p.slug,
+          name: p.name,
+          token_limit: tokenLimit,
+          monthly_tokens: tokenLimit,
+          tokenLimit: tokenLimit,
+          is_free: Boolean(p.is_free),
+          isFree: Boolean(p.is_free),
+          monthly_price_dollars: Number(p.monthly_price_dollars ?? 0),
+          annual_price_dollars: Number(p.annual_price_dollars ?? 0)
+        };
+      });
     } catch (_) {}
 
     return NextResponse.json({
@@ -37100,15 +37231,21 @@ export async function POST(req: NextRequest) {
       planAllocations: planAllocations || {}
     });
 
+    // Update subscription_plans table in PostgreSQL for each plan slug
     if (planAllocations && typeof planAllocations === 'object') {
       for (const [slug, amount] of Object.entries(planAllocations)) {
-        await query('UPDATE subscription_plans SET monthly_tokens = $1, token_limit = $1 WHERE slug = $2', [Math.max(0, Number(amount)), slug]);
+        const num = Math.max(0, Number(amount));
+        await query(`
+          UPDATE subscription_plans 
+          SET token_limit = $1, monthly_tokens = $1, updated_at = NOW() 
+          WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
+        `, [num, slug]);
       }
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Token settings successfully persisted to PostgreSQL.',
+      message: 'Token settings and plan allocations synchronized with PostgreSQL.',
       settings: updated
     });
   } catch (err: any) {
@@ -38147,7 +38284,27 @@ export async function GET() {
 
     let plans: any[] = [];
     try {
-      plans = await query('SELECT id, slug, name, monthly_tokens, token_limit FROM subscription_plans ORDER BY created_at ASC');
+      const planRows = await query(`
+        SELECT id, slug, name, token_limit, monthly_tokens, is_free, monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge 
+        FROM subscription_plans 
+        ORDER BY is_free DESC, monthly_price_dollars ASC
+      `);
+
+      plans = planRows.map((p: any) => {
+        const tokenLimit = Number(p.token_limit ?? p.monthly_tokens ?? settings.planAllocations?.[p.slug] ?? (p.is_free ? 50 : 500));
+        return {
+          id: p.id,
+          slug: p.slug,
+          name: p.name,
+          token_limit: tokenLimit,
+          monthly_tokens: tokenLimit,
+          tokenLimit: tokenLimit,
+          is_free: Boolean(p.is_free),
+          isFree: Boolean(p.is_free),
+          monthly_price_dollars: Number(p.monthly_price_dollars ?? 0),
+          annual_price_dollars: Number(p.annual_price_dollars ?? 0)
+        };
+      });
     } catch (_) {}
 
     return NextResponse.json({
@@ -38177,15 +38334,21 @@ export async function POST(req: NextRequest) {
       planAllocations: planAllocations || {}
     });
 
+    // Update subscription_plans table in PostgreSQL for each plan slug
     if (planAllocations && typeof planAllocations === 'object') {
       for (const [slug, amount] of Object.entries(planAllocations)) {
-        await query('UPDATE subscription_plans SET monthly_tokens = $1, token_limit = $1 WHERE slug = $2', [Math.max(0, Number(amount)), slug]);
+        const num = Math.max(0, Number(amount));
+        await query(`
+          UPDATE subscription_plans 
+          SET token_limit = $1, monthly_tokens = $1, updated_at = NOW() 
+          WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
+        `, [num, slug]);
       }
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Token settings successfully persisted to PostgreSQL.',
+      message: 'Token settings and plan allocations synchronized with PostgreSQL.',
       settings: updated
     });
   } catch (err: any) {
@@ -47908,10 +48071,11 @@ export function useTheme() {
 
 ## File: `apps/web/src/components/Sidebar.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
 
 import packageInfo from '../../package.json';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -47941,13 +48105,14 @@ import {
   Moon,
   Sun,
   Key,
-  Coins
+  Coins,
+  Bell,
+  User as UserIcon
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 
-// ISO Code to National Flag Emoji Fallback Map
 const LANGUAGE_FLAG_MAP: Record<string, string> = {
   en: '🇺🇸',
   es: '🇪🇸',
@@ -47992,6 +48157,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
   if (isAuthRoute) return null;
+
   const { t, locale, setLocale } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
@@ -48000,6 +48166,18 @@ export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
+
+  // Live Token & Notification state for Top Bar
+  const [tokenBalance, setTokenBalance] = useState<number>(0);
+  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [unreadCount, setUnreadCount] = useState<number>(3);
+  const [showNotifications, setShowNotifications] = useState<boolean>(false);
+  const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
+
+  // Dropdown click-outside refs
+  const profileDropdownRef = useRef<HTMLDivElement>(null);
+  const notifDropdownRef = useRef<HTMLDivElement>(null);
+
   const [availableLanguages, setAvailableLanguages] = useState<{ code: string; name: string; flag: string }[]>([
     { code: 'en', name: 'English', flag: '🇺🇸' },
     { code: 'es', name: 'Español', flag: '🇪🇸' },
@@ -48028,17 +48206,45 @@ export default function Sidebar() {
     } catch (_) {}
   };
 
+  const fetchUserTokenAndNotifications = useCallback(async (currentUser: any) => {
+    if (!currentUser) return;
+    try {
+      const cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
+      if (cfgRes.ok) {
+        const cfgData = await cfgRes.json();
+        const cfg = cfgData.settings || cfgData.config || cfgData;
+        if (cfg && cfg.tokenSymbol) {
+          setTokenSymbol(cfg.tokenSymbol);
+        }
+      }
+
+      const queryParam = currentUser.id 
+        ? `?userId=${encodeURIComponent(currentUser.id)}&email=${encodeURIComponent(currentUser.email || '')}`
+        : `?email=${encodeURIComponent(currentUser.email || '')}`;
+      
+      const tokenRes = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
+      if (tokenRes.ok) {
+        const tokenData = await tokenRes.json();
+        if (tokenData.success && typeof tokenData.balance === 'number') {
+          setTokenBalance(tokenData.balance);
+          if (tokenData.tokenSymbol) setTokenSymbol(tokenData.tokenSymbol);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
   useEffect(() => {
     setMounted(true);
-    setUser(getCurrentUser());
+    const currentUser = getCurrentUser();
+    setUser(currentUser);
     const name = getSiteName();
     const icon = getSiteIcon();
     setSiteName(name);
     setSiteIcon(icon);
     updateFavicon(icon);
     loadLanguagesFromAdmin();
+    fetchUserTokenAndNotifications(currentUser);
 
-    // Initialize Theme Mode (Dark / Day)
     const savedMode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
     if (savedMode) {
       const isDark = savedMode === 'dark';
@@ -48049,7 +48255,6 @@ export default function Sidebar() {
       setIsDarkMode(hasDarkClass);
     }
 
-    // Initialize responsive collapse for tablet view
     const initialWidth = window.innerWidth;
     if (initialWidth >= 768 && initialWidth < 1024) {
       setIsCollapsed(true);
@@ -48066,21 +48271,20 @@ export default function Sidebar() {
         width < 768 ? 'mobile' : width < 1024 ? 'tablet' : 'desktop';
 
       if (currentCategory !== prevCategory) {
-        if (currentCategory === 'tablet') {
-          setIsCollapsed(true);
-        } else if (currentCategory === 'desktop') {
-          setIsCollapsed(false);
-        }
-        if (currentCategory !== 'mobile') {
-          setIsOpen(false);
-        }
+        if (currentCategory === 'tablet') setIsCollapsed(true);
+        else if (currentCategory === 'desktop') setIsCollapsed(false);
+        if (currentCategory !== 'mobile') setIsOpen(false);
         prevCategory = currentCategory;
       }
     };
 
     window.addEventListener('resize', handleScreenResize);
 
-    const handleAuthChange = () => setUser(getCurrentUser());
+    const handleAuthChange = () => {
+      const updated = getCurrentUser();
+      setUser(updated);
+      fetchUserTokenAndNotifications(updated);
+    };
     const handleSiteSync = () => {
       setSiteName(getSiteName());
       setSiteIcon(getSiteIcon());
@@ -48091,28 +48295,41 @@ export default function Sidebar() {
       const isDark = localStorage.getItem('zecratary_theme_mode') !== 'light';
       setIsDarkMode(isDark);
     };
+    const handleTokenSync = () => {
+      const u = getCurrentUser();
+      if (u) fetchUserTokenAndNotifications(u);
+    };
 
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target as Node)) {
+        setShowProfileMenu(false);
+      }
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
+        setShowNotifications(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
     window.addEventListener('zecratary_auth_changed', handleAuthChange);
     window.addEventListener('zecratary_site_settings_changed', handleSiteSync);
     window.addEventListener('zecratary_languages_updated', handleLangSync);
     window.addEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
     window.addEventListener('zecratary_theme_changed', handleThemeModeSync);
-    window.addEventListener('zecratary_theme_updated', handleThemeModeSync);
-    window.addEventListener('storage', handleSiteSync);
-    window.addEventListener('storage', handleLangSync);
+    window.addEventListener('zecratary_token_settings_updated', handleTokenSync);
+    window.addEventListener('zecratary_tokens_updated', handleTokenSync);
 
     return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('resize', handleScreenResize);
       window.removeEventListener('zecratary_auth_changed', handleAuthChange);
       window.removeEventListener('zecratary_site_settings_changed', handleSiteSync);
       window.removeEventListener('zecratary_languages_updated', handleLangSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
       window.removeEventListener('zecratary_theme_changed', handleThemeModeSync);
-      window.removeEventListener('zecratary_theme_updated', handleThemeModeSync);
-      window.removeEventListener('storage', handleSiteSync);
-      window.removeEventListener('storage', handleLangSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleTokenSync);
+      window.removeEventListener('zecratary_tokens_updated', handleTokenSync);
     };
-  }, []);
+  }, [fetchUserTokenAndNotifications]);
 
   const toggleThemeMode = () => {
     const nextMode = !isDarkMode;
@@ -48122,17 +48339,14 @@ export default function Sidebar() {
       localStorage.setItem('zecratary_theme_mode', nextMode ? 'dark' : 'light');
       window.dispatchEvent(new Event('zecratary_theme_mode_changed'));
       window.dispatchEvent(new Event('zecratary_theme_changed'));
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
     }
   };
 
   useEffect(() => {
     setIsOpen(false);
+    setShowProfileMenu(false);
+    setShowNotifications(false);
   }, [pathname]);
-
-  if (pathname === '/login' || pathname === '/register' || pathname === '/forgot-password') {
-    return null;
-  }
 
   const isAdmin = user && (
     user.role === 'admin' || 
@@ -48141,21 +48355,14 @@ export default function Sidebar() {
   );
 
   const isActive = (href: string) => {
-    if (href === '/dashboard') {
-      return pathname === '/dashboard' || pathname === '/';
-    }
-    if (href === '/admin') {
-      return pathname === '/admin';
-    }
-    if (href === '/chef') {
-      return pathname === '/chef';
-    }
+    if (href === '/dashboard') return pathname === '/dashboard' || pathname === '/';
+    if (href === '/admin') return pathname === '/admin';
+    if (href === '/chef') return pathname === '/chef';
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
   const showCollapsed = isCollapsed && !isOpen;
 
-  // Harmonized active & hover navigation styles
   const navClass = (href: string) => `
     w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 select-none
     ${isActive(href)
@@ -48170,8 +48377,6 @@ export default function Sidebar() {
 
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
-
-  // Standard icon style matching theme setting with primary fallback
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
 
   return (
@@ -48180,25 +48385,325 @@ export default function Sidebar() {
       <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
         <Link href="/dashboard" className="flex items-center gap-2">
           {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[200px]">
+          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[130px]">
             {displayName}
           </span>
         </Link>
-        <button
-          type="button"
-          onClick={() => setIsOpen(!isOpen)}
-          className={`p-2 rounded-xl border border-[var(--color-border)] transition cursor-pointer ${
-            isDarkMode 
-              ? 'bg-[#141b2d] text-slate-300 hover:text-white' 
-              : 'bg-slate-200 text-slate-800 hover:text-slate-950'
-          }`}
-          aria-label="Toggle navigation menu"
-        >
-          {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Mobile Token Balance Badge */}
+          <Link href="/profile" className="flex items-center gap-1 px-2.5 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)]">
+            <Coins className="h-3.5 w-3.5 text-amber-500" />
+            <span style={{ color: 'var(--color-emerald)' }}>{tokenBalance.toLocaleString()}</span>
+          </Link>
+
+          {/* Mobile Lucide User Icon Button with Dropdown */}
+          <div className="relative" ref={profileDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
+              aria-label="User Profile"
+            >
+              <UserIcon className="h-4 w-4" style={iconStyle} />
+            </button>
+
+            {/* Mobile Profile Dropdown List */}
+            {showProfileMenu && (
+              <div 
+                className="absolute right-0 mt-2 w-64 rounded-2xl border p-2.5 space-y-2 shadow-2xl z-50 animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                <div className="px-2 py-1 border-b border-[var(--color-border)] pb-2 flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
+                    <UserIcon className="w-3.5 h-3.5" style={iconStyle} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
+                      {user?.name || user?.email || 'User Account'}
+                    </p>
+                    <p className="text-[10px] opacity-60 truncate">{user?.email || 'Authenticated'}</p>
+                  </div>
+                </div>
+
+                {/* 1. Language */}
+                <div className="px-2 py-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold">
+                    <Languages className="h-3.5 w-3.5" style={iconStyle} />
+                    <span>{t('language') || 'Language'}</span>
+                  </div>
+                  <select
+                    value={locale}
+                    onChange={(e) => setLocale(e.target.value)}
+                    className="bg-transparent text-xs font-bold outline-none cursor-pointer"
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    {availableLanguages.map((lang) => (
+                      <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
+                        {lang.flag} {lang.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. Day/Dark Mode */}
+                <button
+                  type="button"
+                  onClick={toggleThemeMode}
+                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    {isDarkMode ? <Moon className="h-3.5 w-3.5" style={iconStyle} /> : <Sun className="h-3.5 w-3.5 text-amber-500" />}
+                    <span>{isDarkMode ? (t('nightMode') || 'Dark Mode') : (t('dayMode') || 'Light Mode')}</span>
+                  </div>
+                  <span className="text-[10px] opacity-60 font-mono">{isDarkMode ? 'Dark' : 'Day'}</span>
+                </button>
+
+                {/* 3. Billing */}
+                <Link
+                  href="/billing"
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                >
+                  <CreditCard className="h-3.5 w-3.5" style={iconStyle} />
+                  <span>{t('billing') || 'Billing'}</span>
+                </Link>
+
+                {/* 4. Contact */}
+                <Link
+                  href="/contacts"
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                >
+                  <Mail className="h-3.5 w-3.5" style={iconStyle} />
+                  <span>{t('contactUs') || 'Contact'}</span>
+                </Link>
+
+                {/* 5. Logout */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    logoutUser();
+                    window.location.href = '/login';
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer border-t border-[var(--color-border)] pt-2"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span>{t('logout') || 'Logout'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsOpen(!isOpen)}
+            className={`p-2 rounded-xl border border-[var(--color-border)] transition cursor-pointer ${
+              isDarkMode ? 'bg-[#141b2d] text-slate-300 hover:text-white' : 'bg-slate-200 text-slate-800 hover:text-slate-950'
+            }`}
+            aria-label="Toggle navigation menu"
+          >
+            {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
       </header>
 
-      {/* MOBILE OVERLAY BACKDROP */}
+      {/* DESKTOP TOP BAR */}
+      <div className="hidden md:flex fixed top-0 right-0 left-0 md:left-64 z-30 h-16 bg-[var(--color-card)] border-b border-[var(--color-border)] px-6 items-center justify-between transition-all duration-300">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]" style={{ color: 'var(--color-primary)' }}>
+            {pathname === '/' ? 'Dashboard' : pathname.replace('/', '').toUpperCase()}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {/* Token Balance Widget */}
+          <Link 
+            href="/profile" 
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition shadow-xs group"
+            title="View Token Balance & Summary"
+          >
+            <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
+            <span className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+              {tokenBalance.toLocaleString()}
+            </span>
+            <span className="text-xs font-bold text-amber-500 font-mono">
+              {tokenSymbol}
+            </span>
+          </Link>
+
+          {/* Notification Icon with Dropdown */}
+          <div className="relative" ref={notifDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowNotifications(!showNotifications);
+                setShowProfileMenu(false);
+              }}
+              className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer"
+              aria-label="Notifications"
+            >
+              <Bell className="h-4 w-4" style={iconStyle} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+
+            {showNotifications && (
+              <div 
+                className="absolute right-0 mt-2 w-80 rounded-2xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                  <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                    Notifications
+                  </h3>
+                  <button 
+                    onClick={() => { setUnreadCount(0); setShowNotifications(false); }}
+                    className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
+                  >
+                    Mark all read
+                  </button>
+                </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1 text-xs">
+                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
+                    <p className="font-bold">🎉 Welcome to Zecratary!</p>
+                    <p className="text-[11px] opacity-75">Your account has been initialized with free AI token credits.</p>
+                  </div>
+                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
+                    <p className="font-bold">⚡ AI Model Updated</p>
+                    <p className="text-[11px] opacity-75">Gemini models are fully synchronized and ready for your recipes.</p>
+                  </div>
+                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
+                    <p className="font-bold">🔒 Security Secured</p>
+                    <p className="text-[11px] opacity-75">PostgreSQL database storage connected successfully.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Profile Lucide-User Icon on Top Right with Dropdown */}
+          <div className="relative" ref={profileDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowProfileMenu(!showProfileMenu);
+                setShowNotifications(false);
+              }}
+              className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
+              aria-label="User Profile Dropdown"
+              title="Profile & Settings"
+            >
+              <UserIcon className="h-4 w-4" style={iconStyle} />
+            </button>
+
+            {/* Profile Dropdown Menu */}
+            {showProfileMenu && (
+              <div 
+                className="absolute right-0 mt-2 w-72 rounded-2xl border p-3 space-y-2 shadow-2xl z-50 animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                {/* Profile Header */}
+                <Link
+                  href="/profile"
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-3 p-2 rounded-xl hover:bg-[var(--color-inner-dark)] transition border-b border-[var(--color-border)] pb-3"
+                >
+                  <div className="w-8 h-8 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-center">
+                    <UserIcon className="w-4 h-4" style={iconStyle} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
+                      {user?.name || user?.email || 'User Account'}
+                    </p>
+                    <p className="text-[11px] opacity-60 truncate">
+                      {user?.email || t('viewProfile') || 'View Profile'}
+                    </p>
+                  </div>
+                </Link>
+
+                <div className="space-y-1 pt-1">
+                  {/* 1. Language Selector */}
+                  <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                      <Languages className="w-4 h-4" style={iconStyle} />
+                      <span>{t('language') || 'Language'}</span>
+                    </div>
+                    <select
+                      value={locale}
+                      onChange={(e) => setLocale(e.target.value)}
+                      className="bg-transparent text-xs font-bold outline-none cursor-pointer"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      {availableLanguages.map((lang) => (
+                        <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
+                          {lang.flag} {lang.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 2. Day / Dark Mode Toggle */}
+                  <button
+                    type="button"
+                    onClick={toggleThemeMode}
+                    className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition cursor-pointer text-left"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      {isDarkMode ? <Moon className="h-4 w-4" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500" />}
+                      <span>{isDarkMode ? (t('nightMode') || 'Dark Mode') : (t('dayMode') || 'Light Mode')}</span>
+                    </div>
+                    <span className="text-[10px] font-mono opacity-60 px-2 py-0.5 rounded-md border border-[var(--color-border)]">
+                      {isDarkMode ? 'Dark' : 'Day'}
+                    </span>
+                  </button>
+
+                  {/* 3. Billing */}
+                  <Link
+                    href="/billing"
+                    onClick={() => setShowProfileMenu(false)}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <CreditCard className="h-4 w-4" style={iconStyle} />
+                    <span>{t('billing') || 'Billing'}</span>
+                  </Link>
+
+                  {/* 4. Contact */}
+                  <Link
+                    href="/contacts"
+                    onClick={() => setShowProfileMenu(false)}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <Mail className="h-4 w-4" style={iconStyle} />
+                    <span>{t('contactUs') || 'Contact'}</span>
+                  </Link>
+
+                  {/* 5. Logout */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      logoutUser();
+                      window.location.href = '/login';
+                    }}
+                    className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left border-t border-[var(--color-border)] mt-1.5 pt-2"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span>{t('logout') || 'Logout'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {isOpen && (
         <div 
           onClick={() => setIsOpen(false)} 
@@ -48215,19 +48720,15 @@ export default function Sidebar() {
         ${!isOpen && showCollapsed ? 'md:w-20 p-3' : 'md:w-64 p-5'}
       `}>
         <div className="space-y-4 overflow-y-auto overflow-x-hidden pr-1">
-          {/* TOP BAR / HAMBURGER TOGGLE */}
           {showCollapsed ? (
             <div className="flex flex-col items-center gap-3 pb-2 border-b border-[var(--color-border)]">
               <button
                 type="button"
                 onClick={() => setIsCollapsed(false)}
                 className={`p-2 rounded-xl transition cursor-pointer ${
-                  isDarkMode 
-                    ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' 
-                    : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
+                  isDarkMode ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
                 }`}
                 title="Expand navigation"
-                aria-label="Expand navigation"
               >
                 <Menu className="h-5 w-5" />
               </button>
@@ -48242,12 +48743,9 @@ export default function Sidebar() {
                   type="button"
                   onClick={() => setIsCollapsed(true)}
                   className={`p-2 rounded-xl transition cursor-pointer shrink-0 ${
-                    isDarkMode 
-                      ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' 
-                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
+                    isDarkMode ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
                   }`}
                   title="Collapse navigation"
-                  aria-label="Collapse navigation"
                 >
                   <Menu className="h-5 w-5" />
                 </button>
@@ -48261,11 +48759,7 @@ export default function Sidebar() {
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                className={`md:hidden p-1.5 rounded-lg transition cursor-pointer ${
-                  isDarkMode 
-                    ? 'text-slate-400 hover:text-white hover:bg-slate-800' 
-                    : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
-                }`}
+                className="md:hidden p-1.5 rounded-lg transition cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -48273,19 +48767,13 @@ export default function Sidebar() {
           )}
 
           <nav className="space-y-1">
-            {/* DASHBOARD */}
             <Link href="/dashboard" className={navClass('/dashboard')} title={t('dashboard')}>
               <Home className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('dashboard')}</span>}
             </Link>
 
-            {/* CREATE SECTION */}
-            {showCollapsed ? (
-              <div title={t('create')} />
-            ) : (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${
-                isDarkMode ? 'text-slate-500' : 'text-slate-600'
-              }`}>
+            {!showCollapsed && (
+              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
                 {t('create')}
               </div>
             )}
@@ -48302,13 +48790,8 @@ export default function Sidebar() {
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
             </Link>
 
-            {/* MANAGE SECTION */}
-            {showCollapsed ? (
-              <div title={t('manage')} />
-            ) : (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${
-                isDarkMode ? 'text-slate-500' : 'text-slate-600'
-              }`}>
+            {!showCollapsed && (
+              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
                 {t('manage')}
               </div>
             )}
@@ -48325,13 +48808,8 @@ export default function Sidebar() {
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
             </Link>
 
-            {/* PLAN SECTION */}
-            {showCollapsed ? (
-              <div title={t('plan')} />
-            ) : (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${
-                isDarkMode ? 'text-slate-500' : 'text-slate-600'
-              }`}>
+            {!showCollapsed && (
+              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
                 {t('plan')}
               </div>
             )}
@@ -48348,59 +48826,52 @@ export default function Sidebar() {
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
             </Link>
 
-            {/* ADMIN ACCESS SECTION */}
             {isAdmin && (
               <div className="pt-2 space-y-1">
-                {showCollapsed ? (
-                  <div title={t('adminAccess') || 'Admin Access'} />
-                ) : (
+                {!showCollapsed && (
                   <span className="block text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)] px-3 pt-2 truncate">
                     {t('adminAccess') || 'Admin Access'}
                   </span>
                 )}
-                <Link href="/admin" className={navClass('/admin')} title={t('adminSetting') || 'Admin Setting'}>
+                <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
                   <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('adminSetting') || 'Admin Setting'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
                 </Link>
                 <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
                   <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
                 </Link>
-                <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title={t('tokenSettings') || 'Token Settings'}>
+                <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
                   <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('tokenSettings') || 'Token Settings'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
                 </Link>
-                <Link href="/admin/plans" className={navClass('/admin/plans')} title={t('subscriptionPlans') || 'Subscription Plans'}>
+                <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
                   <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptionPlans') || 'Subscription Plans'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
                 </Link>
-                <Link href="/admin/payment" className={navClass('/admin/payment')} title={t('paymentGateway') || 'Payment Gateway'}>
+                <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
                   <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('paymentGateway') || 'Payment Gateway'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
                 </Link>
-                <Link 
-                  href="/admin/social-login-setting" 
-                  className={navClass('/admin/social-login-setting')} 
-                  title="Social Login"
-                >
+                <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
                   <Key className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
                 </Link>
-                <Link href="/admin/users" className={navClass('/admin/users')} title={t('users') || 'Users'}>
+                <Link href="/admin/users" className={navClass('/admin/users')} title="Users">
                   <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('users') || 'Users'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Users</span>}
                 </Link>
-                <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title={t('recipeType') || 'Recipe Type'}>
+                <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title="Recipe Type">
                   <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('recipeType') || 'Recipe Type'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Recipe Type</span>}
                 </Link>
-                <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title={t('ingredientCategory') || 'Ingredient Category'}>
+                <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
                   <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('ingredientCategory') || 'Ingredient Category'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
                 </Link>
-                <Link href="/admin/language" className={navClass('/admin/language')} title={t('language') || 'Language'}>
+                <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
                   <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('language') || 'Language'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Language</span>}
                 </Link>
               </div>
             )}
@@ -48409,7 +48880,6 @@ export default function Sidebar() {
 
         {/* FOOTER CONTROLS */}
         <div className="pt-3 border-t border-[var(--color-border)] space-y-1">
-          {/* QUICK LANGUAGE SELECTOR & DARK MODE TOGGLE */}
           {showCollapsed ? (
             <div className="flex flex-col items-center gap-2 p-1">
               <div className={`relative flex items-center justify-center p-2 rounded-xl border border-[var(--color-border)] text-base cursor-pointer hover:border-[var(--color-primary)]/50 transition ${
@@ -48435,8 +48905,7 @@ export default function Sidebar() {
                 className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer ${
                   isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
                 }`}
-                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                aria-label="Toggle Theme Mode"
+                title="Toggle Theme Mode"
               >
                 {isDarkMode ? <Moon className="h-4 w-4 shrink-0" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500 shrink-0" />}
               </button>
@@ -48466,8 +48935,7 @@ export default function Sidebar() {
                 className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer shrink-0 ${
                   isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
                 }`}
-                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                aria-label="Toggle Theme Mode"
+                title="Toggle Theme Mode"
               >
                 {isDarkMode ? <Moon className="h-4 w-4 shrink-0" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500 shrink-0" />}
               </button>
@@ -48484,15 +48952,7 @@ export default function Sidebar() {
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing') || 'Billing'}</span>}
           </Link>
 
-          <Link
-            href="/contacts"
-            className={`flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition ${
-              isDarkMode 
-                ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]/50' 
-                : 'text-slate-800 hover:text-slate-950 hover:bg-slate-200/80 font-bold'
-            }`}
-            title={t('contactUs')}
-          >
+          <Link href="/contacts" className={navClass('/contacts')} title={t('contactUs')}>
             <Mail className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('contactUs')}</span>}
           </Link>
@@ -48503,16 +48963,14 @@ export default function Sidebar() {
               window.location.href = '/login';
             }}
             className={`w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer text-left ${
-              isDarkMode 
-                ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/20' 
-                : 'text-slate-800 hover:text-red-600 hover:bg-red-100/70 font-bold'
+              isDarkMode ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/20' : 'text-slate-800 hover:text-red-600 hover:bg-red-100/70 font-bold'
             }`}
             title={t('logout')}
           >
             <LogOut className="h-4 w-4 shrink-0" />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('logout')}</span>}
           </button>
-          {/* DYNAMIC VERSION BADGE */}
+
           <div className={`pt-2 select-none flex items-center ${showCollapsed ? 'justify-center text-[10px]' : 'px-3.5 justify-between text-[11px]'} font-mono ${
             isDarkMode ? 'text-slate-500' : 'text-slate-600'
           }`}>
@@ -49634,7 +50092,6 @@ const DEFAULT_SETTINGS: TokenSettings = {
 
 export async function initTokenTables(): Promise<void> {
   try {
-    // 1. Token settings table
     await query(`
       CREATE TABLE IF NOT EXISTS token_settings (
         id VARCHAR(64) PRIMARY KEY,
@@ -49651,7 +50108,6 @@ export async function initTokenTables(): Promise<void> {
       );
     `);
 
-    // Ensure columns exist if table was previously created with fewer columns
     await query(`
       ALTER TABLE token_settings 
       ADD COLUMN IF NOT EXISTS plan_allocations JSONB DEFAULT '{}'::jsonb,
@@ -49659,7 +50115,6 @@ export async function initTokenTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT true;
     `);
 
-    // 2. Token transactions ledger table
     await query(`
       CREATE TABLE IF NOT EXISTS token_transactions (
         id VARCHAR(100) PRIMARY KEY,
@@ -49673,21 +50128,18 @@ export async function initTokenTables(): Promise<void> {
       );
     `);
 
-    // 3. User balance columns
     await query(`
       ALTER TABLE users 
       ADD COLUMN IF NOT EXISTS token_balance INTEGER DEFAULT 100,
       ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50);
     `);
 
-    // 4. Subscription plan token columns
     await query(`
       ALTER TABLE subscription_plans 
-      ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 100,
+      ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 500,
       ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 500;
     `);
 
-    // Create indices
     await query(`
       CREATE INDEX IF NOT EXISTS idx_token_transactions_email ON token_transactions(user_email);
       CREATE INDEX IF NOT EXISTS idx_token_transactions_created ON token_transactions(created_at DESC);
@@ -49768,6 +50220,20 @@ export async function saveTokenSettings(settings: Partial<TokenSettings>): Promi
     JSON.stringify(merged.planAllocations),
     merged.isEnabled
   ]);
+
+  // Synchronize planAllocations directly to subscription_plans in PostgreSQL
+  if (merged.planAllocations && typeof merged.planAllocations === 'object') {
+    for (const [slug, amount] of Object.entries(merged.planAllocations)) {
+      const num = Math.max(0, Number(amount));
+      try {
+        await query(`
+          UPDATE subscription_plans 
+          SET token_limit = $1, monthly_tokens = $1, updated_at = NOW() 
+          WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
+        `, [num, slug]);
+      } catch (_) {}
+    }
+  }
 
   return merged;
 }
@@ -49912,50 +50378,6 @@ export async function addTokensToUser({
   `, [txId, userRow.id, userRow.email, amount, newBalance, type, description]);
 
   return newBalance;
-}
-
-export async function syncUserMonthlyTokens(userId?: string | null, userEmail?: string | null): Promise<void> {
-  await initTokenTables();
-  try {
-    let userRow: any = null;
-    if (userId) {
-      const rows = await query('SELECT * FROM users WHERE id = $1 LIMIT 1', [userId]);
-      if (rows.length > 0) userRow = rows[0];
-    } else if (userEmail) {
-      const rows = await query('SELECT * FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
-      if (rows.length > 0) userRow = rows[0];
-    }
-    if (!userRow) return;
-
-    const currentCycle = new Date().toISOString().slice(0, 7);
-    if (userRow.last_token_grant_cycle === currentCycle) {
-      return;
-    }
-
-    const planSlug = userRow.subscription_plan || 'taster';
-    const planRows = await query('SELECT monthly_tokens, token_limit FROM subscription_plans WHERE slug = $1 LIMIT 1', [planSlug]);
-    
-    let tokensToGrant = 50;
-    if (planRows.length > 0 && planRows[0].monthly_tokens) {
-      tokensToGrant = Number(planRows[0].monthly_tokens);
-    } else if (planRows.length > 0 && planRows[0].token_limit) {
-      tokensToGrant = Number(planRows[0].token_limit);
-    } else if (planSlug.includes('pro')) {
-      tokensToGrant = 500;
-    }
-
-    await addTokensToUser({
-      userId: userRow.id,
-      userEmail: userRow.email,
-      amount: tokensToGrant,
-      type: 'plan_monthly_grant',
-      description: `Monthly Plan Token Grant (${planSlug.toUpperCase()} - ${currentCycle})`
-    });
-
-    await query('UPDATE users SET last_token_grant_cycle = $1 WHERE id = $2', [currentCycle, userRow.id]);
-  } catch (err) {
-    console.error('Failed syncing monthly plan tokens:', err);
-  }
 }
 
 export async function grantPlanTokensOnPurchase(
