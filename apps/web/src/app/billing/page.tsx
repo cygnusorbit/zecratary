@@ -1,4 +1,4 @@
-// @ts-nocheck
+// Generated / Updated by AI Collaborator
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -19,9 +19,11 @@ import {
   Sparkles,
   Ban,
   Building,
-  Check
+  Check,
+  Coins,
+  Zap
 } from 'lucide-react';
-import { useTranslation } from '@/context/LanguageContext';
+import { useTranslation } from '@/components/LanguageProvider';
 
 interface Transaction {
   id: string;
@@ -47,7 +49,18 @@ interface PlanCatalog {
   name: string;
   monthlyPrice: number;
   annualPrice: number;
+  tokenLimit: number;
+  monthlyBadge?: string;
+  annualBadge?: string;
+  trialBadge?: string;
   description: string;
+  features?: string[];
+  isFree?: boolean;
+}
+
+interface TokenIdentity {
+  tokenName: string;
+  tokenSymbol: string;
 }
 
 export default function UserBillingPage() {
@@ -62,9 +75,11 @@ export default function UserBillingPage() {
   const [user, setUser] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [plans, setPlans] = useState<PlanCatalog[]>([]);
+  const [tokenIdentity, setTokenIdentity] = useState<TokenIdentity>({ tokenName: 'Tokens', tokenSymbol: '🪙' });
   const [gatewayConfig, setGatewayConfig] = useState<any>({
     activeGateway: 'stripe',
     currency: 'USD',
+    currencySymbol: '$',
     stripe: { enabled: true },
     paypal: { enabled: true },
     manual: { enabled: true }
@@ -105,7 +120,7 @@ export default function UserBillingPage() {
       let emailParam = '';
       if (typeof window !== 'undefined') {
         try {
-          const storedUser = localStorage.getItem('zecratary_user') || localStorage.getItem('user') || localStorage.getItem('currentUser');
+          const storedUser = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
           if (storedUser) {
             const parsed = JSON.parse(storedUser);
             if (parsed?.email) emailParam = `?email=${encodeURIComponent(parsed.email)}`;
@@ -121,6 +136,9 @@ export default function UserBillingPage() {
           setTransactions(data.transactions || []);
           setGatewayConfig(data.gatewayConfig || {});
           setPlans(data.plans || []);
+          if (data.tokenIdentity) {
+            setTokenIdentity(data.tokenIdentity);
+          }
           if (data.user?.payment_method) {
             setSelectedMethod(data.user.payment_method);
           }
@@ -135,6 +153,22 @@ export default function UserBillingPage() {
 
   useEffect(() => {
     fetchData();
+
+    const handleSyncEvents = () => {
+      fetchData();
+    };
+
+    window.addEventListener('zecratary_payment_updated', handleSyncEvents);
+    window.addEventListener('zecratary_plans_updated', handleSyncEvents);
+    window.addEventListener('zecratary_users_updated', handleSyncEvents);
+    window.addEventListener('zecratary_token_settings_updated', handleSyncEvents);
+
+    return () => {
+      window.removeEventListener('zecratary_payment_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_plans_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_users_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_token_settings_updated', handleSyncEvents);
+    };
   }, [fetchData]);
 
   useEffect(() => {
@@ -183,7 +217,14 @@ export default function UserBillingPage() {
 
   const filteredPlans = useMemo(() => {
     const q = planSearch.toLowerCase().trim();
-    return plans.filter((p) => !q || (p.name && p.name.toLowerCase().includes(q)) || (p.description && p.description.toLowerCase().includes(q)));
+    return plans.filter((p) => {
+      if (!q) return true;
+      const matchName = p.name && p.name.toLowerCase().includes(q);
+      const matchDesc = p.description && p.description.toLowerCase().includes(q);
+      const matchSlug = p.slug && p.slug.toLowerCase().includes(q);
+      const matchFeatures = Array.isArray(p.features) && p.features.some(f => f.toLowerCase().includes(q));
+      return matchName || matchDesc || matchSlug || matchFeatures;
+    });
   }, [plans, planSearch]);
 
   const totalPlanPages = Math.max(1, Math.ceil(filteredPlans.length / planPageSize));
@@ -244,7 +285,6 @@ export default function UserBillingPage() {
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_payment_updated'));
           window.dispatchEvent(new Event('zecratary_users_updated'));
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
         }
 
         await fetchData();
@@ -258,12 +298,15 @@ export default function UserBillingPage() {
     }
   };
 
+  // Handle Switch Plan with Dynamic Token Grant & PostgreSQL sync
   const handleSwitchPlan = async (plan: PlanCatalog, interval: 'MONTH' | 'YEAR') => {
     const amount = interval === 'YEAR' ? plan.annualPrice : plan.monthlyPrice;
     const planSlugWithInterval = plan.slug === 'taster' ? 'taster' : `${plan.slug}-${interval.toLowerCase()}`;
     const planDisplayName = plan.slug === 'taster' ? 'Taster (Free)' : `${plan.name} (${interval === 'YEAR' ? 'Annual' : 'Monthly'})`;
+    const tokensCredited = plan.tokenLimit ?? (plan.slug === 'taster' ? 50 : 500);
 
-    const confirmPrompt = `${t('confirmSwitchPlanPrompt', 'Switch plan to')} ${planDisplayName} ($${amount})?`;
+    const tokenMsg = tokensCredited > 0 ? ` (+${tokensCredited.toLocaleString()} ${tokenIdentity.tokenSymbol})` : '';
+    const confirmPrompt = `${t('confirmSwitchPlanPrompt', 'Purchase and activate')} ${planDisplayName} for ${gatewayConfig.currencySymbol}${amount.toFixed(2)}${tokenMsg}?`;
     if (!window.confirm(confirmPrompt)) return;
 
     setProcessing(true);
@@ -279,6 +322,7 @@ export default function UserBillingPage() {
           planName: planDisplayName,
           amount,
           interval,
+          tokenLimit: tokensCredited,
           gateway: selectedMethod,
           currency: gatewayConfig?.currency || 'USD'
         })
@@ -286,9 +330,27 @@ export default function UserBillingPage() {
       const data = await res.json();
       if (data.success) {
         setFeedback({ type: 'success', msg: data.message || `Switched plan to ${planDisplayName}` });
-        fetchData();
+
+        // Update local session cache if present
+        try {
+          const raw = localStorage.getItem('zecratary_current_user');
+          if (raw) {
+            const u = JSON.parse(raw);
+            u.subscriptionPlan = planSlugWithInterval;
+            localStorage.setItem('zecratary_current_user', JSON.stringify(u));
+          }
+        } catch (_) {}
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+          window.dispatchEvent(new Event('zecratary_plans_updated'));
+          window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+        }
+
+        await fetchData();
       } else {
-        throw new Error(data.error);
+        throw new Error(data.error || 'Failed to switch subscription plan');
       }
     } catch (err: any) {
       setFeedback({ type: 'error', msg: err.message || 'Failed to switch subscription plan' });
@@ -332,12 +394,12 @@ export default function UserBillingPage() {
   };
 
   const isCurrentPlan = (planSlug: string, interval?: 'MONTH' | 'YEAR') => {
-    const userPlan = (user?.subscription_plan || '').toLowerCase();
+    const userPlan = (user?.subscription_plan || '').toLowerCase().trim();
     if (!interval) {
-      return userPlan.includes(planSlug.toLowerCase());
+      return userPlan.includes(planSlug.toLowerCase().trim());
     }
     const expected = planSlug === 'taster' ? 'taster' : `${planSlug}-${interval.toLowerCase()}`;
-    return userPlan === expected;
+    return userPlan === expected || userPlan === planSlug;
   };
 
   return (
@@ -548,7 +610,7 @@ export default function UserBillingPage() {
                           <span className="block text-xs font-mono opacity-50" style={{ color: 'var(--color-text-secondary)' }}>{tx.id}</span>
                         </td>
                         <td className="p-4 font-bold" style={{ color: 'var(--color-emerald)' }}>
-                          ${tx.amount.toFixed(2)} <span className="text-xs font-normal opacity-70" style={{ color: 'var(--color-text-secondary)' }}>{tx.currency}</span>
+                          {gatewayConfig.currencySymbol}{tx.amount.toFixed(2)} <span className="text-xs font-normal opacity-70" style={{ color: 'var(--color-text-secondary)' }}>{tx.currency}</span>
                         </td>
                         <td className="p-4 uppercase text-xs font-semibold tracking-wider" style={{ color: 'var(--color-text)' }}>
                           {tx.gateway}
@@ -740,6 +802,7 @@ export default function UserBillingPage() {
         {/* TAB 3: SUBSCRIPTIONS */}
         {activeTab === 'subscriptions' && (
           <div className="space-y-6">
+            {/* Current Active Plan Card */}
             <div 
               className="p-6 sm:p-8 rounded-3xl border shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 transition-colors duration-200"
               style={{
@@ -801,6 +864,7 @@ export default function UserBillingPage() {
               </div>
             </div>
 
+            {/* Catalog of Subscription Packages synced from /admin/plans */}
             <div 
               id="catalog-table"
               className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6 transition-colors duration-200"
@@ -815,7 +879,7 @@ export default function UserBillingPage() {
                     {t('availablePlansTableTitle', 'Subscription Packages Catalog')}
                   </h3>
                   <p className="text-xs opacity-70 mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('availablePlansTableSubtitle', 'Compare tiers and smoothly upgrade or downgrade your active subscription.')}
+                    {t('availablePlansTableSubtitle', 'Compare tiers, token allowances, and smoothly upgrade or switch your subscription.')}
                   </p>
                 </div>
 
@@ -851,6 +915,7 @@ export default function UserBillingPage() {
                       }}
                     >
                       <th className="p-4">{t('colPackage', 'Package')}</th>
+                      <th className="p-4">{t('colTokenAllowance', 'AI Token Grant')}</th>
                       <th className="p-4">{t('colDescription', 'Features / Overview')}</th>
                       <th className="p-4">{t('colMonthlyPricing', 'Monthly')}</th>
                       <th className="p-4">{t('colAnnualPricing', 'Annual')}</th>
@@ -860,31 +925,65 @@ export default function UserBillingPage() {
                   <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
                     {paginatedPlans.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-8 text-center opacity-50" style={{ color: 'var(--color-text-secondary)' }}>
-                          {t('noPlansFound', 'No subscription plans found.')}
+                        <td colSpan={6} className="p-8 text-center opacity-50" style={{ color: 'var(--color-text-secondary)' }}>
+                          {t('noPlansFound', 'No subscription plans found matching your search.')}
                         </td>
                       </tr>
                     ) : (
                       paginatedPlans.map((plan) => {
                         const monthlyActive = isCurrentPlan(plan.slug, 'MONTH');
                         const annualActive = isCurrentPlan(plan.slug, 'YEAR');
-                        const isFree = plan.slug === 'taster' || plan.monthlyPrice === 0;
+                        const isFree = plan.slug === 'taster' || plan.isFree || (plan.monthlyPrice === 0 && plan.annualPrice === 0);
 
                         return (
                           <tr key={plan.id} className="transition" style={{ backgroundColor: 'transparent' }}>
                             <td className="p-4 font-bold" style={{ color: 'var(--color-text)' }}>
-                              {plan.name}
-                              <span className="block text-xs font-mono opacity-50" style={{ color: 'var(--color-text-secondary)' }}>{plan.slug}</span>
+                              <div className="flex items-center gap-2">
+                                <span>{plan.name}</span>
+                                {plan.annualBadge && (
+                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-primary/10 text-primary border border-primary/20">
+                                    {plan.annualBadge}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="block text-xs font-mono opacity-50" style={{ color: 'var(--color-text-secondary)' }}>
+                                {plan.slug}
+                              </span>
                             </td>
-                            <td className="p-4 text-xs opacity-70 max-w-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                              {plan.description}
+
+                            <td className="p-4">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-500 border border-amber-500/20 font-mono">
+                                <Coins className="h-3.5 w-3.5" />
+                                <span>+{(plan.tokenLimit ?? (isFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol}</span>
+                              </span>
                             </td>
+
+                            <td className="p-4 text-xs opacity-75 max-w-sm space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
+                              <p className="line-clamp-2">{plan.description}</p>
+                              {Array.isArray(plan.features) && plan.features.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                  {plan.features.slice(0, 3).map((feat, fIdx) => (
+                                    <span key={fIdx} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10">
+                                      <Check className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                                      <span>{feat}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+
                             <td className="p-4 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
-                              {plan.monthlyPrice > 0 ? `$${plan.monthlyPrice.toFixed(2)}/mo` : t('freePrice', 'Free')}
+                              {plan.monthlyPrice > 0 
+                                ? `${gatewayConfig.currencySymbol}${plan.monthlyPrice.toFixed(2)}/mo` 
+                                : t('freePrice', 'Free')}
                             </td>
+
                             <td className="p-4 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
-                              {plan.annualPrice > 0 ? `$${plan.annualPrice.toFixed(2)}/yr` : t('freePrice', 'Free')}
+                              {plan.annualPrice > 0 
+                                ? `${gatewayConfig.currencySymbol}${plan.annualPrice.toFixed(2)}/yr` 
+                                : t('freePrice', 'Free')}
                             </td>
+
                             <td className="p-4 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 {isFree ? (
@@ -894,7 +993,7 @@ export default function UserBillingPage() {
                                     disabled={monthlyActive || processing}
                                     className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${
                                       monthlyActive
-                                        ? 'opacity-60 cursor-default'
+                                        ? 'opacity-60 cursor-default border'
                                         : 'border hover:bg-emerald-500 hover:text-white'
                                     }`}
                                     style={monthlyActive ? {
@@ -916,7 +1015,7 @@ export default function UserBillingPage() {
                                       disabled={monthlyActive || processing}
                                       className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer ${
                                         monthlyActive
-                                          ? 'opacity-60 cursor-default'
+                                          ? 'opacity-60 cursor-default border'
                                           : 'border hover:bg-emerald-500 hover:text-white'
                                       }`}
                                       style={monthlyActive ? {
@@ -940,7 +1039,7 @@ export default function UserBillingPage() {
                                           : 'text-white shadow-md'
                                       }`}
                                       style={{
-                                        backgroundColor: annualActive ? 'var(--color-emerald)' : 'var(--color-emerald)'
+                                        backgroundColor: 'var(--color-emerald)'
                                       }}
                                     >
                                       {annualActive ? t('annualActive', 'Annual Active') : t('chooseAnnualBtn', 'Annual')}

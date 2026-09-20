@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { 
   Coins, Sparkles, Plus, Trash2, Save, ArrowLeft,
@@ -8,7 +8,7 @@ import {
   ChefHat, DownloadCloud, FileText, Camera, Tag, DollarSign,
   Search, Filter, ArrowUpRight, ArrowDownLeft, Calendar, User as UserIcon,
   Clock, Activity, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Columns3, Check, SlidersHorizontal, Eye, EyeOff, Wallet
+  Columns3, Check, SlidersHorizontal, Eye, EyeOff, Wallet, CheckSquare, Square
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -98,6 +98,12 @@ export default function AdminTokenSettingPage() {
     totalTransactions: 0
   });
 
+  // Selection & Deletion State
+  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
+  const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
+
   // Table Column Visibility Controller
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const columnPickerRef = useRef<HTMLDivElement | null>(null);
@@ -146,7 +152,7 @@ export default function AdminTokenSettingPage() {
       const target = prev.find(c => c.key === key);
       const activeCount = prev.filter(c => c.visible).length;
       if (target?.visible && activeCount <= 1) {
-        return prev; // Guard: At least 1 column must stay visible
+        return prev;
       }
       const updated = prev.map(c => c.key === key ? { ...c, visible: !c.visible } : c);
       try {
@@ -230,6 +236,107 @@ export default function AdminTokenSettingPage() {
     }
   }, [activeTab, fetchTransactions, txPage, txLimit]);
 
+  // Select / Select All Calculation for the Current Page
+  const allOnPageSelected = useMemo(() => {
+    return transactions.length > 0 && transactions.every(tx => selectedTxIds.includes(tx.id));
+  }, [transactions, selectedTxIds]);
+
+  const someOnPageSelected = useMemo(() => {
+    return transactions.some(tx => selectedTxIds.includes(tx.id)) && !allOnPageSelected;
+  }, [transactions, selectedTxIds, allOnPageSelected]);
+
+  useEffect(() => {
+    if (selectAllCheckboxRef.current) {
+      selectAllCheckboxRef.current.indeterminate = someOnPageSelected;
+    }
+  }, [someOnPageSelected]);
+
+  const handleToggleSelectAll = () => {
+    if (allOnPageSelected) {
+      const pageIds = new Set(transactions.map(tx => tx.id));
+      setSelectedTxIds(prev => prev.filter(id => !pageIds.has(id)));
+    } else {
+      const pageIds = transactions.map(tx => tx.id);
+      setSelectedTxIds(prev => Array.from(new Set([...prev, ...pageIds])));
+    }
+  };
+
+  const handleToggleSelectOne = (id: string) => {
+    setSelectedTxIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  // Delete Individual Transaction
+  const handleDeleteTransaction = async (id: string, description?: string) => {
+    const confirmMsg = t('confirmDeleteTokenTx', 'Are you sure you want to permanently delete this token transaction record?');
+    if (!window.confirm(confirmMsg)) return;
+
+    setDeletingTxId(id);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const res = await fetch(`/api/admin/token-transactions?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete transaction');
+      }
+
+      setSelectedTxIds(prev => prev.filter(item => item !== id));
+      setSuccessMsg(t('tokenTxDeletedSuccess', 'Transaction record deleted successfully from PostgreSQL.'));
+      await fetchTransactions(txPage, txLimit);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_tokens_updated'));
+        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+      }
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to delete transaction');
+    } finally {
+      setDeletingTxId(null);
+    }
+  };
+
+  // Bulk Delete Selected Transactions
+  const handleBulkDeleteTransactions = async () => {
+    if (selectedTxIds.length === 0) return;
+    const confirmTmpl = t('confirmBulkDeleteTokenTxs', 'Are you sure you want to permanently delete {count} selected transaction(s)? This action cannot be undone.');
+    if (!window.confirm(confirmTmpl.replace('{count}', String(selectedTxIds.length)))) return;
+
+    setBulkDeleting(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const res = await fetch('/api/admin/token-transactions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedTxIds })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete selected transactions');
+      }
+
+      const count = selectedTxIds.length;
+      setSelectedTxIds([]);
+      setSuccessMsg(t('bulkTokenTxDeletedSuccess', `Successfully deleted ${count} transaction record(s) from PostgreSQL.`));
+      await fetchTransactions(txPage, txLimit);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_tokens_updated'));
+        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+      }
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to delete selected transactions');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setSuccessMsg('');
@@ -258,6 +365,10 @@ export default function AdminTokenSettingPage() {
       }
 
       setSuccessMsg(t('tokenSettingsSavedSuccess', 'Token configuration saved and synchronized with PostgreSQL!'));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
       setErrorMsg(err.message || 'Error occurred while saving');
@@ -314,6 +425,13 @@ export default function AdminTokenSettingPage() {
         </span>
       );
     }
+    if (type === 'plan_purchase') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          <Layers className="h-3 w-3" /> Plan Purchase
+        </span>
+      );
+    }
     if (type === 'plan_monthly_grant') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
@@ -328,7 +446,6 @@ export default function AdminTokenSettingPage() {
     );
   };
 
-  // Pagination Window Calculator
   const getPageNumbers = () => {
     const pages: number[] = [];
     const maxVisible = 5;
@@ -893,7 +1010,8 @@ export default function AdminTokenSettingPage() {
                   <option value="all">All Services & Sources</option>
                   <option value="chef">/chef (AI Chat)</option>
                   <option value="import">/import (All Types)</option>
-                  <option value="purchase">Package Purchases</option>
+                  <option value="purchase">All Purchases (Plans & Packages)</option>
+                  <option value="plan_purchase">Plan Purchases</option>
                   <option value="grant">Monthly Plan Grants</option>
                 </select>
               </div>
@@ -1002,11 +1120,66 @@ export default function AdminTokenSettingPage() {
               </div>
             </div>
 
-            {/* Transactions Table with Dynamic Columns and Colspan */}
+            {/* Bulk Actions Banner */}
+            {selectedTxIds.length > 0 && (
+              <div 
+                className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'rgba(239, 68, 68, 0.4)'
+                }}
+              >
+                <div className="flex items-center gap-2 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span>{selectedTxIds.length} {t('transactionsSelected', 'transaction(s) selected')}</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTxIds([])}
+                    className="px-3 py-1.5 rounded-xl border text-xs font-semibold hover:opacity-80 transition cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    {t('clearSelection', 'Clear Selection')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={bulkDeleting}
+                    onClick={handleBulkDeleteTransactions}
+                    className="px-4 py-1.5 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  >
+                    {bulkDeleting ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                    <span>{t('deleteSelectedCount', `Delete Selected (${selectedTxIds.length})`)}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Transactions Table with Checkbox, Dynamic Columns and Actions */}
             <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                    {/* Select All Checkbox Header */}
+                    <th className="p-3.5 w-10 text-center">
+                      <input
+                        ref={selectAllCheckboxRef}
+                        type="checkbox"
+                        checked={allOnPageSelected}
+                        onChange={handleToggleSelectAll}
+                        className="w-4 h-4 rounded accent-primary cursor-pointer align-middle"
+                        title={t('selectAllTooltip', 'Select all transactions on this page')}
+                      />
+                    </th>
                     {isColVisible('user') && <th className="p-3.5">{t('colUser', 'User')}</th>}
                     {isColVisible('user_total_tokens') && <th className="p-3.5">{t('colUserTotalTokens', 'User Total Tokens')}</th>}
                     {isColVisible('service') && <th className="p-3.5">{t('colService', 'Service / Operation')}</th>}
@@ -1014,12 +1187,13 @@ export default function AdminTokenSettingPage() {
                     {isColVisible('balance_after') && <th className="p-3.5">{t('colBalanceAfter', 'Balance After')}</th>}
                     {isColVisible('description') && <th className="p-3.5">{t('colDescription', 'Description')}</th>}
                     {isColVisible('created_at') && <th className="p-3.5">{t('colTimestamp', 'Timestamp')}</th>}
+                    <th className="p-3.5 text-right w-16">{t('colActions', 'Actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
                   {txLoading ? (
                     <tr>
-                      <td colSpan={activeColumnCount} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={activeColumnCount + 2} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         <div className="flex items-center justify-center gap-2">
                           <RefreshCw className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} />
                           <span>{t('loadingLedger', 'Loading token transaction ledger...')}</span>
@@ -1028,19 +1202,30 @@ export default function AdminTokenSettingPage() {
                     </tr>
                   ) : transactions.length === 0 ? (
                     <tr>
-                      <td colSpan={activeColumnCount} className="p-8 text-center text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={activeColumnCount + 2} className="p-8 text-center text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                         {t('noTransactionsFound', 'No transactions recorded matching your search parameters.')}
                       </td>
                     </tr>
                   ) : (
                     transactions.map((tx) => {
                       const isNegative = tx.amount < 0;
+                      const isSelected = selectedTxIds.includes(tx.id);
                       return (
                         <tr 
                           key={tx.id} 
-                          className="hover:bg-slate-500/5 transition font-medium"
+                          className={`transition font-medium ${isSelected ? 'bg-primary/10' : 'hover:bg-slate-500/5'}`}
                           style={{ color: 'var(--color-text)' }}
                         >
+                          {/* Row Selection Checkbox */}
+                          <td className="p-3.5 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectOne(tx.id)}
+                              className="w-4 h-4 rounded accent-primary cursor-pointer align-middle"
+                            />
+                          </td>
+
                           {/* User Column */}
                           {isColVisible('user') && (
                             <td className="p-3.5">
@@ -1100,6 +1285,23 @@ export default function AdminTokenSettingPage() {
                               {new Date(tx.created_at).toLocaleString()}
                             </td>
                           )}
+
+                          {/* Actions Column */}
+                          <td className="p-3.5 text-right">
+                            <button
+                              type="button"
+                              disabled={deletingTxId === tx.id}
+                              onClick={() => handleDeleteTransaction(tx.id, tx.description)}
+                              className="p-1.5 rounded-lg border text-red-400 hover:text-red-300 border-red-900/40 hover:bg-red-950/20 transition cursor-pointer disabled:opacity-50"
+                              title={t('deleteTransactionTooltip', 'Delete Transaction')}
+                            >
+                              {deletingTxId === tx.id ? (
+                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </td>
                         </tr>
                       );
                     })
@@ -1126,7 +1328,6 @@ export default function AdminTokenSettingPage() {
 
               {/* Page Button Bar */}
               <div className="flex items-center gap-1.5">
-                {/* First Page Button */}
                 <button
                   type="button"
                   disabled={txPage <= 1 || txLoading}
@@ -1138,7 +1339,6 @@ export default function AdminTokenSettingPage() {
                   <ChevronsLeft className="h-4 w-4" />
                 </button>
 
-                {/* Previous Page Button */}
                 <button
                   type="button"
                   disabled={txPage <= 1 || txLoading}
@@ -1150,7 +1350,6 @@ export default function AdminTokenSettingPage() {
                   <ChevronLeft className="h-4 w-4" />
                 </button>
 
-                {/* Page Number Buttons */}
                 {getPageNumbers().map((num) => (
                   <button
                     key={num}
@@ -1171,7 +1370,6 @@ export default function AdminTokenSettingPage() {
                   </button>
                 ))}
 
-                {/* Next Page Button */}
                 <button
                   type="button"
                   disabled={txPage >= txTotalPages || txLoading}
@@ -1183,7 +1381,6 @@ export default function AdminTokenSettingPage() {
                   <ChevronRight className="h-4 w-4" />
                 </button>
 
-                {/* Last Page Button */}
                 <button
                   type="button"
                   disabled={txPage >= txTotalPages || txLoading}

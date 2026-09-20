@@ -1,3 +1,4 @@
+import { grantPlanTokensOnPurchase } from '@/lib/tokenService';
 async function ensurePaymentSchema() {
   try {
     await query(`
@@ -294,6 +295,12 @@ export async function POST(req: NextRequest) {
             newTx.expiryDate || null,
             newTx.createdAt || new Date().toISOString()
           ]);
+    // Automatically grant plan tokens and record audit in token_transactions on /admin/token-setting
+    try {
+      await grantPlanTokensOnPurchase(customerEmail, planSlug, { orderId: txId, planName });
+    } catch (tokenErr) {
+      console.warn('Auto grant tokens on payment warning:', tokenErr);
+    }
 
           // Update user's active plan in PostgreSQL
           const userPlanToAssign = isPaidSuccess ? planSlug : 'taster';

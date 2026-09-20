@@ -15,10 +15,11 @@
     "email": "yaayaapapayaa@gmail.com",
     "password": "$2a$10$DefaultHashedPasswordPlaceholderForDemoOnly",
     "role": "user",
-    "subscriptionPlan": "nutrition-pro-monthly",
+    "subscriptionPlan": "taster",
     "createdAt": "2026-09-15T14:46:36.661Z",
     "picture": "https://lh3.googleusercontent.com/a/ACg8ocJllyk2JYc7a5vxbc8kp6P-HxH8vxoMpsjMwRestrotted8lp0=s96-c",
-    "avatar": "https://lh3.googleusercontent.com/a/ACg8ocJllyk2JYc7a5vxbc8kp6P-HxH8vxoMpsjMwRestrotted8lp0=s96-c"
+    "avatar": "https://lh3.googleusercontent.com/a/ACg8ocJllyk2JYc7a5vxbc8kp6P-HxH8vxoMpsjMwRestrotted8lp0=s96-c",
+    "planExpiryDate": null
   },
   {
     "id": "usr_1789391472150_gjur",
