@@ -8,7 +8,7 @@ import {
   ChefHat, DownloadCloud, FileText, Camera, Tag, DollarSign,
   Search, Filter, ArrowUpRight, ArrowDownLeft, Calendar, User as UserIcon,
   Clock, Activity, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Columns3, Check, SlidersHorizontal, Eye, EyeOff, Wallet, CheckSquare, Square
+  Columns3, Check, SlidersHorizontal, Eye, EyeOff, Wallet, ArrowRight
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -26,6 +26,14 @@ interface SubscriptionPlan {
   slug: string;
   name: string;
   monthly_tokens?: number;
+  token_limit?: number;
+  tokenLimit?: number;
+  is_free?: boolean;
+  isFree?: boolean;
+  monthly_price_dollars?: number;
+  annual_price_dollars?: number;
+  monthlyPriceDollars?: number;
+  annualPriceDollars?: number;
 }
 
 interface TokenTransaction {
@@ -78,7 +86,7 @@ export default function AdminTokenSettingPage() {
   // Packages
   const [packages, setPackages] = useState<TokenPackage[]>([]);
   
-  // Subscription Plan Monthly Tokens
+  // Subscription Plan Monthly Tokens (Synchronized with /admin/plans)
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [planAllocations, setPlanAllocations] = useState<{ [slug: string]: number }>({});
 
@@ -169,15 +177,15 @@ export default function AdminTokenSettingPage() {
 
   const activeColumnCount = columns.filter(c => c.visible).length;
 
-  useEffect(() => {
-    fetchSettings();
-  }, []);
-
-  const fetchSettings = async () => {
+  // Dynamic Settings and Plans Fetching (Direct from /api/admin/plans & PostgreSQL)
+  const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/token-settings');
+      // 1. Fetch token settings
+      const res = await fetch('/api/admin/token-settings', { cache: 'no-store' });
       const data = await res.json();
+      let activeAllocations: { [slug: string]: number } = {};
+
       if (data.success && data.settings) {
         setTokenName(data.settings.tokenName || 'Foodie Token');
         setTokenSymbol(data.settings.tokenSymbol || '🪙');
@@ -187,21 +195,90 @@ export default function AdminTokenSettingPage() {
         setImportTextCost(data.settings.importTextCost ?? 1);
         setImportPhotoCost(data.settings.importPhotoCost ?? 3);
         setPackages(data.settings.packages || []);
+        if (data.settings.planAllocations && typeof data.settings.planAllocations === 'object') {
+          activeAllocations = { ...data.settings.planAllocations };
+        }
       }
-      if (data.plans) {
-        setPlans(data.plans);
-        const map: { [slug: string]: number } = {};
-        data.plans.forEach((p: SubscriptionPlan) => {
-          map[p.slug] = p.monthly_tokens ?? (p.slug.includes('pro') ? 500 : 50);
+
+      // 2. Fetch authoritative plans directly from /api/admin/plans
+      let dynamicPlans: SubscriptionPlan[] = [];
+      try {
+        const plansRes = await fetch('/api/admin/plans', { cache: 'no-store' });
+        if (plansRes.ok) {
+          const plansData = await plansRes.json();
+          const list = Array.isArray(plansData.configs) ? plansData.configs : Array.isArray(plansData) ? plansData : [];
+          if (list.length > 0) {
+            dynamicPlans = list.map((p: any) => {
+              const assignedLimit = Number(p.tokenLimit ?? p.token_limit ?? 500);
+              return {
+                id: p.id,
+                slug: p.slug,
+                name: p.name,
+                token_limit: assignedLimit,
+                monthly_tokens: assignedLimit,
+                tokenLimit: assignedLimit,
+                is_free: Boolean(p.isFree ?? p.is_free),
+                isFree: Boolean(p.isFree ?? p.is_free),
+                monthly_price_dollars: Number(p.monthlyPriceDollars ?? p.monthly_price_dollars ?? 0),
+                annual_price_dollars: Number(p.annualPriceDollars ?? p.annual_price_dollars ?? 0)
+              };
+            });
+          }
+        }
+      } catch (_) {}
+
+      // Fallback to data.plans from token-settings if needed
+      if (dynamicPlans.length === 0 && Array.isArray(data.plans) && data.plans.length > 0) {
+        dynamicPlans = data.plans.map((p: any) => {
+          const assignedLimit = Number(p.token_limit ?? p.monthly_tokens ?? 500);
+          return {
+            id: p.id,
+            slug: p.slug,
+            name: p.name,
+            token_limit: assignedLimit,
+            monthly_tokens: assignedLimit,
+            tokenLimit: assignedLimit,
+            is_free: Boolean(p.is_free ?? p.isFree),
+            isFree: Boolean(p.is_free ?? p.isFree),
+            monthly_price_dollars: Number(p.monthly_price_dollars ?? 0),
+            annual_price_dollars: Number(p.annual_price_dollars ?? 0)
+          };
         });
-        setPlanAllocations(map);
       }
+
+      setPlans(dynamicPlans);
+
+      // Build consolidated allocation map prioritizing plan's token_limit from /admin/plans
+      const map: { [slug: string]: number } = {};
+      dynamicPlans.forEach((p: SubscriptionPlan) => {
+        const val = p.token_limit ?? p.tokenLimit ?? p.monthly_tokens ?? activeAllocations[p.slug] ?? (p.is_free || p.isFree ? 50 : 500);
+        map[p.slug] = Number(val);
+      });
+      setPlanAllocations(map);
+
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to fetch token settings');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
+
+    // Automatically re-sync whenever plans are updated in /admin/plans
+    const handlePlansUpdated = () => {
+      fetchSettings();
+    };
+
+    window.addEventListener('zecratary_plans_updated', handlePlansUpdated);
+    window.addEventListener('zecratary_token_settings_updated', handlePlansUpdated);
+
+    return () => {
+      window.removeEventListener('zecratary_plans_updated', handlePlansUpdated);
+      window.removeEventListener('zecratary_token_settings_updated', handlePlansUpdated);
+    };
+  }, [fetchSettings]);
 
   const fetchTransactions = useCallback(async (pageToLoad = 1, limitToUse = txLimit) => {
     setTxLoading(true);
@@ -268,7 +345,7 @@ export default function AdminTokenSettingPage() {
   };
 
   // Delete Individual Transaction
-  const handleDeleteTransaction = async (id: string, description?: string) => {
+  const handleDeleteTransaction = async (id: string) => {
     const confirmMsg = t('confirmDeleteTokenTx', 'Are you sure you want to permanently delete this token transaction record?');
     if (!window.confirm(confirmMsg)) return;
 
@@ -364,9 +441,10 @@ export default function AdminTokenSettingPage() {
         throw new Error(data.error || 'Failed saving token configurations');
       }
 
-      setSuccessMsg(t('tokenSettingsSavedSuccess', 'Token configuration saved and synchronized with PostgreSQL!'));
+      setSuccessMsg(t('tokenSettingsSavedSuccess', 'Token configurations & Plan Allocations saved and synchronized with PostgreSQL!'));
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_plans_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
       setTimeout(() => setSuccessMsg(''), 4000);
@@ -874,49 +952,92 @@ export default function AdminTokenSettingPage() {
             </div>
           </div>
 
-          {/* Section 4: Subscription Plan Monthly Grants */}
+          {/* Section 4: Subscription Plan Monthly Grants (Dynamically Synced with /admin/plans) */}
           <div 
             className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <Layers className="h-4 w-4 text-purple-400" />
-              <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                {t('planMonthlyGrantsHeading', 'Subscription Plan Monthly Included Tokens')}
-              </h2>
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 text-purple-400" />
+                <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                  {t('planMonthlyGrantsHeading', 'Subscription Plan Monthly Included Tokens')}
+                </h2>
+              </div>
+              <Link
+                href="/admin/plans"
+                className="text-xs font-bold text-amber-500 hover:text-amber-400 flex items-center gap-1 transition"
+              >
+                <span>{t('managePlansLink', 'Manage in /admin/plans')}</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
             </div>
 
             <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('planMonthlyGrantsSubtitle', 'Subscribers automatically receive these tokens every recurring monthly billing cycle.')}
+              {t('planMonthlyGrantsSubtitle', 'Subscribers automatically receive these tokens every recurring monthly billing cycle. Values dynamically synchronize with /admin/plans and PostgreSQL.')}
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {plans.map((p) => (
-                <div 
-                  key={p.slug}
-                  className="p-4 rounded-2xl border space-y-2"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            {plans.length === 0 ? (
+              <div 
+                className="p-6 rounded-2xl border text-center text-xs space-y-2"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <p style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('noPlansToAllocate', 'No subscription plans found in database.')}
+                </p>
+                <Link
+                  href="/admin/plans"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{p.name || p.slug}</span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-primary/10" style={{ borderColor: 'var(--color-border)' }}>
-                      {p.slug}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 pt-1">
-                    <input
-                      type="number"
-                      min="0"
-                      value={planAllocations[p.slug] ?? 50}
-                      onChange={(e) => setPlanAllocations({ ...planAllocations, [p.slug]: parseInt(e.target.value) || 0 })}
-                      className="w-24 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
-                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                    />
-                    <span className="text-xs font-bold text-amber-500">{tokenSymbol} / month</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>{t('createPlanPrompt', 'Configure Plans in /admin/plans')}</span>
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {plans.map((p) => {
+                  const isFree = Boolean(p.is_free || p.isFree || (Number(p.monthly_price_dollars || p.monthlyPriceDollars || 0) === 0 && Number(p.annual_price_dollars || p.annualPriceDollars || 0) === 0));
+                  const mPrice = Number(p.monthly_price_dollars ?? p.monthlyPriceDollars ?? 0);
+                  const currentAlloc = planAllocations[p.slug] ?? p.token_limit ?? p.tokenLimit ?? (isFree ? 50 : 500);
+
+                  return (
+                    <div 
+                      key={p.slug || p.id}
+                      className="p-4 rounded-2xl border space-y-2.5 shadow-inner transition"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{p.name || p.slug}</span>
+                          <span className="text-[10px] font-mono opacity-60" style={{ color: 'var(--color-text-secondary)' }}>
+                            {isFree ? t('freeTier', 'Free Tier') : `$${mPrice.toFixed(2)}/mo`}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-primary/10 font-bold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
+                          {p.slug}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <input
+                          type="number"
+                          min="0"
+                          value={currentAlloc}
+                          onChange={(e) => setPlanAllocations(prev => ({
+                            ...prev,
+                            [p.slug]: Math.max(0, parseInt(e.target.value) || 0)
+                          }))}
+                          className="w-28 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
+                          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                        />
+                        <span className="text-xs font-bold text-amber-500 font-mono">{tokenSymbol} / mo</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1169,7 +1290,6 @@ export default function AdminTokenSettingPage() {
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                    {/* Select All Checkbox Header */}
                     <th className="p-3.5 w-10 text-center">
                       <input
                         ref={selectAllCheckboxRef}
@@ -1216,7 +1336,6 @@ export default function AdminTokenSettingPage() {
                           className={`transition font-medium ${isSelected ? 'bg-primary/10' : 'hover:bg-slate-500/5'}`}
                           style={{ color: 'var(--color-text)' }}
                         >
-                          {/* Row Selection Checkbox */}
                           <td className="p-3.5 text-center">
                             <input
                               type="checkbox"
@@ -1226,7 +1345,6 @@ export default function AdminTokenSettingPage() {
                             />
                           </td>
 
-                          {/* User Column */}
                           {isColVisible('user') && (
                             <td className="p-3.5">
                               <div className="font-bold truncate max-w-[180px]" title={tx.user_email}>
@@ -1238,7 +1356,6 @@ export default function AdminTokenSettingPage() {
                             </td>
                           )}
 
-                          {/* User Total Token Column */}
                           {isColVisible('user_total_tokens') && (
                             <td className="p-3.5">
                               <div className="flex items-center gap-1.5 font-mono font-black text-xs" style={{ color: 'var(--color-text)' }}>
@@ -1249,14 +1366,12 @@ export default function AdminTokenSettingPage() {
                             </td>
                           )}
 
-                          {/* Service / Operation */}
                           {isColVisible('service') && (
                             <td className="p-3.5">
                               {renderServiceBadge(tx.type)}
                             </td>
                           )}
 
-                          {/* Amount */}
                           {isColVisible('amount') && (
                             <td className="p-3.5">
                               <span className={`font-mono font-black text-xs ${isNegative ? 'text-red-400' : 'text-emerald-400'}`}>
@@ -1265,33 +1380,29 @@ export default function AdminTokenSettingPage() {
                             </td>
                           )}
 
-                          {/* Balance After */}
                           {isColVisible('balance_after') && (
                             <td className="p-3.5 font-mono text-xs font-bold">
                               {tx.balance_after} <span className="text-amber-500">{tokenSymbol}</span>
                             </td>
                           )}
 
-                          {/* Description */}
                           {isColVisible('description') && (
                             <td className="p-3.5 max-w-[240px] truncate text-[11px]" style={{ color: 'var(--color-text-secondary)' }} title={tx.description}>
                               {tx.description || '-'}
                             </td>
                           )}
 
-                          {/* Timestamp */}
                           {isColVisible('created_at') && (
                             <td className="p-3.5 font-mono text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
                               {new Date(tx.created_at).toLocaleString()}
                             </td>
                           )}
 
-                          {/* Actions Column */}
                           <td className="p-3.5 text-right">
                             <button
                               type="button"
                               disabled={deletingTxId === tx.id}
-                              onClick={() => handleDeleteTransaction(tx.id, tx.description)}
+                              onClick={() => handleDeleteTransaction(tx.id)}
                               className="p-1.5 rounded-lg border text-red-400 hover:text-red-300 border-red-900/40 hover:bg-red-950/20 transition cursor-pointer disabled:opacity-50"
                               title={t('deleteTransactionTooltip', 'Delete Transaction')}
                             >

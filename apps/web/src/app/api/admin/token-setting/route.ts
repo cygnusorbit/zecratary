@@ -11,7 +11,27 @@ export async function GET() {
 
     let plans: any[] = [];
     try {
-      plans = await query('SELECT id, slug, name, monthly_tokens, token_limit FROM subscription_plans ORDER BY created_at ASC');
+      const planRows = await query(`
+        SELECT id, slug, name, token_limit, monthly_tokens, is_free, monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge 
+        FROM subscription_plans 
+        ORDER BY is_free DESC, monthly_price_dollars ASC
+      `);
+
+      plans = planRows.map((p: any) => {
+        const tokenLimit = Number(p.token_limit ?? p.monthly_tokens ?? settings.planAllocations?.[p.slug] ?? (p.is_free ? 50 : 500));
+        return {
+          id: p.id,
+          slug: p.slug,
+          name: p.name,
+          token_limit: tokenLimit,
+          monthly_tokens: tokenLimit,
+          tokenLimit: tokenLimit,
+          is_free: Boolean(p.is_free),
+          isFree: Boolean(p.is_free),
+          monthly_price_dollars: Number(p.monthly_price_dollars ?? 0),
+          annual_price_dollars: Number(p.annual_price_dollars ?? 0)
+        };
+      });
     } catch (_) {}
 
     return NextResponse.json({
@@ -41,15 +61,21 @@ export async function POST(req: NextRequest) {
       planAllocations: planAllocations || {}
     });
 
+    // Update subscription_plans table in PostgreSQL for each plan slug
     if (planAllocations && typeof planAllocations === 'object') {
       for (const [slug, amount] of Object.entries(planAllocations)) {
-        await query('UPDATE subscription_plans SET monthly_tokens = $1, token_limit = $1 WHERE slug = $2', [Math.max(0, Number(amount)), slug]);
+        const num = Math.max(0, Number(amount));
+        await query(`
+          UPDATE subscription_plans 
+          SET token_limit = $1, monthly_tokens = $1, updated_at = NOW() 
+          WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
+        `, [num, slug]);
       }
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Token settings successfully persisted to PostgreSQL.',
+      message: 'Token settings and plan allocations synchronized with PostgreSQL.',
       settings: updated
     });
   } catch (err: any) {

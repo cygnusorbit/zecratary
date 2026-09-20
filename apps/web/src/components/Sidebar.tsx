@@ -1,7 +1,8 @@
+// Generated / Updated by AI Collaborator
 'use client';
 
 import packageInfo from '../../package.json';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -31,13 +32,14 @@ import {
   Moon,
   Sun,
   Key,
-  Coins
+  Coins,
+  Bell,
+  User as UserIcon
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 
-// ISO Code to National Flag Emoji Fallback Map
 const LANGUAGE_FLAG_MAP: Record<string, string> = {
   en: '🇺🇸',
   es: '🇪🇸',
@@ -82,6 +84,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
   if (isAuthRoute) return null;
+
   const { t, locale, setLocale } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
@@ -90,6 +93,18 @@ export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
+
+  // Live Token & Notification state for Top Bar
+  const [tokenBalance, setTokenBalance] = useState<number>(0);
+  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [unreadCount, setUnreadCount] = useState<number>(3);
+  const [showNotifications, setShowNotifications] = useState<boolean>(false);
+  const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
+
+  // Dropdown click-outside refs
+  const profileDropdownRef = useRef<HTMLDivElement>(null);
+  const notifDropdownRef = useRef<HTMLDivElement>(null);
+
   const [availableLanguages, setAvailableLanguages] = useState<{ code: string; name: string; flag: string }[]>([
     { code: 'en', name: 'English', flag: '🇺🇸' },
     { code: 'es', name: 'Español', flag: '🇪🇸' },
@@ -118,17 +133,45 @@ export default function Sidebar() {
     } catch (_) {}
   };
 
+  const fetchUserTokenAndNotifications = useCallback(async (currentUser: any) => {
+    if (!currentUser) return;
+    try {
+      const cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
+      if (cfgRes.ok) {
+        const cfgData = await cfgRes.json();
+        const cfg = cfgData.settings || cfgData.config || cfgData;
+        if (cfg && cfg.tokenSymbol) {
+          setTokenSymbol(cfg.tokenSymbol);
+        }
+      }
+
+      const queryParam = currentUser.id 
+        ? `?userId=${encodeURIComponent(currentUser.id)}&email=${encodeURIComponent(currentUser.email || '')}`
+        : `?email=${encodeURIComponent(currentUser.email || '')}`;
+      
+      const tokenRes = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
+      if (tokenRes.ok) {
+        const tokenData = await tokenRes.json();
+        if (tokenData.success && typeof tokenData.balance === 'number') {
+          setTokenBalance(tokenData.balance);
+          if (tokenData.tokenSymbol) setTokenSymbol(tokenData.tokenSymbol);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
   useEffect(() => {
     setMounted(true);
-    setUser(getCurrentUser());
+    const currentUser = getCurrentUser();
+    setUser(currentUser);
     const name = getSiteName();
     const icon = getSiteIcon();
     setSiteName(name);
     setSiteIcon(icon);
     updateFavicon(icon);
     loadLanguagesFromAdmin();
+    fetchUserTokenAndNotifications(currentUser);
 
-    // Initialize Theme Mode (Dark / Day)
     const savedMode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
     if (savedMode) {
       const isDark = savedMode === 'dark';
@@ -139,7 +182,6 @@ export default function Sidebar() {
       setIsDarkMode(hasDarkClass);
     }
 
-    // Initialize responsive collapse for tablet view
     const initialWidth = window.innerWidth;
     if (initialWidth >= 768 && initialWidth < 1024) {
       setIsCollapsed(true);
@@ -156,21 +198,20 @@ export default function Sidebar() {
         width < 768 ? 'mobile' : width < 1024 ? 'tablet' : 'desktop';
 
       if (currentCategory !== prevCategory) {
-        if (currentCategory === 'tablet') {
-          setIsCollapsed(true);
-        } else if (currentCategory === 'desktop') {
-          setIsCollapsed(false);
-        }
-        if (currentCategory !== 'mobile') {
-          setIsOpen(false);
-        }
+        if (currentCategory === 'tablet') setIsCollapsed(true);
+        else if (currentCategory === 'desktop') setIsCollapsed(false);
+        if (currentCategory !== 'mobile') setIsOpen(false);
         prevCategory = currentCategory;
       }
     };
 
     window.addEventListener('resize', handleScreenResize);
 
-    const handleAuthChange = () => setUser(getCurrentUser());
+    const handleAuthChange = () => {
+      const updated = getCurrentUser();
+      setUser(updated);
+      fetchUserTokenAndNotifications(updated);
+    };
     const handleSiteSync = () => {
       setSiteName(getSiteName());
       setSiteIcon(getSiteIcon());
@@ -181,28 +222,41 @@ export default function Sidebar() {
       const isDark = localStorage.getItem('zecratary_theme_mode') !== 'light';
       setIsDarkMode(isDark);
     };
+    const handleTokenSync = () => {
+      const u = getCurrentUser();
+      if (u) fetchUserTokenAndNotifications(u);
+    };
 
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target as Node)) {
+        setShowProfileMenu(false);
+      }
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
+        setShowNotifications(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
     window.addEventListener('zecratary_auth_changed', handleAuthChange);
     window.addEventListener('zecratary_site_settings_changed', handleSiteSync);
     window.addEventListener('zecratary_languages_updated', handleLangSync);
     window.addEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
     window.addEventListener('zecratary_theme_changed', handleThemeModeSync);
-    window.addEventListener('zecratary_theme_updated', handleThemeModeSync);
-    window.addEventListener('storage', handleSiteSync);
-    window.addEventListener('storage', handleLangSync);
+    window.addEventListener('zecratary_token_settings_updated', handleTokenSync);
+    window.addEventListener('zecratary_tokens_updated', handleTokenSync);
 
     return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('resize', handleScreenResize);
       window.removeEventListener('zecratary_auth_changed', handleAuthChange);
       window.removeEventListener('zecratary_site_settings_changed', handleSiteSync);
       window.removeEventListener('zecratary_languages_updated', handleLangSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
       window.removeEventListener('zecratary_theme_changed', handleThemeModeSync);
-      window.removeEventListener('zecratary_theme_updated', handleThemeModeSync);
-      window.removeEventListener('storage', handleSiteSync);
-      window.removeEventListener('storage', handleLangSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleTokenSync);
+      window.removeEventListener('zecratary_tokens_updated', handleTokenSync);
     };
-  }, []);
+  }, [fetchUserTokenAndNotifications]);
 
   const toggleThemeMode = () => {
     const nextMode = !isDarkMode;
@@ -212,17 +266,14 @@ export default function Sidebar() {
       localStorage.setItem('zecratary_theme_mode', nextMode ? 'dark' : 'light');
       window.dispatchEvent(new Event('zecratary_theme_mode_changed'));
       window.dispatchEvent(new Event('zecratary_theme_changed'));
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
     }
   };
 
   useEffect(() => {
     setIsOpen(false);
+    setShowProfileMenu(false);
+    setShowNotifications(false);
   }, [pathname]);
-
-  if (pathname === '/login' || pathname === '/register' || pathname === '/forgot-password') {
-    return null;
-  }
 
   const isAdmin = user && (
     user.role === 'admin' || 
@@ -231,21 +282,14 @@ export default function Sidebar() {
   );
 
   const isActive = (href: string) => {
-    if (href === '/dashboard') {
-      return pathname === '/dashboard' || pathname === '/';
-    }
-    if (href === '/admin') {
-      return pathname === '/admin';
-    }
-    if (href === '/chef') {
-      return pathname === '/chef';
-    }
+    if (href === '/dashboard') return pathname === '/dashboard' || pathname === '/';
+    if (href === '/admin') return pathname === '/admin';
+    if (href === '/chef') return pathname === '/chef';
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
   const showCollapsed = isCollapsed && !isOpen;
 
-  // Harmonized active & hover navigation styles
   const navClass = (href: string) => `
     w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 select-none
     ${isActive(href)
@@ -260,8 +304,6 @@ export default function Sidebar() {
 
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
-
-  // Standard icon style matching theme setting with primary fallback
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
 
   return (
@@ -270,25 +312,325 @@ export default function Sidebar() {
       <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
         <Link href="/dashboard" className="flex items-center gap-2">
           {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[200px]">
+          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[130px]">
             {displayName}
           </span>
         </Link>
-        <button
-          type="button"
-          onClick={() => setIsOpen(!isOpen)}
-          className={`p-2 rounded-xl border border-[var(--color-border)] transition cursor-pointer ${
-            isDarkMode 
-              ? 'bg-[#141b2d] text-slate-300 hover:text-white' 
-              : 'bg-slate-200 text-slate-800 hover:text-slate-950'
-          }`}
-          aria-label="Toggle navigation menu"
-        >
-          {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Mobile Token Balance Badge */}
+          <Link href="/profile" className="flex items-center gap-1 px-2.5 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)]">
+            <Coins className="h-3.5 w-3.5 text-amber-500" />
+            <span style={{ color: 'var(--color-emerald)' }}>{tokenBalance.toLocaleString()}</span>
+          </Link>
+
+          {/* Mobile Lucide User Icon Button with Dropdown */}
+          <div className="relative" ref={profileDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
+              aria-label="User Profile"
+            >
+              <UserIcon className="h-4 w-4" style={iconStyle} />
+            </button>
+
+            {/* Mobile Profile Dropdown List */}
+            {showProfileMenu && (
+              <div 
+                className="absolute right-0 mt-2 w-64 rounded-2xl border p-2.5 space-y-2 shadow-2xl z-50 animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                <div className="px-2 py-1 border-b border-[var(--color-border)] pb-2 flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
+                    <UserIcon className="w-3.5 h-3.5" style={iconStyle} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
+                      {user?.name || user?.email || 'User Account'}
+                    </p>
+                    <p className="text-[10px] opacity-60 truncate">{user?.email || 'Authenticated'}</p>
+                  </div>
+                </div>
+
+                {/* 1. Language */}
+                <div className="px-2 py-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold">
+                    <Languages className="h-3.5 w-3.5" style={iconStyle} />
+                    <span>{t('language') || 'Language'}</span>
+                  </div>
+                  <select
+                    value={locale}
+                    onChange={(e) => setLocale(e.target.value)}
+                    className="bg-transparent text-xs font-bold outline-none cursor-pointer"
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    {availableLanguages.map((lang) => (
+                      <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
+                        {lang.flag} {lang.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. Day/Dark Mode */}
+                <button
+                  type="button"
+                  onClick={toggleThemeMode}
+                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    {isDarkMode ? <Moon className="h-3.5 w-3.5" style={iconStyle} /> : <Sun className="h-3.5 w-3.5 text-amber-500" />}
+                    <span>{isDarkMode ? (t('nightMode') || 'Dark Mode') : (t('dayMode') || 'Light Mode')}</span>
+                  </div>
+                  <span className="text-[10px] opacity-60 font-mono">{isDarkMode ? 'Dark' : 'Day'}</span>
+                </button>
+
+                {/* 3. Billing */}
+                <Link
+                  href="/billing"
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                >
+                  <CreditCard className="h-3.5 w-3.5" style={iconStyle} />
+                  <span>{t('billing') || 'Billing'}</span>
+                </Link>
+
+                {/* 4. Contact */}
+                <Link
+                  href="/contacts"
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                >
+                  <Mail className="h-3.5 w-3.5" style={iconStyle} />
+                  <span>{t('contactUs') || 'Contact'}</span>
+                </Link>
+
+                {/* 5. Logout */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    logoutUser();
+                    window.location.href = '/login';
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer border-t border-[var(--color-border)] pt-2"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span>{t('logout') || 'Logout'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsOpen(!isOpen)}
+            className={`p-2 rounded-xl border border-[var(--color-border)] transition cursor-pointer ${
+              isDarkMode ? 'bg-[#141b2d] text-slate-300 hover:text-white' : 'bg-slate-200 text-slate-800 hover:text-slate-950'
+            }`}
+            aria-label="Toggle navigation menu"
+          >
+            {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
       </header>
 
-      {/* MOBILE OVERLAY BACKDROP */}
+      {/* DESKTOP TOP BAR */}
+      <div className="hidden md:flex fixed top-0 right-0 left-0 md:left-64 z-30 h-16 bg-[var(--color-card)] border-b border-[var(--color-border)] px-6 items-center justify-between transition-all duration-300">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]" style={{ color: 'var(--color-primary)' }}>
+            {pathname === '/' ? 'Dashboard' : pathname.replace('/', '').toUpperCase()}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {/* Token Balance Widget */}
+          <Link 
+            href="/profile" 
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition shadow-xs group"
+            title="View Token Balance & Summary"
+          >
+            <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
+            <span className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+              {tokenBalance.toLocaleString()}
+            </span>
+            <span className="text-xs font-bold text-amber-500 font-mono">
+              {tokenSymbol}
+            </span>
+          </Link>
+
+          {/* Notification Icon with Dropdown */}
+          <div className="relative" ref={notifDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowNotifications(!showNotifications);
+                setShowProfileMenu(false);
+              }}
+              className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer"
+              aria-label="Notifications"
+            >
+              <Bell className="h-4 w-4" style={iconStyle} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+
+            {showNotifications && (
+              <div 
+                className="absolute right-0 mt-2 w-80 rounded-2xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                  <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                    Notifications
+                  </h3>
+                  <button 
+                    onClick={() => { setUnreadCount(0); setShowNotifications(false); }}
+                    className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
+                  >
+                    Mark all read
+                  </button>
+                </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1 text-xs">
+                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
+                    <p className="font-bold">🎉 Welcome to Zecratary!</p>
+                    <p className="text-[11px] opacity-75">Your account has been initialized with free AI token credits.</p>
+                  </div>
+                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
+                    <p className="font-bold">⚡ AI Model Updated</p>
+                    <p className="text-[11px] opacity-75">Gemini models are fully synchronized and ready for your recipes.</p>
+                  </div>
+                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
+                    <p className="font-bold">🔒 Security Secured</p>
+                    <p className="text-[11px] opacity-75">PostgreSQL database storage connected successfully.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Profile Lucide-User Icon on Top Right with Dropdown */}
+          <div className="relative" ref={profileDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowProfileMenu(!showProfileMenu);
+                setShowNotifications(false);
+              }}
+              className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
+              aria-label="User Profile Dropdown"
+              title="Profile & Settings"
+            >
+              <UserIcon className="h-4 w-4" style={iconStyle} />
+            </button>
+
+            {/* Profile Dropdown Menu */}
+            {showProfileMenu && (
+              <div 
+                className="absolute right-0 mt-2 w-72 rounded-2xl border p-3 space-y-2 shadow-2xl z-50 animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                {/* Profile Header */}
+                <Link
+                  href="/profile"
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-3 p-2 rounded-xl hover:bg-[var(--color-inner-dark)] transition border-b border-[var(--color-border)] pb-3"
+                >
+                  <div className="w-8 h-8 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-center">
+                    <UserIcon className="w-4 h-4" style={iconStyle} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
+                      {user?.name || user?.email || 'User Account'}
+                    </p>
+                    <p className="text-[11px] opacity-60 truncate">
+                      {user?.email || t('viewProfile') || 'View Profile'}
+                    </p>
+                  </div>
+                </Link>
+
+                <div className="space-y-1 pt-1">
+                  {/* 1. Language Selector */}
+                  <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                      <Languages className="w-4 h-4" style={iconStyle} />
+                      <span>{t('language') || 'Language'}</span>
+                    </div>
+                    <select
+                      value={locale}
+                      onChange={(e) => setLocale(e.target.value)}
+                      className="bg-transparent text-xs font-bold outline-none cursor-pointer"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      {availableLanguages.map((lang) => (
+                        <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
+                          {lang.flag} {lang.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 2. Day / Dark Mode Toggle */}
+                  <button
+                    type="button"
+                    onClick={toggleThemeMode}
+                    className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition cursor-pointer text-left"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      {isDarkMode ? <Moon className="h-4 w-4" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500" />}
+                      <span>{isDarkMode ? (t('nightMode') || 'Dark Mode') : (t('dayMode') || 'Light Mode')}</span>
+                    </div>
+                    <span className="text-[10px] font-mono opacity-60 px-2 py-0.5 rounded-md border border-[var(--color-border)]">
+                      {isDarkMode ? 'Dark' : 'Day'}
+                    </span>
+                  </button>
+
+                  {/* 3. Billing */}
+                  <Link
+                    href="/billing"
+                    onClick={() => setShowProfileMenu(false)}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <CreditCard className="h-4 w-4" style={iconStyle} />
+                    <span>{t('billing') || 'Billing'}</span>
+                  </Link>
+
+                  {/* 4. Contact */}
+                  <Link
+                    href="/contacts"
+                    onClick={() => setShowProfileMenu(false)}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <Mail className="h-4 w-4" style={iconStyle} />
+                    <span>{t('contactUs') || 'Contact'}</span>
+                  </Link>
+
+                  {/* 5. Logout */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      logoutUser();
+                      window.location.href = '/login';
+                    }}
+                    className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left border-t border-[var(--color-border)] mt-1.5 pt-2"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span>{t('logout') || 'Logout'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {isOpen && (
         <div 
           onClick={() => setIsOpen(false)} 
@@ -305,19 +647,15 @@ export default function Sidebar() {
         ${!isOpen && showCollapsed ? 'md:w-20 p-3' : 'md:w-64 p-5'}
       `}>
         <div className="space-y-4 overflow-y-auto overflow-x-hidden pr-1">
-          {/* TOP BAR / HAMBURGER TOGGLE */}
           {showCollapsed ? (
             <div className="flex flex-col items-center gap-3 pb-2 border-b border-[var(--color-border)]">
               <button
                 type="button"
                 onClick={() => setIsCollapsed(false)}
                 className={`p-2 rounded-xl transition cursor-pointer ${
-                  isDarkMode 
-                    ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' 
-                    : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
+                  isDarkMode ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
                 }`}
                 title="Expand navigation"
-                aria-label="Expand navigation"
               >
                 <Menu className="h-5 w-5" />
               </button>
@@ -332,12 +670,9 @@ export default function Sidebar() {
                   type="button"
                   onClick={() => setIsCollapsed(true)}
                   className={`p-2 rounded-xl transition cursor-pointer shrink-0 ${
-                    isDarkMode 
-                      ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' 
-                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
+                    isDarkMode ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
                   }`}
                   title="Collapse navigation"
-                  aria-label="Collapse navigation"
                 >
                   <Menu className="h-5 w-5" />
                 </button>
@@ -351,11 +686,7 @@ export default function Sidebar() {
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                className={`md:hidden p-1.5 rounded-lg transition cursor-pointer ${
-                  isDarkMode 
-                    ? 'text-slate-400 hover:text-white hover:bg-slate-800' 
-                    : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
-                }`}
+                className="md:hidden p-1.5 rounded-lg transition cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -363,19 +694,13 @@ export default function Sidebar() {
           )}
 
           <nav className="space-y-1">
-            {/* DASHBOARD */}
             <Link href="/dashboard" className={navClass('/dashboard')} title={t('dashboard')}>
               <Home className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('dashboard')}</span>}
             </Link>
 
-            {/* CREATE SECTION */}
-            {showCollapsed ? (
-              <div title={t('create')} />
-            ) : (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${
-                isDarkMode ? 'text-slate-500' : 'text-slate-600'
-              }`}>
+            {!showCollapsed && (
+              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
                 {t('create')}
               </div>
             )}
@@ -392,13 +717,8 @@ export default function Sidebar() {
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
             </Link>
 
-            {/* MANAGE SECTION */}
-            {showCollapsed ? (
-              <div title={t('manage')} />
-            ) : (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${
-                isDarkMode ? 'text-slate-500' : 'text-slate-600'
-              }`}>
+            {!showCollapsed && (
+              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
                 {t('manage')}
               </div>
             )}
@@ -415,13 +735,8 @@ export default function Sidebar() {
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
             </Link>
 
-            {/* PLAN SECTION */}
-            {showCollapsed ? (
-              <div title={t('plan')} />
-            ) : (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${
-                isDarkMode ? 'text-slate-500' : 'text-slate-600'
-              }`}>
+            {!showCollapsed && (
+              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
                 {t('plan')}
               </div>
             )}
@@ -438,59 +753,52 @@ export default function Sidebar() {
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
             </Link>
 
-            {/* ADMIN ACCESS SECTION */}
             {isAdmin && (
               <div className="pt-2 space-y-1">
-                {showCollapsed ? (
-                  <div title={t('adminAccess') || 'Admin Access'} />
-                ) : (
+                {!showCollapsed && (
                   <span className="block text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)] px-3 pt-2 truncate">
                     {t('adminAccess') || 'Admin Access'}
                   </span>
                 )}
-                <Link href="/admin" className={navClass('/admin')} title={t('adminSetting') || 'Admin Setting'}>
+                <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
                   <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('adminSetting') || 'Admin Setting'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
                 </Link>
                 <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
                   <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
                 </Link>
-                <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title={t('tokenSettings') || 'Token Settings'}>
+                <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
                   <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('tokenSettings') || 'Token Settings'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
                 </Link>
-                <Link href="/admin/plans" className={navClass('/admin/plans')} title={t('subscriptionPlans') || 'Subscription Plans'}>
+                <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
                   <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptionPlans') || 'Subscription Plans'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
                 </Link>
-                <Link href="/admin/payment" className={navClass('/admin/payment')} title={t('paymentGateway') || 'Payment Gateway'}>
+                <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
                   <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('paymentGateway') || 'Payment Gateway'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
                 </Link>
-                <Link 
-                  href="/admin/social-login-setting" 
-                  className={navClass('/admin/social-login-setting')} 
-                  title="Social Login"
-                >
+                <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
                   <Key className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
                 </Link>
-                <Link href="/admin/users" className={navClass('/admin/users')} title={t('users') || 'Users'}>
+                <Link href="/admin/users" className={navClass('/admin/users')} title="Users">
                   <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('users') || 'Users'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Users</span>}
                 </Link>
-                <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title={t('recipeType') || 'Recipe Type'}>
+                <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title="Recipe Type">
                   <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('recipeType') || 'Recipe Type'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Recipe Type</span>}
                 </Link>
-                <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title={t('ingredientCategory') || 'Ingredient Category'}>
+                <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
                   <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('ingredientCategory') || 'Ingredient Category'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
                 </Link>
-                <Link href="/admin/language" className={navClass('/admin/language')} title={t('language') || 'Language'}>
+                <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
                   <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('language') || 'Language'}</span>}
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">Language</span>}
                 </Link>
               </div>
             )}
@@ -499,7 +807,6 @@ export default function Sidebar() {
 
         {/* FOOTER CONTROLS */}
         <div className="pt-3 border-t border-[var(--color-border)] space-y-1">
-          {/* QUICK LANGUAGE SELECTOR & DARK MODE TOGGLE */}
           {showCollapsed ? (
             <div className="flex flex-col items-center gap-2 p-1">
               <div className={`relative flex items-center justify-center p-2 rounded-xl border border-[var(--color-border)] text-base cursor-pointer hover:border-[var(--color-primary)]/50 transition ${
@@ -525,8 +832,7 @@ export default function Sidebar() {
                 className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer ${
                   isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
                 }`}
-                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                aria-label="Toggle Theme Mode"
+                title="Toggle Theme Mode"
               >
                 {isDarkMode ? <Moon className="h-4 w-4 shrink-0" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500 shrink-0" />}
               </button>
@@ -556,8 +862,7 @@ export default function Sidebar() {
                 className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer shrink-0 ${
                   isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
                 }`}
-                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                aria-label="Toggle Theme Mode"
+                title="Toggle Theme Mode"
               >
                 {isDarkMode ? <Moon className="h-4 w-4 shrink-0" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500 shrink-0" />}
               </button>
@@ -574,15 +879,7 @@ export default function Sidebar() {
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing') || 'Billing'}</span>}
           </Link>
 
-          <Link
-            href="/contacts"
-            className={`flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition ${
-              isDarkMode 
-                ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]/50' 
-                : 'text-slate-800 hover:text-slate-950 hover:bg-slate-200/80 font-bold'
-            }`}
-            title={t('contactUs')}
-          >
+          <Link href="/contacts" className={navClass('/contacts')} title={t('contactUs')}>
             <Mail className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('contactUs')}</span>}
           </Link>
@@ -593,16 +890,14 @@ export default function Sidebar() {
               window.location.href = '/login';
             }}
             className={`w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer text-left ${
-              isDarkMode 
-                ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/20' 
-                : 'text-slate-800 hover:text-red-600 hover:bg-red-100/70 font-bold'
+              isDarkMode ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/20' : 'text-slate-800 hover:text-red-600 hover:bg-red-100/70 font-bold'
             }`}
             title={t('logout')}
           >
             <LogOut className="h-4 w-4 shrink-0" />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('logout')}</span>}
           </button>
-          {/* DYNAMIC VERSION BADGE */}
+
           <div className={`pt-2 select-none flex items-center ${showCollapsed ? 'justify-center text-[10px]' : 'px-3.5 justify-between text-[11px]'} font-mono ${
             isDarkMode ? 'text-slate-500' : 'text-slate-600'
           }`}>

@@ -51,7 +51,6 @@ const DEFAULT_SETTINGS: TokenSettings = {
 
 export async function initTokenTables(): Promise<void> {
   try {
-    // 1. Token settings table
     await query(`
       CREATE TABLE IF NOT EXISTS token_settings (
         id VARCHAR(64) PRIMARY KEY,
@@ -68,7 +67,6 @@ export async function initTokenTables(): Promise<void> {
       );
     `);
 
-    // Ensure columns exist if table was previously created with fewer columns
     await query(`
       ALTER TABLE token_settings 
       ADD COLUMN IF NOT EXISTS plan_allocations JSONB DEFAULT '{}'::jsonb,
@@ -76,7 +74,6 @@ export async function initTokenTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT true;
     `);
 
-    // 2. Token transactions ledger table
     await query(`
       CREATE TABLE IF NOT EXISTS token_transactions (
         id VARCHAR(100) PRIMARY KEY,
@@ -90,21 +87,18 @@ export async function initTokenTables(): Promise<void> {
       );
     `);
 
-    // 3. User balance columns
     await query(`
       ALTER TABLE users 
       ADD COLUMN IF NOT EXISTS token_balance INTEGER DEFAULT 100,
       ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50);
     `);
 
-    // 4. Subscription plan token columns
     await query(`
       ALTER TABLE subscription_plans 
-      ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 100,
+      ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 500,
       ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 500;
     `);
 
-    // Create indices
     await query(`
       CREATE INDEX IF NOT EXISTS idx_token_transactions_email ON token_transactions(user_email);
       CREATE INDEX IF NOT EXISTS idx_token_transactions_created ON token_transactions(created_at DESC);
@@ -185,6 +179,20 @@ export async function saveTokenSettings(settings: Partial<TokenSettings>): Promi
     JSON.stringify(merged.planAllocations),
     merged.isEnabled
   ]);
+
+  // Synchronize planAllocations directly to subscription_plans in PostgreSQL
+  if (merged.planAllocations && typeof merged.planAllocations === 'object') {
+    for (const [slug, amount] of Object.entries(merged.planAllocations)) {
+      const num = Math.max(0, Number(amount));
+      try {
+        await query(`
+          UPDATE subscription_plans 
+          SET token_limit = $1, monthly_tokens = $1, updated_at = NOW() 
+          WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
+        `, [num, slug]);
+      } catch (_) {}
+    }
+  }
 
   return merged;
 }
@@ -329,50 +337,6 @@ export async function addTokensToUser({
   `, [txId, userRow.id, userRow.email, amount, newBalance, type, description]);
 
   return newBalance;
-}
-
-export async function syncUserMonthlyTokens(userId?: string | null, userEmail?: string | null): Promise<void> {
-  await initTokenTables();
-  try {
-    let userRow: any = null;
-    if (userId) {
-      const rows = await query('SELECT * FROM users WHERE id = $1 LIMIT 1', [userId]);
-      if (rows.length > 0) userRow = rows[0];
-    } else if (userEmail) {
-      const rows = await query('SELECT * FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
-      if (rows.length > 0) userRow = rows[0];
-    }
-    if (!userRow) return;
-
-    const currentCycle = new Date().toISOString().slice(0, 7);
-    if (userRow.last_token_grant_cycle === currentCycle) {
-      return;
-    }
-
-    const planSlug = userRow.subscription_plan || 'taster';
-    const planRows = await query('SELECT monthly_tokens, token_limit FROM subscription_plans WHERE slug = $1 LIMIT 1', [planSlug]);
-    
-    let tokensToGrant = 50;
-    if (planRows.length > 0 && planRows[0].monthly_tokens) {
-      tokensToGrant = Number(planRows[0].monthly_tokens);
-    } else if (planRows.length > 0 && planRows[0].token_limit) {
-      tokensToGrant = Number(planRows[0].token_limit);
-    } else if (planSlug.includes('pro')) {
-      tokensToGrant = 500;
-    }
-
-    await addTokensToUser({
-      userId: userRow.id,
-      userEmail: userRow.email,
-      amount: tokensToGrant,
-      type: 'plan_monthly_grant',
-      description: `Monthly Plan Token Grant (${planSlug.toUpperCase()} - ${currentCycle})`
-    });
-
-    await query('UPDATE users SET last_token_grant_cycle = $1 WHERE id = $2', [currentCycle, userRow.id]);
-  } catch (err) {
-    console.error('Failed syncing monthly plan tokens:', err);
-  }
 }
 
 export async function grantPlanTokensOnPurchase(
