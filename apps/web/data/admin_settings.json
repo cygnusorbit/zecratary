@@ -1,9 +1,9 @@
 {
-  "aiModel": "gemini-3.5-flash-lite",
+  "aiModel": "gemini-3.5-flash",
   "taxRate": 0,
   "currency": "USD",
   "siteName": "Zecratary",
-  "updatedAt": "2026-09-21T05:19:07.377Z",
+  "updatedAt": "2026-09-21T14:20:27.882Z",
   "aiProvider": "gemini",
   "recipeTypes": [
     "Breakfast",
@@ -55,8 +55,8 @@
   "titlebarEmoji": "🍳",
   "titlebarImage": "",
   "chefAiSettings": {
-    "model": "gemini-3.5-flash-lite",
-    "apiKey": "AQ.Ab8RN6IAJKJD1CtV8nAqkKlmQFj-1CbdSalkICafii42qYdjdw",
+    "model": "gemini-3.5-flash",
+    "apiKey": "AQ.Ab8RN6IV413r-my3ha0UekHmrrFtKz1f9il12r2QUqnVh7pisg",
     "provider": "gemini",
     "sections": [
       {
@@ -82,19 +82,15 @@
       }
     ],
     "maxTokens": 4096,
-    "updatedAt": "2026-09-21T05:19:07.377Z",
+    "updatedAt": "2026-09-21T14:20:27.882Z",
     "voiceSpeed": 1,
     "maxPlanDays": 7,
     "temperature": 0.7,
     "voiceEngine": "version2",
-    "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize the selected Knowledge Base, custom vocabulary, filter words, and dietary preferences when generating culinary or meal planning responses.",
+    "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize the selected Knowledge Base, custom vocabulary, filter words, and dietary preferences when generating culinary or meal planning responses. main goal is to guide user ",
     "voiceAutoPlay": false,
     "enableWebSearch": true,
-    "filterWordsList": [
-      "Oily",
-      "Artificial preservatives",
-      "Unhealthy trans fats"
-    ],
+    "filterWordsList": [],
     "knowledgeBaseList": [
       "Culinary Masterclass DB v2",
       "Nutritional Guidelines 2026"
@@ -102,12 +98,7 @@
     "resultDisplayMode": "card",
     "selectedVoiceName": "en-US-Neural2-F",
     "enablePantryContext": true,
-    "customVocabularyList": [
-      "Umami",
-      "Sous-vide",
-      "Macronutrients",
-      "Batch-cooking"
-    ],
+    "customVocabularyList": [],
     "availableGeminiModels": [
       {
         "id": "gemini-2.5-flash",

@@ -31,9 +31,11 @@ export interface AiModelOption {
 }
 
 const DEFAULT_GEMINI_MODELS: AiModelOption[] = [
-  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', label: 'Gemini 3.6 Flash (Latest Recommended - 2026)' },
-  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', label: 'Gemini 1.5 Flash (Stable Long-Context)' },
-  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', label: 'Gemini 1.5 Pro (Deep Reasoning & Multimodal)' }
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', label: 'Gemini 2.5 Flash (Fast & Recommended)' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', label: 'Gemini 2.5 Pro (Deep Reasoning)' },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', label: 'Gemini 3.6 Flash (Latest Standard)' },
+  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', label: 'Gemini 1.5 Flash (Versatile & Stable)' },
+  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', label: 'Gemini 1.5 Pro (Multimodal Long-Context)' }
 ];
 
 const DEFAULT_OPENAI_MODELS: AiModelOption[] = [
@@ -83,7 +85,7 @@ export default function ChefAISettingsPage() {
   const [provider, setProvider] = useState<'gemini' | 'openai'>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('gemini-3.6-flash');
+  const [model, setModel] = useState('gemini-2.5-flash');
   const [geminiModelsList, setGeminiModelsList] = useState<AiModelOption[]>(DEFAULT_GEMINI_MODELS);
   const [openaiModelsList, setOpenaiModelsList] = useState<AiModelOption[]>(DEFAULT_OPENAI_MODELS);
   const [syncingModels, setSyncingModels] = useState(false);
@@ -192,12 +194,14 @@ export default function ChefAISettingsPage() {
     window.addEventListener('zecratary_theme_updated', handleThemeEvent);
     window.addEventListener('zecratary_theme_mode_changed', handleThemeEvent);
     window.addEventListener('zecratary_theme_changed', handleThemeEvent);
+    window.addEventListener('zecratary_admin_settings_updated', handleThemeEvent);
     window.addEventListener('storage', handleThemeEvent);
 
     return () => {
       window.removeEventListener('zecratary_theme_updated', handleThemeEvent);
       window.removeEventListener('zecratary_theme_mode_changed', handleThemeEvent);
       window.removeEventListener('zecratary_theme_changed', handleThemeEvent);
+      window.removeEventListener('zecratary_admin_settings_updated', handleThemeEvent);
       window.removeEventListener('storage', handleThemeEvent);
     };
   }, [applySavedTheme]);
@@ -214,10 +218,8 @@ export default function ChefAISettingsPage() {
             if (k.envKey && k.keyValue) {
               map[k.envKey] = k.keyValue;
               const u = k.envKey.toUpperCase();
-              const val = String(k.keyValue || '').trim();
-              const isOAuth = val.includes('.apps.googleusercontent.com') || val.startsWith('GOCSPX-') || u.includes('CLIENT_ID') || u.includes('CLIENT_SECRET');
-              if (!isOAuth && (u === 'GEMINI_API_KEY' || u === 'GOOGLE_AI_KEY' || u === 'GOOGLE_GENAI_API_KEY' || (u === 'GOOGLE_API_KEY' && val.startsWith('AIzaSy')))) {
-                map['GEMINI_API_KEY'] = val;
+              if (u.includes('GEMINI')) {
+                map['GEMINI_API_KEY'] = k.keyValue;
               }
               if (u.includes('OPENAI')) {
                 map['OPENAI_API_KEY'] = k.keyValue;
@@ -244,9 +246,8 @@ export default function ChefAISettingsPage() {
         if (c.provider) setProvider(c.provider);
         else if (serverData.aiProvider) setProvider(serverData.aiProvider);
 
-        if (c.apiKey !== undefined) setApiKey(c.apiKey);
+        if (c.apiKey !== undefined && c.apiKey) setApiKey(c.apiKey);
 
-        // Load models list first before restoring selected model
         if (Array.isArray(c.availableGeminiModels) && c.availableGeminiModels.length > 0) {
           setGeminiModelsList(c.availableGeminiModels);
         }
@@ -254,10 +255,10 @@ export default function ChefAISettingsPage() {
           setOpenaiModelsList(c.availableOpenAiModels);
         }
 
-        const savedModel = c.model || serverData.aiModel || serverData.model;
-        if (savedModel) {
-          setModel(savedModel);
-          modelRef.current = savedModel;
+        const resolvedSavedModel = c.model || serverData.aiModel || serverData.model;
+        if (resolvedSavedModel) {
+          setModel(resolvedSavedModel);
+          modelRef.current = resolvedSavedModel;
         }
 
         if (c.temperature !== undefined) setTemperature(c.temperature);
@@ -314,10 +315,6 @@ export default function ChefAISettingsPage() {
 
   const handleSyncModels = async () => {
     const keyToQuery = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
-    if (!keyToQuery) {
-      setTestResult({ success: false, message: t('enterApiKeyFirst', 'Please enter an API key or sync from .env first.') });
-      return;
-    }
     setSyncingModels(true);
     setTestResult(null);
 
@@ -330,36 +327,34 @@ export default function ChefAISettingsPage() {
 
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.models) && data.models.length > 0) {
-        let updatedModel = modelRef.current;
+        let currentActive = modelRef.current || model;
         if (provider === 'gemini') {
           setGeminiModelsList(data.models);
-          if (!data.models.some((m: any) => m.id === updatedModel)) {
-            updatedModel = data.models[0].id;
-            setModel(updatedModel);
-            modelRef.current = updatedModel;
+          if (!data.models.some((m: any) => m.id === currentActive)) {
+            currentActive = data.models[0].id;
+            setModel(currentActive);
+            modelRef.current = currentActive;
           }
         } else {
           setOpenaiModelsList(data.models);
-          if (!data.models.some((m: any) => m.id === updatedModel)) {
-            updatedModel = data.models[0].id;
-            setModel(updatedModel);
-            modelRef.current = updatedModel;
+          if (!data.models.some((m: any) => m.id === currentActive)) {
+            currentActive = data.models[0].id;
+            setModel(currentActive);
+            modelRef.current = currentActive;
           }
         }
-
         setTestResult({
           success: true,
           message: `${t('modelsSyncedNotice', 'Synced latest models dynamically')}: ${data.models.length} ${t('modelsFound', 'models discovered')}.`
         });
 
-        // Persist model list without overwriting current configured model
         await persistServerAdminSettings({
           aiProvider: provider,
-          aiModel: updatedModel,
+          aiModel: currentActive,
           chefAiSettings: {
             provider,
+            model: currentActive,
             apiKey: keyToQuery,
-            model: updatedModel,
             availableGeminiModels: provider === 'gemini' ? data.models : geminiModelsList,
             availableOpenAiModels: provider === 'openai' ? data.models : openaiModelsList,
             updatedAt: new Date().toISOString()
@@ -376,39 +371,25 @@ export default function ChefAISettingsPage() {
   };
 
   const handleTestApiKey = async () => {
-    const rawKey = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
-    const keyToTest = rawKey.replace(/^["']|["']$/g, '').trim();
-    if (provider === 'gemini' && (keyToTest.includes('.apps.googleusercontent.com') || keyToTest.startsWith('GOCSPX-'))) {
-      setTestResult({ success: false, message: t('oauthKeyError', 'Invalid Key Type: You entered a Google OAuth Client ID or Secret instead of a Gemini API Key. Please get a Gemini API Key starting with "AIzaSy" from https://aistudio.google.com/app/apikey.') });
-      return;
-    }
-    if (!keyToTest) {
-      setTestResult({ success: false, message: t('enterApiKeyFirst', 'Please enter an API key or sync from .env first.') });
-      return;
-    }
+    const keyToTest = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
     setTestingKey(true);
     setTestResult(null);
 
     try {
+      const activeModelToTest = modelRef.current || model;
       const res = await fetch('/api/admin/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider,
           apiKey: keyToTest,
-          model: modelRef.current
+          model: activeModelToTest
         })
       });
 
-      const rawText = await res.text();
-      let data: any = {};
-      try {
-        data = rawText ? JSON.parse(rawText) : {};
-      } catch (_) {
-        data = { success: false, error: `Invalid response from server (${res.status}: ${res.statusText})` };
-      }
+      const data = await res.json().catch(() => ({}));
 
-      if (data.success) {
+      if (res.ok && data.success) {
         setTestResult({ success: true, message: data.message });
         if (Array.isArray(data.models) && data.models.length > 0) {
           if (provider === 'gemini') {
@@ -418,7 +399,7 @@ export default function ChefAISettingsPage() {
           }
         }
       } else {
-        setTestResult({ success: false, message: data.error || t('connectionFailed', 'Connection failed.') });
+        setTestResult({ success: false, message: data.error || t('connectionFailed', 'Connection test failed.') });
       }
     } catch (err: any) {
       setTestResult({ success: false, message: err.message || t('verificationEndpointError', 'Could not reach verification endpoint.') });
@@ -427,9 +408,9 @@ export default function ChefAISettingsPage() {
     }
   };
 
-  const autoConnectGemini = async (silent = false) => {
+  const autoConnectGemini = async () => {
     setAutoConnecting(true);
-    if (!silent) setTestResult(null);
+    setTestResult(null);
 
     try {
       const res = await fetch('/api/admin/keys?t=' + Date.now(), { cache: 'no-store' });
@@ -444,57 +425,47 @@ export default function ChefAISettingsPage() {
         }
       }
 
-      if (!resolvedKey || resolvedKey.includes('sample') || resolvedKey.length < 10) {
-        if (!silent) {
-          setTestResult({ success: false, message: t('noGeminiKeyFound', 'No active Google Gemini key found in .env. Please enter a key.') });
-        }
-        setAutoConnecting(false);
-        return;
-      }
-
-      const activeModelToTest = modelRef.current || 'gemini-2.5-flash';
+      const activeModelToPreserve = modelRef.current || model || 'gemini-2.5-flash';
       const testRes = await fetch('/api/admin/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'gemini',
           apiKey: resolvedKey,
-          model: activeModelToTest
+          model: activeModelToPreserve
         })
       });
 
-      const rawAutoText = await testRes.text();
-      let testData: any = {};
-      try {
-        testData = rawAutoText ? JSON.parse(rawAutoText) : {};
-      } catch (_) {
-        testData = { success: false, error: `Invalid server response (${testRes.status})` };
-      }
+      const testData = await testRes.json().catch(() => ({}));
 
-      if (testData.success) {
+      if (testRes.ok && testData.success) {
         if (Array.isArray(testData.models) && testData.models.length > 0) {
           setGeminiModelsList(testData.models);
         }
 
-        if (!silent) {
-          setTestResult({ success: true, message: testData.message || `Connected to Google Gemini & dynamic models synced!` });
-          await persistServerAdminSettings({
-            aiProvider: 'gemini',
-            aiModel: activeModelToTest,
-            chefAiSettings: {
-              provider: 'gemini',
-              apiKey: resolvedKey,
-              model: activeModelToTest,
-              availableGeminiModels: testData.models || geminiModelsList,
-              updatedAt: new Date().toISOString()
-            }
-          });
+        setTestResult({ success: true, message: testData.message || `Connected to Google Gemini & dynamic models synced!` });
+
+        await persistServerAdminSettings({
+          aiProvider: 'gemini',
+          aiModel: activeModelToPreserve,
+          chefAiSettings: {
+            provider: 'gemini',
+            apiKey: resolvedKey,
+            model: activeModelToPreserve,
+            availableGeminiModels: testData.models || geminiModelsList,
+            updatedAt: new Date().toISOString()
+          }
+        });
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+          window.dispatchEvent(new Event('zecratary_settings_updated'));
         }
-      } else if (!silent) {
+      } else {
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
       }
     } catch (err: any) {
-      if (!silent) setTestResult({ success: false, message: err.message || t('autoConnectionError', 'Auto-connection error.') });
+      setTestResult({ success: false, message: err.message || t('autoConnectionError', 'Auto-connection error.') });
     } finally {
       setAutoConnecting(false);
     }
@@ -505,17 +476,13 @@ export default function ChefAISettingsPage() {
     setTestResult(null);
     try {
       const map = await fetchEnvKeys();
-      const resolvedGemini = map['GEMINI_API_KEY'] || 
-                             map['GOOGLE_API_KEY'] || 
-                             map['NEXT_PUBLIC_GEMINI_API_KEY'] || 
-                             map['NEXT_PUBLIC_GOOGLE_API_KEY'] || '';
-      const resolvedOpenAI = map['OPENAI_API_KEY'] || 
-                             map['NEXT_PUBLIC_OPENAI_API_KEY'] || '';
-
+      const resolvedGemini = map['GEMINI_API_KEY'] || map['GOOGLE_AI_KEY'] || map['GOOGLE_API_KEY'] || '';
+      const resolvedOpenAI = map['OPENAI_API_KEY'] || '';
       const targetKey = provider === 'gemini' ? resolvedGemini : resolvedOpenAI;
 
       if (targetKey && targetKey.trim().length > 5) {
         const cleanKey = targetKey.trim();
+        const activeModel = modelRef.current || model;
         setApiKey(cleanKey);
         setTestResult({
           success: true,
@@ -524,17 +491,17 @@ export default function ChefAISettingsPage() {
 
         await persistServerAdminSettings({
           aiProvider: provider,
-          aiModel: modelRef.current,
+          aiModel: activeModel,
           chefAiSettings: {
             apiKey: cleanKey,
             provider,
-            model: modelRef.current
+            model: activeModel
           }
         });
       } else {
         setTestResult({
           success: false,
-          message: `No active ${provider === 'gemini' ? 'GEMINI_API_KEY or GOOGLE_API_KEY' : 'OPENAI_API_KEY'} found in your local .env file.`
+          message: `No active ${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'} found in your local .env file.`
         });
       }
     } catch (err: any) {
@@ -545,6 +512,49 @@ export default function ChefAISettingsPage() {
     } finally {
       setTimeout(() => setSyncingEnvKey(false), 500);
     }
+  };
+
+  // Agent Parameter Handlers: Knowledge Base, Custom Vocabulary, Filter Words
+  const handleAddKnowledgeBase = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = newKbInput.trim();
+    if (!clean) return;
+    if (!knowledgeBaseList.includes(clean)) {
+      setKnowledgeBaseList([...knowledgeBaseList, clean]);
+    }
+    setNewKbInput('');
+  };
+
+  const handleRemoveKnowledgeBase = (idx: number) => {
+    setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx));
+  };
+
+  const handleAddCustomVocabulary = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = newVocabInput.trim();
+    if (!clean) return;
+    if (!customVocabularyList.includes(clean)) {
+      setCustomVocabularyList([...customVocabularyList, clean]);
+    }
+    setNewVocabInput('');
+  };
+
+  const handleRemoveCustomVocabulary = (idx: number) => {
+    setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx));
+  };
+
+  const handleAddFilterWord = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = newFilterInput.trim();
+    if (!clean) return;
+    if (!filterWordsList.includes(clean)) {
+      setFilterWordsList([...filterWordsList, clean]);
+    }
+    setNewFilterInput('');
+  };
+
+  const handleRemoveFilterWord = (idx: number) => {
+    setFilterWordsList(filterWordsList.filter((_, i) => i !== idx));
   };
 
   const handleAddTopicSection = (e: React.FormEvent) => {
@@ -608,7 +618,7 @@ export default function ChefAISettingsPage() {
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const cleanApiKey = apiKey.trim();
-    const activeModel = modelRef.current;
+    const activeModel = modelRef.current || model;
 
     const config = {
       provider,
@@ -640,7 +650,6 @@ export default function ChefAISettingsPage() {
       .filter(s => s.enabled !== false)
       .flatMap(s => s.questions);
 
-    // 1. Persist to PostgreSQL admin_settings with selected model
     await persistServerAdminSettings({
       aiProvider: provider,
       aiModel: activeModel,
@@ -648,7 +657,6 @@ export default function ChefAISettingsPage() {
       chefQuestionnaire: activeFlattenedQuestions
     });
 
-    // 2. Synchronize key & model with .env and PostgreSQL admin_api_keys
     if (cleanApiKey) {
       try {
         const res = await fetch('/api/admin/keys', {
@@ -670,11 +678,6 @@ export default function ChefAISettingsPage() {
             success: true,
             message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (${provider === 'gemini' ? 'Gemini' : 'OpenAI'} • ${activeModel})`
           });
-        } else {
-          setTestResult({
-            success: false,
-            message: `Server stored settings, but .env save returned: ${data.error || 'Server rejected key save'}`
-          });
         }
       } catch (err: any) {
         setTestResult({
@@ -692,6 +695,7 @@ export default function ChefAISettingsPage() {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+      window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
       window.dispatchEvent(new Event('zecratary_settings_updated'));
       window.dispatchEvent(new Event('storage'));
     }
@@ -712,8 +716,6 @@ export default function ChefAISettingsPage() {
         transition: 'background-color 200ms ease, color 200ms ease'
       }}
     >
-      
-      {/* Autofill & Transition Overrides */}
       <style dangerouslySetInnerHTML={{ __html: `
         .settings-input:-webkit-autofill,
         .settings-input:-webkit-autofill:hover,
@@ -759,8 +761,6 @@ export default function ChefAISettingsPage() {
               backgroundColor: 'var(--color-primary)',
               boxShadow: '0 8px 20px -4px rgba(224, 86, 56, 0.3)'
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             <Check className="h-4 w-4" /> {t('saveConfigurationBtn', 'Save Configuration')}
           </button>
@@ -823,7 +823,7 @@ export default function ChefAISettingsPage() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => autoConnectGemini(false)}
+                    onClick={autoConnectGemini}
                     disabled={autoConnecting}
                     className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 shadow-xs hover:opacity-90"
                     style={{
@@ -860,7 +860,7 @@ export default function ChefAISettingsPage() {
                   onClick={() => handleProviderChange('gemini')}
                   className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: provider === 'gemini' ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                    backgroundColor: 'var(--color-inner-dark)',
                     borderColor: provider === 'gemini' ? 'var(--color-primary)' : 'var(--color-border)',
                     color: provider === 'gemini' ? 'var(--color-text)' : 'var(--color-text-secondary)'
                   }}
@@ -868,7 +868,7 @@ export default function ChefAISettingsPage() {
                   <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>Google Gemini</span>
-                    <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 2.0 / 1.5</span>
+                    <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 3.6 / 1.5</span>
                   </div>
                 </button>
 
@@ -877,7 +877,7 @@ export default function ChefAISettingsPage() {
                   onClick={() => handleProviderChange('openai')}
                   className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: provider === 'openai' ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                    backgroundColor: 'var(--color-inner-dark)',
                     borderColor: provider === 'openai' ? 'var(--color-emerald)' : 'var(--color-border)',
                     color: provider === 'openai' ? 'var(--color-text)' : 'var(--color-text-secondary)'
                   }}
@@ -948,11 +948,11 @@ export default function ChefAISettingsPage() {
 
                   {testResult && (
                     <div 
-                      className="mt-2 p-2.5 rounded-xl border text-xs font-semibold flex items-start gap-2 animate-in fade-in shadow-xs"
+                      className="mt-2 p-3 rounded-xl border text-xs font-semibold flex items-start gap-2.5 animate-in fade-in shadow-xs transition-colors duration-200"
                       style={{
-                        backgroundColor: 'var(--color-inner-dark)',
                         borderColor: testResult.success ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
-                        color: testResult.success ? 'var(--color-emerald)' : '#ef4444'
+                        color: testResult.success ? 'var(--color-emerald)' : '#ef4444',
+                        backgroundColor: 'var(--color-inner-dark)'
                       }}
                     >
                       {testResult.success ? (
@@ -968,7 +968,6 @@ export default function ChefAISettingsPage() {
                   </span>
                 </div>
 
-                {/* DYNAMIC MODEL VERSION SELECTOR */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1019,7 +1018,7 @@ export default function ChefAISettingsPage() {
 
                   <div className="flex items-center justify-between text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
                     <span>{t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}</span>
-                    <span className="font-semibold text-emerald-500">
+                    <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
                       {activeModelsList.length} {t('modelsAvailableDynamically', 'models available dynamically')}
                     </span>
                   </div>
@@ -1112,7 +1111,7 @@ export default function ChefAISettingsPage() {
                               title={isEnabled ? 'Disable topic' : 'Enable topic'}
                             >
                               {isEnabled ? (
-                                <ToggleRight className="h-6 w-6 text-emerald-500" />
+                                <ToggleRight className="h-6 w-6" style={{ color: 'var(--color-emerald)' }} />
                               ) : (
                                 <ToggleLeft className="h-6 w-6 text-slate-400" />
                               )}
@@ -1179,8 +1178,6 @@ export default function ChefAISettingsPage() {
                       disabled={!newTopicTitle.trim()}
                       className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md"
                       style={{ backgroundColor: 'var(--color-primary)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                     >
                       {t('createTopicBtn', 'Create Topic Category')}
                     </button>
@@ -1327,7 +1324,7 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
 
-            {/* Results Appearance Section with Live Preview */}
+            {/* Results Appearance Section */}
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs mt-6 transition-colors duration-200"
               style={{
@@ -1369,123 +1366,6 @@ export default function ChefAISettingsPage() {
                   );
                 })}
               </div>
-
-              {/* LIVE PREVIEW BOX */}
-              <div className="pt-3 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center justify-between">
-                  <span className="font-bold flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text)' }}>
-                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('liveUiPreview', 'Live UI Preview')} ({resultDisplayMode.toUpperCase()} MODE)
-                  </span>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('liveUiPreviewNotice', 'Updates instantly when selecting above')}
-                  </span>
-                </div>
-
-                <div 
-                  className="border rounded-2xl p-4 space-y-3 shadow-inner transition-colors duration-200"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  {resultDisplayMode === 'compact' && (
-                    <div className="space-y-2 animate-in fade-in">
-                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: 'var(--color-border)' }}>
-                        <span className="font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                          <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('previewPlanTitle', 'High Protein Plan (3 Days)')}
-                        </span>
-                        <span style={{ color: 'var(--color-text-secondary)' }}>3/3 Days</span>
-                      </div>
-                      <div className="space-y-1.5">
-                        <div 
-                          className="flex items-center justify-between p-2 rounded-xl border text-[11px]"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <span className="font-bold" style={{ color: 'var(--color-primary)' }}>Day 1 - Sunday:</span>
-                          <span className="font-medium" style={{ color: 'var(--color-text)' }}>Avocado Quinoa Bowl</span>
-                          <span style={{ color: 'var(--color-text-secondary)' }}>25m</span>
-                        </div>
-                        <div 
-                          className="flex items-center justify-between p-2 rounded-xl border text-[11px]"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <span className="font-bold" style={{ color: 'var(--color-primary)' }}>Day 2 - Monday:</span>
-                          <span className="font-medium" style={{ color: 'var(--color-text)' }}>Grilled Salmon Salad</span>
-                          <span style={{ color: 'var(--color-text-secondary)' }}>20m</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {resultDisplayMode === 'detailed' && (
-                    <div className="space-y-3 animate-in fade-in">
-                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: 'var(--color-border)' }}>
-                        <span className="font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-primary)' }}>Detailed Master Plan Preview</span>
-                        <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>3 Days</span>
-                      </div>
-                      <div 
-                        className="border rounded-xl p-3 space-y-2 text-[11px]"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        <div className="flex justify-between font-bold" style={{ color: 'var(--color-primary)' }}>
-                          <span>Day 1 - Sunday</span>
-                          <span>DINNER</span>
-                        </div>
-                        <div className="flex gap-2.5 items-start">
-                          <div className="w-10 h-10 rounded-lg shrink-0 bg-cover bg-center border" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=150&q=80)', borderColor: 'var(--color-border)' }} />
-                          <div className="space-y-0.5 flex-1">
-                            <h5 className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>Avocado Quinoa Bowl</h5>
-                            <p className="text-[10px] line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>Nutritious plant-based high-protein bowl with fresh lime dressing.</p>
-                            <span className="text-[9px] block" style={{ color: 'var(--color-text-secondary)' }}>Ingredients: Quinoa, Avocado, Chickpeas, Olive Oil</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {resultDisplayMode === 'card' && (
-                    <div className="space-y-3 animate-in fade-in">
-                      <div 
-                        className="rounded-xl overflow-hidden border"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        <div className="text-white px-3 py-2 flex items-center justify-between font-bold text-xs" style={{ backgroundColor: 'var(--color-primary)' }}>
-                          <span>Day 1 - Sunday</span>
-                          <span className="text-[10px] opacity-90">Sep 6</span>
-                        </div>
-                        <div className="p-3 space-y-2">
-                          <div className="flex items-start gap-3">
-                            <div className="w-12 h-12 rounded-lg shrink-0 bg-cover bg-center border" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=150&q=80)', borderColor: 'var(--color-border)' }} />
-                            <div className="min-w-0 flex-1">
-                              <span className="text-[10px] font-black uppercase" style={{ color: 'var(--color-primary)' }}>Dinner</span>
-                              <h4 className="font-extrabold text-xs truncate" style={{ color: 'var(--color-text)' }}>Avocado Quinoa Bowl</h4>
-                              <p className="text-[10px] line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>Nutritious chef-curated home recipe suited to your diet.</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3 text-[10px] pt-1 border-t" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> 15m</span>
-                            <span className="flex items-center gap-1"><Flame className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> 20m</span>
-                            <span className="flex items-center gap-1"><Users className="h-3 w-3" /> 2 servings</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
             </div>
           </div>
         )}
@@ -1596,9 +1476,6 @@ export default function ChefAISettingsPage() {
                   className="w-full cursor-pointer"
                   style={{ accentColor: 'var(--color-primary)' }}
                 />
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('speechSpeedDesc', 'Adjust the speaking pace of the AI assistant when reading recipe steps aloud.')}
-                </p>
               </div>
 
               <div className="space-y-2 flex flex-col justify-center">
@@ -1629,7 +1506,7 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 4: AGENT PARAMETERS */}
+        {/* TAB 4: AGENT PARAMETERS (RESTORED ALL FUNCTIONS) */}
         {activeTab === 'advanced' && (
           <div className="space-y-6 animate-in fade-in">
             {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
@@ -1708,15 +1585,15 @@ export default function ChefAISettingsPage() {
                   className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: strictDietEnforcement ? '#3b82f6' : 'var(--color-border)',
+                    borderColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)',
                     color: 'var(--color-text)'
                   }}
                 >
                   <div className="flex items-center justify-between">
-                    <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? '#3b82f6' : 'var(--color-text-secondary)' }} />
+                    <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
                     <div 
                       className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: strictDietEnforcement ? '#3b82f6' : 'var(--color-border)' }}
+                      style={{ backgroundColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)' }}
                     >
                       <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
                     </div>
@@ -1731,7 +1608,7 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
 
-            {/* AGENT PARAMETERS & KNOWLEDGE TUNING */}
+            {/* TUNING PARAMETERS, KNOWLEDGE BASE, CUSTOM VOCABULARY & FILTER WORDS */}
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
               style={{
@@ -1793,7 +1670,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* KNOWLEDGE BASE FEATURE */}
+              {/* RESTORED: KNOWLEDGE BASE FEATURE */}
               <div className="space-y-3 pt-1">
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
@@ -1804,9 +1681,9 @@ export default function ChefAISettingsPage() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
+                <form onSubmit={handleAddKnowledgeBase} className="flex gap-2">
                   <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -1815,66 +1692,57 @@ export default function ChefAISettingsPage() {
                   >
                     <input
                       type="text"
-                      placeholder="Knowledge Base..."
+                      placeholder={t('knowledgeBasePlaceholder', 'Knowledge Base reference (e.g. Culinary Masterclass DB, Keto Guidelines)...')}
                       value={newKbInput}
                       onChange={(e) => setNewKbInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newKbInput.trim()) {
-                          e.preventDefault();
-                          setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
-                          setNewKbInput('');
-                        }
-                      }}
-                      className="bg-transparent border-none outline-none w-full text-xs"
+                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
                       style={{ color: 'var(--color-text)' }}
                     />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (newKbInput.trim()) {
-                          setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
-                          setNewKbInput('');
-                        }
-                      }}
-                      className="w-6 h-6 rounded-lg font-bold flex items-center justify-center shrink-0 cursor-pointer transition hover:opacity-80"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      +
-                    </button>
                   </div>
-                </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                  </button>
+                </form>
 
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {knowledgeBaseList.map((item, idx) => (
-                    <span 
-                      key={idx}
-                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-primary)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {item}
-                      <button
-                        type="button"
-                        onClick={() => setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx))}
-                        className="hover:text-red-500 cursor-pointer"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                  {knowledgeBaseList.length === 0 ? (
+                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('noKnowledgeBaseEntries', 'No knowledge base references added yet.')}
                     </span>
-                  ))}
+                  ) : (
+                    knowledgeBaseList.map((item, idx) => (
+                      <span 
+                        key={idx}
+                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveKnowledgeBase(idx)}
+                          className="hover:opacity-75 cursor-pointer ml-0.5"
+                          title="Remove reference"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
                 </div>
               </div>
 
-              {/* CUSTOM VOCABULARY FEATURE */}
+              {/* RESTORED: CUSTOM VOCABULARY FEATURE */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
                     <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
                   </h3>
                   <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1882,9 +1750,9 @@ export default function ChefAISettingsPage() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
+                <form onSubmit={handleAddCustomVocabulary} className="flex gap-2">
                   <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -1893,62 +1761,54 @@ export default function ChefAISettingsPage() {
                   >
                     <input
                       type="text"
-                      placeholder={t('startTypingToAdd', 'Start typing to add')}
+                      placeholder={t('startTypingToAddVocab', 'Add custom culinary terminology (e.g. Umami, Sous-vide, Chiffonade)...')}
                       value={newVocabInput}
                       onChange={(e) => setNewVocabInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newVocabInput.trim()) {
-                          e.preventDefault();
-                          setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
-                          setNewVocabInput('');
-                        }
-                      }}
-                      className="bg-transparent border-none outline-none w-full text-xs"
+                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
                       style={{ color: 'var(--color-text)' }}
                     />
-                    <span 
-                      onClick={() => {
-                        if (newVocabInput.trim()) {
-                          setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
-                          setNewVocabInput('');
-                        }
-                      }}
-                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {t('enterKey', 'Enter')}
-                    </span>
                   </div>
-                </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                    style={{ backgroundColor: 'var(--color-emerald)' }}
+                  >
+                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                  </button>
+                </form>
 
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {customVocabularyList.map((item, idx) => (
-                    <span 
-                      key={idx}
-                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-emerald)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {item}
-                      <button
-                        type="button"
-                        onClick={() => setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx))}
-                        className="hover:text-red-500 cursor-pointer"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                  {customVocabularyList.length === 0 ? (
+                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('noCustomVocabularyEntries', 'No custom vocabulary terms added yet.')}
                     </span>
-                  ))}
+                  ) : (
+                    customVocabularyList.map((item, idx) => (
+                      <span 
+                        key={idx}
+                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-emerald)',
+                          color: 'var(--color-emerald)'
+                        }}
+                      >
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveCustomVocabulary(idx)}
+                          className="hover:opacity-75 cursor-pointer ml-0.5"
+                          title="Remove term"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
                 </div>
               </div>
 
-              {/* FILTER WORDS FEATURE */}
+              {/* RESTORED: FILTER WORDS FEATURE */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
@@ -1959,9 +1819,9 @@ export default function ChefAISettingsPage() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
+                <form onSubmit={handleAddFilterWord} className="flex gap-2">
                   <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -1970,62 +1830,54 @@ export default function ChefAISettingsPage() {
                   >
                     <input
                       type="text"
-                      placeholder={t('startTypingToAdd', 'Start typing to add')}
+                      placeholder={t('startTypingToAddFilter', 'Add restricted word or prohibited ingredient (e.g. Trans fats, MSG)...')}
                       value={newFilterInput}
                       onChange={(e) => setNewFilterInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newFilterInput.trim()) {
-                          e.preventDefault();
-                          setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
-                          setNewFilterInput('');
-                        }
-                      }}
-                      className="bg-transparent border-none outline-none w-full text-xs"
+                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
                       style={{ color: 'var(--color-text)' }}
                     />
-                    <span 
-                      onClick={() => {
-                        if (newFilterInput.trim()) {
-                          setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
-                          setNewFilterInput('');
-                        }
-                      }}
-                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {t('enterKey', 'Enter')}
-                    </span>
                   </div>
-                </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                    style={{ backgroundColor: '#ef4444' }}
+                  >
+                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                  </button>
+                </form>
 
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {filterWordsList.map((item, idx) => (
-                    <span 
-                      key={idx}
-                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'rgba(239, 68, 68, 0.4)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {item}
-                      <button
-                        type="button"
-                        onClick={() => setFilterWordsList(filterWordsList.filter((_, i) => i !== idx))}
-                        className="hover:text-red-500 cursor-pointer"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                  {filterWordsList.length === 0 ? (
+                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('noFilterWordsEntries', 'No filter words configured.')}
                     </span>
-                  ))}
+                  ) : (
+                    filterWordsList.map((item, idx) => (
+                      <span 
+                        key={idx}
+                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'rgba(239, 68, 68, 0.5)',
+                          color: '#ef4444'
+                        }}
+                      >
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFilterWord(idx)}
+                          className="hover:opacity-75 cursor-pointer ml-0.5"
+                          title="Remove filter word"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
                 </div>
               </div>
 
-              {/* SYSTEM PROMPT / PERSONA */}
+              {/* RESTORED: SYSTEM PROMPT / AUTONOMOUS PERSONA */}
               <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
@@ -2034,7 +1886,7 @@ export default function ChefAISettingsPage() {
                   rows={5}
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
-                  className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
+                  className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition font-medium"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',

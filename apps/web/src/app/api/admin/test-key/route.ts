@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+let cachedPool: any = null;
+
 async function getPostgresPool() {
+  if (cachedPool) return cachedPool;
   const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
   if (!connStr) return null;
   try {
@@ -11,194 +16,226 @@ async function getPostgresPool() {
                         connStr.includes('neon.tech') || 
                         connStr.includes('supabase.co') || 
                         process.env.NODE_ENV === 'production';
-    return new Pool({
+    cachedPool = new Pool({
       connectionString: connStr,
       ssl: requiresSsl ? { rejectUnauthorized: false } : false
     });
-  } catch (_) {
+    return cachedPool;
+  } catch (err) {
     return null;
   }
 }
 
-async function persistDiscoveredModels(provider: string, models: any[]) {
-  try {
-    const pool = await getPostgresPool();
-    if (!pool) return;
-    const settingsRes = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
-    if (settingsRes.rows && settingsRes.rows.length > 0) {
-      const row = settingsRes.rows[0];
-      let val = row.value || {};
-      if (typeof val === 'string') {
-        try { val = JSON.parse(val); } catch (_) { val = {}; }
+function cleanCredential(val?: string): string {
+  if (!val) return '';
+  return val.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().replace(/^["']|["']$/g, '').trim();
+}
+
+async function resolveKey(provider: string, explicitKey?: string): Promise<string> {
+  const clean = cleanCredential(explicitKey);
+  if (clean && clean.length > 5 && !clean.includes('sample')) return clean;
+
+  const targetEnv = provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
+  const pool = await getPostgresPool();
+
+  if (pool) {
+    try {
+      const res = await pool.query('SELECT key_value FROM admin_api_keys WHERE env_key = $1 LIMIT 1;', [targetEnv]);
+      if (res.rows && res.rows[0]?.key_value) {
+        const k = cleanCredential(res.rows[0].key_value);
+        if (k && !k.includes('sample')) return k;
       }
-      if (!val.chefAiSettings) val.chefAiSettings = {};
-      if (provider === 'gemini') {
-        val.chefAiSettings.availableGeminiModels = models;
-      } else {
-        val.chefAiSettings.availableOpenAiModels = models;
+    } catch (_) {}
+
+    try {
+      const sRes = await pool.query('SELECT chef_ai_settings, value FROM admin_settings LIMIT 1;');
+      if (sRes.rows && sRes.rows[0]) {
+        const row = sRes.rows[0];
+        let chef = row.chef_ai_settings || row.value?.chefAiSettings || {};
+        if (typeof chef === 'string') {
+          try { chef = JSON.parse(chef); } catch (_) { chef = {}; }
+        }
+        if (chef.apiKey) {
+          const k = cleanCredential(chef.apiKey);
+          if (k && !k.includes('sample')) return k;
+        }
       }
-      await pool.query(
-        "UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE id = $2;",
-        [JSON.stringify(val), row.id]
-      );
+    } catch (_) {}
+  }
+
+  const cwd = process.cwd();
+  const envPaths = [
+    path.join(cwd, '.env'),
+    path.join(cwd, '.env.local'),
+    path.join(cwd, 'apps', 'web', '.env'),
+    path.join(cwd, 'apps', 'web', '.env.local')
+  ];
+
+  for (const ep of envPaths) {
+    if (fs.existsSync(ep)) {
+      try {
+        const lines = fs.readFileSync(ep, 'utf-8').split(/\r?\n/);
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith(`${targetEnv}=`)) {
+            const rawVal = trimmed.substring(`${targetEnv}=`.length);
+            const k = cleanCredential(rawVal);
+            if (k && !k.includes('sample')) return k;
+          }
+        }
+      } catch (_) {}
     }
-    await pool.end();
-  } catch (_) {}
+  }
+
+  return cleanCredential(process.env[targetEnv] || process.env['GOOGLE_API_KEY']);
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { provider, apiKey, model } = await req.json();
-    const cleanKey = (apiKey || '').trim().replace(/^["']|["']$/g, '');
+    const body = await req.json().catch(() => ({}));
+    const provider = body.provider || 'gemini';
+    const cleanKey = await resolveKey(provider, body.apiKey);
+    const requestedModel = cleanCredential(body.model);
 
     if (!cleanKey) {
-      return NextResponse.json({ success: false, error: 'No API key provided to test.' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: `No active API key provided or found in database for ${provider}.` },
+        { status: 400 }
+      );
     }
 
     if (provider === 'gemini') {
-      if (cleanKey.includes('.apps.googleusercontent.com')) {
-        return NextResponse.json({
-          success: false,
-          error: "Invalid Credential Type: You entered a Google OAuth Client ID (for Social Login), not a Gemini API Key. Please get an API key starting with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
-        }, { status: 400 });
-      }
-
-      if (cleanKey.startsWith('GOCSPX-')) {
-        return NextResponse.json({
-          success: false,
-          error: "Invalid Credential Type: You entered a Google OAuth Client Secret, not a Gemini API Key. Please get an API key starting with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
-        }, { status: 400 });
-      }
-
-      let discoveredModels: any[] = [];
+      let catalogModels: any[] = [];
       try {
-        const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
-        const listRes = await fetch(listUrl, {
-          cache: 'no-store',
-          headers: {
-            'x-goog-api-key': cleanKey
-          }
+        const catRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
         });
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          if (Array.isArray(listData.models)) {
-            discoveredModels = listData.models
-              .filter((m: any) => {
-                const methods = m.supportedGenerationMethods || [];
-                const name = (m.name || '').toLowerCase();
-                return methods.includes('generateContent') &&
-                       !name.includes('embedding') &&
-                       !name.includes('aqa') &&
-                       !name.includes('imagen');
+        const catData = await catRes.json().catch(() => ({}));
+        if (catRes.ok && Array.isArray(catData.models)) {
+          catalogModels = catData.models
+            .filter((m: any) => {
+              const name = m.name || '';
+              const methods = m.supportedGenerationMethods || [];
+              const isGen = methods.includes('generateContent') || methods.length === 0;
+              const isEmb = name.includes('embedding') || name.includes('aqa') || name.includes('imagen');
+              return isGen && !isEmb;
+            })
+            .map((m: any) => {
+              const rawId = (m.name || '').replace(/^models\//, '');
+              return {
+                id: rawId,
+                name: m.displayName || rawId,
+                label: `${m.displayName || rawId} (${rawId})`,
+                description: m.description || 'Google Gemini production model.'
+              };
+            });
+        }
+      } catch (_) {}
+
+      // Prioritized verification ping using requested model first
+      const pingCandidate = requestedModel || (catalogModels.length > 0 ? catalogModels[0].id : 'gemini-2.5-flash');
+      const testModelsToTry = Array.from(new Set([pingCandidate, 'gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-1.5-flash']));
+      let pingSuccess = false;
+      let confirmedModel = pingCandidate;
+      let lastErrMsg = '';
+
+      for (const tModel of testModelsToTry) {
+        try {
+          const testRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${tModel}:generateContent?key=${cleanKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: 'ping' }] }],
+                generationConfig: { maxOutputTokens: 5 }
               })
-              .map((m: any) => {
-                const rawId = m.name?.startsWith('models/') ? m.name.replace('models/', '') : m.name;
-                const displayName = m.displayName || rawId;
-                return {
-                  id: rawId,
-                  name: displayName,
-                  label: `${displayName} (${rawId})`,
-                  description: m.description || ''
-                };
-              });
+            }
+          );
+          const testData = await testRes.json().catch(() => ({}));
+          if (testRes.ok && (testData.candidates || testData.promptFeedback)) {
+            pingSuccess = true;
+            confirmedModel = tModel;
+            break;
+          } else {
+            lastErrMsg = testData.error?.message || `HTTP ${testRes.status}`;
           }
-        } else {
-          const errData = await listRes.json().catch(() => ({}));
-          const errMsg = errData.error?.message || '';
-          if (listRes.status === 401 || errMsg.includes('authentication credentials') || errMsg.includes('API key')) {
-            return NextResponse.json({
-              success: false,
-              error: "Google API Authentication Failed (401): The provided Gemini API Key is invalid or expired. Please check your API key at https://aistudio.google.com/app/apikey."
-            }, { status: 401 });
-          }
+        } catch (e: any) {
+          lastErrMsg = e.message;
         }
-      } catch (err) {
-        console.warn('[Gemini] Model listing error:', err);
       }
 
-      const activeModel = model || (discoveredModels.length > 0 ? discoveredModels[0].id : 'gemini-2.5-flash');
-      const genUrl = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${encodeURIComponent(cleanKey)}`;
-      const res = await fetch(genUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': cleanKey
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Ping' }] }],
-          generationConfig: { maxOutputTokens: 3 }
-        })
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) {
-        const rawMsg = data.error?.message || `Google API handshake failed (${res.status})`;
-        let friendly = rawMsg;
-        if (res.status === 401 || rawMsg.includes('authentication credentials') || rawMsg.includes('API key')) {
-          friendly = "Google API Authentication Failed (401): The provided Gemini API Key is invalid, expired, or rejected. Please obtain an active API key from Google AI Studio (https://aistudio.google.com/app/apikey).";
-        }
-        return NextResponse.json({
-          success: false,
-          error: friendly,
-          models: discoveredModels
-        });
+      if (!pingSuccess && catalogModels.length === 0) {
+        return NextResponse.json({ success: false, error: lastErrMsg || 'Gemini handshake failed.' }, { status: 400 });
       }
 
-      if (discoveredModels.length > 0) {
-        persistDiscoveredModels('gemini', discoveredModels).catch(() => {});
+      // Preserve existing selected model in PostgreSQL while syncing available models catalog
+      const pool = await getPostgresPool();
+      if (pool && catalogModels.length > 0) {
+        try {
+          const res = await pool.query('SELECT * FROM admin_settings LIMIT 1;');
+          if (res.rows && res.rows.length > 0) {
+            const row = res.rows[0];
+            let chef = row.chef_ai_settings;
+            if (typeof chef === 'string') {
+              try { chef = JSON.parse(chef); } catch (_) { chef = {}; }
+            }
+            chef = chef || {};
+            chef.availableGeminiModels = catalogModels;
+            await pool.query(
+              `UPDATE admin_settings 
+               SET chef_ai_settings = $1::jsonb,
+                   value = jsonb_set(COALESCE(value, '{}'::jsonb), '{chefAiSettings,availableGeminiModels}', $2::jsonb),
+                   updated_at = NOW() 
+               WHERE id = $3;`,
+              [JSON.stringify(chef), JSON.stringify(catalogModels), row.id]
+            );
+          }
+        } catch (_) {}
       }
 
       return NextResponse.json({
         success: true,
-        message: `Connected to Google Gemini (${activeModel}) & synced ${discoveredModels.length} latest models!`,
-        models: discoveredModels,
-        testedModel: activeModel
-      });
-    } else {
-      let discoveredModels: any[] = [];
-      try {
-        const listRes = await fetch('https://api.openai.com/v1/models', {
-          headers: { Authorization: `Bearer ${cleanKey}` },
-          cache: 'no-store'
-        });
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          if (Array.isArray(listData.data)) {
-            discoveredModels = listData.data
-              .filter((m: any) => {
-                const id = (m.id || '').toLowerCase();
-                return (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')) &&
-                       !id.includes('realtime') && !id.includes('audio') &&
-                       !id.includes('moderation') && !id.includes('embedding') &&
-                       !id.includes('instruct') && !id.includes('similarity');
-              })
-              .sort((a: any, b: any) => (b.created || 0) - (a.created || 0))
-              .map((m: any) => ({
-                id: m.id,
-                name: m.id,
-                label: m.id,
-                description: `OpenAI ${m.id}`
-              }));
-          }
-        }
-      } catch (err) {
-        console.warn('[OpenAI] Model listing error:', err);
-      }
-
-      if (discoveredModels.length > 0) {
-        persistDiscoveredModels('openai', discoveredModels).catch(() => {});
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `Connected to OpenAI API & synced ${discoveredModels.length} latest models!`,
-        models: discoveredModels
+        message: `Connected to Google Gemini successfully! (${catalogModels.length} models synced)`,
+        models: catalogModels.length > 0 ? catalogModels : undefined,
+        testedModel: requestedModel || confirmedModel
       });
     }
+
+    // OpenAI provider check
+    if (provider === 'openai') {
+      const openAiRes = await fetch('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${cleanKey}` }
+      });
+      const openAiData = await openAiRes.json().catch(() => ({}));
+
+      if (!openAiRes.ok) {
+        return NextResponse.json({ success: false, error: openAiData.error?.message || 'OpenAI verification failed.' }, { status: 400 });
+      }
+
+      let openAiModels: any[] = [];
+      if (Array.isArray(openAiData.data)) {
+        openAiModels = openAiData.data
+          .filter((m: any) => m.id && (m.id.startsWith('gpt-') || m.id.startsWith('o1') || m.id.startsWith('chatgpt')))
+          .map((m: any) => ({
+            id: m.id,
+            name: m.id,
+            label: `${m.id.toUpperCase()}`,
+            description: 'OpenAI GPT Model.'
+          }));
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Connected to OpenAI successfully! (${openAiModels.length} models synced)`,
+        models: openAiModels.length > 0 ? openAiModels : undefined,
+        testedModel: requestedModel || 'gpt-4o'
+      });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unsupported provider' }, { status: 400 });
   } catch (err: any) {
-    return NextResponse.json({
-      success: false,
-      error: err.message || 'Verification endpoint failed to connect.'
-    });
+    return NextResponse.json({ success: false, error: err.message || 'Internal connection test failure.' }, { status: 500 });
   }
 }

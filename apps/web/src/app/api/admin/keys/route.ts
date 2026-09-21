@@ -21,7 +21,7 @@ async function getPostgresPool() {
       ssl: requiresSsl ? { rejectUnauthorized: false } : false
     });
     return cachedPool;
-  } catch (_) {
+  } catch (err) {
     return null;
   }
 }
@@ -80,11 +80,6 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return map;
 }
 
-function isOAuthCredential(val: string): boolean {
-  if (!val) return false;
-  return val.includes('.apps.googleusercontent.com') || val.startsWith('GOCSPX-');
-}
-
 function updateEnvFile(filePath: string, key: string, value: string) {
   let content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
   const regex = new RegExp(`^${key}=.*$`, 'm');
@@ -107,7 +102,7 @@ export async function GET() {
       Object.assign(envMap, parseEnvFile(ep));
     }
 
-    ['GEMINI_API_KEY', 'GOOGLE_AI_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'].forEach(k => {
+    ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'].forEach(k => {
       if (process.env[k] && !envMap[k]) envMap[k] = process.env[k]!;
     });
 
@@ -125,23 +120,8 @@ export async function GET() {
           keyValue: row.key_value,
           status: row.status
         });
-        if (row.env_key && row.key_value && !isOAuthCredential(row.key_value)) {
-          envMap[row.env_key] = row.key_value;
-        }
+        if (row.env_key && row.key_value) envMap[row.env_key] = row.key_value;
       }
-    }
-
-    // Isolate real Gemini API key
-    let resolvedGemini = '';
-    for (const k of ['GEMINI_API_KEY', 'GOOGLE_AI_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY']) {
-      const v = envMap[k];
-      if (v && !isOAuthCredential(v) && !v.includes('sample')) {
-        resolvedGemini = v;
-        break;
-      }
-    }
-    if (resolvedGemini) {
-      envMap['GEMINI_API_KEY'] = resolvedGemini;
     }
 
     return NextResponse.json({ success: true, keys: dbKeys, envMap });
@@ -156,31 +136,19 @@ export async function POST(req: NextRequest) {
     const { name, provider, envKey, keyValue, model, status } = body;
 
     const keyToSave = (envKey || (provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY')).trim();
-    const valToSave = (keyValue || '').trim().replace(/^["']|["']$/g, '');
+    const valToSave = (keyValue || '').trim();
 
     if (!keyToSave) {
       return NextResponse.json({ success: false, error: 'Target environment key is required.' }, { status: 400 });
     }
 
-    if (provider === 'gemini' && isOAuthCredential(valToSave)) {
-      return NextResponse.json({
-        success: false,
-        error: "Cannot save: You provided a Google OAuth Client ID or Secret instead of a Gemini API Key. Gemini keys start with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
-      }, { status: 400 });
-    }
-
-    // 1. Write to local .env files
     for (const ep of getEnvFilePaths()) {
       try { updateEnvFile(ep, keyToSave, valToSave); } catch (_) {}
     }
 
-    // 2. Synchronize process runtime memory
     process.env[keyToSave] = valToSave;
-    if (keyToSave === 'GEMINI_API_KEY') {
-      process.env['GOOGLE_API_KEY'] = valToSave;
-    }
+    if (keyToSave === 'GEMINI_API_KEY') process.env['GOOGLE_API_KEY'] = valToSave;
 
-    // 3. Persist to PostgreSQL admin_api_keys
     const pool = await getPostgresPool();
     if (pool) {
       await initPostgresTables(pool);
@@ -203,9 +171,9 @@ export async function POST(req: NextRequest) {
         ]
       );
 
-      // Synchronize admin_settings without destroying active model
+      // Preserve model identifier during key synchronization
       try {
-        const settingsRes = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
+        const settingsRes = await pool.query('SELECT * FROM admin_settings LIMIT 1;');
         if (settingsRes.rows && settingsRes.rows.length > 0) {
           const row = settingsRes.rows[0];
           let val = row.value || {};
@@ -215,13 +183,30 @@ export async function POST(req: NextRequest) {
           if (!val.chefAiSettings) val.chefAiSettings = {};
           val.chefAiSettings.apiKey = valToSave;
           val.chefAiSettings.provider = provider || val.chefAiSettings.provider || 'gemini';
-          if (model) {
-            val.chefAiSettings.model = model;
-            val.aiModel = model;
+
+          const resolvedModel = model || row.ai_model || val.chefAiSettings.model || val.aiModel;
+          if (resolvedModel) {
+            val.chefAiSettings.model = resolvedModel;
+            val.aiModel = resolvedModel;
           }
+
+          let chefAi = row.chef_ai_settings || {};
+          if (typeof chefAi === 'string') {
+            try { chefAi = JSON.parse(chefAi); } catch (_) { chefAi = {}; }
+          }
+          chefAi.apiKey = valToSave;
+          chefAi.provider = provider || chefAi.provider || 'gemini';
+          if (resolvedModel) chefAi.model = resolvedModel;
+
           await pool.query(
-            "UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE id = $2;",
-            [JSON.stringify(val), row.id]
+            `UPDATE admin_settings 
+             SET value = $1::jsonb, 
+                 chef_ai_settings = $2::jsonb,
+                 ai_model = COALESCE($3, ai_model),
+                 ai_provider = COALESCE($4, ai_provider),
+                 updated_at = NOW() 
+             WHERE id = $5;`,
+            [JSON.stringify(val), JSON.stringify(chefAi), resolvedModel || null, provider || null, row.id]
           );
         }
       } catch (_) {}
