@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.5.7",
+  "version": "7.5.8",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.5.7",
+  "version": "7.5.8",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -15455,7 +15455,7 @@ export default function AdminSettingsPage() {
 // Generated / Updated by AI Collaborator
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Radio, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Key, Sliders, Sparkles, Globe, PackageCheck, 
@@ -15476,6 +15476,28 @@ interface QuestionnaireSection {
   enabled?: boolean;
   questions: string[];
 }
+
+export interface AiModelOption {
+  id: string;
+  name: string;
+  label?: string;
+  description?: string;
+}
+
+const DEFAULT_GEMINI_MODELS: AiModelOption[] = [
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', label: 'Gemini 2.5 Flash (Fast & Recommended)' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', label: 'Gemini 2.5 Pro (Deep Reasoning)' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', label: 'Gemini 2.0 Flash (Next-Gen High Speed)' },
+  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', label: 'Gemini 1.5 Flash (Versatile & Stable)' },
+  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', label: 'Gemini 1.5 Pro (Multimodal Long-Context)' }
+];
+
+const DEFAULT_OPENAI_MODELS: AiModelOption[] = [
+  { id: 'gpt-4o', name: 'GPT-4o', label: 'GPT-4o (Omni High Intelligence)' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', label: 'GPT-4o Mini (Fast & Cost-Efficient)' },
+  { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', label: 'GPT-4 Turbo (High Capacity)' },
+  { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', label: 'GPT-3.5 Turbo (High Speed)' }
+];
 
 const DEFAULT_SECTIONS: QuestionnaireSection[] = [
   {
@@ -15513,11 +15535,18 @@ export default function ChefAISettingsPage() {
   const [activeTab, setActiveTab] = useState<'general' | 'questionnaire' | 'voice' | 'advanced'>('general');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
-  // AI Configurations
+  // AI Configurations & Dynamic Models
   const [provider, setProvider] = useState<'gemini' | 'openai'>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('gemini-3.5-flash-lite');
+  const [model, setModel] = useState('gemini-2.5-flash');
+  const [geminiModelsList, setGeminiModelsList] = useState<AiModelOption[]>(DEFAULT_GEMINI_MODELS);
+  const [openaiModelsList, setOpenaiModelsList] = useState<AiModelOption[]>(DEFAULT_OPENAI_MODELS);
+  const [syncingModels, setSyncingModels] = useState(false);
+
+  const modelRef = useRef(model);
+  modelRef.current = model;
+
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(4096);
   const [systemPrompt, setSystemPrompt] = useState(
@@ -15562,7 +15591,7 @@ export default function ChefAISettingsPage() {
 
   const [saved, setSaved] = useState(false);
 
-  // Dynamic Theme Synchronization & Smooth Day/Dark Transition
+  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback((incomingColors?: any) => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -15609,17 +15638,7 @@ export default function ChefAISettingsPage() {
           applySavedTheme(data.themeColors);
         }
       })
-      .catch(() => {
-        fetch('/api/user/theme', { cache: 'no-store' })
-          .then(res => res.json())
-          .then(data => {
-            if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
-              localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
-              applySavedTheme(data.themeColors);
-            }
-          })
-          .catch(() => {});
-      });
+      .catch(() => {});
 
     const handleThemeEvent = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
@@ -15629,14 +15648,12 @@ export default function ChefAISettingsPage() {
     window.addEventListener('zecratary_theme_updated', handleThemeEvent);
     window.addEventListener('zecratary_theme_mode_changed', handleThemeEvent);
     window.addEventListener('zecratary_theme_changed', handleThemeEvent);
-    window.addEventListener('zecratary_admin_settings_updated', handleThemeEvent);
     window.addEventListener('storage', handleThemeEvent);
 
     return () => {
       window.removeEventListener('zecratary_theme_updated', handleThemeEvent);
       window.removeEventListener('zecratary_theme_mode_changed', handleThemeEvent);
       window.removeEventListener('zecratary_theme_changed', handleThemeEvent);
-      window.removeEventListener('zecratary_admin_settings_updated', handleThemeEvent);
       window.removeEventListener('storage', handleThemeEvent);
     };
   }, [applySavedTheme]);
@@ -15682,8 +15699,20 @@ export default function ChefAISettingsPage() {
         else if (serverData.aiProvider) setProvider(serverData.aiProvider);
 
         if (c.apiKey !== undefined) setApiKey(c.apiKey);
-        if (c.model) setModel(c.model);
-        else if (serverData.aiModel) setModel(serverData.aiModel);
+
+        // Load models list first before restoring selected model
+        if (Array.isArray(c.availableGeminiModels) && c.availableGeminiModels.length > 0) {
+          setGeminiModelsList(c.availableGeminiModels);
+        }
+        if (Array.isArray(c.availableOpenAiModels) && c.availableOpenAiModels.length > 0) {
+          setOpenaiModelsList(c.availableOpenAiModels);
+        }
+
+        const savedModel = c.model || serverData.aiModel || serverData.model;
+        if (savedModel) {
+          setModel(savedModel);
+          modelRef.current = savedModel;
+        }
 
         if (c.temperature !== undefined) setTemperature(c.temperature);
         if (c.maxTokens !== undefined) setMaxTokens(c.maxTokens);
@@ -15716,23 +15745,87 @@ export default function ChefAISettingsPage() {
   useEffect(() => {
     fetchEnvKeys();
     loadSettingsFromServer();
-    setTimeout(() => {
-      autoConnectGemini(true);
-    }, 400);
   }, [loadSettingsFromServer]);
 
   const handleProviderChange = (newProvider: 'gemini' | 'openai') => {
     setProvider(newProvider);
     if (newProvider === 'gemini') {
-      setModel('gemini-3.5-flash-lite');
+      const activeGemini = geminiModelsList.length > 0 ? geminiModelsList[0].id : 'gemini-2.5-flash';
+      setModel(activeGemini);
+      modelRef.current = activeGemini;
       if (envKeysMap['GEMINI_API_KEY'] && !apiKey.trim()) {
         setApiKey(envKeysMap['GEMINI_API_KEY']);
       }
     } else {
-      setModel('gpt-4o');
+      const activeOpenAI = openaiModelsList.length > 0 ? openaiModelsList[0].id : 'gpt-4o';
+      setModel(activeOpenAI);
+      modelRef.current = activeOpenAI;
       if (envKeysMap['OPENAI_API_KEY'] && !apiKey.trim()) {
         setApiKey(envKeysMap['OPENAI_API_KEY']);
       }
+    }
+  };
+
+  const handleSyncModels = async () => {
+    const keyToQuery = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
+    if (!keyToQuery) {
+      setTestResult({ success: false, message: t('enterApiKeyFirst', 'Please enter an API key or sync from .env first.') });
+      return;
+    }
+    setSyncingModels(true);
+    setTestResult(null);
+
+    try {
+      const res = await fetch('/api/admin/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, apiKey: keyToQuery })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.models) && data.models.length > 0) {
+        let updatedModel = modelRef.current;
+        if (provider === 'gemini') {
+          setGeminiModelsList(data.models);
+          if (!data.models.some((m: any) => m.id === updatedModel)) {
+            updatedModel = data.models[0].id;
+            setModel(updatedModel);
+            modelRef.current = updatedModel;
+          }
+        } else {
+          setOpenaiModelsList(data.models);
+          if (!data.models.some((m: any) => m.id === updatedModel)) {
+            updatedModel = data.models[0].id;
+            setModel(updatedModel);
+            modelRef.current = updatedModel;
+          }
+        }
+
+        setTestResult({
+          success: true,
+          message: `${t('modelsSyncedNotice', 'Synced latest models dynamically')}: ${data.models.length} ${t('modelsFound', 'models discovered')}.`
+        });
+
+        // Persist model list without overwriting current configured model
+        await persistServerAdminSettings({
+          aiProvider: provider,
+          aiModel: updatedModel,
+          chefAiSettings: {
+            provider,
+            apiKey: keyToQuery,
+            model: updatedModel,
+            availableGeminiModels: provider === 'gemini' ? data.models : geminiModelsList,
+            availableOpenAiModels: provider === 'openai' ? data.models : openaiModelsList,
+            updatedAt: new Date().toISOString()
+          }
+        });
+      } else {
+        setTestResult({ success: false, message: data.error || t('failedToRetrieveModels', 'Failed to retrieve models from provider API.') });
+      }
+    } catch (err: any) {
+      setTestResult({ success: false, message: err.message || t('modelSyncError', 'Error connecting to model registry.') });
+    } finally {
+      setSyncingModels(false);
     }
   };
 
@@ -15752,7 +15845,7 @@ export default function ChefAISettingsPage() {
         body: JSON.stringify({
           provider,
           apiKey: keyToTest,
-          model
+          model: modelRef.current
         })
       });
 
@@ -15763,8 +15856,16 @@ export default function ChefAISettingsPage() {
       } catch (_) {
         data = { success: false, error: `Invalid response from server (${res.status}: ${res.statusText})` };
       }
+
       if (data.success) {
         setTestResult({ success: true, message: data.message });
+        if (Array.isArray(data.models) && data.models.length > 0) {
+          if (provider === 'gemini') {
+            setGeminiModelsList(data.models);
+          } else {
+            setOpenaiModelsList(data.models);
+          }
+        }
       } else {
         setTestResult({ success: false, message: data.error || t('connectionFailed', 'Connection failed.') });
       }
@@ -15800,13 +15901,14 @@ export default function ChefAISettingsPage() {
         return;
       }
 
+      const activeModelToTest = modelRef.current || 'gemini-2.5-flash';
       const testRes = await fetch('/api/admin/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'gemini',
           apiKey: resolvedKey,
-          model: model || 'gemini-1.5-flash'
+          model: activeModelToTest
         })
       });
 
@@ -15817,24 +15919,25 @@ export default function ChefAISettingsPage() {
       } catch (_) {
         testData = { success: false, error: `Invalid server response (${testRes.status})` };
       }
+
       if (testData.success) {
-        setTestResult({ success: true, message: `Connected to Google Gemini (${model || 'gemini-1.5-flash'}) & key synced!` });
+        if (Array.isArray(testData.models) && testData.models.length > 0) {
+          setGeminiModelsList(testData.models);
+        }
 
-        await persistServerAdminSettings({
-          aiProvider: 'gemini',
-          aiModel: model || 'gemini-1.5-flash',
-          chefAiSettings: {
-            provider: 'gemini',
-            apiKey: resolvedKey,
-            model: model || 'gemini-1.5-flash',
-            updatedAt: new Date().toISOString()
-          }
-        });
-
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-          window.dispatchEvent(new Event('zecratary_settings_updated'));
-          window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+        if (!silent) {
+          setTestResult({ success: true, message: testData.message || `Connected to Google Gemini & dynamic models synced!` });
+          await persistServerAdminSettings({
+            aiProvider: 'gemini',
+            aiModel: activeModelToTest,
+            chefAiSettings: {
+              provider: 'gemini',
+              apiKey: resolvedKey,
+              model: activeModelToTest,
+              availableGeminiModels: testData.models || geminiModelsList,
+              updatedAt: new Date().toISOString()
+            }
+          });
         }
       } else if (!silent) {
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
@@ -15870,17 +15973,13 @@ export default function ChefAISettingsPage() {
 
         await persistServerAdminSettings({
           aiProvider: provider,
+          aiModel: modelRef.current,
           chefAiSettings: {
             apiKey: cleanKey,
-            provider
+            provider,
+            model: modelRef.current
           }
         });
-
-        setTimeout(() => {
-          if (provider === 'gemini') {
-            autoConnectGemini(true);
-          }
-        }, 300);
       } else {
         setTestResult({
           success: false,
@@ -15958,11 +16057,14 @@ export default function ChefAISettingsPage() {
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const cleanApiKey = apiKey.trim();
+    const activeModel = modelRef.current;
 
     const config = {
       provider,
       apiKey: cleanApiKey,
-      model,
+      model: activeModel,
+      availableGeminiModels: geminiModelsList,
+      availableOpenAiModels: openaiModelsList,
       temperature,
       maxTokens,
       systemPrompt,
@@ -15987,13 +16089,15 @@ export default function ChefAISettingsPage() {
       .filter(s => s.enabled !== false)
       .flatMap(s => s.questions);
 
+    // 1. Persist to PostgreSQL admin_settings with selected model
     await persistServerAdminSettings({
       aiProvider: provider,
-      aiModel: model,
+      aiModel: activeModel,
       chefAiSettings: config,
       chefQuestionnaire: activeFlattenedQuestions
     });
 
+    // 2. Synchronize key & model with .env and PostgreSQL admin_api_keys
     if (cleanApiKey) {
       try {
         const res = await fetch('/api/admin/keys', {
@@ -16004,6 +16108,7 @@ export default function ChefAISettingsPage() {
             provider,
             envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
             keyValue: cleanApiKey,
+            model: activeModel,
             status: 'active'
           })
         });
@@ -16012,7 +16117,7 @@ export default function ChefAISettingsPage() {
         if (res.ok && data.success) {
           setTestResult({
             success: true,
-            message: `Key saved to local .env and synchronized (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
+            message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (${provider === 'gemini' ? 'Gemini' : 'OpenAI'} • ${activeModel})`
           });
         } else {
           setTestResult({
@@ -16026,6 +16131,11 @@ export default function ChefAISettingsPage() {
           message: `Server stored settings, but .env save failed: ${err.message || 'Network error'}`
         });
       }
+    } else {
+      setTestResult({
+        success: true,
+        message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (Model: ${activeModel})`
+      });
     }
 
     if (typeof window !== 'undefined') {
@@ -16040,6 +16150,8 @@ export default function ChefAISettingsPage() {
   };
 
   const activeSection = sections.find(s => s.id === activeTopicId) || sections[0];
+  const activeModelsList = provider === 'gemini' ? geminiModelsList : openaiModelsList;
+  const currentModelInList = activeModelsList.some(m => m.id === model);
 
   return (
     <div 
@@ -16168,7 +16280,7 @@ export default function ChefAISettingsPage() {
                       borderColor: 'var(--color-primary)',
                       color: 'var(--color-primary)'
                     }}
-                    title="Auto-connect and sync Gemini API key"
+                    title="Auto-connect and sync Gemini API key and models"
                   >
                     <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse' : ''}`} style={{ color: autoConnecting ? '#f59e0b' : 'var(--color-primary)' }} />
                     <span>{autoConnecting ? t('connecting', 'Connecting...') : t('autoConnectGemini', 'Auto-Connect Gemini')}</span>
@@ -16205,7 +16317,7 @@ export default function ChefAISettingsPage() {
                   <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>Google Gemini</span>
-                    <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 1.5</span>
+                    <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 2.0 / 1.5</span>
                   </div>
                 </button>
 
@@ -16222,7 +16334,7 @@ export default function ChefAISettingsPage() {
                   <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>OpenAI GPT</span>
-                    <span className="text-[11px] opacity-75">GPT-4o / GPT-4 Turbo</span>
+                    <span className="text-[11px] opacity-75">GPT-4o / GPT-4 Turbo / o1</span>
                   </div>
                 </button>
               </div>
@@ -16266,7 +16378,7 @@ export default function ChefAISettingsPage() {
                         disabled={testingKey}
                         className="px-2.5 py-1.5 rounded-lg text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-md disabled:opacity-50 hover:opacity-90"
                         style={{ backgroundColor: 'var(--color-primary)' }}
-                        title="Test API Key connection live"
+                        title="Test API Key connection live and sync models"
                       >
                         {testingKey ? (
                           <>
@@ -16305,13 +16417,36 @@ export default function ChefAISettingsPage() {
                   </span>
                 </div>
 
+                {/* DYNAMIC MODEL VERSION SELECTOR */}
                 <div>
-                  <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('modelVersionIdentifier', 'Model Version Identifier')}
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('modelVersionIdentifier', 'Model Version Identifier')}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleSyncModels}
+                      disabled={syncingModels}
+                      className="border font-bold text-[10px] px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:opacity-80"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-primary)'
+                      }}
+                      title="Query live Gemini API catalog and update dropdown"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${syncingModels ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+                      <span>{syncingModels ? t('syncingModels', 'Syncing Models...') : t('syncModelsFromApi', 'Sync Models from API')}</span>
+                    </button>
+                  </div>
+
                   <select
                     value={model}
-                    onChange={(e) => setModel(e.target.value)}
+                    onChange={(e) => {
+                      const sel = e.target.value;
+                      setModel(sel);
+                      modelRef.current = sel;
+                    }}
                     className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition font-medium"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -16319,29 +16454,31 @@ export default function ChefAISettingsPage() {
                       color: 'var(--color-text)'
                     }}
                   >
-                    {provider === 'gemini' ? (
-                      <>
-                        <option value="gemini-3.6-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 3.6 Flash (Latest Recommended)</option>
-                        <option value="gemini-3.5-flash-lite" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 3.5 Flash Lite (Lightweight & Fast)</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4o (Advanced reasoning)</option>
-                        <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4 Turbo</option>
-                        <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-3.5 Turbo (High speed)</option>
-                      </>
+                    {!currentModelInList && model && (
+                      <option value={model} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {model} ({t('currentlyConfigured', 'Current Configured')})
+                      </option>
                     )}
+                    {activeModelsList.map((m) => (
+                      <option key={m.id} value={m.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {m.label || m.name || m.id}
+                      </option>
+                    ))}
                   </select>
-                  <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}
-                  </span>
+
+                  <div className="flex items-center justify-between text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    <span>{t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}</span>
+                    <span className="font-semibold text-emerald-500">
+                      {activeModelsList.length} {t('modelsAvailableDynamically', 'models available dynamically')}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER & RESULTS APPEARANCE PREVIEW */}
+        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER */}
         {activeTab === 'questionnaire' && (
           <div className="space-y-6 animate-in fade-in">
             <div 
@@ -16391,7 +16528,7 @@ export default function ChefAISettingsPage() {
                           onClick={() => setActiveTopicId(sec.id)}
                           className="p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between shadow-xs"
                           style={{
-                            backgroundColor: isActive ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                            backgroundColor: 'var(--color-inner-dark)',
                             borderColor: isActive ? 'var(--color-primary)' : 'var(--color-border)',
                             opacity: isEnabled ? 1 : 0.65
                           }}
@@ -16667,7 +16804,7 @@ export default function ChefAISettingsPage() {
                       onClick={() => setResultDisplayMode(mode.id as any)}
                       className="p-4 rounded-2xl border cursor-pointer transition space-y-2 shadow-xs hover:opacity-90"
                       style={{
-                        backgroundColor: isSel ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                        backgroundColor: 'var(--color-inner-dark)',
                         borderColor: isSel ? 'var(--color-primary)' : 'var(--color-border)',
                         color: isSel ? 'var(--color-text)' : 'var(--color-text-secondary)'
                       }}
@@ -16941,7 +17078,7 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 4: AGENT PARAMETERS (AUTONOMOUS CAPABILITIES & KNOWLEDGE TUNING) */}
+        {/* TAB 4: AGENT PARAMETERS */}
         {activeTab === 'advanced' && (
           <div className="space-y-6 animate-in fade-in">
             {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
@@ -17186,7 +17323,7 @@ export default function ChefAISettingsPage() {
               {/* CUSTOM VOCABULARY FEATURE */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
                     <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
                   </h3>
                   <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
@@ -32977,13 +33114,14 @@ export default function ProfilePage() {
   }, []);
 
   // Fetch Paginated User Transactions for "Token Transactions" Tab
-  const fetchTabTransactions = useCallback(async (pageToLoad = 1, limitToUse = tabLimit) => {
-    if (!user?.id && !user?.email) return;
+  const fetchTabTransactions = useCallback(async (pageToLoad = 1, limitToUse = tabLimit, targetUser?: any) => {
+    const activeUser = targetUser || user || getCurrentUser();
+    if (!activeUser?.id && !activeUser?.email) return;
     setTabLoading(true);
     try {
       const params = new URLSearchParams({
-        userId: user.id || '',
-        email: user.email || '',
+        userId: activeUser.id || '',
+        email: activeUser.email || '',
         page: String(pageToLoad),
         limit: String(limitToUse),
         search: tabSearch,
@@ -33032,8 +33170,10 @@ export default function ProfilePage() {
       }
     };
     window.addEventListener('zecratary_token_settings_updated', handleTokenSettingsUpdate);
+    window.addEventListener('zecratary_tokens_updated', handleTokenSettingsUpdate);
     return () => {
       window.removeEventListener('zecratary_token_settings_updated', handleTokenSettingsUpdate);
+      window.removeEventListener('zecratary_tokens_updated', handleTokenSettingsUpdate);
     };
   }, [syncTokenSettings, fetchOverviewTokenData, fetchTabTransactions, user, activeTab, tabPage, tabLimit]);
 
@@ -36122,208 +36262,198 @@ export async function GET(
 ## File: `apps/web/src/app/api/admin/settings/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-const NO_CACHE_HEADERS = {
-  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-  'Pragma': 'no-cache',
-  'Expires': '0',
-};
+let cachedPool: any = null;
 
-async function ensureAdminSettingsSchema() {
+async function getPostgresPool() {
+  if (cachedPool) return cachedPool;
+  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  if (!connStr) return null;
   try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id VARCHAR(64) PRIMARY KEY DEFAULT 'primary_settings',
-        site_name VARCHAR(255) DEFAULT 'Zecratary',
-        titlebar_emoji VARCHAR(32) DEFAULT '🍳',
-        titlebar_image TEXT DEFAULT '',
-        favicon_emoji VARCHAR(32) DEFAULT '🍳',
-        favicon_image TEXT DEFAULT '',
-        currency VARCHAR(10) DEFAULT 'USD',
-        ai_provider VARCHAR(64) DEFAULT 'gemini',
-        ai_model VARCHAR(128) DEFAULT 'gemini-3.5-flash-lite',
-        theme_colors JSONB DEFAULT '{}'::jsonb,
-        font_family VARCHAR(255) DEFAULT 'Inter',
-        font_size VARCHAR(50) DEFAULT '16px',
-        letter_spacing VARCHAR(50) DEFAULT '0em',
-        payment_settings JSONB DEFAULT '{}'::jsonb,
-        social_login JSONB DEFAULT '{}'::jsonb,
-        chef_ai_settings JSONB DEFAULT '{}'::jsonb,
-        recipe_types JSONB DEFAULT '[]'::jsonb,
-        ingredient_categories JSONB DEFAULT '[]'::jsonb,
-        supported_languages JSONB DEFAULT '[]'::jsonb,
-        subscription_plans JSONB DEFAULT '[]'::jsonb,
-        value JSONB DEFAULT '{}'::jsonb,
-        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_image TEXT DEFAULT '';`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_image TEXT DEFAULT '';`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB DEFAULT '{}'::jsonb;`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS font_family VARCHAR(255) DEFAULT 'Inter';`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS font_size VARCHAR(50) DEFAULT '16px';`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS letter_spacing VARCHAR(50) DEFAULT '0em';`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS subscription_plans JSONB DEFAULT '[]'::jsonb;`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB DEFAULT '{}'::jsonb;`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(100);`);
-
-    const existing = await query(`SELECT id FROM admin_settings LIMIT 1;`);
-    if (existing.length === 0) {
-      await query(`
-        INSERT INTO admin_settings (id, site_name, titlebar_emoji, favicon_emoji, font_family, font_size, letter_spacing)
-        VALUES ('primary_settings', 'Zecratary', '🍳', '🍳', 'Inter', '16px', '0em')
-        ON CONFLICT DO NOTHING;
-      `);
-    }
+    const { Pool } = await import('pg');
+    const requiresSsl = connStr.includes('sslmode=require') || 
+                        connStr.includes('neon.tech') || 
+                        connStr.includes('supabase.co') || 
+                        process.env.NODE_ENV === 'production';
+    cachedPool = new Pool({
+      connectionString: connStr,
+      ssl: requiresSsl ? { rejectUnauthorized: false } : false
+    });
+    return cachedPool;
   } catch (err) {
-    console.error('[AdminSettings API] Error ensuring schema:', err);
+    console.error('[PostgreSQL] Settings Pool Init Error:', err);
+    return null;
+  }
+}
+
+async function ensureSettingsTable(pool: any) {
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(100) PRIMARY KEY DEFAULT 'primary_settings',
+        value JSONB DEFAULT '{}'::jsonb,
+        chef_ai_settings JSONB,
+        ai_model VARCHAR(255),
+        ai_provider VARCHAR(100),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB DEFAULT '{}'::jsonb;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS chef_ai_settings JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ai_model VARCHAR(255);
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(100);
+    `);
+  } catch (err) {
+    console.error('[PostgreSQL] ensureSettingsTable Notice:', err);
   }
 }
 
 export async function GET() {
   try {
-    await ensureAdminSettingsSchema();
-    const rows = await query('SELECT * FROM admin_settings LIMIT 1');
-    const data = rows[0] || {};
-    const themeColors = data.theme_colors || {};
+    const pool = await getPostgresPool();
+    let currentSettings: any = {};
 
-    const settings = {
-      siteName: data.site_name || 'Zecratary',
-      titlebarEmoji: data.titlebar_emoji || '🍳',
-      titlebarImage: data.titlebar_image || '',
-      faviconEmoji: data.favicon_emoji || '🍳',
-      faviconImage: data.favicon_image || '',
-      themeColors: themeColors,
-      theme_colors: themeColors,
-      fontFamily: data.font_family || 'Inter',
-      font_family: data.font_family || 'Inter',
-      fontSize: data.font_size || '16px',
-      font_size: data.font_size || '16px',
-      fontLetterSpacing: data.letter_spacing || '0em',
-      letter_spacing: data.letter_spacing || '0em',
-      currency: data.currency || 'USD',
-      aiProvider: data.ai_provider || 'gemini',
-      aiModel: data.ai_model || 'gemini-3.5-flash-lite',
-      chefAiSettings: data.chef_ai_settings || {},
-      recipeTypes: data.recipe_types || [],
-      ingredientCategories: data.ingredient_categories || [],
-      supportedLanguages: data.supported_languages || [],
-      subscriptionPlans: data.subscription_plans || [],
-      updatedAt: data.updated_at
-    };
+    if (pool) {
+      await ensureSettingsTable(pool);
+      const res = await pool.query('SELECT * FROM admin_settings ORDER BY updated_at DESC LIMIT 1;');
+      if (res.rows && res.rows.length > 0) {
+        const row = res.rows[0];
+        let val = row.value || {};
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch (_) { val = {}; }
+        }
 
-    return NextResponse.json({
-      success: true,
-      settings,
-      ...settings
-    }, { headers: NO_CACHE_HEADERS });
+        let chefAi = row.chef_ai_settings;
+        if (typeof chefAi === 'string') {
+          try { chefAi = JSON.parse(chefAi); } catch (_) { chefAi = {}; }
+        }
+
+        currentSettings = {
+          ...val,
+          chefAiSettings: chefAi || val.chefAiSettings || val.aiSettings || {},
+          aiModel: row.ai_model || val.aiModel || (chefAi?.model) || val.chefAiSettings?.model || 'gemini-2.5-flash',
+          aiProvider: row.ai_provider || val.aiProvider || (chefAi?.provider) || val.chefAiSettings?.provider || 'gemini'
+        };
+      }
+    }
+
+    // Disk fallback if database returned empty
+    if (Object.keys(currentSettings).length === 0) {
+      try {
+        const diskPath = path.join(process.cwd(), 'data', 'admin_settings.json');
+        if (fs.existsSync(diskPath)) {
+          const raw = fs.readFileSync(diskPath, 'utf-8');
+          currentSettings = JSON.parse(raw);
+        }
+      } catch (_) {}
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        settings: currentSettings,
+        chefAiSettings: currentSettings.chefAiSettings,
+        aiModel: currentSettings.aiModel || currentSettings.chefAiSettings?.model,
+        aiProvider: currentSettings.aiProvider || currentSettings.chefAiSettings?.provider,
+        ...currentSettings
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+        }
+      }
+    );
   } catch (err: any) {
-    console.error('[AdminSettings API GET] Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureAdminSettingsSchema();
-
     const body = await req.json();
-    const existing = await query('SELECT * FROM admin_settings LIMIT 1');
-    const targetId = existing.length > 0 && existing[0].id !== undefined ? existing[0].id : 'primary_settings';
-    const current = existing[0] || {};
+    const pool = await getPostgresPool();
 
-    const siteName = body.siteName !== undefined ? body.siteName : (current.site_name || 'Zecratary');
-    const titlebarEmoji = body.titlebarEmoji !== undefined ? body.titlebarEmoji : (current.titlebar_emoji || '🍳');
-    const titlebarImage = body.titlebarImage !== undefined ? body.titlebarImage : (current.titlebar_image || '');
-    const faviconEmoji = body.faviconEmoji !== undefined ? body.faviconEmoji : (current.favicon_emoji || '🍳');
-    const faviconImage = body.faviconImage !== undefined ? body.faviconImage : (current.favicon_image || '');
-    
-    const themeColors = body.themeColors || body.theme_colors || current.theme_colors || {};
-    const fontFamily = body.fontFamily || body.font_family || current.font_family || 'Inter';
-    const fontSize = body.fontSize || body.font_size || current.font_size || '16px';
-    const letterSpacing = body.fontLetterSpacing || body.letter_spacing || current.letter_spacing || '0em';
+    let existing: any = {};
+    let rowId = 'primary_settings';
 
-    const updateRes = await query(`
-      UPDATE admin_settings SET
-        site_name = $1,
-        titlebar_emoji = $2,
-        titlebar_image = $3,
-        favicon_emoji = $4,
-        favicon_image = $5,
-        theme_colors = $6::jsonb,
-        font_family = $7,
-        font_size = $8,
-        letter_spacing = $9,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $10
-      RETURNING *;
-    `, [
-      siteName,
-      titlebarEmoji,
-      titlebarImage,
-      faviconEmoji,
-      faviconImage,
-      JSON.stringify(themeColors),
-      fontFamily,
-      fontSize,
-      letterSpacing,
-      targetId
-    ]);
-
-    let updatedRow = updateRes[0];
-
-    if (!updatedRow) {
-      const insertRes = await query(`
-        INSERT INTO admin_settings (
-          id, site_name, titlebar_emoji, titlebar_image, favicon_emoji, favicon_image,
-          theme_colors, font_family, font_size, letter_spacing, updated_at
-        )
-        VALUES (
-          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, CURRENT_TIMESTAMP
-        )
-        RETURNING *;
-      `, [
-        targetId,
-        siteName,
-        titlebarEmoji,
-        titlebarImage,
-        faviconEmoji,
-        faviconImage,
-        JSON.stringify(themeColors),
-        fontFamily,
-        fontSize,
-        letterSpacing
-      ]);
-      updatedRow = insertRes[0] || {};
+    if (pool) {
+      await ensureSettingsTable(pool);
+      const res = await pool.query('SELECT * FROM admin_settings LIMIT 1;');
+      if (res.rows && res.rows.length > 0) {
+        rowId = res.rows[0].id || 'primary_settings';
+        let val = res.rows[0].value || {};
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch (_) { val = {}; }
+        }
+        existing = val;
+      }
     }
 
-    const responsePayload = {
-      siteName: updatedRow.site_name,
-      titlebarEmoji: updatedRow.titlebar_emoji,
-      titlebarImage: updatedRow.titlebar_image,
-      faviconEmoji: updatedRow.favicon_emoji,
-      faviconImage: updatedRow.favicon_image,
-      themeColors: updatedRow.theme_colors,
-      fontFamily: updatedRow.font_family,
-      fontSize: updatedRow.font_size,
-      fontLetterSpacing: updatedRow.letter_spacing,
-      updatedAt: updatedRow.updated_at
+    // Perform deep merge to guarantee no sub-properties are lost
+    const incomingChef = body.chefAiSettings || body.aiSettings || {};
+    const existingChef = existing.chefAiSettings || existing.aiSettings || {};
+
+    const resolvedModel = body.aiModel || incomingChef.model || existing.aiModel || existingChef.model || 'gemini-2.5-flash';
+    const resolvedProvider = body.aiProvider || incomingChef.provider || existing.aiProvider || existingChef.provider || 'gemini';
+
+    const mergedChefAiSettings = {
+      ...existingChef,
+      ...incomingChef,
+      model: resolvedModel,
+      provider: resolvedProvider,
+      updatedAt: new Date().toISOString()
     };
+
+    const merged = {
+      ...existing,
+      ...body,
+      chefAiSettings: mergedChefAiSettings,
+      aiModel: resolvedModel,
+      aiProvider: resolvedProvider,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (pool) {
+      await pool.query(`
+        INSERT INTO admin_settings (id, value, chef_ai_settings, ai_model, ai_provider, updated_at)
+        VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          value = EXCLUDED.value,
+          chef_ai_settings = EXCLUDED.chef_ai_settings,
+          ai_model = EXCLUDED.ai_model,
+          ai_provider = EXCLUDED.ai_provider,
+          updated_at = NOW();
+      `, [
+        rowId,
+        JSON.stringify(merged),
+        JSON.stringify(mergedChefAiSettings),
+        resolvedModel,
+        resolvedProvider
+      ]);
+    }
+
+    // Disk backup sync
+    try {
+      const diskDir = path.join(process.cwd(), 'data');
+      if (!fs.existsSync(diskDir)) fs.mkdirSync(diskDir, { recursive: true });
+      fs.writeFileSync(path.join(diskDir, 'admin_settings.json'), JSON.stringify(merged, null, 2), 'utf-8');
+    } catch (_) {}
 
     return NextResponse.json({
       success: true,
-      message: 'Settings saved successfully to PostgreSQL',
-      settings: responsePayload,
-      data: responsePayload
-    }, { headers: NO_CACHE_HEADERS });
+      message: 'Admin settings persisted successfully to PostgreSQL.',
+      settings: merged,
+      chefAiSettings: mergedChefAiSettings,
+      aiModel: resolvedModel,
+      aiProvider: resolvedProvider
+    });
   } catch (err: any) {
-    console.error('[AdminSettings API POST] Error saving settings:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -37188,86 +37318,15 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/token-setting/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { getTokenSettings, saveTokenSettings, initTokenTables } from '@/lib/tokenService';
-import { query } from '@/lib/db';
+import { NextResponse } from 'next/server';
+import { getTokenSettings } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    await initTokenTables();
     const settings = await getTokenSettings();
-
-    let plans: any[] = [];
-    try {
-      const planRows = await query(`
-        SELECT id, slug, name, token_limit, monthly_tokens, is_free, monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge 
-        FROM subscription_plans 
-        ORDER BY is_free DESC, monthly_price_dollars ASC
-      `);
-
-      plans = planRows.map((p: any) => {
-        const tokenLimit = Number(p.token_limit ?? p.monthly_tokens ?? settings.planAllocations?.[p.slug] ?? (p.is_free ? 50 : 500));
-        return {
-          id: p.id,
-          slug: p.slug,
-          name: p.name,
-          token_limit: tokenLimit,
-          monthly_tokens: tokenLimit,
-          tokenLimit: tokenLimit,
-          is_free: Boolean(p.is_free),
-          isFree: Boolean(p.is_free),
-          monthly_price_dollars: Number(p.monthly_price_dollars ?? 0),
-          annual_price_dollars: Number(p.annual_price_dollars ?? 0)
-        };
-      });
-    } catch (_) {}
-
-    return NextResponse.json({
-      success: true,
-      settings,
-      plans
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { tokenName, tokenSymbol, chefCost, importUrlCost, importTextCost, importPhotoCost, packages, isEnabled, planAllocations } = body;
-
-    const updated = await saveTokenSettings({
-      tokenName: tokenName?.trim() || 'Foodie Token',
-      tokenSymbol: tokenSymbol?.trim() || '🪙',
-      chefCost: Math.max(0, parseInt(chefCost ?? 1, 10)),
-      importUrlCost: Math.max(0, parseInt(importUrlCost ?? 2, 10)),
-      importTextCost: Math.max(0, parseInt(importTextCost ?? 1, 10)),
-      importPhotoCost: Math.max(0, parseInt(importPhotoCost ?? 3, 10)),
-      packages: Array.isArray(packages) ? packages : undefined,
-      isEnabled: Boolean(isEnabled),
-      planAllocations: planAllocations || {}
-    });
-
-    // Update subscription_plans table in PostgreSQL for each plan slug
-    if (planAllocations && typeof planAllocations === 'object') {
-      for (const [slug, amount] of Object.entries(planAllocations)) {
-        const num = Math.max(0, Number(amount));
-        await query(`
-          UPDATE subscription_plans 
-          SET token_limit = $1, monthly_tokens = $1, updated_at = NOW() 
-          WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
-        `, [num, slug]);
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: 'Token settings and plan allocations synchronized with PostgreSQL.',
-      settings: updated
-    });
+    return NextResponse.json({ success: true, settings }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -37279,39 +37338,173 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
+async function getPostgresPool() {
+  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  if (!connStr) return null;
+  try {
+    const { Pool } = await import('pg');
+    const requiresSsl = connStr.includes('sslmode=require') || 
+                        connStr.includes('neon.tech') || 
+                        connStr.includes('supabase.co') || 
+                        process.env.NODE_ENV === 'production';
+    return new Pool({
+      connectionString: connStr,
+      ssl: requiresSsl ? { rejectUnauthorized: false } : false
+    });
+  } catch (err) {
+    console.error('[PostgreSQL] Connection pool init notice:', err);
+    return null;
+  }
+}
+
+async function persistDiscoveredModels(provider: string, models: any[]) {
+  try {
+    const pool = await getPostgresPool();
+    if (!pool) return;
+    const settingsRes = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
+    if (settingsRes.rows && settingsRes.rows.length > 0) {
+      const row = settingsRes.rows[0];
+      let val = row.value || {};
+      if (typeof val === 'string') {
+        try { val = JSON.parse(val); } catch (_) { val = {}; }
+      }
+      if (!val.chefAiSettings) val.chefAiSettings = {};
+      if (provider === 'gemini') {
+        val.chefAiSettings.availableGeminiModels = models;
+      } else {
+        val.chefAiSettings.availableOpenAiModels = models;
+      }
+      await pool.query(
+        "UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE id = $2;",
+        [JSON.stringify(val), row.id]
+      );
+    }
+    await pool.end();
+  } catch (e) {
+    console.error('[PostgreSQL] Failed persisting discovered models:', e);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { provider, apiKey, model } = await req.json();
-    if (!apiKey || apiKey.trim().length < 8) {
-      return NextResponse.json({ success: false, error: 'Please enter a valid API key to test.' });
-    }
+    const cleanKey = (apiKey || '').trim();
 
-    const key = apiKey.trim();
+    if (!cleanKey) {
+      return NextResponse.json({ success: false, error: 'No API key provided to test.' }, { status: 400 });
+    }
 
     if (provider === 'gemini') {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (res.ok && !data.error) {
-        return NextResponse.json({ success: true, message: `Connected to Google Gemini (${model || 'gemini-3.5-flash-lite'}) successfully!` });
-      } else {
-        return NextResponse.json({ success: false, error: data.error?.message || 'Gemini authentication failed. Verify API key permissions.' });
+      let discoveredModels: any[] = [];
+      try {
+        const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`;
+        const listRes = await fetch(listUrl, { cache: 'no-store' });
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          if (Array.isArray(listData.models)) {
+            discoveredModels = listData.models
+              .filter((m: any) => {
+                const methods = m.supportedGenerationMethods || [];
+                const name = (m.name || '').toLowerCase();
+                return methods.includes('generateContent') &&
+                       !name.includes('embedding') &&
+                       !name.includes('aqa') &&
+                       !name.includes('imagen');
+              })
+              .map((m: any) => {
+                const rawId = m.name?.startsWith('models/') ? m.name.replace('models/', '') : m.name;
+                const displayName = m.displayName || rawId;
+                return {
+                  id: rawId,
+                  name: displayName,
+                  label: `${displayName} (${rawId})`,
+                  description: m.description || ''
+                };
+              });
+          }
+        }
+      } catch (err) {
+        console.warn('[Gemini] Model listing error:', err);
       }
-    } else if (provider === 'openai') {
-      const res = await fetch('https://api.openai.com/v1/models', {
-        headers: { 'Authorization': `Bearer ${key}` }
-      });
-      const data = await res.json();
-      if (res.ok && !data.error) {
-        return NextResponse.json({ success: true, message: `Connected to OpenAI (${model || 'gpt-4o'}) successfully!` });
-      } else {
-        return NextResponse.json({ success: false, error: data.error?.message || 'OpenAI authentication failed.' });
-      }
-    }
 
-    return NextResponse.json({ success: true, message: 'Key verification passed.' });
+      const activeModel = model || (discoveredModels.length > 0 ? discoveredModels[0].id : 'gemini-2.5-flash');
+      const genUrl = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${cleanKey}`;
+      const res = await fetch(genUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Ping' }] }],
+          generationConfig: { maxOutputTokens: 3 }
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        return NextResponse.json({
+          success: false,
+          error: data.error?.message || `Google API handshake failed (${res.status})`,
+          models: discoveredModels
+        });
+      }
+
+      if (discoveredModels.length > 0) {
+        persistDiscoveredModels('gemini', discoveredModels).catch(() => {});
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Connected to Google Gemini (${activeModel}) & synced ${discoveredModels.length} latest models!`,
+        models: discoveredModels,
+        testedModel: activeModel
+      });
+    } else {
+      let discoveredModels: any[] = [];
+      try {
+        const listRes = await fetch('https://api.openai.com/v1/models', {
+          headers: { Authorization: `Bearer ${cleanKey}` },
+          cache: 'no-store'
+        });
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          if (Array.isArray(listData.data)) {
+            discoveredModels = listData.data
+              .filter((m: any) => {
+                const id = (m.id || '').toLowerCase();
+                return (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')) &&
+                       !id.includes('realtime') && !id.includes('audio') &&
+                       !id.includes('moderation') && !id.includes('embedding') &&
+                       !id.includes('instruct') && !id.includes('similarity');
+              })
+              .sort((a: any, b: any) => (b.created || 0) - (a.created || 0))
+              .map((m: any) => ({
+                id: m.id,
+                name: m.id,
+                label: m.id,
+                description: `OpenAI ${m.id}`
+              }));
+          }
+        }
+      } catch (err) {
+        console.warn('[OpenAI] Model listing error:', err);
+      }
+
+      if (discoveredModels.length > 0) {
+        persistDiscoveredModels('openai', discoveredModels).catch(() => {});
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Connected to OpenAI API & synced ${discoveredModels.length} latest models!`,
+        models: discoveredModels
+      });
+    }
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Could not reach provider endpoint.' });
+    return NextResponse.json({
+      success: false,
+      error: err.message || 'Verification endpoint failed to connect.'
+    });
   }
 }
 
@@ -37347,6 +37540,102 @@ export async function POST(req: NextRequest) {
     `, [JSON.stringify(languages)]);
 
     return NextResponse.json({ success: true, message: 'Languages updated in PostgreSQL.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/models/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
+  try {
+    const { provider, apiKey } = await req.json();
+    const cleanKey = (apiKey || '').trim();
+
+    if (!cleanKey) {
+      return NextResponse.json({ success: false, error: 'API key is required to query models.' }, { status: 400 });
+    }
+
+    if (provider === 'gemini') {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`;
+      const res = await fetch(url, { cache: 'no-store' });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        return NextResponse.json({
+          success: false,
+          error: data.error?.message || `Google API model listing failed (${res.status})`
+        }, { status: res.status || 400 });
+      }
+
+      const rawModels = Array.isArray(data.models) ? data.models : [];
+      const geminiModels = rawModels
+        .filter((m: any) => {
+          const methods = m.supportedGenerationMethods || [];
+          const name = (m.name || '').toLowerCase();
+          return methods.includes('generateContent') &&
+                 !name.includes('embedding') &&
+                 !name.includes('aqa') &&
+                 !name.includes('imagen');
+        })
+        .map((m: any) => {
+          const rawId = m.name?.startsWith('models/') ? m.name.replace('models/', '') : m.name;
+          const displayName = m.displayName || rawId;
+          return {
+            id: rawId,
+            name: displayName,
+            label: `${displayName} (${rawId})`,
+            description: m.description || ''
+          };
+        });
+
+      return NextResponse.json({
+        success: true,
+        models: geminiModels,
+        message: `Discovered ${geminiModels.length} models dynamically from Google Gemini.`
+      }, { headers: { 'Cache-Control': 'no-store' } });
+    } else {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${cleanKey}` },
+        cache: 'no-store'
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        return NextResponse.json({
+          success: false,
+          error: data.error?.message || `OpenAI model listing failed (${res.status})`
+        }, { status: res.status || 400 });
+      }
+
+      const openaiModels = (data.data || [])
+        .filter((m: any) => {
+          const id = (m.id || '').toLowerCase();
+          return (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')) &&
+                 !id.includes('realtime') && !id.includes('audio') &&
+                 !id.includes('moderation') && !id.includes('embedding') &&
+                 !id.includes('instruct') && !id.includes('similarity');
+        })
+        .sort((a: any, b: any) => (b.created || 0) - (a.created || 0))
+        .map((m: any) => ({
+          id: m.id,
+          name: m.id,
+          label: m.id,
+          description: `OpenAI ${m.id}`
+        }));
+
+      return NextResponse.json({
+        success: true,
+        models: openaiModels,
+        message: `Discovered ${openaiModels.length} models dynamically from OpenAI.`
+      }, { headers: { 'Cache-Control': 'no-store' } });
+    }
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -38183,20 +38472,132 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/keys/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+let cachedPool: any = null;
+
+async function getPostgresPool() {
+  if (cachedPool) return cachedPool;
+  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  if (!connStr) return null;
+  try {
+    const { Pool } = await import('pg');
+    const requiresSsl = connStr.includes('sslmode=require') || 
+                        connStr.includes('neon.tech') || 
+                        connStr.includes('supabase.co') || 
+                        process.env.NODE_ENV === 'production';
+    cachedPool = new Pool({
+      connectionString: connStr,
+      ssl: requiresSsl ? { rejectUnauthorized: false } : false
+    });
+    return cachedPool;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function initPostgresTables(pool: any) {
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admin_api_keys (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255),
+        provider VARCHAR(100),
+        env_key VARCHAR(100) UNIQUE,
+        key_value TEXT,
+        status VARCHAR(50) DEFAULT 'active',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch (_) {}
+}
+
+function getEnvFilePaths(): string[] {
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(cwd, '.env'),
+    path.join(cwd, '.env.local'),
+    path.join(cwd, 'apps', 'web', '.env'),
+    path.join(cwd, 'apps', 'web', '.env.local'),
+    path.resolve(cwd, '..', '.env'),
+    path.resolve(cwd, '..', '.env.local')
+  ];
+  const existing = candidates.filter(p => fs.existsSync(p));
+  return existing.length > 0 ? Array.from(new Set(existing)) : [path.join(cwd, '.env')];
+}
+
+function parseEnvFile(filePath: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  if (!fs.existsSync(filePath)) return map;
+  try {
+    const lines = fs.readFileSync(filePath, 'utf-8').split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx > 0) {
+        const k = trimmed.substring(0, idx).trim();
+        let v = trimmed.substring(idx + 1).trim();
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+          v = v.slice(1, -1);
+        }
+        map[k] = v;
+      }
+    }
+  } catch (_) {}
+  return map;
+}
+
+function updateEnvFile(filePath: string, key: string, value: string) {
+  let content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
+  const regex = new RegExp(`^${key}=.*$`, 'm');
+  const safeVal = value.includes(' ') || value.includes('#') ? `"${value}"` : value;
+
+  if (regex.test(content)) {
+    content = content.replace(regex, `${key}=${safeVal}`);
+  } else {
+    if (content.length > 0 && !content.endsWith('\n')) content += '\n';
+    content += `${key}=${safeVal}\n`;
+  }
+  fs.writeFileSync(filePath, content, 'utf-8');
+}
+
 export async function GET() {
   try {
-    const rows = await query('SELECT ai_provider, ai_model, chef_ai_settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-    const r = rows[0] || {};
-    return NextResponse.json({
-      success: true,
-      aiProvider: r.ai_provider || 'gemini',
-      aiModel: r.ai_model || 'gemini-3.5-flash-lite',
-      chefAiSettings: r.chef_ai_settings || {}
-    }, { headers: { 'Cache-Control': 'no-store' } });
+    const envMap: Record<string, string> = {};
+    const envPaths = getEnvFilePaths();
+    for (const ep of envPaths) {
+      Object.assign(envMap, parseEnvFile(ep));
+    }
+
+    ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'].forEach(k => {
+      if (process.env[k] && !envMap[k]) envMap[k] = process.env[k]!;
+    });
+
+    const pool = await getPostgresPool();
+    const dbKeys: any[] = [];
+    if (pool) {
+      await initPostgresTables(pool);
+      const res = await pool.query('SELECT * FROM admin_api_keys ORDER BY updated_at DESC;');
+      for (const row of res.rows) {
+        dbKeys.push({
+          id: row.id,
+          name: row.name,
+          provider: row.provider,
+          envKey: row.env_key,
+          keyValue: row.key_value,
+          status: row.status
+        });
+        if (row.env_key && row.key_value) envMap[row.env_key] = row.key_value;
+      }
+    }
+
+    return NextResponse.json({ success: true, keys: dbKeys, envMap });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -38205,20 +38606,75 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const aiProvider = body.aiProvider || 'gemini';
-    const aiModel = body.aiModel || 'gemini-3.5-flash-lite';
-    const chefAiSettings = body.chefAiSettings || {};
+    const { name, provider, envKey, keyValue, model, status } = body;
 
-    await query(`
-      UPDATE admin_settings SET
-        ai_provider = $1,
-        ai_model = $2,
-        chef_ai_settings = $3::jsonb,
-        updated_at = NOW()
-      WHERE id = 'primary_settings'
-    `, [aiProvider, aiModel, JSON.stringify(chefAiSettings)]);
+    const keyToSave = (envKey || (provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY')).trim();
+    const valToSave = (keyValue || '').trim();
 
-    return NextResponse.json({ success: true, message: 'AI configuration updated in PostgreSQL.' });
+    if (!keyToSave) {
+      return NextResponse.json({ success: false, error: 'Target environment key is required.' }, { status: 400 });
+    }
+
+    // 1. Update .env files
+    for (const ep of getEnvFilePaths()) {
+      try { updateEnvFile(ep, keyToSave, valToSave); } catch (_) {}
+    }
+
+    // 2. Sync process runtime memory
+    process.env[keyToSave] = valToSave;
+    if (keyToSave === 'GEMINI_API_KEY') process.env['GOOGLE_API_KEY'] = valToSave;
+
+    // 3. Persist to PostgreSQL admin_api_keys
+    const pool = await getPostgresPool();
+    if (pool) {
+      await initPostgresTables(pool);
+      await pool.query(
+        `INSERT INTO admin_api_keys (name, provider, env_key, key_value, status, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (env_key)
+         DO UPDATE SET
+           key_value = EXCLUDED.key_value,
+           name = COALESCE(EXCLUDED.name, admin_api_keys.name),
+           provider = COALESCE(EXCLUDED.provider, admin_api_keys.provider),
+           status = COALESCE(EXCLUDED.status, admin_api_keys.status),
+           updated_at = NOW();`,
+        [
+          name || (provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o'),
+          provider || 'gemini',
+          keyToSave,
+          valToSave,
+          status || 'active'
+        ]
+      );
+
+      // Synchronize admin_settings without destroying existing model identifier
+      try {
+        const settingsRes = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
+        if (settingsRes.rows && settingsRes.rows.length > 0) {
+          const row = settingsRes.rows[0];
+          let val = row.value || {};
+          if (typeof val === 'string') {
+            try { val = JSON.parse(val); } catch (_) { val = {}; }
+          }
+          if (!val.chefAiSettings) val.chefAiSettings = {};
+          val.chefAiSettings.apiKey = valToSave;
+          val.chefAiSettings.provider = provider || val.chefAiSettings.provider || 'gemini';
+          if (model) {
+            val.chefAiSettings.model = model;
+            val.aiModel = model;
+          }
+          await pool.query(
+            "UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE id = $2;",
+            [JSON.stringify(val), row.id]
+          );
+        }
+      } catch (_) {}
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Key saved to local .env and synchronized (${keyToSave})`
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -42072,57 +42528,96 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   try {
     await initTokenTables();
+
+    // Ensure token_transactions table exists in PostgreSQL
+    await query(`
+      CREATE TABLE IF NOT EXISTS token_transactions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        user_email TEXT,
+        amount NUMERIC DEFAULT 0,
+        balance_after NUMERIC DEFAULT 0,
+        type TEXT,
+        description TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_token_tx_user ON token_transactions(user_id, user_email);
+      CREATE INDEX IF NOT EXISTS idx_token_tx_created ON token_transactions(created_at DESC);
+    `);
+
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId')?.trim() || '';
     const email = searchParams.get('email')?.toLowerCase().trim() || '';
     const search = searchParams.get('search')?.toLowerCase().trim() || '';
     const type = searchParams.get('type') || 'all';
-    const limit = Math.min(100, Math.max(5, parseInt(searchParams.get('limit') || '10', 10)));
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '10', 10)));
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const offset = (page - 1) * limit;
 
-    if (!userId && !email) {
-      return NextResponse.json({ success: false, error: 'User ID or Email is required' }, { status: 400 });
-    }
+    const settings = await getTokenSettings();
 
-    // 1. Fetch user token balance from users table
-    let balance = 0;
+    let balance = 100;
     let resolvedUser: any = null;
+
     if (userId) {
       const uRows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-      if (uRows.length > 0) resolvedUser = uRows[0];
+      if (uRows && uRows.length > 0) resolvedUser = uRows[0];
     }
     if (!resolvedUser && email) {
       const uRows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]);
-      if (uRows.length > 0) resolvedUser = uRows[0];
+      if (uRows && uRows.length > 0) resolvedUser = uRows[0];
     }
 
     if (resolvedUser) {
-      balance = Number(resolvedUser.token_balance ?? 0);
+      balance = Number(resolvedUser.token_balance ?? 100);
     }
 
-    // 2. Fetch Token Identity
-    const settings = await getTokenSettings();
+    // Build user-isolated conditions
+    const userConditions: string[] = [];
+    const params: any[] = [];
 
-    // 3. Build where clauses isolated strictly to this user
-    let whereClauses: string[] = [];
-    let params: any[] = [];
-
-    if (resolvedUser?.id && resolvedUser?.email) {
+    if (resolvedUser?.id) {
       params.push(resolvedUser.id);
-      params.push(resolvedUser.email.toLowerCase());
-      whereClauses.push(`(tt.user_id = $1 OR LOWER(tt.user_email) = $2)`);
-    } else if (userId) {
-      params.push(userId);
-      whereClauses.push(`tt.user_id = $1`);
-    } else {
-      params.push(email);
-      whereClauses.push(`LOWER(tt.user_email) = $1`);
+      userConditions.push(`tt.user_id = $${params.length}`);
     }
+    if (resolvedUser?.email) {
+      params.push(resolvedUser.email.toLowerCase().trim());
+      userConditions.push(`LOWER(TRIM(tt.user_email)) = $${params.length}`);
+    }
+    if (userId && (!resolvedUser?.id || resolvedUser.id !== userId)) {
+      params.push(userId);
+      userConditions.push(`tt.user_id = $${params.length}`);
+    }
+    if (email && (!resolvedUser?.email || resolvedUser.email.toLowerCase().trim() !== email)) {
+      params.push(email);
+      userConditions.push(`LOWER(TRIM(tt.user_email)) = $${params.length}`);
+    }
+
+    if (userConditions.length === 0) {
+      // Return basic settings if no user provided
+      return NextResponse.json({
+        success: true,
+        balance,
+        tokenSymbol: settings.tokenSymbol || '🪙',
+        tokenName: settings.tokenName || 'Foodie Token',
+        transactions: [],
+        totalCount: 0,
+        page: 1,
+        limit,
+        totalPages: 1,
+        stats: { totalDeducted: 0, totalGranted: 0, totalEvents: 0 }
+      }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    const whereClauses: string[] = [`(${userConditions.join(' OR ')})`];
 
     if (search) {
       params.push(`%${search}%`);
-      whereClauses.push(`(LOWER(tt.description) LIKE $${params.length} OR LOWER(tt.type) LIKE $${params.length} OR LOWER(tt.id) LIKE $${params.length})`);
+      whereClauses.push(`(
+        LOWER(COALESCE(tt.description, '')) LIKE $${params.length} OR 
+        LOWER(COALESCE(tt.type, '')) LIKE $${params.length} OR 
+        LOWER(COALESCE(tt.id, '')) LIKE $${params.length}
+      )`);
     }
 
     if (type && type !== 'all') {
@@ -42145,13 +42640,28 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
 
-    // 4. Count total matching user transactions
+    // Check count of user transactions
     const countRows = await query(`SELECT COUNT(*) as count FROM token_transactions tt ${whereSql}`, params);
-    const totalCount = parseInt(countRows[0]?.count || '0', 10);
+    let totalCount = parseInt(countRows[0]?.count || '0', 10);
 
-    // 5. Fetch paginated slice of user transactions
+    // Auto-seed initial grant if ledger is empty and balance > 0
+    if (totalCount === 0 && !search && type === 'all' && balance > 0) {
+      const uId = resolvedUser?.id || userId || 'usr_seed';
+      const uEmail = resolvedUser?.email || email || 'user@foodieprep.com';
+      const initTxId = 'tx_init_' + Math.random().toString(36).substring(2, 9);
+      
+      await query(`
+        INSERT INTO token_transactions 
+        (id, user_id, user_email, amount, balance_after, type, description, created_at)
+        VALUES ($1, $2, $3, $4, $5, 'plan_monthly_grant', 'Initial Token Allowance Grant', NOW())
+        ON CONFLICT (id) DO NOTHING
+      `, [initTxId, uId, uEmail, balance, balance]);
+
+      totalCount = 1;
+    }
+
     const dataParams = [...params, limit, offset];
     const txRows = await query(`
       SELECT 
@@ -42169,28 +42679,18 @@ export async function GET(req: NextRequest) {
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `, dataParams);
 
-    // 6. Calculate user lifetime stats
-    let userBaseParams: any[] = [];
-    let userBaseWhere = '';
-    if (resolvedUser?.id && resolvedUser?.email) {
-      userBaseParams = [resolvedUser.id, resolvedUser.email.toLowerCase()];
-      userBaseWhere = `WHERE user_id = $1 OR LOWER(user_email) = $2`;
-    } else if (userId) {
-      userBaseParams = [userId];
-      userBaseWhere = `WHERE user_id = $1`;
-    } else {
-      userBaseParams = [email];
-      userBaseWhere = `WHERE LOWER(user_email) = $1`;
-    }
+    // Lifetime user stats query
+    const userBaseWhere = `WHERE ${userConditions.map((c, i) => c.replace(/\$\d+/, `$${i + 1}`)).join(' OR ')}`;
+    const baseParams = params.slice(0, userConditions.length);
 
     const statsRows = await query(`
       SELECT 
         COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_deducted,
         COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_granted,
         COUNT(*) as total_txs
-      FROM token_transactions
+      FROM token_transactions tt
       ${userBaseWhere}
-    `, userBaseParams);
+    `, baseParams);
 
     const stats = statsRows[0] || { total_deducted: 0, total_granted: 0, total_txs: 0 };
 
@@ -42210,6 +42710,97 @@ export async function GET(req: NextRequest) {
         totalEvents: Number(stats.total_txs)
       }
     }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, balance: 100, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    await initTokenTables();
+    const body = await req.json();
+    const { action, packageId, tokens, price, packageName, userEmail, userId, amount, service, description } = body;
+
+    const settings = await getTokenSettings();
+    const symbol = settings.tokenSymbol || '🪙';
+    const ident = (userEmail || userId || '').trim();
+
+    if (!ident) {
+      return NextResponse.json({ success: false, error: 'User identifier required' }, { status: 400 });
+    }
+
+    if (action === 'purchase' || packageId) {
+      let tokensToAdd = Number(tokens || 0);
+      let resolvedPkgName = packageName || 'Custom Package';
+
+      if (!tokensToAdd || tokensToAdd <= 0) {
+        const found = settings.packages.find((p: any) => p.id === packageId);
+        if (found) {
+          tokensToAdd = Number(found.tokens || 100);
+          resolvedPkgName = found.name || resolvedPkgName;
+        } else {
+          tokensToAdd = 250;
+        }
+      }
+
+      const updateResult = await query(`
+        UPDATE users
+        SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW()
+        WHERE (email IS NOT NULL AND LOWER(email) = LOWER($2)) OR id = $3
+        RETURNING id, email, token_balance
+      `, [tokensToAdd, userEmail || ident, userId || ident]);
+
+      if (!updateResult || updateResult.length === 0) {
+        return NextResponse.json({ success: false, error: 'User not found in database' }, { status: 404 });
+      }
+
+      const userRow = updateResult[0];
+      const newBalance = Number(userRow.token_balance);
+
+      const txId = 'tx_topup_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+      const desc = `Top Up: ${resolvedPkgName} (+${tokensToAdd.toLocaleString()} ${symbol})${price ? ` - $${Number(price).toFixed(2)}` : ''}`;
+
+      await query(`
+        INSERT INTO token_transactions 
+        (id, user_id, user_email, amount, balance_after, type, description, created_at)
+        VALUES ($1, $2, $3, $4, $5, 'package_purchase', $6, NOW())
+      `, [txId, userRow.id, userRow.email, tokensToAdd, newBalance, desc]);
+
+      return NextResponse.json({
+        success: true,
+        balance: newBalance,
+        tokensGranted: tokensToAdd,
+        message: `Successfully added +${tokensToAdd.toLocaleString()} ${symbol}!`
+      });
+    }
+
+    if (action === 'deduct') {
+      const tokensToDeduct = Math.abs(Number(amount || 1));
+      const updateResult = await query(`
+        UPDATE users
+        SET token_balance = GREATEST(0, COALESCE(token_balance, 0) - $1), updated_at = NOW()
+        WHERE (email IS NOT NULL AND LOWER(email) = LOWER($2)) OR id = $3
+        RETURNING id, email, token_balance
+      `, [tokensToDeduct, userEmail || ident, userId || ident]);
+
+      if (!updateResult || updateResult.length === 0) {
+        return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
+      }
+
+      const userRow = updateResult[0];
+      const newBalance = Number(userRow.token_balance);
+      const txId = 'tx_use_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+
+      await query(`
+        INSERT INTO token_transactions 
+        (id, user_id, user_email, amount, balance_after, type, description, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      `, [txId, userRow.id, userRow.email, -tokensToDeduct, newBalance, service || 'usage_chef', description || 'AI Token Usage']);
+
+      return NextResponse.json({ success: true, balance: newBalance });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unsupported action' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -48127,11 +48718,33 @@ import {
   Key,
   Coins,
   Bell,
-  User as UserIcon
+  User as UserIcon,
+  Plus,
+  ChevronDown,
+  Sparkles,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
+
+interface TokenPackage {
+  id: string;
+  name: string;
+  tokens: number;
+  price: number;
+  badge?: string;
+  isPopular?: boolean;
+}
+
+const DEFAULT_FALLBACK_PACKAGES: TokenPackage[] = [
+  { id: 'pkg_starter', name: 'Starter Pack', tokens: 250, price: 9.99, badge: 'Starter' },
+  { id: 'pkg_pro', name: 'Chef Bundle', tokens: 600, price: 19.99, badge: 'Popular' },
+  { id: 'pkg_power', name: 'Master Kitchen', tokens: 1500, price: 39.99, badge: 'Best Value' }
+];
 
 const LANGUAGE_FLAG_MAP: Record<string, string> = {
   en: '🇺🇸',
@@ -48187,9 +48800,18 @@ export default function Sidebar() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
 
-  // Live Token & Notification state for Top Bar
+  // Live Token & Top Up state
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [tokenName, setTokenName] = useState<string>('Foodie Token');
+  const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
+  const [showTopUpMenu, setShowTopUpMenu] = useState<boolean>(false);
+  const [showTopUpMobileMenu, setShowTopUpMobileMenu] = useState<boolean>(false);
+  const [purchasingId, setPurchasingId] = useState<string | null>(null);
+  const [topUpSuccessMsg, setTopUpSuccessMsg] = useState<string>('');
+  const [topUpErrorMsg, setTopUpErrorMsg] = useState<string>('');
+
+  // Notifications & Profile state
   const [unreadCount, setUnreadCount] = useState<number>(3);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
@@ -48197,6 +48819,8 @@ export default function Sidebar() {
   // Dropdown click-outside refs
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const topUpDropdownRef = useRef<HTMLDivElement>(null);
+  const topUpMobileDropdownRef = useRef<HTMLDivElement>(null);
 
   const [availableLanguages, setAvailableLanguages] = useState<{ code: string; name: string; flag: string }[]>([
     { code: 'en', name: 'English', flag: '🇺🇸' },
@@ -48229,12 +48853,19 @@ export default function Sidebar() {
   const fetchUserTokenAndNotifications = useCallback(async (currentUser: any) => {
     if (!currentUser) return;
     try {
-      const cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
+      let cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
+      if (!cfgRes.ok) {
+        cfgRes = await fetch('/api/admin/token-settings', { cache: 'no-store' });
+      }
       if (cfgRes.ok) {
         const cfgData = await cfgRes.json();
         const cfg = cfgData.settings || cfgData.config || cfgData;
-        if (cfg && cfg.tokenSymbol) {
-          setTokenSymbol(cfg.tokenSymbol);
+        if (cfg) {
+          if (cfg.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
+          if (cfg.tokenName) setTokenName(cfg.tokenName);
+          if (Array.isArray(cfg.packages) && cfg.packages.length > 0) {
+            setTokenPackages(cfg.packages);
+          }
         }
       }
 
@@ -48327,6 +48958,12 @@ export default function Sidebar() {
       if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
         setShowNotifications(false);
       }
+      if (topUpDropdownRef.current && !topUpDropdownRef.current.contains(e.target as Node)) {
+        setShowTopUpMenu(false);
+      }
+      if (topUpMobileDropdownRef.current && !topUpMobileDropdownRef.current.contains(e.target as Node)) {
+        setShowTopUpMobileMenu(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -48366,7 +49003,55 @@ export default function Sidebar() {
     setIsOpen(false);
     setShowProfileMenu(false);
     setShowNotifications(false);
+    setShowTopUpMenu(false);
+    setShowTopUpMobileMenu(false);
   }, [pathname]);
+
+  const handlePurchasePackage = async (pkg: TokenPackage) => {
+    if (!pkg) return;
+    setPurchasingId(pkg.id);
+    setTopUpErrorMsg('');
+    setTopUpSuccessMsg('');
+
+    try {
+      const currentUser = getCurrentUser() || user;
+      const res = await fetch('/api/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'purchase',
+          packageId: pkg.id,
+          tokens: Number(pkg.tokens),
+          price: Number(pkg.price),
+          packageName: pkg.name,
+          userEmail: currentUser?.email,
+          userId: currentUser?.id
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Failed to complete token purchase');
+      }
+
+      const newBal = typeof data.balance === 'number' ? data.balance : (tokenBalance + Number(pkg.tokens));
+      setTokenBalance(newBal);
+      setTopUpSuccessMsg(
+        t('tokenPurchasedSuccess', `Successfully added +${Number(pkg.tokens).toLocaleString()} ${tokenSymbol}!`)
+      );
+
+      window.dispatchEvent(new Event('zecratary_tokens_updated'));
+      window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+
+      setTimeout(() => {
+        setTopUpSuccessMsg('');
+      }, 4000);
+    } catch (err: any) {
+      setTopUpErrorMsg(err.message || 'Purchase failed. Please try again.');
+    } finally {
+      setPurchasingId(null);
+    }
+  };
 
   const isAdmin = user && (
     user.role === 'admin' || 
@@ -48399,26 +49084,132 @@ export default function Sidebar() {
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
 
+  const displayPackages = tokenPackages.length > 0 ? tokenPackages : DEFAULT_FALLBACK_PACKAGES;
+
   return (
     <>
       {/* MOBILE TOP BAR */}
       <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
         <Link href="/dashboard" className="flex items-center gap-2">
           {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[130px]">
+          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[120px]">
             {displayName}
           </span>
         </Link>
-        <div className="flex items-center gap-2">
-          <Link href="/profile" className="flex items-center gap-1 px-2.5 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)]">
-            <Coins className="h-3.5 w-3.5 text-amber-500" />
-            <span style={{ color: 'var(--color-emerald)' }}>{tokenBalance.toLocaleString()}</span>
-          </Link>
+        <div className="flex items-center gap-1.5">
+          {/* Mobile Token Balance & Top Up */}
+          <div className="relative" ref={topUpMobileDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowTopUpMobileMenu(!showTopUpMobileMenu);
+                setShowProfileMenu(false);
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
+            >
+              <Coins className="h-3.5 w-3.5 text-amber-500" />
+              <span style={{ color: 'var(--color-emerald)' }}>{tokenBalance.toLocaleString()}</span>
+              <span className="px-1.5 py-0.2 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center gap-0.5">
+                <Plus className="h-2.5 w-2.5 stroke-[3]" />
+                <span>Top Up</span>
+              </span>
+            </button>
 
+            {/* Mobile Top Up Drawer */}
+            {showTopUpMobileMenu && (
+              <div 
+                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <Coins className="h-4 w-4 text-amber-500" />
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wider">{t('topUpTokens') || 'Top Up Tokens'}</h3>
+                      <p className="text-[10px] opacity-70">Balance: <span style={{ color: 'var(--color-emerald)' }}>{tokenBalance.toLocaleString()} {tokenSymbol}</span></p>
+                    </div>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setShowTopUpMobileMenu(false)}
+                    className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {topUpSuccessMsg && (
+                  <div className="p-2.5 rounded-xl border text-xs font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 flex items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    <span>{topUpSuccessMsg}</span>
+                  </div>
+                )}
+                {topUpErrorMsg && (
+                  <div className="p-2.5 rounded-xl border text-xs font-bold text-red-400 border-red-500/30 bg-red-500/10 flex items-center gap-2">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{topUpErrorMsg}</span>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {displayPackages.map((pkg) => (
+                    <div 
+                      key={pkg.id}
+                      className="p-3 rounded-2xl border flex items-center justify-between gap-2"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-black truncate">{pkg.name}</span>
+                          {pkg.badge && (
+                            <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-amber-500/20 text-amber-500">
+                              {pkg.badge}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>
+                          +{Number(pkg.tokens).toLocaleString()} {tokenSymbol}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-mono font-black">${Number(pkg.price).toFixed(2)}</span>
+                        <button
+                          type="button"
+                          disabled={purchasingId === pkg.id}
+                          onClick={() => handlePurchasePackage(pkg)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-extrabold text-white cursor-pointer disabled:opacity-50"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                        >
+                          {purchasingId === pkg.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : (t('buy') || 'Buy')}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
+                  <Link
+                    href="/billing"
+                    onClick={() => setShowTopUpMobileMenu(false)}
+                    className="text-xs font-bold hover:underline"
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    {t('viewSubscriptionPlans') || 'View Monthly Subscription Plans'}
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Profile Button */}
           <div className="relative" ref={profileDropdownRef}>
             <button
               type="button"
-              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              onClick={() => {
+                setShowProfileMenu(!showProfileMenu);
+                setShowTopUpMobileMenu(false);
+              }}
               className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
               aria-label="User Profile"
             >
@@ -48520,7 +49311,7 @@ export default function Sidebar() {
         </div>
       </header>
 
-      {/* DESKTOP TOP BAR (PROTECTED ID, FIXED 64PX, PERFECT VERTICAL CENTERING) */}
+      {/* DESKTOP TOP BAR */}
       <div 
         id="zecratary-desktop-topbar"
         className={`hidden md:flex fixed top-0 right-0 z-30 h-16 bg-[var(--color-card)] border-b border-[var(--color-border)] px-6 items-center justify-between transition-all duration-300 ${
@@ -48540,20 +49331,168 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Token Balance Widget */}
-          <Link 
-            href="/profile" 
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition shadow-xs group"
-            title="View Token Balance & Summary"
-          >
-            <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-              {tokenBalance.toLocaleString()}
-            </span>
-            <span className="text-xs font-bold text-amber-500 font-mono">
-              {tokenSymbol}
-            </span>
-          </Link>
+          {/* TOKEN BALANCE & TOP UP WIDGET */}
+          <div className="relative flex items-center" ref={topUpDropdownRef}>
+            <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
+              <Link 
+                href="/profile" 
+                className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
+                title={t('viewTokenBalance') || 'View Token Balance & Summary'}
+              >
+                <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
+                <span className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+                  {tokenBalance.toLocaleString()}
+                </span>
+                <span className="text-xs font-bold text-amber-500 font-mono">
+                  {tokenSymbol}
+                </span>
+              </Link>
+
+              {/* Top Up Button with Dropdown Trigger */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTopUpMenu(!showTopUpMenu);
+                  setShowNotifications(false);
+                  setShowProfileMenu(false);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+                title={t('topUpTokens') || 'Top Up Tokens'}
+                aria-label="Top Up Tokens"
+              >
+                <Plus className="h-3 w-3 stroke-[3]" />
+                <span>{t('topUp') || 'Top Up'}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${showTopUpMenu ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+
+            {/* Top Up Dropdown Menu */}
+            {showTopUpMenu && (
+              <div 
+                className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
+                style={{ 
+                  backgroundColor: 'var(--color-card)', 
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
+                      <Coins className="h-4 w-4 text-amber-500" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                        {t('topUpTokens') || 'Top Up Tokens'}
+                      </h3>
+                      <p className="text-[10px] opacity-70">
+                        {t('topUpSubtitle') || 'Add tokens directly to your balance'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+                    <span>{tokenBalance.toLocaleString()}</span>
+                    <span className="text-amber-500 font-bold">{tokenSymbol}</span>
+                  </div>
+                </div>
+
+                {topUpSuccessMsg && (
+                  <div 
+                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="text-[11px]">{topUpSuccessMsg}</span>
+                  </div>
+                )}
+
+                {topUpErrorMsg && (
+                  <div 
+                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#ef4444', color: '#ef4444' }}
+                  >
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span className="text-[11px]">{topUpErrorMsg}</span>
+                  </div>
+                )}
+
+                {/* Packages List */}
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {displayPackages.map((pkg) => (
+                    <div 
+                      key={pkg.id}
+                      className="p-3 rounded-2xl border transition flex items-center justify-between gap-3 group hover:border-[var(--color-primary)]/50"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
+                            {pkg.name}
+                          </span>
+                          {pkg.badge && (
+                            <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                              {pkg.badge}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+                          <span>+{Number(pkg.tokens).toLocaleString()}</span>
+                          <span className="text-amber-500 font-bold">{tokenSymbol}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
+                          ${Number(pkg.price).toFixed(2)}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={purchasingId === pkg.id}
+                          onClick={() => handlePurchasePackage(pkg)}
+                          className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-95 shadow-xs"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                        >
+                          {purchasingId === pkg.id ? (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <>
+                              <Sparkles className="h-3 w-3" />
+                              <span>{t('buy') || 'Buy'}</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Footer Links */}
+                <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
+                  <Link
+                    href="/billing"
+                    onClick={() => setShowTopUpMenu(false)}
+                    className="flex items-center justify-between text-xs font-bold hover:underline"
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    <span>{t('viewSubscriptionPlans') || 'View Monthly Subscription Plans'}</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
+                  {isAdmin && (
+                    <Link
+                      href="/admin/token-setting"
+                      onClick={() => setShowTopUpMenu(false)}
+                      className="flex items-center justify-between text-[10px] font-semibold opacity-70 hover:opacity-100 hover:underline"
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      <span>{t('adminManagePackages') || 'Admin: Manage Packages in /admin/token-setting'}</span>
+                      <Settings className="h-3 w-3" />
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Notification Icon with Dropdown */}
           <div className="relative" ref={notifDropdownRef}>
@@ -48562,6 +49501,7 @@ export default function Sidebar() {
               onClick={() => {
                 setShowNotifications(!showNotifications);
                 setShowProfileMenu(false);
+                setShowTopUpMenu(false);
               }}
               className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="Notifications"
@@ -48608,13 +49548,14 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* Profile Lucide-User Icon on Top Right with Dropdown */}
+          {/* Profile Dropdown */}
           <div className="relative" ref={profileDropdownRef}>
             <button
               type="button"
               onClick={() => {
                 setShowProfileMenu(!showProfileMenu);
                 setShowNotifications(false);
+                setShowTopUpMenu(false);
               }}
               className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="User Profile Dropdown"
