@@ -15,8 +15,7 @@ async function getPostgresPool() {
       connectionString: connStr,
       ssl: requiresSsl ? { rejectUnauthorized: false } : false
     });
-  } catch (err) {
-    console.error('[PostgreSQL] Connection pool init notice:', err);
+  } catch (_) {
     return null;
   }
 }
@@ -44,25 +43,42 @@ async function persistDiscoveredModels(provider: string, models: any[]) {
       );
     }
     await pool.end();
-  } catch (e) {
-    console.error('[PostgreSQL] Failed persisting discovered models:', e);
-  }
+  } catch (_) {}
 }
 
 export async function POST(req: NextRequest) {
   try {
     const { provider, apiKey, model } = await req.json();
-    const cleanKey = (apiKey || '').trim();
+    const cleanKey = (apiKey || '').trim().replace(/^["']|["']$/g, '');
 
     if (!cleanKey) {
       return NextResponse.json({ success: false, error: 'No API key provided to test.' }, { status: 400 });
     }
 
     if (provider === 'gemini') {
+      if (cleanKey.includes('.apps.googleusercontent.com')) {
+        return NextResponse.json({
+          success: false,
+          error: "Invalid Credential Type: You entered a Google OAuth Client ID (for Social Login), not a Gemini API Key. Please get an API key starting with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
+        }, { status: 400 });
+      }
+
+      if (cleanKey.startsWith('GOCSPX-')) {
+        return NextResponse.json({
+          success: false,
+          error: "Invalid Credential Type: You entered a Google OAuth Client Secret, not a Gemini API Key. Please get an API key starting with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
+        }, { status: 400 });
+      }
+
       let discoveredModels: any[] = [];
       try {
-        const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`;
-        const listRes = await fetch(listUrl, { cache: 'no-store' });
+        const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
+        const listRes = await fetch(listUrl, {
+          cache: 'no-store',
+          headers: {
+            'x-goog-api-key': cleanKey
+          }
+        });
         if (listRes.ok) {
           const listData = await listRes.json();
           if (Array.isArray(listData.models)) {
@@ -86,27 +102,44 @@ export async function POST(req: NextRequest) {
                 };
               });
           }
+        } else {
+          const errData = await listRes.json().catch(() => ({}));
+          const errMsg = errData.error?.message || '';
+          if (listRes.status === 401 || errMsg.includes('authentication credentials') || errMsg.includes('API key')) {
+            return NextResponse.json({
+              success: false,
+              error: "Google API Authentication Failed (401): The provided Gemini API Key is invalid or expired. Please check your API key at https://aistudio.google.com/app/apikey."
+            }, { status: 401 });
+          }
         }
       } catch (err) {
         console.warn('[Gemini] Model listing error:', err);
       }
 
       const activeModel = model || (discoveredModels.length > 0 ? discoveredModels[0].id : 'gemini-2.5-flash');
-      const genUrl = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${cleanKey}`;
+      const genUrl = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${encodeURIComponent(cleanKey)}`;
       const res = await fetch(genUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cleanKey
+        },
         body: JSON.stringify({
           contents: [{ parts: [{ text: 'Ping' }] }],
           generationConfig: { maxOutputTokens: 3 }
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) {
+        const rawMsg = data.error?.message || `Google API handshake failed (${res.status})`;
+        let friendly = rawMsg;
+        if (res.status === 401 || rawMsg.includes('authentication credentials') || rawMsg.includes('API key')) {
+          friendly = "Google API Authentication Failed (401): The provided Gemini API Key is invalid, expired, or rejected. Please obtain an active API key from Google AI Studio (https://aistudio.google.com/app/apikey).";
+        }
         return NextResponse.json({
           success: false,
-          error: data.error?.message || `Google API handshake failed (${res.status})`,
+          error: friendly,
           models: discoveredModels
         });
       }

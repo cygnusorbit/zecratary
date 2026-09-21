@@ -125,7 +125,7 @@ export default function ChefChatPage() {
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-3.6-flash');
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [customVocabularyList, setCustomVocabularyList] = useState<string[]>([]);
@@ -505,7 +505,10 @@ export default function ChefChatPage() {
         const sData = await sRes.json();
         const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
         if (chefCfg) {
-          if (chefCfg.model || sData.aiModel) setActiveAiModel(chefCfg.model || sData.aiModel);
+          if (sData.aiModel || chefCfg.model) {
+          const resolved = sData.aiModel || chefCfg.model;
+          setActiveAiModel(resolved.replace(/^models\//, ''));
+        }
           if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
           if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
           if (Array.isArray(chefCfg.customVocabularyList)) setCustomVocabularyList(chefCfg.customVocabularyList.filter(Boolean));

@@ -31,11 +31,9 @@ export interface AiModelOption {
 }
 
 const DEFAULT_GEMINI_MODELS: AiModelOption[] = [
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', label: 'Gemini 2.5 Flash (Fast & Recommended)' },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', label: 'Gemini 2.5 Pro (Deep Reasoning)' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', label: 'Gemini 2.0 Flash (Next-Gen High Speed)' },
-  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', label: 'Gemini 1.5 Flash (Versatile & Stable)' },
-  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', label: 'Gemini 1.5 Pro (Multimodal Long-Context)' }
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', label: 'Gemini 3.6 Flash (Latest Recommended - 2026)' },
+  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', label: 'Gemini 1.5 Flash (Stable Long-Context)' },
+  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', label: 'Gemini 1.5 Pro (Deep Reasoning & Multimodal)' }
 ];
 
 const DEFAULT_OPENAI_MODELS: AiModelOption[] = [
@@ -85,7 +83,7 @@ export default function ChefAISettingsPage() {
   const [provider, setProvider] = useState<'gemini' | 'openai'>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('gemini-2.5-flash');
+  const [model, setModel] = useState('gemini-3.6-flash');
   const [geminiModelsList, setGeminiModelsList] = useState<AiModelOption[]>(DEFAULT_GEMINI_MODELS);
   const [openaiModelsList, setOpenaiModelsList] = useState<AiModelOption[]>(DEFAULT_OPENAI_MODELS);
   const [syncingModels, setSyncingModels] = useState(false);
@@ -216,8 +214,10 @@ export default function ChefAISettingsPage() {
             if (k.envKey && k.keyValue) {
               map[k.envKey] = k.keyValue;
               const u = k.envKey.toUpperCase();
-              if (u.includes('GEMINI') || u.includes('GOOGLE')) {
-                map['GEMINI_API_KEY'] = k.keyValue;
+              const val = String(k.keyValue || '').trim();
+              const isOAuth = val.includes('.apps.googleusercontent.com') || val.startsWith('GOCSPX-') || u.includes('CLIENT_ID') || u.includes('CLIENT_SECRET');
+              if (!isOAuth && (u === 'GEMINI_API_KEY' || u === 'GOOGLE_AI_KEY' || u === 'GOOGLE_GENAI_API_KEY' || (u === 'GOOGLE_API_KEY' && val.startsWith('AIzaSy')))) {
+                map['GEMINI_API_KEY'] = val;
               }
               if (u.includes('OPENAI')) {
                 map['OPENAI_API_KEY'] = k.keyValue;
@@ -376,7 +376,12 @@ export default function ChefAISettingsPage() {
   };
 
   const handleTestApiKey = async () => {
-    const keyToTest = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
+    const rawKey = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
+    const keyToTest = rawKey.replace(/^["']|["']$/g, '').trim();
+    if (provider === 'gemini' && (keyToTest.includes('.apps.googleusercontent.com') || keyToTest.startsWith('GOCSPX-'))) {
+      setTestResult({ success: false, message: t('oauthKeyError', 'Invalid Key Type: You entered a Google OAuth Client ID or Secret instead of a Gemini API Key. Please get a Gemini API Key starting with "AIzaSy" from https://aistudio.google.com/app/apikey.') });
+      return;
+    }
     if (!keyToTest) {
       setTestResult({ success: false, message: t('enterApiKeyFirst', 'Please enter an API key or sync from .env first.') });
       return;

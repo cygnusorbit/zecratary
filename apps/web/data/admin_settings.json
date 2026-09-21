@@ -3,7 +3,7 @@
   "taxRate": 0,
   "currency": "USD",
   "siteName": "Zecratary",
-  "updatedAt": "2026-09-21T03:41:03.224Z",
+  "updatedAt": "2026-09-21T05:19:07.377Z",
   "aiProvider": "gemini",
   "recipeTypes": [
     "Breakfast",
@@ -56,7 +56,7 @@
   "titlebarImage": "",
   "chefAiSettings": {
     "model": "gemini-3.5-flash-lite",
-    "apiKey": "AQ.Ab8RN6LdEnQjMGHS9FIVMLLpLKzimCOiB3FqS-Mlvj98h1EYbQ",
+    "apiKey": "AQ.Ab8RN6IAJKJD1CtV8nAqkKlmQFj-1CbdSalkICafii42qYdjdw",
     "provider": "gemini",
     "sections": [
       {
@@ -82,7 +82,7 @@
       }
     ],
     "maxTokens": 4096,
-    "updatedAt": "2026-09-21T03:41:03.224Z",
+    "updatedAt": "2026-09-21T05:19:07.377Z",
     "voiceSpeed": 1,
     "maxPlanDays": 7,
     "temperature": 0.7,

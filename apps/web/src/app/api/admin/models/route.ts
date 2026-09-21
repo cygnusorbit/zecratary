@@ -5,22 +5,36 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const { provider, apiKey } = await req.json();
-    const cleanKey = (apiKey || '').trim();
+    const cleanKey = (apiKey || '').trim().replace(/^["']|["']$/g, '');
 
     if (!cleanKey) {
       return NextResponse.json({ success: false, error: 'API key is required to query models.' }, { status: 400 });
     }
 
     if (provider === 'gemini') {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`;
-      const res = await fetch(url, { cache: 'no-store' });
-      const data = await res.json();
-
-      if (!res.ok || data.error) {
+      if (cleanKey.includes('.apps.googleusercontent.com') || cleanKey.startsWith('GOCSPX-')) {
         return NextResponse.json({
           success: false,
-          error: data.error?.message || `Google API model listing failed (${res.status})`
-        }, { status: res.status || 400 });
+          error: "Invalid Key Type: You entered a Google OAuth credential instead of a Gemini API Key. Please get a Gemini API Key from https://aistudio.google.com/app/apikey."
+        }, { status: 400 });
+      }
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
+      const res = await fetch(url, {
+        cache: 'no-store',
+        headers: {
+          'x-goog-api-key': cleanKey
+        }
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || data.error) {
+        const rawMsg = data.error?.message || `Google API model listing failed (${res.status})`;
+        let friendly = rawMsg;
+        if (res.status === 401 || rawMsg.includes('authentication credentials') || rawMsg.includes('API key')) {
+          friendly = "Google API Authentication Failed (401): The provided Gemini API Key is invalid, expired, or rejected. Please obtain an active API key from Google AI Studio (https://aistudio.google.com/app/apikey).";
+        }
+        return NextResponse.json({ success: false, error: friendly }, { status: res.status || 400 });
       }
 
       const rawModels = Array.isArray(data.models) ? data.models : [];
@@ -54,7 +68,7 @@ export async function POST(req: NextRequest) {
         headers: { Authorization: `Bearer ${cleanKey}` },
         cache: 'no-store'
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok || data.error) {
         return NextResponse.json({

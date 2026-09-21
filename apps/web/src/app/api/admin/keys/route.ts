@@ -21,7 +21,7 @@ async function getPostgresPool() {
       ssl: requiresSsl ? { rejectUnauthorized: false } : false
     });
     return cachedPool;
-  } catch (err) {
+  } catch (_) {
     return null;
   }
 }
@@ -80,6 +80,11 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return map;
 }
 
+function isOAuthCredential(val: string): boolean {
+  if (!val) return false;
+  return val.includes('.apps.googleusercontent.com') || val.startsWith('GOCSPX-');
+}
+
 function updateEnvFile(filePath: string, key: string, value: string) {
   let content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
   const regex = new RegExp(`^${key}=.*$`, 'm');
@@ -102,7 +107,7 @@ export async function GET() {
       Object.assign(envMap, parseEnvFile(ep));
     }
 
-    ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'].forEach(k => {
+    ['GEMINI_API_KEY', 'GOOGLE_AI_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'].forEach(k => {
       if (process.env[k] && !envMap[k]) envMap[k] = process.env[k]!;
     });
 
@@ -120,8 +125,23 @@ export async function GET() {
           keyValue: row.key_value,
           status: row.status
         });
-        if (row.env_key && row.key_value) envMap[row.env_key] = row.key_value;
+        if (row.env_key && row.key_value && !isOAuthCredential(row.key_value)) {
+          envMap[row.env_key] = row.key_value;
+        }
       }
+    }
+
+    // Isolate real Gemini API key
+    let resolvedGemini = '';
+    for (const k of ['GEMINI_API_KEY', 'GOOGLE_AI_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY']) {
+      const v = envMap[k];
+      if (v && !isOAuthCredential(v) && !v.includes('sample')) {
+        resolvedGemini = v;
+        break;
+      }
+    }
+    if (resolvedGemini) {
+      envMap['GEMINI_API_KEY'] = resolvedGemini;
     }
 
     return NextResponse.json({ success: true, keys: dbKeys, envMap });
@@ -136,20 +156,29 @@ export async function POST(req: NextRequest) {
     const { name, provider, envKey, keyValue, model, status } = body;
 
     const keyToSave = (envKey || (provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY')).trim();
-    const valToSave = (keyValue || '').trim();
+    const valToSave = (keyValue || '').trim().replace(/^["']|["']$/g, '');
 
     if (!keyToSave) {
       return NextResponse.json({ success: false, error: 'Target environment key is required.' }, { status: 400 });
     }
 
-    // 1. Update .env files
+    if (provider === 'gemini' && isOAuthCredential(valToSave)) {
+      return NextResponse.json({
+        success: false,
+        error: "Cannot save: You provided a Google OAuth Client ID or Secret instead of a Gemini API Key. Gemini keys start with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
+      }, { status: 400 });
+    }
+
+    // 1. Write to local .env files
     for (const ep of getEnvFilePaths()) {
       try { updateEnvFile(ep, keyToSave, valToSave); } catch (_) {}
     }
 
-    // 2. Sync process runtime memory
+    // 2. Synchronize process runtime memory
     process.env[keyToSave] = valToSave;
-    if (keyToSave === 'GEMINI_API_KEY') process.env['GOOGLE_API_KEY'] = valToSave;
+    if (keyToSave === 'GEMINI_API_KEY') {
+      process.env['GOOGLE_API_KEY'] = valToSave;
+    }
 
     // 3. Persist to PostgreSQL admin_api_keys
     const pool = await getPostgresPool();
@@ -174,7 +203,7 @@ export async function POST(req: NextRequest) {
         ]
       );
 
-      // Synchronize admin_settings without destroying existing model identifier
+      // Synchronize admin_settings without destroying active model
       try {
         const settingsRes = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
         if (settingsRes.rows && settingsRes.rows.length > 0) {
