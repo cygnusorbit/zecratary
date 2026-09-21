@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
     let filterWordsList: string[] = [];
     let customVocabularyList: string[] = [];
     let knowledgeBaseList: string[] = [];
+    let recommendedRecipeUrls: string[] = [];
     let enablePantryContext = true;
     let systemPrompt = 'You are Chef Foodie, an autonomous culinary AI assistant and executive chef.';
     let temperature = 0.7;
@@ -54,6 +55,8 @@ export async function POST(req: NextRequest) {
         if (Array.isArray(c.filterWordsList)) filterWordsList = c.filterWordsList.filter(Boolean);
         if (Array.isArray(c.customVocabularyList)) customVocabularyList = c.customVocabularyList.filter(Boolean);
         if (Array.isArray(c.knowledgeBaseList)) knowledgeBaseList = c.knowledgeBaseList.filter(Boolean);
+        if (Array.isArray(c.recommendedRecipeUrls)) recommendedRecipeUrls = c.recommendedRecipeUrls.filter(Boolean);
+        else if (Array.isArray(c.recommendedRecipesUrls)) recommendedRecipeUrls = c.recommendedRecipesUrls.filter(Boolean);
         if (c.enablePantryContext !== undefined) enablePantryContext = Boolean(c.enablePantryContext);
         if (c.systemPrompt) systemPrompt = c.systemPrompt;
         if (c.temperature !== undefined) temperature = Number(c.temperature);
@@ -147,6 +150,17 @@ USER CULINARY PROFILE:
 - Taste Preferences: ${tastes}
 - In-Stock Pantry Ingredients: ${pantry}
 ${customVocabularyList.length > 0 ? `- Custom Vocabulary: ${customVocabularyList.join(', ')}` : ''}
+${recommendedRecipeUrls.length > 0 ? `
+CRITICAL INSTRUCTION - PRIMARY RECIPE SOURCES ("Recommended Recipes Url"):
+The administrator has designated the following URLs as the PRIMARY, AUTHORITATIVE SOURCES for recipe recommendations on /chef:
+${recommendedRecipeUrls.map((url, i) => `${i + 1}.${url}`).join('\n')}
+
+MANDATORY RULES FOR CHEF AI:
+1. PRIMARY RECOMMENDATION: You MUST find, base, and prioritize recipe suggestions from the "Recommended Recipes Url" list above as your PRIMARY source before using any general knowledge.
+2. CITATION & SOURCE LINK: When recommending or generating a recipe inspired by or based on these URLs, you MUST explicitly provide the source URL and domain name so the user can review the original recipe. Format as: "Source: [Website Name](${url})".
+3. INGREDIENT & TECHNIQUE HARMONIZATION: Adapt the recipe from the recommended URL to fit the user's pantry ingredients, dietary restrictions, and servings, while preserving the authentic essence, preparation steps, and seasonings from the primary source.
+` : ''}
+
 ${knowledgeBaseList.length > 0 ? `- Culinary Knowledge Base: ${knowledgeBaseList.join('; ')}` : ''}
 
 USER PROMPT / TASK:

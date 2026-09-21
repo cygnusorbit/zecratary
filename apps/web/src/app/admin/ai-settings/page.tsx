@@ -128,6 +128,10 @@ export default function ChefAISettingsPage() {
   const [filterWordsList, setFilterWordsList] = useState<string[]>(['Oily', 'Artificial preservatives', 'Unhealthy trans fats']);
   const [newFilterInput, setNewFilterInput] = useState('');
 
+  // Recommended Recipes Url (Primary source for /chef)
+  const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
+  const [newRecipeUrlInput, setNewRecipeUrlInput] = useState('');
+
   // Multi-Topic Questionnaire State
   const [sections, setSections] = useState<QuestionnaireSection[]>(DEFAULT_SECTIONS);
   const [newTopicTitle, setNewTopicTitle] = useState('');
@@ -555,6 +559,47 @@ export default function ChefAISettingsPage() {
 
   const handleRemoveFilterWord = (idx: number) => {
     setFilterWordsList(filterWordsList.filter((_, i) => i !== idx));
+  };
+
+  // Recommended Recipes Url Handlers (Supports single and multiple URLs)
+  const handleAddRecommendedUrls = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const raw = newRecipeUrlInput.trim();
+    if (!raw) return;
+
+    // Split by newlines, commas, or multiple whitespaces to support multiple URLs
+    const entries = raw
+      .split(/[\n,]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const cleanedUrls: string[] = [];
+    for (let entry of entries) {
+      if (!/^https?:\/\//i.test(entry)) {
+        entry = 'https://' + entry;
+      }
+      try {
+        new URL(entry);
+        if (!recommendedRecipeUrls.includes(entry) && !cleanedUrls.includes(entry)) {
+          cleanedUrls.push(entry);
+        }
+      } catch (_) {}
+    }
+
+    if (cleanedUrls.length > 0) {
+      setRecommendedRecipeUrls([...recommendedRecipeUrls, ...cleanedUrls]);
+      setNewRecipeUrlInput('');
+    }
+  };
+
+  const handleRemoveRecommendedUrl = (idx: number) => {
+    setRecommendedRecipeUrls(recommendedRecipeUrls.filter((_, i) => i !== idx));
+  };
+
+  const handleClearAllRecommendedUrls = () => {
+    if (confirm(t('confirmClearAllUrls', 'Clear all recommended recipe URLs?'))) {
+      setRecommendedRecipeUrls([]);
+    }
   };
 
   const handleAddTopicSection = (e: React.FormEvent) => {
@@ -1667,6 +1712,164 @@ export default function ChefAISettingsPage() {
                   <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('maxPlanDaysDesc', 'Maximum number of days the AI can structure in a single meal plan wizard sequence.')}
                   </p>
+                </div>
+              </div>
+
+                            {/* RECOMMENDED RECIPES URL (PRIMARY SOURCE FOR /chef) */}
+              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <div>
+                    <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                      <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('recommendedRecipesUrlHeader', 'Recommended Recipes Url')}
+                    </h3>
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('recommendedRecipesUrlDesc', 'Configure primary source URLs for recipe recommendations. When users ask for recipes on /chef, AI will search and prioritize these URLs as the primary source.')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span 
+                      className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border shrink-0"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
+                        color: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {recommendedRecipeUrls.length} {t('urlsActiveBadge', 'Active URLs (Primary)')}
+                    </span>
+                    {recommendedRecipeUrls.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllRecommendedUrls}
+                        className="text-[10px] text-red-400 hover:text-red-500 font-bold transition cursor-pointer"
+                      >
+                        {t('clearAll', 'Clear All')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Multi-URL Input Box with Batch Support */}
+                <div className="space-y-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div 
+                      className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <input
+                        type="text"
+                        placeholder={t('recommendedRecipeUrlPlaceholder', 'Add recipe URL (paste single or multiple separated by commas or newlines)...')}
+                        value={newRecipeUrlInput}
+                        onChange={(e) => setNewRecipeUrlInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddRecommendedUrls();
+                          }
+                        }}
+                        className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                        style={{ color: 'var(--color-text)' }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAddRecommendedUrls()}
+                      disabled={!newRecipeUrlInput.trim()}
+                      className="px-4 py-2.5 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md disabled:opacity-40 hover:opacity-90 shrink-0"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      <Plus className="h-4 w-4" /> {t('addUrlBtn', 'Add URL')}
+                    </button>
+                  </div>
+                  <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
+                    💡 {t('multiUrlHint', 'Tip: You can paste multiple URLs at once separated by commas or newlines. Chef AI will prioritize these as primary culinary references.')}
+                  </span>
+                </div>
+
+                {/* URL List / Badges */}
+                <div className="space-y-2 pt-1">
+                  {recommendedRecipeUrls.length === 0 ? (
+                    <div 
+                      className="p-4 text-center border border-dashed rounded-2xl text-xs space-y-0.5"
+                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                    >
+                      <span className="font-semibold block">{t('noRecommendedUrlsTitle', 'No Recommended Recipe URLs configured.')}</span>
+                      <span className="text-[11px] block">{t('noRecommendedUrlsDesc', 'Add your preferred food blog or recipe URLs above to make /chef recommend recipes from them first.')}</span>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[260px] overflow-y-auto pr-1">
+                      {recommendedRecipeUrls.map((urlStr, idx) => {
+                        let domain = 'Website';
+                        try {
+                          domain = new URL(urlStr).hostname.replace(/^www\./, '');
+                        } catch (_) {}
+
+                        return (
+                          <div 
+                            key={idx}
+                            className="p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span 
+                                  className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border truncate"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-primary)'
+                                  }}
+                                >
+                                  {domain}
+                                </span>
+                                <span 
+                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
+                                  style={{
+                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                    color: 'var(--color-emerald)'
+                                  }}
+                                >
+                                  {t('primaryTag', 'Primary')}
+                                </span>
+                              </div>
+                              <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text)' }} title={urlStr}>
+                                {urlStr}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <a
+                                href={urlStr}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1 rounded-lg hover:opacity-80 transition cursor-pointer"
+                                style={{ color: 'var(--color-primary)' }}
+                                title={t('openUrlTooltip', 'Open in new tab')}
+                              >
+                                <Globe className="h-3.5 w-3.5" />
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveRecommendedUrl(idx)}
+                                className="p-1 rounded-lg hover:text-red-500 transition cursor-pointer"
+                                style={{ color: 'var(--color-text-secondary)' }}
+                                title={t('removeUrlTooltip', 'Remove URL')}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
 
