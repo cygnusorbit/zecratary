@@ -1,205 +1,195 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-const NO_CACHE_HEADERS = {
-  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-  'Pragma': 'no-cache',
-  'Expires': '0',
-};
+let cachedPool: any = null;
 
-async function ensureAdminSettingsSchema() {
+async function getPostgresPool() {
+  if (cachedPool) return cachedPool;
+  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  if (!connStr) return null;
   try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id VARCHAR(64) PRIMARY KEY DEFAULT 'primary_settings',
-        site_name VARCHAR(255) DEFAULT 'Zecratary',
-        titlebar_emoji VARCHAR(32) DEFAULT '🍳',
-        titlebar_image TEXT DEFAULT '',
-        favicon_emoji VARCHAR(32) DEFAULT '🍳',
-        favicon_image TEXT DEFAULT '',
-        currency VARCHAR(10) DEFAULT 'USD',
-        ai_provider VARCHAR(64) DEFAULT 'gemini',
-        ai_model VARCHAR(128) DEFAULT 'gemini-3.5-flash-lite',
-        theme_colors JSONB DEFAULT '{}'::jsonb,
-        font_family VARCHAR(255) DEFAULT 'Inter',
-        font_size VARCHAR(50) DEFAULT '16px',
-        letter_spacing VARCHAR(50) DEFAULT '0em',
-        payment_settings JSONB DEFAULT '{}'::jsonb,
-        social_login JSONB DEFAULT '{}'::jsonb,
-        chef_ai_settings JSONB DEFAULT '{}'::jsonb,
-        recipe_types JSONB DEFAULT '[]'::jsonb,
-        ingredient_categories JSONB DEFAULT '[]'::jsonb,
-        supported_languages JSONB DEFAULT '[]'::jsonb,
-        subscription_plans JSONB DEFAULT '[]'::jsonb,
-        value JSONB DEFAULT '{}'::jsonb,
-        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_image TEXT DEFAULT '';`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_image TEXT DEFAULT '';`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB DEFAULT '{}'::jsonb;`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS font_family VARCHAR(255) DEFAULT 'Inter';`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS font_size VARCHAR(50) DEFAULT '16px';`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS letter_spacing VARCHAR(50) DEFAULT '0em';`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS subscription_plans JSONB DEFAULT '[]'::jsonb;`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB DEFAULT '{}'::jsonb;`);
-    await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(100);`);
-
-    const existing = await query(`SELECT id FROM admin_settings LIMIT 1;`);
-    if (existing.length === 0) {
-      await query(`
-        INSERT INTO admin_settings (id, site_name, titlebar_emoji, favicon_emoji, font_family, font_size, letter_spacing)
-        VALUES ('primary_settings', 'Zecratary', '🍳', '🍳', 'Inter', '16px', '0em')
-        ON CONFLICT DO NOTHING;
-      `);
-    }
+    const { Pool } = await import('pg');
+    const requiresSsl = connStr.includes('sslmode=require') || 
+                        connStr.includes('neon.tech') || 
+                        connStr.includes('supabase.co') || 
+                        process.env.NODE_ENV === 'production';
+    cachedPool = new Pool({
+      connectionString: connStr,
+      ssl: requiresSsl ? { rejectUnauthorized: false } : false
+    });
+    return cachedPool;
   } catch (err) {
-    console.error('[AdminSettings API] Error ensuring schema:', err);
+    console.error('[PostgreSQL] Settings Pool Init Error:', err);
+    return null;
+  }
+}
+
+async function ensureSettingsTable(pool: any) {
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(100) PRIMARY KEY DEFAULT 'primary_settings',
+        value JSONB DEFAULT '{}'::jsonb,
+        chef_ai_settings JSONB,
+        ai_model VARCHAR(255),
+        ai_provider VARCHAR(100),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB DEFAULT '{}'::jsonb;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS chef_ai_settings JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ai_model VARCHAR(255);
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(100);
+    `);
+  } catch (err) {
+    console.error('[PostgreSQL] ensureSettingsTable Notice:', err);
   }
 }
 
 export async function GET() {
   try {
-    await ensureAdminSettingsSchema();
-    const rows = await query('SELECT * FROM admin_settings LIMIT 1');
-    const data = rows[0] || {};
-    const themeColors = data.theme_colors || {};
+    const pool = await getPostgresPool();
+    let currentSettings: any = {};
 
-    const settings = {
-      siteName: data.site_name || 'Zecratary',
-      titlebarEmoji: data.titlebar_emoji || '🍳',
-      titlebarImage: data.titlebar_image || '',
-      faviconEmoji: data.favicon_emoji || '🍳',
-      faviconImage: data.favicon_image || '',
-      themeColors: themeColors,
-      theme_colors: themeColors,
-      fontFamily: data.font_family || 'Inter',
-      font_family: data.font_family || 'Inter',
-      fontSize: data.font_size || '16px',
-      font_size: data.font_size || '16px',
-      fontLetterSpacing: data.letter_spacing || '0em',
-      letter_spacing: data.letter_spacing || '0em',
-      currency: data.currency || 'USD',
-      aiProvider: data.ai_provider || 'gemini',
-      aiModel: data.ai_model || 'gemini-3.5-flash-lite',
-      chefAiSettings: data.chef_ai_settings || {},
-      recipeTypes: data.recipe_types || [],
-      ingredientCategories: data.ingredient_categories || [],
-      supportedLanguages: data.supported_languages || [],
-      subscriptionPlans: data.subscription_plans || [],
-      updatedAt: data.updated_at
-    };
+    if (pool) {
+      await ensureSettingsTable(pool);
+      const res = await pool.query('SELECT * FROM admin_settings ORDER BY updated_at DESC LIMIT 1;');
+      if (res.rows && res.rows.length > 0) {
+        const row = res.rows[0];
+        let val = row.value || {};
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch (_) { val = {}; }
+        }
 
-    return NextResponse.json({
-      success: true,
-      settings,
-      ...settings
-    }, { headers: NO_CACHE_HEADERS });
+        let chefAi = row.chef_ai_settings;
+        if (typeof chefAi === 'string') {
+          try { chefAi = JSON.parse(chefAi); } catch (_) { chefAi = {}; }
+        }
+
+        currentSettings = {
+          ...val,
+          chefAiSettings: chefAi || val.chefAiSettings || val.aiSettings || {},
+          aiModel: row.ai_model || val.aiModel || (chefAi?.model) || val.chefAiSettings?.model || 'gemini-2.5-flash',
+          aiProvider: row.ai_provider || val.aiProvider || (chefAi?.provider) || val.chefAiSettings?.provider || 'gemini'
+        };
+      }
+    }
+
+    // Disk fallback if database returned empty
+    if (Object.keys(currentSettings).length === 0) {
+      try {
+        const diskPath = path.join(process.cwd(), 'data', 'admin_settings.json');
+        if (fs.existsSync(diskPath)) {
+          const raw = fs.readFileSync(diskPath, 'utf-8');
+          currentSettings = JSON.parse(raw);
+        }
+      } catch (_) {}
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        settings: currentSettings,
+        chefAiSettings: currentSettings.chefAiSettings,
+        aiModel: currentSettings.aiModel || currentSettings.chefAiSettings?.model,
+        aiProvider: currentSettings.aiProvider || currentSettings.chefAiSettings?.provider,
+        ...currentSettings
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+        }
+      }
+    );
   } catch (err: any) {
-    console.error('[AdminSettings API GET] Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureAdminSettingsSchema();
-
     const body = await req.json();
-    const existing = await query('SELECT * FROM admin_settings LIMIT 1');
-    const targetId = existing.length > 0 && existing[0].id !== undefined ? existing[0].id : 'primary_settings';
-    const current = existing[0] || {};
+    const pool = await getPostgresPool();
 
-    const siteName = body.siteName !== undefined ? body.siteName : (current.site_name || 'Zecratary');
-    const titlebarEmoji = body.titlebarEmoji !== undefined ? body.titlebarEmoji : (current.titlebar_emoji || '🍳');
-    const titlebarImage = body.titlebarImage !== undefined ? body.titlebarImage : (current.titlebar_image || '');
-    const faviconEmoji = body.faviconEmoji !== undefined ? body.faviconEmoji : (current.favicon_emoji || '🍳');
-    const faviconImage = body.faviconImage !== undefined ? body.faviconImage : (current.favicon_image || '');
-    
-    const themeColors = body.themeColors || body.theme_colors || current.theme_colors || {};
-    const fontFamily = body.fontFamily || body.font_family || current.font_family || 'Inter';
-    const fontSize = body.fontSize || body.font_size || current.font_size || '16px';
-    const letterSpacing = body.fontLetterSpacing || body.letter_spacing || current.letter_spacing || '0em';
+    let existing: any = {};
+    let rowId = 'primary_settings';
 
-    const updateRes = await query(`
-      UPDATE admin_settings SET
-        site_name = $1,
-        titlebar_emoji = $2,
-        titlebar_image = $3,
-        favicon_emoji = $4,
-        favicon_image = $5,
-        theme_colors = $6::jsonb,
-        font_family = $7,
-        font_size = $8,
-        letter_spacing = $9,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $10
-      RETURNING *;
-    `, [
-      siteName,
-      titlebarEmoji,
-      titlebarImage,
-      faviconEmoji,
-      faviconImage,
-      JSON.stringify(themeColors),
-      fontFamily,
-      fontSize,
-      letterSpacing,
-      targetId
-    ]);
-
-    let updatedRow = updateRes[0];
-
-    if (!updatedRow) {
-      const insertRes = await query(`
-        INSERT INTO admin_settings (
-          id, site_name, titlebar_emoji, titlebar_image, favicon_emoji, favicon_image,
-          theme_colors, font_family, font_size, letter_spacing, updated_at
-        )
-        VALUES (
-          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, CURRENT_TIMESTAMP
-        )
-        RETURNING *;
-      `, [
-        targetId,
-        siteName,
-        titlebarEmoji,
-        titlebarImage,
-        faviconEmoji,
-        faviconImage,
-        JSON.stringify(themeColors),
-        fontFamily,
-        fontSize,
-        letterSpacing
-      ]);
-      updatedRow = insertRes[0] || {};
+    if (pool) {
+      await ensureSettingsTable(pool);
+      const res = await pool.query('SELECT * FROM admin_settings LIMIT 1;');
+      if (res.rows && res.rows.length > 0) {
+        rowId = res.rows[0].id || 'primary_settings';
+        let val = res.rows[0].value || {};
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch (_) { val = {}; }
+        }
+        existing = val;
+      }
     }
 
-    const responsePayload = {
-      siteName: updatedRow.site_name,
-      titlebarEmoji: updatedRow.titlebar_emoji,
-      titlebarImage: updatedRow.titlebar_image,
-      faviconEmoji: updatedRow.favicon_emoji,
-      faviconImage: updatedRow.favicon_image,
-      themeColors: updatedRow.theme_colors,
-      fontFamily: updatedRow.font_family,
-      fontSize: updatedRow.font_size,
-      fontLetterSpacing: updatedRow.letter_spacing,
-      updatedAt: updatedRow.updated_at
+    // Perform deep merge to guarantee no sub-properties are lost
+    const incomingChef = body.chefAiSettings || body.aiSettings || {};
+    const existingChef = existing.chefAiSettings || existing.aiSettings || {};
+
+    const resolvedModel = body.aiModel || incomingChef.model || existing.aiModel || existingChef.model || 'gemini-2.5-flash';
+    const resolvedProvider = body.aiProvider || incomingChef.provider || existing.aiProvider || existingChef.provider || 'gemini';
+
+    const mergedChefAiSettings = {
+      ...existingChef,
+      ...incomingChef,
+      model: resolvedModel,
+      provider: resolvedProvider,
+      updatedAt: new Date().toISOString()
     };
+
+    const merged = {
+      ...existing,
+      ...body,
+      chefAiSettings: mergedChefAiSettings,
+      aiModel: resolvedModel,
+      aiProvider: resolvedProvider,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (pool) {
+      await pool.query(`
+        INSERT INTO admin_settings (id, value, chef_ai_settings, ai_model, ai_provider, updated_at)
+        VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          value = EXCLUDED.value,
+          chef_ai_settings = EXCLUDED.chef_ai_settings,
+          ai_model = EXCLUDED.ai_model,
+          ai_provider = EXCLUDED.ai_provider,
+          updated_at = NOW();
+      `, [
+        rowId,
+        JSON.stringify(merged),
+        JSON.stringify(mergedChefAiSettings),
+        resolvedModel,
+        resolvedProvider
+      ]);
+    }
+
+    // Disk backup sync
+    try {
+      const diskDir = path.join(process.cwd(), 'data');
+      if (!fs.existsSync(diskDir)) fs.mkdirSync(diskDir, { recursive: true });
+      fs.writeFileSync(path.join(diskDir, 'admin_settings.json'), JSON.stringify(merged, null, 2), 'utf-8');
+    } catch (_) {}
 
     return NextResponse.json({
       success: true,
-      message: 'Settings saved successfully to PostgreSQL',
-      settings: responsePayload,
-      data: responsePayload
-    }, { headers: NO_CACHE_HEADERS });
+      message: 'Admin settings persisted successfully to PostgreSQL.',
+      settings: merged,
+      chefAiSettings: mergedChefAiSettings,
+      aiModel: resolvedModel,
+      aiProvider: resolvedProvider
+    });
   } catch (err: any) {
-    console.error('[AdminSettings API POST] Error saving settings:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }

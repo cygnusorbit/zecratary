@@ -1,15 +1,25 @@
 {
-  "siteName": "Zecratary",
-  "siteDescription": "Smart Meal Planning & Recipe Assistant",
-  "titlebarEmoji": "🍳",
-  "faviconEmoji": "🍳",
-  "aiProvider": "gemini",
   "aiModel": "gemini-3.5-flash-lite",
-  "currency": "USD",
   "taxRate": 0,
-  "maintenanceMode": false,
-  "allowRegistration": true,
+  "currency": "USD",
+  "siteName": "Zecratary",
+  "updatedAt": "2026-09-21T03:30:54.290Z",
+  "aiProvider": "gemini",
+  "recipeTypes": [
+    "Breakfast",
+    "Lunch",
+    "Dinner",
+    "Snack",
+    "Dessert",
+    "Beverage",
+    "Appetizer",
+    "Salad",
+    "Soup",
+    "Side Dish",
+    "Baking"
+  ],
   "socialLogin": {
+    "updatedAt": "2026-09-18T12:28:40.488Z",
     "appleKeyId": "",
     "appleTeamId": "",
     "appleEnabled": false,
@@ -23,9 +33,364 @@
     "googleClientSecret": "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",
     "facebookClientSecret": "",
     "allowSocialRegistration": true,
-    "requireEmailVerification": true,
-    "updatedAt": "2026-09-18T12:28:40.488Z"
+    "requireEmailVerification": true
   },
+  "themeColors": {
+    "accent": "#ec4899",
+    "primary": "#ec4899",
+    "cardBorder": "#2a1650",
+    "accentColor": "#ec4899",
+    "sidebarIcon": "#c084fc",
+    "primaryColor": "#ec4899",
+    "primaryHover": "#7c3aed",
+    "accentEmerald": "#ec4899",
+    "textSecondary": "#d8b4fe",
+    "backgroundDark": "#0f081c",
+    "cardBackground": "#180d2e",
+    "backgroundColor": "#0f081c",
+    "sidebarIconColor": "#c084fc"
+  },
+  "faviconEmoji": "🍳",
+  "faviconImage": "",
+  "titlebarEmoji": "🍳",
+  "titlebarImage": "",
+  "chefAiSettings": {
+    "model": "gemini-3.5-flash-lite",
+    "apiKey": "AQ.Ab8RN6LdEnQjMGHS9FIVMLLpLKzimCOiB3FqS-Mlvj98h1EYbQ",
+    "provider": "gemini",
+    "sections": [
+      {
+        "id": "sec_core",
+        "enabled": true,
+        "questions": [
+          "How many days would you like to plan for (up to 7 days)?",
+          "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+          "When would you like the meal plan to start (today, tomorrow, or a specific date)?"
+        ],
+        "topicTitle": "Core Meal Plan Logistics",
+        "description": "Basic duration, meal types, and start dates for the multi-day plan."
+      },
+      {
+        "id": "sec_pref",
+        "enabled": true,
+        "questions": [
+          "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+          "What is your approximate ingredient budget per serving?"
+        ],
+        "topicTitle": "Dietary Preferences & Budget",
+        "description": "Themes, nutritional restrictions, and financial target per serving."
+      }
+    ],
+    "maxTokens": 4096,
+    "updatedAt": "2026-09-21T03:30:54.290Z",
+    "voiceSpeed": 1,
+    "maxPlanDays": 7,
+    "temperature": 0.7,
+    "voiceEngine": "version2",
+    "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize the selected Knowledge Base, custom vocabulary, filter words, and dietary preferences when generating culinary or meal planning responses.",
+    "voiceAutoPlay": false,
+    "enableWebSearch": true,
+    "filterWordsList": [
+      "Oily",
+      "Artificial preservatives",
+      "Unhealthy trans fats"
+    ],
+    "knowledgeBaseList": [
+      "Culinary Masterclass DB v2",
+      "Nutritional Guidelines 2026"
+    ],
+    "resultDisplayMode": "card",
+    "selectedVoiceName": "en-US-Neural2-F",
+    "enablePantryContext": true,
+    "customVocabularyList": [
+      "Umami",
+      "Sous-vide",
+      "Macronutrients",
+      "Batch-cooking"
+    ],
+    "availableGeminiModels": [
+      {
+        "id": "gemini-2.5-flash",
+        "name": "Gemini 2.5 Flash",
+        "label": "Gemini 2.5 Flash (gemini-2.5-flash)",
+        "description": "Stable version of Gemini 2.5 Flash, our mid-size multimodal model that supports up to 1 million tokens, released in June of 2025."
+      },
+      {
+        "id": "gemini-2.5-pro",
+        "name": "Gemini 2.5 Pro",
+        "label": "Gemini 2.5 Pro (gemini-2.5-pro)",
+        "description": "Stable release (June 17th, 2025) of Gemini 2.5 Pro"
+      },
+      {
+        "id": "gemini-2.5-flash-preview-tts",
+        "name": "Gemini 2.5 Flash Preview TTS",
+        "label": "Gemini 2.5 Flash Preview TTS (gemini-2.5-flash-preview-tts)",
+        "description": "Gemini 2.5 Flash Preview TTS"
+      },
+      {
+        "id": "gemini-2.5-pro-preview-tts",
+        "name": "Gemini 2.5 Pro Preview TTS",
+        "label": "Gemini 2.5 Pro Preview TTS (gemini-2.5-pro-preview-tts)",
+        "description": "Gemini 2.5 Pro Preview TTS"
+      },
+      {
+        "id": "gemma-4-26b-a4b-it",
+        "name": "Gemma 4 26B A4B IT",
+        "label": "Gemma 4 26B A4B IT (gemma-4-26b-a4b-it)",
+        "description": "Gemma 4 26B A4B IT"
+      },
+      {
+        "id": "gemma-4-31b-it",
+        "name": "Gemma 4 31B IT",
+        "label": "Gemma 4 31B IT (gemma-4-31b-it)",
+        "description": "Gemma 4 31B IT"
+      },
+      {
+        "id": "gemini-flash-latest",
+        "name": "Gemini Flash Latest",
+        "label": "Gemini Flash Latest (gemini-flash-latest)",
+        "description": "Latest release of Gemini Flash"
+      },
+      {
+        "id": "gemini-flash-lite-latest",
+        "name": "Gemini Flash-Lite Latest",
+        "label": "Gemini Flash-Lite Latest (gemini-flash-lite-latest)",
+        "description": "Latest release of Gemini Flash-Lite"
+      },
+      {
+        "id": "gemini-pro-latest",
+        "name": "Gemini Pro Latest",
+        "label": "Gemini Pro Latest (gemini-pro-latest)",
+        "description": "Latest release of Gemini Pro"
+      },
+      {
+        "id": "gemini-2.5-flash-lite",
+        "name": "Gemini 2.5 Flash-Lite",
+        "label": "Gemini 2.5 Flash-Lite (gemini-2.5-flash-lite)",
+        "description": "Stable version of Gemini 2.5 Flash-Lite, released in July of 2025"
+      },
+      {
+        "id": "gemini-2.5-flash-image",
+        "name": "Nano Banana",
+        "label": "Nano Banana (gemini-2.5-flash-image)",
+        "description": "Gemini 2.5 Flash Preview Image"
+      },
+      {
+        "id": "gemini-3-flash-preview",
+        "name": "Gemini 3 Flash Preview",
+        "label": "Gemini 3 Flash Preview (gemini-3-flash-preview)",
+        "description": "Gemini 3 Flash Preview"
+      },
+      {
+        "id": "gemini-3.1-pro-preview",
+        "name": "Gemini 3.1 Pro Preview",
+        "label": "Gemini 3.1 Pro Preview (gemini-3.1-pro-preview)",
+        "description": "Gemini 3.1 Pro Preview"
+      },
+      {
+        "id": "gemini-3.1-pro-preview-customtools",
+        "name": "Gemini 3.1 Pro Preview Custom Tools",
+        "label": "Gemini 3.1 Pro Preview Custom Tools (gemini-3.1-pro-preview-customtools)",
+        "description": "Gemini 3.1 Pro Preview optimized for custom tool usage"
+      },
+      {
+        "id": "gemini-3.1-flash-lite-preview",
+        "name": "Gemini 3.1 Flash Lite Preview",
+        "label": "Gemini 3.1 Flash Lite Preview (gemini-3.1-flash-lite-preview)",
+        "description": "Gemini 3.1 Flash Lite Preview"
+      },
+      {
+        "id": "gemini-3.1-flash-lite",
+        "name": "Gemini 3.1 Flash Lite",
+        "label": "Gemini 3.1 Flash Lite (gemini-3.1-flash-lite)",
+        "description": "Gemini 3.1 Flash Lite"
+      },
+      {
+        "id": "gemini-3-pro-image-preview",
+        "name": "Nano Banana Pro",
+        "label": "Nano Banana Pro (gemini-3-pro-image-preview)",
+        "description": "Gemini 3 Pro Image Preview"
+      },
+      {
+        "id": "gemini-3-pro-image",
+        "name": "Nano Banana Pro",
+        "label": "Nano Banana Pro (gemini-3-pro-image)",
+        "description": "Gemini 3 Pro Image"
+      },
+      {
+        "id": "nano-banana-pro-preview",
+        "name": "Nano Banana Pro",
+        "label": "Nano Banana Pro (nano-banana-pro-preview)",
+        "description": "Gemini 3 Pro Image Preview"
+      },
+      {
+        "id": "gemini-3.1-flash-image-preview",
+        "name": "Nano Banana 2",
+        "label": "Nano Banana 2 (gemini-3.1-flash-image-preview)",
+        "description": "Gemini 3.1 Flash Image Preview."
+      },
+      {
+        "id": "gemini-3.1-flash-image",
+        "name": "Nano Banana 2",
+        "label": "Nano Banana 2 (gemini-3.1-flash-image)",
+        "description": "Gemini 3.1 Flash Image."
+      },
+      {
+        "id": "gemini-3.1-flash-lite-image",
+        "name": "Nano Banana 2 Lite",
+        "label": "Nano Banana 2 Lite (gemini-3.1-flash-lite-image)",
+        "description": "Gemini 3.1 Flash Lite Image."
+      },
+      {
+        "id": "gemini-3.5-flash",
+        "name": "Gemini 3.5 Flash",
+        "label": "Gemini 3.5 Flash (gemini-3.5-flash)",
+        "description": "Gemini 3.5 Flash"
+      },
+      {
+        "id": "gemini-3.5-flash-lite",
+        "name": "Gemini 3.5 Flash Lite",
+        "label": "Gemini 3.5 Flash Lite (gemini-3.5-flash-lite)",
+        "description": "Gemini 3.5 Flash Lite"
+      },
+      {
+        "id": "gemini-omni-flash-preview",
+        "name": "Gemini Omni Flash Preview",
+        "label": "Gemini Omni Flash Preview (gemini-omni-flash-preview)",
+        "description": "Gemini Omni Flash Preview"
+      },
+      {
+        "id": "gemini-omni-1.1-flash",
+        "name": "Gemini Omni 1.1 Flash",
+        "label": "Gemini Omni 1.1 Flash (gemini-omni-1.1-flash)",
+        "description": "Gemini Omni 1.1 Flash "
+      },
+      {
+        "id": "gemini-3.5-transcribe",
+        "name": "Gemini 3.5 Transcribe",
+        "label": "Gemini 3.5 Transcribe (gemini-3.5-transcribe)",
+        "description": "Gemini 3.5 Transcribe"
+      },
+      {
+        "id": "gemini-3.6-flash",
+        "name": "Gemini 3.6 Flash",
+        "label": "Gemini 3.6 Flash (gemini-3.6-flash)",
+        "description": "Gemini 3.6 Flash"
+      },
+      {
+        "id": "gemini-3.7-flash",
+        "name": "Gemini 3.7 Flash",
+        "label": "Gemini 3.7 Flash (gemini-3.7-flash)",
+        "description": "Gemini 3.7 Flash"
+      },
+      {
+        "id": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
+        "label": "Gemini 3.8 Flash (gemini-3.8-flash)",
+        "description": "Gemini 3.8 Flash"
+      },
+      {
+        "id": "lyria-3-clip-preview",
+        "name": "Lyria 3 Clip Preview",
+        "label": "Lyria 3 Clip Preview (lyria-3-clip-preview)",
+        "description": "Lyria 3 30s model Preview"
+      },
+      {
+        "id": "lyria-3-pro-preview",
+        "name": "Lyria 3 Pro Preview",
+        "label": "Lyria 3 Pro Preview (lyria-3-pro-preview)",
+        "description": "Lyria 3 Pro Preview"
+      },
+      {
+        "id": "lyria-3.5",
+        "name": "Lyria 3.5",
+        "label": "Lyria 3.5 (lyria-3.5)",
+        "description": "Music Generation model"
+      },
+      {
+        "id": "gemini-3.1-flash-tts-preview",
+        "name": "Gemini 3.1 Flash TTS Preview",
+        "label": "Gemini 3.1 Flash TTS Preview (gemini-3.1-flash-tts-preview)",
+        "description": "Gemini 3.1 Flash TTS Preview"
+      },
+      {
+        "id": "gemini-robotics-er-2-preview",
+        "name": "Gemini Robotics-ER 2 Preview",
+        "label": "Gemini Robotics-ER 2 Preview (gemini-robotics-er-2-preview)",
+        "description": "Gemini Robotics-ER 2 Preview"
+      },
+      {
+        "id": "gemini-2.5-computer-use-preview-10-2025",
+        "name": "Gemini 2.5 Computer Use Preview 10-2025",
+        "label": "Gemini 2.5 Computer Use Preview 10-2025 (gemini-2.5-computer-use-preview-10-2025)",
+        "description": "Gemini 2.5 Computer Use Preview 10-2025"
+      },
+      {
+        "id": "antigravity-preview-05-2026",
+        "name": "Antigravity Agent Preview",
+        "label": "Antigravity Agent Preview (antigravity-preview-05-2026)",
+        "description": "Preview release of Antigravity Agent (05-2026)"
+      },
+      {
+        "id": "antigravity-preview-09-2026",
+        "name": "Antigravity Agent Preview",
+        "label": "Antigravity Agent Preview (antigravity-preview-09-2026)",
+        "description": "Preview release of Antigravity Agent (09-2026)"
+      },
+      {
+        "id": "deep-research-max-preview-04-2026",
+        "name": "Deep Research Max Preview (Apr-21-2026)",
+        "label": "Deep Research Max Preview (Apr-21-2026) (deep-research-max-preview-04-2026)",
+        "description": "Preview release (April 21st, 2026) of Deep Research Max"
+      },
+      {
+        "id": "deep-research-preview-04-2026",
+        "name": "Deep Research Preview (Apr-21-2026)",
+        "label": "Deep Research Preview (Apr-21-2026) (deep-research-preview-04-2026)",
+        "description": "Preview release (April 21th, 2026) of Deep Research"
+      },
+      {
+        "id": "deep-research-pro-preview-12-2025",
+        "name": "Deep Research Pro Preview (Dec-12-2025)",
+        "label": "Deep Research Pro Preview (Dec-12-2025) (deep-research-pro-preview-12-2025)",
+        "description": "Preview release (December 12th, 2025) of Deep Research Pro"
+      }
+    ],
+    "availableOpenAiModels": [
+      {
+        "id": "gpt-4o",
+        "name": "GPT-4o",
+        "label": "GPT-4o (Omni High Intelligence)"
+      },
+      {
+        "id": "gpt-4o-mini",
+        "name": "GPT-4o Mini",
+        "label": "GPT-4o Mini (Fast & Cost-Efficient)"
+      },
+      {
+        "id": "gpt-4-turbo",
+        "name": "GPT-4 Turbo",
+        "label": "GPT-4 Turbo (High Capacity)"
+      },
+      {
+        "id": "gpt-3.5-turbo",
+        "name": "GPT-3.5 Turbo",
+        "label": "GPT-3.5 Turbo (High Speed)"
+      }
+    ],
+    "strictDietEnforcement": true,
+    "enableVoiceInteraction": false
+  },
+  "maintenanceMode": false,
+  "siteDescription": "Smart Meal Planning & Recipe Assistant",
+  "allowRegistration": true,
+  "chefQuestionnaire": [
+    "How many days would you like to plan for (up to 7 days)?",
+    "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+    "When would you like the meal plan to start (today, tomorrow, or a specific date)?",
+    "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+    "What is your approximate ingredient budget per serving?"
+  ],
   "subscriptionPlans": [
     {
       "id": "preset_taster",
@@ -61,47 +426,6 @@
       "tokenReimburseFrequency": "monthly"
     }
   ],
-  "updatedAt": "2026-09-18T12:28:40.609Z",
-  "chefAiSettings": {
-    "model": "gemini-3.5-flash-lite",
-    "apiKey": "AQ.Ab8RN6IhH6iaU_4chRKwnTIyKxG4bBTJURnex1GtD9nPAttcOQ",
-    "provider": "gemini",
-    "updatedAt": "2026-09-16T05:43:42.177Z"
-  },
-  "chefQuestionnaire": [],
-  "ingredientCategories": [
-    "Produce",
-    "Dairy & Eggs",
-    "Meat & Poultry",
-    "Seafood",
-    "Bakery",
-    "Pantry & Dry Goods",
-    "Canned Goods",
-    "Baking & Cooking",
-    "Spices & Seasonings",
-    "Snacks",
-    "Beverages",
-    "Frozen Foods",
-    "Condiments & Sauces",
-    "Oils & Vinegars"
-  ],
-  "titlebarImage": "",
-  "faviconImage": "",
-  "themeColors": {
-    "accent": "#ec4899",
-    "primary": "#ec4899",
-    "cardBorder": "#2a1650",
-    "accentColor": "#ec4899",
-    "sidebarIcon": "#c084fc",
-    "primaryColor": "#ec4899",
-    "primaryHover": "#7c3aed",
-    "accentEmerald": "#ec4899",
-    "textSecondary": "#d8b4fe",
-    "backgroundDark": "#0f081c",
-    "cardBackground": "#180d2e",
-    "backgroundColor": "#0f081c",
-    "sidebarIconColor": "#c084fc"
-  },
   "supportedLanguages": [
     {
       "code": "en",
@@ -144,17 +468,20 @@
       "lastUpdated": "2026-09-18T10:38:11.128Z"
     }
   ],
-  "recipeTypes": [
-    "Breakfast",
-    "Lunch",
-    "Dinner",
-    "Snack",
-    "Dessert",
-    "Beverage",
-    "Appetizer",
-    "Salad",
-    "Soup",
-    "Side Dish",
-    "Baking"
+  "ingredientCategories": [
+    "Produce",
+    "Dairy & Eggs",
+    "Meat & Poultry",
+    "Seafood",
+    "Bakery",
+    "Pantry & Dry Goods",
+    "Canned Goods",
+    "Baking & Cooking",
+    "Spices & Seasonings",
+    "Snacks",
+    "Beverages",
+    "Frozen Foods",
+    "Condiments & Sauces",
+    "Oils & Vinegars"
   ]
 }

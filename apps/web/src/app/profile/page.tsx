@@ -453,13 +453,14 @@ export default function ProfilePage() {
   }, []);
 
   // Fetch Paginated User Transactions for "Token Transactions" Tab
-  const fetchTabTransactions = useCallback(async (pageToLoad = 1, limitToUse = tabLimit) => {
-    if (!user?.id && !user?.email) return;
+  const fetchTabTransactions = useCallback(async (pageToLoad = 1, limitToUse = tabLimit, targetUser?: any) => {
+    const activeUser = targetUser || user || getCurrentUser();
+    if (!activeUser?.id && !activeUser?.email) return;
     setTabLoading(true);
     try {
       const params = new URLSearchParams({
-        userId: user.id || '',
-        email: user.email || '',
+        userId: activeUser.id || '',
+        email: activeUser.email || '',
         page: String(pageToLoad),
         limit: String(limitToUse),
         search: tabSearch,
@@ -508,8 +509,10 @@ export default function ProfilePage() {
       }
     };
     window.addEventListener('zecratary_token_settings_updated', handleTokenSettingsUpdate);
+    window.addEventListener('zecratary_tokens_updated', handleTokenSettingsUpdate);
     return () => {
       window.removeEventListener('zecratary_token_settings_updated', handleTokenSettingsUpdate);
+      window.removeEventListener('zecratary_tokens_updated', handleTokenSettingsUpdate);
     };
   }, [syncTokenSettings, fetchOverviewTokenData, fetchTabTransactions, user, activeTab, tabPage, tabLimit]);
 

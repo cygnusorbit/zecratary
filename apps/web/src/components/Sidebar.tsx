@@ -34,11 +34,33 @@ import {
   Key,
   Coins,
   Bell,
-  User as UserIcon
+  User as UserIcon,
+  Plus,
+  ChevronDown,
+  Sparkles,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
+
+interface TokenPackage {
+  id: string;
+  name: string;
+  tokens: number;
+  price: number;
+  badge?: string;
+  isPopular?: boolean;
+}
+
+const DEFAULT_FALLBACK_PACKAGES: TokenPackage[] = [
+  { id: 'pkg_starter', name: 'Starter Pack', tokens: 250, price: 9.99, badge: 'Starter' },
+  { id: 'pkg_pro', name: 'Chef Bundle', tokens: 600, price: 19.99, badge: 'Popular' },
+  { id: 'pkg_power', name: 'Master Kitchen', tokens: 1500, price: 39.99, badge: 'Best Value' }
+];
 
 const LANGUAGE_FLAG_MAP: Record<string, string> = {
   en: '🇺🇸',
@@ -94,9 +116,18 @@ export default function Sidebar() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
 
-  // Live Token & Notification state for Top Bar
+  // Live Token & Top Up state
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [tokenName, setTokenName] = useState<string>('Foodie Token');
+  const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
+  const [showTopUpMenu, setShowTopUpMenu] = useState<boolean>(false);
+  const [showTopUpMobileMenu, setShowTopUpMobileMenu] = useState<boolean>(false);
+  const [purchasingId, setPurchasingId] = useState<string | null>(null);
+  const [topUpSuccessMsg, setTopUpSuccessMsg] = useState<string>('');
+  const [topUpErrorMsg, setTopUpErrorMsg] = useState<string>('');
+
+  // Notifications & Profile state
   const [unreadCount, setUnreadCount] = useState<number>(3);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
@@ -104,6 +135,8 @@ export default function Sidebar() {
   // Dropdown click-outside refs
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const topUpDropdownRef = useRef<HTMLDivElement>(null);
+  const topUpMobileDropdownRef = useRef<HTMLDivElement>(null);
 
   const [availableLanguages, setAvailableLanguages] = useState<{ code: string; name: string; flag: string }[]>([
     { code: 'en', name: 'English', flag: '🇺🇸' },
@@ -136,12 +169,19 @@ export default function Sidebar() {
   const fetchUserTokenAndNotifications = useCallback(async (currentUser: any) => {
     if (!currentUser) return;
     try {
-      const cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
+      let cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
+      if (!cfgRes.ok) {
+        cfgRes = await fetch('/api/admin/token-settings', { cache: 'no-store' });
+      }
       if (cfgRes.ok) {
         const cfgData = await cfgRes.json();
         const cfg = cfgData.settings || cfgData.config || cfgData;
-        if (cfg && cfg.tokenSymbol) {
-          setTokenSymbol(cfg.tokenSymbol);
+        if (cfg) {
+          if (cfg.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
+          if (cfg.tokenName) setTokenName(cfg.tokenName);
+          if (Array.isArray(cfg.packages) && cfg.packages.length > 0) {
+            setTokenPackages(cfg.packages);
+          }
         }
       }
 
@@ -234,6 +274,12 @@ export default function Sidebar() {
       if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
         setShowNotifications(false);
       }
+      if (topUpDropdownRef.current && !topUpDropdownRef.current.contains(e.target as Node)) {
+        setShowTopUpMenu(false);
+      }
+      if (topUpMobileDropdownRef.current && !topUpMobileDropdownRef.current.contains(e.target as Node)) {
+        setShowTopUpMobileMenu(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -273,7 +319,55 @@ export default function Sidebar() {
     setIsOpen(false);
     setShowProfileMenu(false);
     setShowNotifications(false);
+    setShowTopUpMenu(false);
+    setShowTopUpMobileMenu(false);
   }, [pathname]);
+
+  const handlePurchasePackage = async (pkg: TokenPackage) => {
+    if (!pkg) return;
+    setPurchasingId(pkg.id);
+    setTopUpErrorMsg('');
+    setTopUpSuccessMsg('');
+
+    try {
+      const currentUser = getCurrentUser() || user;
+      const res = await fetch('/api/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'purchase',
+          packageId: pkg.id,
+          tokens: Number(pkg.tokens),
+          price: Number(pkg.price),
+          packageName: pkg.name,
+          userEmail: currentUser?.email,
+          userId: currentUser?.id
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Failed to complete token purchase');
+      }
+
+      const newBal = typeof data.balance === 'number' ? data.balance : (tokenBalance + Number(pkg.tokens));
+      setTokenBalance(newBal);
+      setTopUpSuccessMsg(
+        t('tokenPurchasedSuccess', `Successfully added +${Number(pkg.tokens).toLocaleString()} ${tokenSymbol}!`)
+      );
+
+      window.dispatchEvent(new Event('zecratary_tokens_updated'));
+      window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+
+      setTimeout(() => {
+        setTopUpSuccessMsg('');
+      }, 4000);
+    } catch (err: any) {
+      setTopUpErrorMsg(err.message || 'Purchase failed. Please try again.');
+    } finally {
+      setPurchasingId(null);
+    }
+  };
 
   const isAdmin = user && (
     user.role === 'admin' || 
@@ -306,26 +400,132 @@ export default function Sidebar() {
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
 
+  const displayPackages = tokenPackages.length > 0 ? tokenPackages : DEFAULT_FALLBACK_PACKAGES;
+
   return (
     <>
       {/* MOBILE TOP BAR */}
       <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
         <Link href="/dashboard" className="flex items-center gap-2">
           {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[130px]">
+          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[120px]">
             {displayName}
           </span>
         </Link>
-        <div className="flex items-center gap-2">
-          <Link href="/profile" className="flex items-center gap-1 px-2.5 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)]">
-            <Coins className="h-3.5 w-3.5 text-amber-500" />
-            <span style={{ color: 'var(--color-emerald)' }}>{tokenBalance.toLocaleString()}</span>
-          </Link>
+        <div className="flex items-center gap-1.5">
+          {/* Mobile Token Balance & Top Up */}
+          <div className="relative" ref={topUpMobileDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowTopUpMobileMenu(!showTopUpMobileMenu);
+                setShowProfileMenu(false);
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
+            >
+              <Coins className="h-3.5 w-3.5 text-amber-500" />
+              <span style={{ color: 'var(--color-emerald)' }}>{tokenBalance.toLocaleString()}</span>
+              <span className="px-1.5 py-0.2 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center gap-0.5">
+                <Plus className="h-2.5 w-2.5 stroke-[3]" />
+                <span>Top Up</span>
+              </span>
+            </button>
 
+            {/* Mobile Top Up Drawer */}
+            {showTopUpMobileMenu && (
+              <div 
+                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <Coins className="h-4 w-4 text-amber-500" />
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wider">{t('topUpTokens') || 'Top Up Tokens'}</h3>
+                      <p className="text-[10px] opacity-70">Balance: <span style={{ color: 'var(--color-emerald)' }}>{tokenBalance.toLocaleString()} {tokenSymbol}</span></p>
+                    </div>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setShowTopUpMobileMenu(false)}
+                    className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {topUpSuccessMsg && (
+                  <div className="p-2.5 rounded-xl border text-xs font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 flex items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    <span>{topUpSuccessMsg}</span>
+                  </div>
+                )}
+                {topUpErrorMsg && (
+                  <div className="p-2.5 rounded-xl border text-xs font-bold text-red-400 border-red-500/30 bg-red-500/10 flex items-center gap-2">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{topUpErrorMsg}</span>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {displayPackages.map((pkg) => (
+                    <div 
+                      key={pkg.id}
+                      className="p-3 rounded-2xl border flex items-center justify-between gap-2"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-black truncate">{pkg.name}</span>
+                          {pkg.badge && (
+                            <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-amber-500/20 text-amber-500">
+                              {pkg.badge}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>
+                          +{Number(pkg.tokens).toLocaleString()} {tokenSymbol}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-mono font-black">${Number(pkg.price).toFixed(2)}</span>
+                        <button
+                          type="button"
+                          disabled={purchasingId === pkg.id}
+                          onClick={() => handlePurchasePackage(pkg)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-extrabold text-white cursor-pointer disabled:opacity-50"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                        >
+                          {purchasingId === pkg.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : (t('buy') || 'Buy')}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
+                  <Link
+                    href="/billing"
+                    onClick={() => setShowTopUpMobileMenu(false)}
+                    className="text-xs font-bold hover:underline"
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    {t('viewSubscriptionPlans') || 'View Monthly Subscription Plans'}
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Profile Button */}
           <div className="relative" ref={profileDropdownRef}>
             <button
               type="button"
-              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              onClick={() => {
+                setShowProfileMenu(!showProfileMenu);
+                setShowTopUpMobileMenu(false);
+              }}
               className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
               aria-label="User Profile"
             >
@@ -427,7 +627,7 @@ export default function Sidebar() {
         </div>
       </header>
 
-      {/* DESKTOP TOP BAR (PROTECTED ID, FIXED 64PX, PERFECT VERTICAL CENTERING) */}
+      {/* DESKTOP TOP BAR */}
       <div 
         id="zecratary-desktop-topbar"
         className={`hidden md:flex fixed top-0 right-0 z-30 h-16 bg-[var(--color-card)] border-b border-[var(--color-border)] px-6 items-center justify-between transition-all duration-300 ${
@@ -447,20 +647,168 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Token Balance Widget */}
-          <Link 
-            href="/profile" 
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition shadow-xs group"
-            title="View Token Balance & Summary"
-          >
-            <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-              {tokenBalance.toLocaleString()}
-            </span>
-            <span className="text-xs font-bold text-amber-500 font-mono">
-              {tokenSymbol}
-            </span>
-          </Link>
+          {/* TOKEN BALANCE & TOP UP WIDGET */}
+          <div className="relative flex items-center" ref={topUpDropdownRef}>
+            <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
+              <Link 
+                href="/profile" 
+                className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
+                title={t('viewTokenBalance') || 'View Token Balance & Summary'}
+              >
+                <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
+                <span className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+                  {tokenBalance.toLocaleString()}
+                </span>
+                <span className="text-xs font-bold text-amber-500 font-mono">
+                  {tokenSymbol}
+                </span>
+              </Link>
+
+              {/* Top Up Button with Dropdown Trigger */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTopUpMenu(!showTopUpMenu);
+                  setShowNotifications(false);
+                  setShowProfileMenu(false);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+                title={t('topUpTokens') || 'Top Up Tokens'}
+                aria-label="Top Up Tokens"
+              >
+                <Plus className="h-3 w-3 stroke-[3]" />
+                <span>{t('topUp') || 'Top Up'}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${showTopUpMenu ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+
+            {/* Top Up Dropdown Menu */}
+            {showTopUpMenu && (
+              <div 
+                className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
+                style={{ 
+                  backgroundColor: 'var(--color-card)', 
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
+                      <Coins className="h-4 w-4 text-amber-500" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                        {t('topUpTokens') || 'Top Up Tokens'}
+                      </h3>
+                      <p className="text-[10px] opacity-70">
+                        {t('topUpSubtitle') || 'Add tokens directly to your balance'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+                    <span>{tokenBalance.toLocaleString()}</span>
+                    <span className="text-amber-500 font-bold">{tokenSymbol}</span>
+                  </div>
+                </div>
+
+                {topUpSuccessMsg && (
+                  <div 
+                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="text-[11px]">{topUpSuccessMsg}</span>
+                  </div>
+                )}
+
+                {topUpErrorMsg && (
+                  <div 
+                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#ef4444', color: '#ef4444' }}
+                  >
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span className="text-[11px]">{topUpErrorMsg}</span>
+                  </div>
+                )}
+
+                {/* Packages List */}
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {displayPackages.map((pkg) => (
+                    <div 
+                      key={pkg.id}
+                      className="p-3 rounded-2xl border transition flex items-center justify-between gap-3 group hover:border-[var(--color-primary)]/50"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
+                            {pkg.name}
+                          </span>
+                          {pkg.badge && (
+                            <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                              {pkg.badge}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+                          <span>+{Number(pkg.tokens).toLocaleString()}</span>
+                          <span className="text-amber-500 font-bold">{tokenSymbol}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
+                          ${Number(pkg.price).toFixed(2)}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={purchasingId === pkg.id}
+                          onClick={() => handlePurchasePackage(pkg)}
+                          className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-95 shadow-xs"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                        >
+                          {purchasingId === pkg.id ? (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <>
+                              <Sparkles className="h-3 w-3" />
+                              <span>{t('buy') || 'Buy'}</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Footer Links */}
+                <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
+                  <Link
+                    href="/billing"
+                    onClick={() => setShowTopUpMenu(false)}
+                    className="flex items-center justify-between text-xs font-bold hover:underline"
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    <span>{t('viewSubscriptionPlans') || 'View Monthly Subscription Plans'}</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
+                  {isAdmin && (
+                    <Link
+                      href="/admin/token-setting"
+                      onClick={() => setShowTopUpMenu(false)}
+                      className="flex items-center justify-between text-[10px] font-semibold opacity-70 hover:opacity-100 hover:underline"
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      <span>{t('adminManagePackages') || 'Admin: Manage Packages in /admin/token-setting'}</span>
+                      <Settings className="h-3 w-3" />
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Notification Icon with Dropdown */}
           <div className="relative" ref={notifDropdownRef}>
@@ -469,6 +817,7 @@ export default function Sidebar() {
               onClick={() => {
                 setShowNotifications(!showNotifications);
                 setShowProfileMenu(false);
+                setShowTopUpMenu(false);
               }}
               className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="Notifications"
@@ -515,13 +864,14 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* Profile Lucide-User Icon on Top Right with Dropdown */}
+          {/* Profile Dropdown */}
           <div className="relative" ref={profileDropdownRef}>
             <button
               type="button"
               onClick={() => {
                 setShowProfileMenu(!showProfileMenu);
                 setShowNotifications(false);
+                setShowTopUpMenu(false);
               }}
               className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="User Profile Dropdown"

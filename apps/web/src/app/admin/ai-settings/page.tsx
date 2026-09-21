@@ -1,7 +1,7 @@
 // Generated / Updated by AI Collaborator
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Radio, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Key, Sliders, Sparkles, Globe, PackageCheck, 
@@ -22,6 +22,28 @@ interface QuestionnaireSection {
   enabled?: boolean;
   questions: string[];
 }
+
+export interface AiModelOption {
+  id: string;
+  name: string;
+  label?: string;
+  description?: string;
+}
+
+const DEFAULT_GEMINI_MODELS: AiModelOption[] = [
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', label: 'Gemini 2.5 Flash (Fast & Recommended)' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', label: 'Gemini 2.5 Pro (Deep Reasoning)' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', label: 'Gemini 2.0 Flash (Next-Gen High Speed)' },
+  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', label: 'Gemini 1.5 Flash (Versatile & Stable)' },
+  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', label: 'Gemini 1.5 Pro (Multimodal Long-Context)' }
+];
+
+const DEFAULT_OPENAI_MODELS: AiModelOption[] = [
+  { id: 'gpt-4o', name: 'GPT-4o', label: 'GPT-4o (Omni High Intelligence)' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', label: 'GPT-4o Mini (Fast & Cost-Efficient)' },
+  { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', label: 'GPT-4 Turbo (High Capacity)' },
+  { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', label: 'GPT-3.5 Turbo (High Speed)' }
+];
 
 const DEFAULT_SECTIONS: QuestionnaireSection[] = [
   {
@@ -59,11 +81,18 @@ export default function ChefAISettingsPage() {
   const [activeTab, setActiveTab] = useState<'general' | 'questionnaire' | 'voice' | 'advanced'>('general');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
-  // AI Configurations
+  // AI Configurations & Dynamic Models
   const [provider, setProvider] = useState<'gemini' | 'openai'>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('gemini-3.5-flash-lite');
+  const [model, setModel] = useState('gemini-2.5-flash');
+  const [geminiModelsList, setGeminiModelsList] = useState<AiModelOption[]>(DEFAULT_GEMINI_MODELS);
+  const [openaiModelsList, setOpenaiModelsList] = useState<AiModelOption[]>(DEFAULT_OPENAI_MODELS);
+  const [syncingModels, setSyncingModels] = useState(false);
+
+  const modelRef = useRef(model);
+  modelRef.current = model;
+
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(4096);
   const [systemPrompt, setSystemPrompt] = useState(
@@ -108,7 +137,7 @@ export default function ChefAISettingsPage() {
 
   const [saved, setSaved] = useState(false);
 
-  // Dynamic Theme Synchronization & Smooth Day/Dark Transition
+  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback((incomingColors?: any) => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -155,17 +184,7 @@ export default function ChefAISettingsPage() {
           applySavedTheme(data.themeColors);
         }
       })
-      .catch(() => {
-        fetch('/api/user/theme', { cache: 'no-store' })
-          .then(res => res.json())
-          .then(data => {
-            if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
-              localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
-              applySavedTheme(data.themeColors);
-            }
-          })
-          .catch(() => {});
-      });
+      .catch(() => {});
 
     const handleThemeEvent = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
@@ -175,14 +194,12 @@ export default function ChefAISettingsPage() {
     window.addEventListener('zecratary_theme_updated', handleThemeEvent);
     window.addEventListener('zecratary_theme_mode_changed', handleThemeEvent);
     window.addEventListener('zecratary_theme_changed', handleThemeEvent);
-    window.addEventListener('zecratary_admin_settings_updated', handleThemeEvent);
     window.addEventListener('storage', handleThemeEvent);
 
     return () => {
       window.removeEventListener('zecratary_theme_updated', handleThemeEvent);
       window.removeEventListener('zecratary_theme_mode_changed', handleThemeEvent);
       window.removeEventListener('zecratary_theme_changed', handleThemeEvent);
-      window.removeEventListener('zecratary_admin_settings_updated', handleThemeEvent);
       window.removeEventListener('storage', handleThemeEvent);
     };
   }, [applySavedTheme]);
@@ -228,8 +245,20 @@ export default function ChefAISettingsPage() {
         else if (serverData.aiProvider) setProvider(serverData.aiProvider);
 
         if (c.apiKey !== undefined) setApiKey(c.apiKey);
-        if (c.model) setModel(c.model);
-        else if (serverData.aiModel) setModel(serverData.aiModel);
+
+        // Load models list first before restoring selected model
+        if (Array.isArray(c.availableGeminiModels) && c.availableGeminiModels.length > 0) {
+          setGeminiModelsList(c.availableGeminiModels);
+        }
+        if (Array.isArray(c.availableOpenAiModels) && c.availableOpenAiModels.length > 0) {
+          setOpenaiModelsList(c.availableOpenAiModels);
+        }
+
+        const savedModel = c.model || serverData.aiModel || serverData.model;
+        if (savedModel) {
+          setModel(savedModel);
+          modelRef.current = savedModel;
+        }
 
         if (c.temperature !== undefined) setTemperature(c.temperature);
         if (c.maxTokens !== undefined) setMaxTokens(c.maxTokens);
@@ -262,23 +291,87 @@ export default function ChefAISettingsPage() {
   useEffect(() => {
     fetchEnvKeys();
     loadSettingsFromServer();
-    setTimeout(() => {
-      autoConnectGemini(true);
-    }, 400);
   }, [loadSettingsFromServer]);
 
   const handleProviderChange = (newProvider: 'gemini' | 'openai') => {
     setProvider(newProvider);
     if (newProvider === 'gemini') {
-      setModel('gemini-3.5-flash-lite');
+      const activeGemini = geminiModelsList.length > 0 ? geminiModelsList[0].id : 'gemini-2.5-flash';
+      setModel(activeGemini);
+      modelRef.current = activeGemini;
       if (envKeysMap['GEMINI_API_KEY'] && !apiKey.trim()) {
         setApiKey(envKeysMap['GEMINI_API_KEY']);
       }
     } else {
-      setModel('gpt-4o');
+      const activeOpenAI = openaiModelsList.length > 0 ? openaiModelsList[0].id : 'gpt-4o';
+      setModel(activeOpenAI);
+      modelRef.current = activeOpenAI;
       if (envKeysMap['OPENAI_API_KEY'] && !apiKey.trim()) {
         setApiKey(envKeysMap['OPENAI_API_KEY']);
       }
+    }
+  };
+
+  const handleSyncModels = async () => {
+    const keyToQuery = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
+    if (!keyToQuery) {
+      setTestResult({ success: false, message: t('enterApiKeyFirst', 'Please enter an API key or sync from .env first.') });
+      return;
+    }
+    setSyncingModels(true);
+    setTestResult(null);
+
+    try {
+      const res = await fetch('/api/admin/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, apiKey: keyToQuery })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.models) && data.models.length > 0) {
+        let updatedModel = modelRef.current;
+        if (provider === 'gemini') {
+          setGeminiModelsList(data.models);
+          if (!data.models.some((m: any) => m.id === updatedModel)) {
+            updatedModel = data.models[0].id;
+            setModel(updatedModel);
+            modelRef.current = updatedModel;
+          }
+        } else {
+          setOpenaiModelsList(data.models);
+          if (!data.models.some((m: any) => m.id === updatedModel)) {
+            updatedModel = data.models[0].id;
+            setModel(updatedModel);
+            modelRef.current = updatedModel;
+          }
+        }
+
+        setTestResult({
+          success: true,
+          message: `${t('modelsSyncedNotice', 'Synced latest models dynamically')}: ${data.models.length} ${t('modelsFound', 'models discovered')}.`
+        });
+
+        // Persist model list without overwriting current configured model
+        await persistServerAdminSettings({
+          aiProvider: provider,
+          aiModel: updatedModel,
+          chefAiSettings: {
+            provider,
+            apiKey: keyToQuery,
+            model: updatedModel,
+            availableGeminiModels: provider === 'gemini' ? data.models : geminiModelsList,
+            availableOpenAiModels: provider === 'openai' ? data.models : openaiModelsList,
+            updatedAt: new Date().toISOString()
+          }
+        });
+      } else {
+        setTestResult({ success: false, message: data.error || t('failedToRetrieveModels', 'Failed to retrieve models from provider API.') });
+      }
+    } catch (err: any) {
+      setTestResult({ success: false, message: err.message || t('modelSyncError', 'Error connecting to model registry.') });
+    } finally {
+      setSyncingModels(false);
     }
   };
 
@@ -298,7 +391,7 @@ export default function ChefAISettingsPage() {
         body: JSON.stringify({
           provider,
           apiKey: keyToTest,
-          model
+          model: modelRef.current
         })
       });
 
@@ -309,8 +402,16 @@ export default function ChefAISettingsPage() {
       } catch (_) {
         data = { success: false, error: `Invalid response from server (${res.status}: ${res.statusText})` };
       }
+
       if (data.success) {
         setTestResult({ success: true, message: data.message });
+        if (Array.isArray(data.models) && data.models.length > 0) {
+          if (provider === 'gemini') {
+            setGeminiModelsList(data.models);
+          } else {
+            setOpenaiModelsList(data.models);
+          }
+        }
       } else {
         setTestResult({ success: false, message: data.error || t('connectionFailed', 'Connection failed.') });
       }
@@ -346,13 +447,14 @@ export default function ChefAISettingsPage() {
         return;
       }
 
+      const activeModelToTest = modelRef.current || 'gemini-2.5-flash';
       const testRes = await fetch('/api/admin/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'gemini',
           apiKey: resolvedKey,
-          model: model || 'gemini-1.5-flash'
+          model: activeModelToTest
         })
       });
 
@@ -363,24 +465,25 @@ export default function ChefAISettingsPage() {
       } catch (_) {
         testData = { success: false, error: `Invalid server response (${testRes.status})` };
       }
+
       if (testData.success) {
-        setTestResult({ success: true, message: `Connected to Google Gemini (${model || 'gemini-1.5-flash'}) & key synced!` });
+        if (Array.isArray(testData.models) && testData.models.length > 0) {
+          setGeminiModelsList(testData.models);
+        }
 
-        await persistServerAdminSettings({
-          aiProvider: 'gemini',
-          aiModel: model || 'gemini-1.5-flash',
-          chefAiSettings: {
-            provider: 'gemini',
-            apiKey: resolvedKey,
-            model: model || 'gemini-1.5-flash',
-            updatedAt: new Date().toISOString()
-          }
-        });
-
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-          window.dispatchEvent(new Event('zecratary_settings_updated'));
-          window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+        if (!silent) {
+          setTestResult({ success: true, message: testData.message || `Connected to Google Gemini & dynamic models synced!` });
+          await persistServerAdminSettings({
+            aiProvider: 'gemini',
+            aiModel: activeModelToTest,
+            chefAiSettings: {
+              provider: 'gemini',
+              apiKey: resolvedKey,
+              model: activeModelToTest,
+              availableGeminiModels: testData.models || geminiModelsList,
+              updatedAt: new Date().toISOString()
+            }
+          });
         }
       } else if (!silent) {
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
@@ -416,17 +519,13 @@ export default function ChefAISettingsPage() {
 
         await persistServerAdminSettings({
           aiProvider: provider,
+          aiModel: modelRef.current,
           chefAiSettings: {
             apiKey: cleanKey,
-            provider
+            provider,
+            model: modelRef.current
           }
         });
-
-        setTimeout(() => {
-          if (provider === 'gemini') {
-            autoConnectGemini(true);
-          }
-        }, 300);
       } else {
         setTestResult({
           success: false,
@@ -504,11 +603,14 @@ export default function ChefAISettingsPage() {
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const cleanApiKey = apiKey.trim();
+    const activeModel = modelRef.current;
 
     const config = {
       provider,
       apiKey: cleanApiKey,
-      model,
+      model: activeModel,
+      availableGeminiModels: geminiModelsList,
+      availableOpenAiModels: openaiModelsList,
       temperature,
       maxTokens,
       systemPrompt,
@@ -533,13 +635,15 @@ export default function ChefAISettingsPage() {
       .filter(s => s.enabled !== false)
       .flatMap(s => s.questions);
 
+    // 1. Persist to PostgreSQL admin_settings with selected model
     await persistServerAdminSettings({
       aiProvider: provider,
-      aiModel: model,
+      aiModel: activeModel,
       chefAiSettings: config,
       chefQuestionnaire: activeFlattenedQuestions
     });
 
+    // 2. Synchronize key & model with .env and PostgreSQL admin_api_keys
     if (cleanApiKey) {
       try {
         const res = await fetch('/api/admin/keys', {
@@ -550,6 +654,7 @@ export default function ChefAISettingsPage() {
             provider,
             envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
             keyValue: cleanApiKey,
+            model: activeModel,
             status: 'active'
           })
         });
@@ -558,7 +663,7 @@ export default function ChefAISettingsPage() {
         if (res.ok && data.success) {
           setTestResult({
             success: true,
-            message: `Key saved to local .env and synchronized (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
+            message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (${provider === 'gemini' ? 'Gemini' : 'OpenAI'} • ${activeModel})`
           });
         } else {
           setTestResult({
@@ -572,6 +677,11 @@ export default function ChefAISettingsPage() {
           message: `Server stored settings, but .env save failed: ${err.message || 'Network error'}`
         });
       }
+    } else {
+      setTestResult({
+        success: true,
+        message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (Model: ${activeModel})`
+      });
     }
 
     if (typeof window !== 'undefined') {
@@ -586,6 +696,8 @@ export default function ChefAISettingsPage() {
   };
 
   const activeSection = sections.find(s => s.id === activeTopicId) || sections[0];
+  const activeModelsList = provider === 'gemini' ? geminiModelsList : openaiModelsList;
+  const currentModelInList = activeModelsList.some(m => m.id === model);
 
   return (
     <div 
@@ -714,7 +826,7 @@ export default function ChefAISettingsPage() {
                       borderColor: 'var(--color-primary)',
                       color: 'var(--color-primary)'
                     }}
-                    title="Auto-connect and sync Gemini API key"
+                    title="Auto-connect and sync Gemini API key and models"
                   >
                     <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse' : ''}`} style={{ color: autoConnecting ? '#f59e0b' : 'var(--color-primary)' }} />
                     <span>{autoConnecting ? t('connecting', 'Connecting...') : t('autoConnectGemini', 'Auto-Connect Gemini')}</span>
@@ -751,7 +863,7 @@ export default function ChefAISettingsPage() {
                   <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>Google Gemini</span>
-                    <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 1.5</span>
+                    <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 2.0 / 1.5</span>
                   </div>
                 </button>
 
@@ -768,7 +880,7 @@ export default function ChefAISettingsPage() {
                   <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>OpenAI GPT</span>
-                    <span className="text-[11px] opacity-75">GPT-4o / GPT-4 Turbo</span>
+                    <span className="text-[11px] opacity-75">GPT-4o / GPT-4 Turbo / o1</span>
                   </div>
                 </button>
               </div>
@@ -812,7 +924,7 @@ export default function ChefAISettingsPage() {
                         disabled={testingKey}
                         className="px-2.5 py-1.5 rounded-lg text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-md disabled:opacity-50 hover:opacity-90"
                         style={{ backgroundColor: 'var(--color-primary)' }}
-                        title="Test API Key connection live"
+                        title="Test API Key connection live and sync models"
                       >
                         {testingKey ? (
                           <>
@@ -851,13 +963,36 @@ export default function ChefAISettingsPage() {
                   </span>
                 </div>
 
+                {/* DYNAMIC MODEL VERSION SELECTOR */}
                 <div>
-                  <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('modelVersionIdentifier', 'Model Version Identifier')}
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('modelVersionIdentifier', 'Model Version Identifier')}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleSyncModels}
+                      disabled={syncingModels}
+                      className="border font-bold text-[10px] px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:opacity-80"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-primary)'
+                      }}
+                      title="Query live Gemini API catalog and update dropdown"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${syncingModels ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+                      <span>{syncingModels ? t('syncingModels', 'Syncing Models...') : t('syncModelsFromApi', 'Sync Models from API')}</span>
+                    </button>
+                  </div>
+
                   <select
                     value={model}
-                    onChange={(e) => setModel(e.target.value)}
+                    onChange={(e) => {
+                      const sel = e.target.value;
+                      setModel(sel);
+                      modelRef.current = sel;
+                    }}
                     className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition font-medium"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -865,29 +1000,31 @@ export default function ChefAISettingsPage() {
                       color: 'var(--color-text)'
                     }}
                   >
-                    {provider === 'gemini' ? (
-                      <>
-                        <option value="gemini-3.6-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 3.6 Flash (Latest Recommended)</option>
-                        <option value="gemini-3.5-flash-lite" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 3.5 Flash Lite (Lightweight & Fast)</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4o (Advanced reasoning)</option>
-                        <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4 Turbo</option>
-                        <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-3.5 Turbo (High speed)</option>
-                      </>
+                    {!currentModelInList && model && (
+                      <option value={model} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {model} ({t('currentlyConfigured', 'Current Configured')})
+                      </option>
                     )}
+                    {activeModelsList.map((m) => (
+                      <option key={m.id} value={m.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {m.label || m.name || m.id}
+                      </option>
+                    ))}
                   </select>
-                  <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}
-                  </span>
+
+                  <div className="flex items-center justify-between text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    <span>{t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}</span>
+                    <span className="font-semibold text-emerald-500">
+                      {activeModelsList.length} {t('modelsAvailableDynamically', 'models available dynamically')}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER & RESULTS APPEARANCE PREVIEW */}
+        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER */}
         {activeTab === 'questionnaire' && (
           <div className="space-y-6 animate-in fade-in">
             <div 
@@ -937,7 +1074,7 @@ export default function ChefAISettingsPage() {
                           onClick={() => setActiveTopicId(sec.id)}
                           className="p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between shadow-xs"
                           style={{
-                            backgroundColor: isActive ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                            backgroundColor: 'var(--color-inner-dark)',
                             borderColor: isActive ? 'var(--color-primary)' : 'var(--color-border)',
                             opacity: isEnabled ? 1 : 0.65
                           }}
@@ -1213,7 +1350,7 @@ export default function ChefAISettingsPage() {
                       onClick={() => setResultDisplayMode(mode.id as any)}
                       className="p-4 rounded-2xl border cursor-pointer transition space-y-2 shadow-xs hover:opacity-90"
                       style={{
-                        backgroundColor: isSel ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                        backgroundColor: 'var(--color-inner-dark)',
                         borderColor: isSel ? 'var(--color-primary)' : 'var(--color-border)',
                         color: isSel ? 'var(--color-text)' : 'var(--color-text-secondary)'
                       }}
@@ -1487,7 +1624,7 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 4: AGENT PARAMETERS (AUTONOMOUS CAPABILITIES & KNOWLEDGE TUNING) */}
+        {/* TAB 4: AGENT PARAMETERS */}
         {activeTab === 'advanced' && (
           <div className="space-y-6 animate-in fade-in">
             {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
@@ -1732,7 +1869,7 @@ export default function ChefAISettingsPage() {
               {/* CUSTOM VOCABULARY FEATURE */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
                     <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
                   </h3>
                   <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
