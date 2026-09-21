@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.6.0",
+  "version": "7.6.1",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.6.0",
+  "version": "7.6.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9078,7 +9078,7 @@ export default function ChefChatPage() {
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-3.6-flash');
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [customVocabularyList, setCustomVocabularyList] = useState<string[]>([]);
@@ -9458,7 +9458,10 @@ export default function ChefChatPage() {
         const sData = await sRes.json();
         const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
         if (chefCfg) {
-          if (chefCfg.model || sData.aiModel) setActiveAiModel(chefCfg.model || sData.aiModel);
+          if (sData.aiModel || chefCfg.model) {
+          const resolved = sData.aiModel || chefCfg.model;
+          setActiveAiModel(resolved.replace(/^models\//, ''));
+        }
           if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
           if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
           if (Array.isArray(chefCfg.customVocabularyList)) setCustomVocabularyList(chefCfg.customVocabularyList.filter(Boolean));
@@ -14412,11 +14415,9 @@ export interface AiModelOption {
 }
 
 const DEFAULT_GEMINI_MODELS: AiModelOption[] = [
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', label: 'Gemini 2.5 Flash (Fast & Recommended)' },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', label: 'Gemini 2.5 Pro (Deep Reasoning)' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', label: 'Gemini 2.0 Flash (Next-Gen High Speed)' },
-  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', label: 'Gemini 1.5 Flash (Versatile & Stable)' },
-  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', label: 'Gemini 1.5 Pro (Multimodal Long-Context)' }
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', label: 'Gemini 3.6 Flash (Latest Recommended - 2026)' },
+  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', label: 'Gemini 1.5 Flash (Stable Long-Context)' },
+  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', label: 'Gemini 1.5 Pro (Deep Reasoning & Multimodal)' }
 ];
 
 const DEFAULT_OPENAI_MODELS: AiModelOption[] = [
@@ -14466,7 +14467,7 @@ export default function ChefAISettingsPage() {
   const [provider, setProvider] = useState<'gemini' | 'openai'>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('gemini-2.5-flash');
+  const [model, setModel] = useState('gemini-3.6-flash');
   const [geminiModelsList, setGeminiModelsList] = useState<AiModelOption[]>(DEFAULT_GEMINI_MODELS);
   const [openaiModelsList, setOpenaiModelsList] = useState<AiModelOption[]>(DEFAULT_OPENAI_MODELS);
   const [syncingModels, setSyncingModels] = useState(false);
@@ -14597,8 +14598,10 @@ export default function ChefAISettingsPage() {
             if (k.envKey && k.keyValue) {
               map[k.envKey] = k.keyValue;
               const u = k.envKey.toUpperCase();
-              if (u.includes('GEMINI') || u.includes('GOOGLE')) {
-                map['GEMINI_API_KEY'] = k.keyValue;
+              const val = String(k.keyValue || '').trim();
+              const isOAuth = val.includes('.apps.googleusercontent.com') || val.startsWith('GOCSPX-') || u.includes('CLIENT_ID') || u.includes('CLIENT_SECRET');
+              if (!isOAuth && (u === 'GEMINI_API_KEY' || u === 'GOOGLE_AI_KEY' || u === 'GOOGLE_GENAI_API_KEY' || (u === 'GOOGLE_API_KEY' && val.startsWith('AIzaSy')))) {
+                map['GEMINI_API_KEY'] = val;
               }
               if (u.includes('OPENAI')) {
                 map['OPENAI_API_KEY'] = k.keyValue;
@@ -14757,7 +14760,12 @@ export default function ChefAISettingsPage() {
   };
 
   const handleTestApiKey = async () => {
-    const keyToTest = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
+    const rawKey = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
+    const keyToTest = rawKey.replace(/^["']|["']$/g, '').trim();
+    if (provider === 'gemini' && (keyToTest.includes('.apps.googleusercontent.com') || keyToTest.startsWith('GOCSPX-'))) {
+      setTestResult({ success: false, message: t('oauthKeyError', 'Invalid Key Type: You entered a Google OAuth Client ID or Secret instead of a Gemini API Key. Please get a Gemini API Key starting with "AIzaSy" from https://aistudio.google.com/app/apikey.') });
+      return;
+    }
     if (!keyToTest) {
       setTestResult({ success: false, message: t('enterApiKeyFirst', 'Please enter an API key or sync from .env first.') });
       return;
@@ -36421,8 +36429,7 @@ async function getPostgresPool() {
       connectionString: connStr,
       ssl: requiresSsl ? { rejectUnauthorized: false } : false
     });
-  } catch (err) {
-    console.error('[PostgreSQL] Connection pool init notice:', err);
+  } catch (_) {
     return null;
   }
 }
@@ -36450,25 +36457,42 @@ async function persistDiscoveredModels(provider: string, models: any[]) {
       );
     }
     await pool.end();
-  } catch (e) {
-    console.error('[PostgreSQL] Failed persisting discovered models:', e);
-  }
+  } catch (_) {}
 }
 
 export async function POST(req: NextRequest) {
   try {
     const { provider, apiKey, model } = await req.json();
-    const cleanKey = (apiKey || '').trim();
+    const cleanKey = (apiKey || '').trim().replace(/^["']|["']$/g, '');
 
     if (!cleanKey) {
       return NextResponse.json({ success: false, error: 'No API key provided to test.' }, { status: 400 });
     }
 
     if (provider === 'gemini') {
+      if (cleanKey.includes('.apps.googleusercontent.com')) {
+        return NextResponse.json({
+          success: false,
+          error: "Invalid Credential Type: You entered a Google OAuth Client ID (for Social Login), not a Gemini API Key. Please get an API key starting with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
+        }, { status: 400 });
+      }
+
+      if (cleanKey.startsWith('GOCSPX-')) {
+        return NextResponse.json({
+          success: false,
+          error: "Invalid Credential Type: You entered a Google OAuth Client Secret, not a Gemini API Key. Please get an API key starting with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
+        }, { status: 400 });
+      }
+
       let discoveredModels: any[] = [];
       try {
-        const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`;
-        const listRes = await fetch(listUrl, { cache: 'no-store' });
+        const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
+        const listRes = await fetch(listUrl, {
+          cache: 'no-store',
+          headers: {
+            'x-goog-api-key': cleanKey
+          }
+        });
         if (listRes.ok) {
           const listData = await listRes.json();
           if (Array.isArray(listData.models)) {
@@ -36492,27 +36516,44 @@ export async function POST(req: NextRequest) {
                 };
               });
           }
+        } else {
+          const errData = await listRes.json().catch(() => ({}));
+          const errMsg = errData.error?.message || '';
+          if (listRes.status === 401 || errMsg.includes('authentication credentials') || errMsg.includes('API key')) {
+            return NextResponse.json({
+              success: false,
+              error: "Google API Authentication Failed (401): The provided Gemini API Key is invalid or expired. Please check your API key at https://aistudio.google.com/app/apikey."
+            }, { status: 401 });
+          }
         }
       } catch (err) {
         console.warn('[Gemini] Model listing error:', err);
       }
 
       const activeModel = model || (discoveredModels.length > 0 ? discoveredModels[0].id : 'gemini-2.5-flash');
-      const genUrl = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${cleanKey}`;
+      const genUrl = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${encodeURIComponent(cleanKey)}`;
       const res = await fetch(genUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cleanKey
+        },
         body: JSON.stringify({
           contents: [{ parts: [{ text: 'Ping' }] }],
           generationConfig: { maxOutputTokens: 3 }
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) {
+        const rawMsg = data.error?.message || `Google API handshake failed (${res.status})`;
+        let friendly = rawMsg;
+        if (res.status === 401 || rawMsg.includes('authentication credentials') || rawMsg.includes('API key')) {
+          friendly = "Google API Authentication Failed (401): The provided Gemini API Key is invalid, expired, or rejected. Please obtain an active API key from Google AI Studio (https://aistudio.google.com/app/apikey).";
+        }
         return NextResponse.json({
           success: false,
-          error: data.error?.message || `Google API handshake failed (${res.status})`,
+          error: friendly,
           models: discoveredModels
         });
       }
@@ -36624,22 +36665,36 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const { provider, apiKey } = await req.json();
-    const cleanKey = (apiKey || '').trim();
+    const cleanKey = (apiKey || '').trim().replace(/^["']|["']$/g, '');
 
     if (!cleanKey) {
       return NextResponse.json({ success: false, error: 'API key is required to query models.' }, { status: 400 });
     }
 
     if (provider === 'gemini') {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`;
-      const res = await fetch(url, { cache: 'no-store' });
-      const data = await res.json();
-
-      if (!res.ok || data.error) {
+      if (cleanKey.includes('.apps.googleusercontent.com') || cleanKey.startsWith('GOCSPX-')) {
         return NextResponse.json({
           success: false,
-          error: data.error?.message || `Google API model listing failed (${res.status})`
-        }, { status: res.status || 400 });
+          error: "Invalid Key Type: You entered a Google OAuth credential instead of a Gemini API Key. Please get a Gemini API Key from https://aistudio.google.com/app/apikey."
+        }, { status: 400 });
+      }
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
+      const res = await fetch(url, {
+        cache: 'no-store',
+        headers: {
+          'x-goog-api-key': cleanKey
+        }
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || data.error) {
+        const rawMsg = data.error?.message || `Google API model listing failed (${res.status})`;
+        let friendly = rawMsg;
+        if (res.status === 401 || rawMsg.includes('authentication credentials') || rawMsg.includes('API key')) {
+          friendly = "Google API Authentication Failed (401): The provided Gemini API Key is invalid, expired, or rejected. Please obtain an active API key from Google AI Studio (https://aistudio.google.com/app/apikey).";
+        }
+        return NextResponse.json({ success: false, error: friendly }, { status: res.status || 400 });
       }
 
       const rawModels = Array.isArray(data.models) ? data.models : [];
@@ -36673,7 +36728,7 @@ export async function POST(req: NextRequest) {
         headers: { Authorization: `Bearer ${cleanKey}` },
         cache: 'no-store'
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok || data.error) {
         return NextResponse.json({
@@ -37562,7 +37617,7 @@ async function getPostgresPool() {
       ssl: requiresSsl ? { rejectUnauthorized: false } : false
     });
     return cachedPool;
-  } catch (err) {
+  } catch (_) {
     return null;
   }
 }
@@ -37621,6 +37676,11 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return map;
 }
 
+function isOAuthCredential(val: string): boolean {
+  if (!val) return false;
+  return val.includes('.apps.googleusercontent.com') || val.startsWith('GOCSPX-');
+}
+
 function updateEnvFile(filePath: string, key: string, value: string) {
   let content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
   const regex = new RegExp(`^${key}=.*$`, 'm');
@@ -37643,7 +37703,7 @@ export async function GET() {
       Object.assign(envMap, parseEnvFile(ep));
     }
 
-    ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'].forEach(k => {
+    ['GEMINI_API_KEY', 'GOOGLE_AI_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'].forEach(k => {
       if (process.env[k] && !envMap[k]) envMap[k] = process.env[k]!;
     });
 
@@ -37661,8 +37721,23 @@ export async function GET() {
           keyValue: row.key_value,
           status: row.status
         });
-        if (row.env_key && row.key_value) envMap[row.env_key] = row.key_value;
+        if (row.env_key && row.key_value && !isOAuthCredential(row.key_value)) {
+          envMap[row.env_key] = row.key_value;
+        }
       }
+    }
+
+    // Isolate real Gemini API key
+    let resolvedGemini = '';
+    for (const k of ['GEMINI_API_KEY', 'GOOGLE_AI_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY']) {
+      const v = envMap[k];
+      if (v && !isOAuthCredential(v) && !v.includes('sample')) {
+        resolvedGemini = v;
+        break;
+      }
+    }
+    if (resolvedGemini) {
+      envMap['GEMINI_API_KEY'] = resolvedGemini;
     }
 
     return NextResponse.json({ success: true, keys: dbKeys, envMap });
@@ -37677,20 +37752,29 @@ export async function POST(req: NextRequest) {
     const { name, provider, envKey, keyValue, model, status } = body;
 
     const keyToSave = (envKey || (provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY')).trim();
-    const valToSave = (keyValue || '').trim();
+    const valToSave = (keyValue || '').trim().replace(/^["']|["']$/g, '');
 
     if (!keyToSave) {
       return NextResponse.json({ success: false, error: 'Target environment key is required.' }, { status: 400 });
     }
 
-    // 1. Update .env files
+    if (provider === 'gemini' && isOAuthCredential(valToSave)) {
+      return NextResponse.json({
+        success: false,
+        error: "Cannot save: You provided a Google OAuth Client ID or Secret instead of a Gemini API Key. Gemini keys start with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
+      }, { status: 400 });
+    }
+
+    // 1. Write to local .env files
     for (const ep of getEnvFilePaths()) {
       try { updateEnvFile(ep, keyToSave, valToSave); } catch (_) {}
     }
 
-    // 2. Sync process runtime memory
+    // 2. Synchronize process runtime memory
     process.env[keyToSave] = valToSave;
-    if (keyToSave === 'GEMINI_API_KEY') process.env['GOOGLE_API_KEY'] = valToSave;
+    if (keyToSave === 'GEMINI_API_KEY') {
+      process.env['GOOGLE_API_KEY'] = valToSave;
+    }
 
     // 3. Persist to PostgreSQL admin_api_keys
     const pool = await getPostgresPool();
@@ -37715,7 +37799,7 @@ export async function POST(req: NextRequest) {
         ]
       );
 
-      // Synchronize admin_settings without destroying existing model identifier
+      // Synchronize admin_settings without destroying active model
       try {
         const settingsRes = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
         if (settingsRes.rows && settingsRes.rows.length > 0) {
@@ -40744,10 +40828,28 @@ async function getPostgresPool() {
       ssl: requiresSsl ? { rejectUnauthorized: false } : false
     });
     return cachedPool;
-  } catch (err) {
-    console.error('[PostgreSQL Pool Error]:', err);
+  } catch (_) {
     return null;
   }
+}
+
+function cleanApiKey(key: string): string {
+  if (!key) return '';
+  return key
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/^Bearer\s+/i, '')
+    .replace(/^["']|["']$/g, '')
+    .replace(/[\r\n\t]/g, '')
+    .trim();
+}
+
+function normalizeModel(model: string): string {
+  const m = (model || '').trim().replace(/^models\//, '');
+  // Automatically upgrade deprecated 2.0-flash to Google's recommended 3.6-flash
+  if (!m || m === 'gemini-2.0-flash' || m === 'gemini-2.5-flash' || m === 'gemini-3.5-flash-lite') {
+    return 'gemini-3.6-flash';
+  }
+  return m;
 }
 
 function getEnvKeysFromDisk(): Record<string, string> {
@@ -40772,24 +40874,13 @@ function getEnvKeysFromDisk(): Record<string, string> {
           if (idx > 0) {
             const k = trimmed.substring(0, idx).trim();
             let v = trimmed.substring(idx + 1).trim();
-            if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-              v = v.slice(1, -1);
-            }
-            map[k] = v;
+            map[k] = cleanApiKey(v);
           }
         }
       } catch (_) {}
     }
   }
   return map;
-}
-
-function sanitizeGeminiModel(rawModel: string): string {
-  const m = (rawModel || '').toLowerCase().trim();
-  if (!m || m.includes('3.5') || m.includes('3.6') || !m.startsWith('gemini')) {
-    return 'gemini-2.5-flash';
-  }
-  return rawModel.replace(/^models\//, '');
 }
 
 export async function POST(req: NextRequest) {
@@ -40818,8 +40909,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Prompt or questionnaire submission is required' }, { status: 400 });
     }
 
-    // 1. Fetch AI Configuration & Agent Parameters from PostgreSQL admin_settings
-    let activeModel = 'gemini-2.5-flash';
+    // 1. Fetch AI Settings and the EXACT Model configured in /admin/ai-settings
+    let activeModel = 'gemini-3.6-flash';
     let provider = 'gemini';
     let apiKey = '';
     let temperature = 0.7;
@@ -40838,8 +40929,7 @@ export async function POST(req: NextRequest) {
     if (pool) {
       try {
         const sRes = await pool.query(
-          'SELECT chef_ai_settings, ai_model, ai_provider, value FROM admin_settings WHERE id = $1 LIMIT 1',
-          ['primary_settings']
+          'SELECT chef_ai_settings, ai_model, ai_provider, value FROM admin_settings ORDER BY updated_at DESC LIMIT 1'
         );
         if (sRes.rows.length > 0) {
           const row = sRes.rows[0];
@@ -40852,9 +40942,12 @@ export async function POST(req: NextRequest) {
 
           if (c) {
             if (c.provider || row.ai_provider) provider = c.provider || row.ai_provider || 'gemini';
-            const rawM = c.model || row.ai_model || 'gemini-2.5-flash';
-            activeModel = provider === 'gemini' ? sanitizeGeminiModel(rawM) : (rawM || 'gpt-4o');
-            if (c.apiKey) apiKey = c.apiKey.trim();
+            
+            // Strictly honor the model selected in /admin/ai-settings
+            const chosenModel = c.model || row.ai_model || 'gemini-3.6-flash';
+            activeModel = provider === 'gemini' ? normalizeModel(chosenModel) : (chosenModel || 'gpt-4o');
+
+            if (c.apiKey) apiKey = cleanApiKey(c.apiKey);
             if (c.temperature !== undefined) temperature = Number(c.temperature);
             if (c.maxTokens !== undefined) maxTokens = Number(c.maxTokens);
             if (c.systemPrompt) systemPrompt = c.systemPrompt;
@@ -40868,37 +40961,39 @@ export async function POST(req: NextRequest) {
             if (c.resultDisplayMode) resultDisplayMode = c.resultDisplayMode;
           }
         }
-      } catch (e) {
-        console.warn('[PostgreSQL] Settings load notice in /api/ai:', e);
-      }
+      } catch (_) {}
     }
 
-    // Comprehensive API Key Resolution: admin_api_keys -> process.env -> disk .env
+    // Resolve API Key
     if (!apiKey) {
       if (pool) {
         try {
           const kRes = await pool.query(
-            "SELECT key_value FROM admin_api_keys WHERE (provider = $1 OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+            "SELECT key_value FROM admin_api_keys WHERE (provider = $1 OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_AI_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
             [provider]
           );
           if (kRes.rows.length > 0 && kRes.rows[0].key_value) {
-            apiKey = kRes.rows[0].key_value.trim();
+            apiKey = cleanApiKey(kRes.rows[0].key_value);
           }
         } catch (_) {}
       }
     }
 
     if (!apiKey) {
-      apiKey = provider === 'gemini' 
-        ? (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim()
-        : (process.env.OPENAI_API_KEY || '').trim();
+      apiKey = cleanApiKey(
+        provider === 'gemini'
+          ? (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_KEY || process.env.GOOGLE_GENAI_API_KEY || process.env.GOOGLE_API_KEY || '')
+          : (process.env.OPENAI_API_KEY || '')
+      );
     }
 
     if (!apiKey) {
       const diskMap = getEnvKeysFromDisk();
-      apiKey = provider === 'gemini'
-        ? (diskMap['GEMINI_API_KEY'] || diskMap['GOOGLE_API_KEY'] || diskMap['NEXT_PUBLIC_GEMINI_API_KEY'] || '').trim()
-        : (diskMap['OPENAI_API_KEY'] || diskMap['NEXT_PUBLIC_OPENAI_API_KEY'] || '').trim();
+      apiKey = cleanApiKey(
+        provider === 'gemini'
+          ? (diskMap['GEMINI_API_KEY'] || diskMap['GOOGLE_AI_KEY'] || diskMap['GOOGLE_GENAI_API_KEY'] || diskMap['GOOGLE_API_KEY'] || '')
+          : (diskMap['OPENAI_API_KEY'] || '')
+      );
     }
 
     // 2. Strict Dietary Filter Verification
@@ -40919,7 +41014,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Token System Verification & Deduction
+    // 3. Token Deduction
     const tokenSettings = await getTokenSettings();
     const chefCost = tokenSettings.chefCost ?? 1;
     let deduction: any = { success: true, deducted: 0, currentBalance: 0 };
@@ -40947,7 +41042,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Intent Classification: Greeting vs Recipe vs Cooking Question
+    // 4. Intent Classification
     const lowerPrompt = prompt.toLowerCase().trim();
     const isGreeting = /^(hello|hi|hey|good\s*(morning|afternoon|evening)|howdy|greetings|halo|hola|bonjour)[\s!.,?]*$/i.test(lowerPrompt);
     const isPantryInquiry = lowerPrompt.includes('what is in my pantry') || lowerPrompt.includes("what's in my pantry");
@@ -40967,7 +41062,6 @@ export async function POST(req: NextRequest) {
       lowerPrompt.includes('idea')
     );
 
-    // User Culinary Preferences Context
     const prefs = body.preferences || {};
     const servings = Number(prefs.servings || 2);
     const country = prefs.country || 'Singapore';
@@ -40987,24 +41081,23 @@ export async function POST(req: NextRequest) {
     let generatedPlan: any = null;
     let recommendedRecipe: any = null;
 
-    // 5. System Instructions Formulation
     const systemInstructions = `${systemPrompt}
-You are Chef Foodie, an expert autonomous culinary AI chef and supportive cooking thought partner.
+You are Chef Foodie, an expert autonomous culinary AI chef and supportive cooking partner.
 ACTIVE USER CULINARY PROFILE:
 - Target Servings: ${servings} people
-- Cuisine & Country Context: ${country}
-- Dietary Rules: ${dietSummary} (MANDATORY: If Vegetarian or Vegan, NEVER suggest meat, poultry, seafood, or fish sauce!)
-- Allergies to Exclude: ${allergySummary} (MANDATORY: NEVER include these allergens!)
-- Avoided Ingredients & Cooking Styles: ${avoidSummary} (e.g. if avoiding 'Oily', do not deep-fry; use steaming, light searing, or roasting!)
+- Regional Cuisine & Country: ${country}
+- Dietary Rules: ${dietSummary} (STRICT RULE: If Vegetarian or Vegan, NEVER suggest meat, poultry, seafood, or fish sauce!)
+- Allergies to Exclude: ${allergySummary} (STRICT RULE: NEVER include these allergens!)
+- Avoided Ingredients & Styles: ${avoidSummary} (e.g. if avoiding 'Oily', do not deep-fry; use steaming, light searing, or roasting!)
 - Flavor & Taste Profile: ${tasteSummary}
 - In-Stock Pantry Items: ${pantrySummary}
 ${knowledgeBaseList.length > 0 ? `- Prioritized Knowledge Bases: ${knowledgeBaseList.join(', ')}` : ''}
 ${customVocabularyList.length > 0 ? `- Custom Terminology: ${customVocabularyList.join(', ')}` : ''}
 
 BEHAVIOR AND JSON OUTPUT SPECIFICATIONS:
-1. GREETING/CASUAL INQUIRY: If the user sends a greeting (e.g. "Hello", "Hi"), DO NOT generate a recipe named "Hello"! Greet the user warmly by name or as a passionate foodie, acknowledge that their ${dietSummary} profile for ${country} with ${servings} servings is loaded, and ask how you can help. Suggest 2-3 specific, tempting dish ideas. Return JSON with {"reply": "...", "recommendedRecipe": null}.
-2. UNIQUE RECIPE GENERATION: When asked for a recipe or meal plan, generate an inventive, authentic dish. Always name real, quantified ingredients (e.g. "250g firm organic tofu, cubed", "2 cloves minced garlic", "1 tbsp toasted sesame oil") and specific directions. NEVER output vague placeholders like "Fresh Seasonal Vegetables" or "Balanced Quality Protein"!
-3. Provide valid JSON structure:
+1. GREETING/CASUAL INQUIRY: If the user sends a greeting (e.g. "Hello", "Hi"), DO NOT generate a recipe named "Hello"! Greet the user warmly, acknowledge their active ${dietSummary} profile for ${country} (${servings} servings), and ask how you can help. Suggest 2-3 specific, tempting dish ideas. Return JSON with {"reply": "...", "recommendedRecipe": null, "plan": null}.
+2. UNIQUE RECIPE GENERATION: When asked for a recipe or meal plan, generate an inventive, authentic dish. Always name real, quantified ingredients (e.g. "250g firm organic tofu, cubed", "2 cloves minced garlic", "1 tbsp toasted sesame oil") and specific directions. NEVER output placeholder phrases like "Fresh Seasonal Vegetables" or "Balanced Quality Protein"!
+3. When providing a recipe or meal plan, format your output strictly as a valid JSON object:
 {
   "reply": "Warm conversational commentary explaining the culinary technique and how the dish honors their dietary profile",
   "recommendedRecipe": {
@@ -41023,182 +41116,128 @@ BEHAVIOR AND JSON OUTPUT SPECIFICATIONS:
   "plan": null
 }`;
 
-    // 6. Live LLM Handshake with Auto-Retry Logic
-    if (apiKey && apiKey.length > 8 && !apiKey.includes('sample')) {
-      if (provider === 'gemini') {
-        const modelsToAttempt = Array.from(new Set([activeModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']));
+    if (!apiKey) {
+      return NextResponse.json({
+        success: false,
+        error: "AI API Key is missing. Please configure and test your API key in /admin/ai-settings."
+      }, { status: 400 });
+    }
 
-        for (const targetModel of modelsToAttempt) {
-          try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
+    let apiErrorDetails = '';
 
-            let userPrompt = prompt;
-            if (isQuestionnaire) {
-              userPrompt = `User completed questionnaire for "${topicTitle}". Answers:\n${JSON.stringify(questionnaireAnswers, null, 2)}\nGenerate a ${maxPlanDays}-day meal plan and a signature recommended recipe honoring diet: ${dietSummary}, country: ${country}, avoid: ${avoidSummary}, servings: ${servings}.`;
-            } else if (isGreeting) {
-              userPrompt = `User said: "${prompt}". Reply warmly, acknowledge their ${dietSummary} preferences and ${servings}-person servings target for ${country}, and ask how you can help. DO NOT return a recipe card. Return JSON with {"reply": "..."}`;
-            }
+    // 5. Query Live API using the Active Model Configured in /admin/ai-settings
+    if (provider === 'gemini') {
+      // Prioritize the model selected in /admin/ai-settings; if deprecated, fall back to gemini-3.6-flash
+      const modelsToAttempt = Array.from(new Set([activeModel, 'gemini-3.6-flash', 'gemini-1.5-flash']));
 
-            const res = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [
-                  {
-                    role: 'user',
-                    parts: [{ text: `${systemInstructions}\n\nUser: ${userPrompt}` }]
-                  }
-                ],
-                generationConfig: {
-                  temperature: Math.max(0.6, Math.min(1.0, temperature)),
-                  maxOutputTokens: maxTokens
-                }
-              })
-            });
-
-            if (res.ok) {
-              const data = await res.json();
-              const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-              const jsonMatch = rawText.match(/```json\s*([\s\S]*?)\s*```/) || rawText.match(/\{[\s\S]*\}/);
-
-              if (jsonMatch) {
-                try {
-                  const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-                  responseText = parsed.reply || rawText;
-                  if (parsed.plan) generatedPlan = parsed.plan;
-                  if (isRecipeIntent || isQuestionnaire) {
-                    recommendedRecipe = parsed.recommendedRecipe || parsed.recipe || null;
-                  }
-                } catch (_) {
-                  responseText = rawText;
-                }
-              } else {
-                responseText = rawText;
-              }
-              activeModel = targetModel;
-              break; // Success
-            }
-          } catch (err) {
-            console.warn(`[Gemini Attempt ${targetModel} error]:`, err);
-          }
-        }
-      } else if (provider === 'openai') {
+      for (let i = 0; i < modelsToAttempt.length; i++) {
+        const targetModel = modelsToAttempt[i];
         try {
-          const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          let userPrompt = prompt;
+          if (isQuestionnaire) {
+            userPrompt = `User completed questionnaire for "${topicTitle}". Answers:\n${JSON.stringify(questionnaireAnswers, null, 2)}\nGenerate a ${maxPlanDays}-day meal plan and a signature recommended recipe honoring diet: ${dietSummary}, country: ${country}, avoid: ${avoidSummary}, servings: ${servings}. Output valid JSON with "reply", "plan", and "recommendedRecipe".`;
+          } else if (isGreeting) {
+            userPrompt = `User said: "${prompt}". Reply warmly, acknowledge their ${dietSummary} preferences and ${servings}-person servings target for ${country}, and ask how you can help. DO NOT return a recipe card. Return JSON with {"reply": "...", "recommendedRecipe": null, "plan": null}`;
+          }
+
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
+          const res = await fetch(url, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              model: activeModel || 'gpt-4o',
-              messages: [
-                { role: 'system', content: systemInstructions },
-                { role: 'user', content: isGreeting ? `${prompt} (Acknowledge my profile, do not generate a recipe)` : prompt }
-              ],
-              temperature: Math.max(0.6, Math.min(1.0, temperature)),
-              response_format: { type: 'json_object' }
+              contents: [{ role: 'user', parts: [{ text: `${systemInstructions}\n\nUser Request: ${userPrompt}` }] }],
+              generationConfig: {
+                temperature: Math.max(0.6, Math.min(1.0, temperature)),
+                maxOutputTokens: maxTokens
+              }
             })
           });
 
           if (res.ok) {
             const data = await res.json();
-            const rawContent = data.choices?.[0]?.message?.content || '';
-            try {
-              const parsed = JSON.parse(rawContent);
-              responseText = parsed.reply || rawContent;
-              if (parsed.plan) generatedPlan = parsed.plan;
-              if (isRecipeIntent || isQuestionnaire) {
-                recommendedRecipe = parsed.recommendedRecipe || parsed.recipe || null;
+            const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const jsonMatch = rawText.match(/```json\s*([\s\S]*?)\s*```/) || rawText.match(/\{[\s\S]*\}/);
+
+            if (jsonMatch) {
+              try {
+                const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+                responseText = parsed.reply || rawText;
+                if (parsed.plan) generatedPlan = parsed.plan;
+                if (isRecipeIntent || isQuestionnaire) {
+                  recommendedRecipe = parsed.recommendedRecipe || parsed.recipe || null;
+                }
+              } catch (_) {
+                responseText = rawText;
               }
-            } catch (_) {
-              responseText = rawContent;
+            } else {
+              responseText = rawText;
+            }
+            activeModel = targetModel;
+            break;
+          } else {
+            const errData = await res.json().catch(() => ({}));
+            const rawErrMsg = errData.error?.message || `Google API returned HTTP ${res.status}`;
+            apiErrorDetails = rawErrMsg;
+
+            // If Google returns deprecation guidance, dynamically extract the recommended model
+            const matchRec = rawErrMsg.match(/use\s+models\/([a-zA-Z0-9.\-_]+)/i);
+            if (matchRec && matchRec[1] && !modelsToAttempt.includes(matchRec[1])) {
+              modelsToAttempt.push(matchRec[1]);
             }
           }
-        } catch (err) {
-          console.warn('[OpenAI error in /api/ai]:', err);
+        } catch (err: any) {
+          apiErrorDetails = err.message || 'Network request failed';
         }
       }
-    }
+    } else if (provider === 'openai') {
+      try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: activeModel || 'gpt-4o',
+            messages: [
+              { role: 'system', content: systemInstructions },
+              { role: 'user', content: isGreeting ? `${prompt} (Acknowledge profile, no recipe)` : prompt }
+            ],
+            temperature: Math.max(0.6, Math.min(1.0, temperature)),
+            response_format: { type: 'json_object' }
+          })
+        });
 
-    // 7. Dynamic Fallback Synthesizer (Unique & Preference-Driven)
-    if (!responseText) {
-      if (isGreeting) {
-        responseText = `Hello! I'm Chef Foodie, your culinary assistant. I have your preferences loaded and ready:
-• **Servings**: Cooking for ${servings} ${(servings === 1 ? 'person' : 'people')}
-• **Cuisine & Style**: ${country}
-• **Diet**: ${dietSummary}
-• **Allergies & Avoid**: ${allergies.concat(avoid).join(', ') || 'None'}
-• **Flavor Note**: ${tasteSummary}
-${pantryItems.length > 0 ? `• **Pantry Ingredients**: ${pantryItems.length} items in stock ready to use` : ''}
-
-What would you like to cook today? You can ask for a personalized recipe, launch a meal plan wizard, or tell me what's in your fridge!`;
-        recommendedRecipe = null;
-      } else if (isPantryInquiry) {
-        responseText = pantryItems.length > 0
-          ? `You have ${pantryItems.length} items in your pantry: ${pantryItems.join(', ')}. Would you like a ${dietSummary} recipe built around these?`
-          : "Your pantry inventory is currently empty. You can add items in the Pantry tab, or tell me what ingredients you have!";
-        recommendedRecipe = null;
-      } else {
-        // Formulate a dynamic, non-generic recipe matching exact user profile
-        const isVeg = diets.some((d: string) => d.toLowerCase().includes('veg'));
-        const titles = isVeg
-          ? [
-              `${country} Fragrant Sesame Crusted Tofu & Bok Choy Bowl`,
-              `${country} Spiced Chickpea & Roasted Cauliflower Bowl`,
-              `Crispy Lemongrass Tempeh with Fragrant Jasmine Rice`,
-              `Garlic Herb Quinoa with Glazed King Oyster Mushrooms`
-            ]
-          : [
-              `${country} Pan-Seared Citrus Herb Salmon & Brown Rice`,
-              `${country} Garlic Ginger Glazed Barramundi Fillet`,
-              `Mediterranean Lemon Herb Chicken with Roasted Greens`,
-              `Seared Herb Salmon with Steamed Seasonal Greens`
-            ];
-
-        const selectedTitle = titles[Math.floor(Math.random() * titles.length)];
-
-        responseText = `Here is a custom ${dietSummary} culinary preparation formulated for ${servings} ${(servings === 1 ? 'person' : 'people')} in ${country}, strictly avoiding ${avoidSummary} and ${allergySummary}.`;
-
-        recommendedRecipe = {
-          title: selectedTitle,
-          description: `An authentic culinary creation crafted specifically for your ${dietSummary} preferences, featuring ${country} aromatics, scaled for ${servings} portions, and prepared without heavy oil.`,
-          prepMinutes: 15,
-          cookMinutes: 20,
-          servings: servings,
-          calories: isVeg ? 430 : 490,
-          mealType: 'Dinner',
-          ingredients: isVeg ? [
-            pantryItems[0] ? `In-Stock: ${pantryItems[0]}` : '300g Organic Firm Tofu (pressed and cubed)',
-            '2 cups Baby Bok Choy or Tender Spinach',
-            '1 cup Steamed Brown Rice or Quinoa',
-            '1 tbsp Cold-Pressed Toasted Sesame Oil',
-            '2 cloves Garlic and 1 tsp Minced Ginger',
-            '2 tbsp Low-Sodium Tamari & Fresh Lime Juice'
-          ] : [
-            pantryItems[0] ? `In-Stock: ${pantryItems[0]}` : '2 Wild Salmon Fillets (6 oz each)',
-            '2 cups Fresh Asparagus Spears or Bok Choy',
-            '1 cup Tri-Color Quinoa or Jasmine Rice',
-            '1 tbsp Cold-Pressed Extra Virgin Olive Oil',
-            '2 cloves Minced Garlic & Fresh Thyme',
-            '1 Fresh Lemon (juiced) & Cracked Black Pepper'
-          ],
-          instructions: [
-            'Rinse all fresh produce and pat dry thoroughly.',
-            'Heat the cold-pressed oil in a heavy skillet over medium-high heat with minced garlic and ginger.',
-            isVeg 
-              ? 'Sear tofu cubes for 3-4 minutes per side until evenly crisp and golden.'
-              : 'Sear salmon skin-side down for 4 minutes until crisp, flip gently and cook for 3 more minutes.',
-            'Toss fresh greens into the pan and steam lightly for 2 minutes with a splash of water.',
-            'Assemble bowls with warm grains, top with the cooked protein and greens, and finish with fresh citrus zest.'
-          ],
-          chefTip: `To respect your preference against ${avoidSummary}, we use a light high-heat sear with minimal oil to achieve crispness naturally.`,
-          image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
-        };
+        if (res.ok) {
+          const data = await res.json();
+          const rawContent = data.choices?.[0]?.message?.content || '';
+          try {
+            const parsed = JSON.parse(rawContent);
+            responseText = parsed.reply || rawContent;
+            if (parsed.plan) generatedPlan = parsed.plan;
+            if (isRecipeIntent || isQuestionnaire) {
+              recommendedRecipe = parsed.recommendedRecipe || parsed.recipe || null;
+            }
+          } catch (_) {
+            responseText = rawContent;
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          apiErrorDetails = errData.error?.message || `OpenAI returned HTTP ${res.status}`;
+        }
+      } catch (err: any) {
+        apiErrorDetails = err.message;
       }
     }
 
-    // 8. Record Telemetry in PostgreSQL
+    if (!responseText) {
+      return NextResponse.json({
+        success: false,
+        error: `AI Provider (${provider}) generation failed: ${apiErrorDetails || 'Failed to reach API'}. Please verify your API key and model selection in /admin/ai-settings.`
+      }, { status: 502 });
+    }
+
+    // 6. Record Telemetry in PostgreSQL
     const promptTokens = Math.max(20, Math.ceil((prompt.length + 200) / 4));
     const completionTokens = Math.max(30, Math.ceil(responseText.length / 4) + (recommendedRecipe ? 100 : 0));
 
