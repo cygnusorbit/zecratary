@@ -8,7 +8,8 @@ import {
   Calendar, CalendarPlus, X, ArrowLeftRight, Utensils, Loader2, User as UserIcon, 
   Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
   ChevronLeft, ChevronRight, Search, Heart, Copy, ShoppingCart, Dices, 
-  CheckCircle2, Layers, HelpCircle, Coins, Cpu, ShieldAlert, AlertTriangle
+  CheckCircle2, Layers, HelpCircle, Coins, Cpu, ShieldAlert, Mic, MicOff,
+  Volume2, VolumeX, Square, BookOpen, BookA, Zap, Award
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -40,12 +41,27 @@ interface MealPlanData {
   meals: MealItem[];
 }
 
+interface RecommendedRecipeData {
+  title: string;
+  description: string;
+  prepMinutes: number;
+  cookMinutes: number;
+  servings: number;
+  calories?: number;
+  mealType?: string;
+  ingredients: string[];
+  instructions: string[];
+  chefTip?: string;
+  image?: string;
+}
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content?: string;
   plan?: MealPlanData;
   recipe?: any;
+  recommendedRecipe?: RecommendedRecipeData;
 }
 
 const DIETARY_OPTIONS = [
@@ -109,10 +125,26 @@ export default function ChefChatPage() {
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-3.5-flash-lite');
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
+  const [customVocabularyList, setCustomVocabularyList] = useState<string[]>([]);
+  const [knowledgeBaseList, setKnowledgeBaseList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
+  const [enableWebSearch, setEnableWebSearch] = useState<boolean>(true);
+  const [maxPlanDays, setMaxPlanDays] = useState<number>(7);
+
+  // Voice Interaction State (Synced from /admin/ai-settings)
+  const [enableVoiceInteraction, setEnableVoiceInteraction] = useState<boolean>(true);
+  const [voiceEngine, setVoiceEngine] = useState<'version1' | 'version2'>('version2');
+  const [voiceSpeed, setVoiceSpeed] = useState<number>(1.0);
+  const [voiceAutoPlay, setVoiceAutoPlay] = useState<boolean>(false);
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('en-US-Neural2-F');
+  
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const speechRecognitionRef = useRef<any>(null);
 
   // Token System Telemetry Synced with /admin/token-setting
   const [tokenBalance, setTokenBalance] = useState<number>(0);
@@ -122,33 +154,20 @@ export default function ChefChatPage() {
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
-  // Preferences State
-  const [showPreferences, setShowPreferences] = useState(false);
-  const [servings, setServings] = useState(2);
-  const [country, setCountry] = useState('Singapore');
+  // User Dietary Preferences State
+  const [showPreferences, setShowPreferences] = useState<boolean>(false);
+  const [servings, setServings] = useState<number>(2);
+  const [country, setCountry] = useState<string>('Singapore');
   const [selectedDiets, setSelectedDiets] = useState<string[]>(['Vegetarian']);
   const [selectedAllergies, setSelectedAllergies] = useState<string[]>(['Peanuts']);
   const [ingredientsToAvoid, setIngredientsToAvoid] = useState<string[]>(['Oily']);
-  const [newAvoidInput, setNewAvoidInput] = useState('');
+  const [newAvoidInput, setNewAvoidInput] = useState<string>('');
   const [tastesList, setTastesList] = useState<string[]>(['Less Spicy']);
-  const [newTasteInput, setNewTasteInput] = useState('');
+  const [newTasteInput, setNewTasteInput] = useState<string>('');
 
-  // Wizard Flow State
+  // Wizard Questionnaire Flow State
   const [wizardStep, setWizardStep] = useState<number | null>(null);
   const [wizardAnswers, setWizardAnswers] = useState<Record<number, string>>({});
-  const [wizardData, setWizardData] = useState<{
-    days: number;
-    mealType: string;
-    theme: string;
-    startDate: string;
-    budget: string;
-  }>({
-    days: 3,
-    mealType: 'dinner',
-    theme: 'high-protein',
-    startDate: 'tomorrow',
-    budget: '4'
-  });
 
   // Modals State
   const [showBatchModal, setShowBatchModal] = useState(false);
@@ -181,394 +200,171 @@ export default function ChefChatPage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Synchronize Token Telemetry and AI Settings from Server
-  const fetchTokenAndAiTelemetry = useCallback(async () => {
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const queryParam = active?.id ? `?userId=${active.id}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
-      
-      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
-      const data = await res.json();
+  // ------------------------------------------------------------------
+  // Voice Synthesis Engine
+  // ------------------------------------------------------------------
+  const cleanSpeechText = (text: string): string => {
+    if (!text) return '';
+    return text
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/[#*_~`]/g, '')
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+      .replace(/•|\*|-/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
 
-      if (data.success) {
-        setTokenBalance(Number(data.balance ?? 0));
-        setTokenSymbol(data.tokenSymbol || '🪙');
-        setTokenName(data.tokenName || 'Foodie Token');
-        setChefCost(Number(data.costs?.chef ?? 1));
-        if (Array.isArray(data.packages)) {
-          setTokenPackages(data.packages);
-        }
-
-        if (data.aiSettings) {
-          setActiveAiModel(data.aiSettings.model || 'gemini-3.5-flash-lite');
-          setStrictDietEnforcement(Boolean(data.aiSettings.strictDietEnforcement));
-          setFilterWordsList(Array.isArray(data.aiSettings.filterWordsList) ? data.aiSettings.filterWordsList : []);
-        }
-      }
-
-      // Also retrieve full questionnaire topics and display mode from /api/admin/settings
-      try {
-        const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
-        const sData = await sRes.json();
-        const chefCfg = sData?.chefAiSettings || sData;
-        if (chefCfg) {
-          if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
-            const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
-            const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
-            setQuestionnaireSections(toUse);
-            const allQs = toUse.flatMap((s: any) => s.questions || []);
-            setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
-          }
-          if (chefCfg.resultDisplayMode) {
-            setResultDisplayMode(chefCfg.resultDisplayMode);
-          }
-          if (chefCfg.enablePantryContext !== undefined) {
-            setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
-          }
-        }
-      } catch (_) {}
-
-    } catch (err) {
-      console.warn('Failed to fetch /chef telemetry:', err);
+  const stopSpeaking = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
     }
-  }, []);
+    setIsSpeaking(false);
+    setSpeakingMsgId(null);
+  };
 
-  // Theme Synchronizer
-  const applySavedTheme = useCallback(() => {
-    try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (_) {}
-  }, []);
+  const speakText = (textToSpeak: string, msgId?: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
 
-  useEffect(() => {
-    applySavedTheme();
-    fetchTokenAndAiTelemetry();
+    if (isSpeaking && speakingMsgId === msgId) {
+      stopSpeaking();
+      return;
+    }
 
-    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('zecratary_admin_settings_updated', fetchTokenAndAiTelemetry);
-    window.addEventListener('zecratary_engine_config_updated', fetchTokenAndAiTelemetry);
-    window.addEventListener('zecratary_chef_ai_settings_updated', fetchTokenAndAiTelemetry);
-    window.addEventListener('zecratary_users_updated', fetchTokenAndAiTelemetry);
-    window.addEventListener('storage', fetchTokenAndAiTelemetry);
+    stopSpeaking();
+    const clean = cleanSpeechText(textToSpeak);
+    if (!clean) return;
 
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('zecratary_admin_settings_updated', fetchTokenAndAiTelemetry);
-      window.removeEventListener('zecratary_engine_config_updated', fetchTokenAndAiTelemetry);
-      window.removeEventListener('zecratary_chef_ai_settings_updated', fetchTokenAndAiTelemetry);
-      window.removeEventListener('zecratary_users_updated', fetchTokenAndAiTelemetry);
-      window.removeEventListener('storage', fetchTokenAndAiTelemetry);
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.rate = Math.max(0.7, Math.min(1.8, voiceSpeed || 1.0));
+
+    if (selectedVoiceName.includes('F') || selectedVoiceName.includes('Aria') || selectedVoiceName.includes('Matilda')) {
+      utterance.pitch = 1.05;
+    } else if (selectedVoiceName.includes('D') || selectedVoiceName.includes('Marcus')) {
+      utterance.pitch = 0.88;
+    } else {
+      utterance.pitch = 1.0;
+    }
+
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      let matchedVoice = null;
+      if (selectedVoiceName.includes('GB')) {
+        matchedVoice = voices.find(v => v.lang.includes('en-GB'));
+      } else if (selectedVoiceName.includes('AU')) {
+        matchedVoice = voices.find(v => v.lang.includes('en-AU'));
+      } else {
+        matchedVoice = voices.find(v => v.lang.includes('en-US') || v.lang.startsWith('en'));
+      }
+      if (matchedVoice) utterance.voice = matchedVoice;
+    }
+
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+      setSpeakingMsgId(msgId || 'general');
     };
-  }, [applySavedTheme, fetchTokenAndAiTelemetry]);
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setSpeakingMsgId(null);
+    };
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setSpeakingMsgId(null);
+    };
 
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const toggleSpeechRecognition = () => {
+    if (typeof window === 'undefined') return;
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showToast("Speech recognition is not supported in this browser.");
+      return;
+    }
+
+    if (isListening) {
+      speechRecognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        showToast("🎙️ Listening... Speak your request");
+      };
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results?.[0]?.[0]?.transcript || '';
+        if (transcript) {
+          setPrompt(prev => (prev ? `${prev} ${transcript}` : transcript));
+        }
+      };
+
+      recognition.onerror = () => {
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      speechRecognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      setIsListening(false);
+    }
+  };
+
+  // ------------------------------------------------------------------
+  // Dietary Preferences Handlers (Local & PostgreSQL Sync)
+  // ------------------------------------------------------------------
   const getUserKey = useCallback((user: User | null) => {
     if (!user) return 'guest';
     return user.id || (user.email ? user.email.toLowerCase().trim() : 'guest');
   }, []);
 
-  const loadScopedData = useCallback((user: User | null) => {
-    if (typeof window === 'undefined') return;
-
-    try {
-      const allRecipesRaw = localStorage.getItem('zecratary_recipes') || '[]';
-      const adminRecipesRaw = localStorage.getItem('zecratary_admin_recipes') || '[]';
-      const savedRecipesRaw = localStorage.getItem('zecratary_saved_recipes') || '[]';
-
-      const combinedCatalog = [...JSON.parse(allRecipesRaw), ...JSON.parse(adminRecipesRaw), ...JSON.parse(savedRecipesRaw)];
-
-      const currentUserId = user?.id;
-      const currentUserEmail = user?.email?.toLowerCase().trim();
-      const currentUserName = user?.name?.toLowerCase().trim();
-
-      const normalizeRecipe = (r: any) => ({
-        id: r.id || `rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        title: r.title || r.name || 'Untitled Recipe',
-        description: r.description || 'Nutritious chef-curated home recipe.',
-        prep: Number(r.prepTimeMinutes || r.prep || 15),
-        cook: Number(r.cookTimeMinutes || r.cook || 20),
-        servings: Number(r.servings || 2),
-        image: r.imageUrl || r.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
-        ingredients: Array.isArray(r.ingredients) 
-          ? r.ingredients.map((ing: any) => typeof ing === 'string' ? ing : (ing.item || ing.name || ''))
-          : [],
-        mealType: (r.recipeType || r.mealType || r.category || 'dinner').toLowerCase(),
-        userId: r.userId,
-        createdBy: r.createdBy || 'Community Chef',
-        isFavorite: Boolean(r.isFavorite),
-        bookId: r.bookId
-      });
-
-      const belongsToCurrentUser = (item: any) => {
-        if (!user) return false;
-        const itemUserId = item.userId;
-        const itemCreatedBy = item.createdBy ? item.createdBy.toLowerCase().trim() : '';
-        const itemAuthor = item.author ? item.author.toLowerCase().trim() : '';
-
-        return (
-          (currentUserId && itemUserId === currentUserId) ||
-          (currentUserEmail && (itemCreatedBy === currentUserEmail || itemAuthor === currentUserEmail)) ||
-          (currentUserName && (itemCreatedBy === currentUserName || itemAuthor === currentUserName))
-        );
-      };
-
-      const otherList: any[] = [];
-      const otherSeen = new Set<string>();
-
-      for (const item of combinedCatalog) {
-        if (!belongsToCurrentUser(item)) {
-          const key = (item.title || item.name || '').toLowerCase().trim();
-          if (key && !otherSeen.has(key)) {
-            otherSeen.add(key);
-            otherList.push(normalizeRecipe(item));
-          }
-        }
-      }
-      setOtherUsersRecipes(otherList);
-
-      const userSavedMap = new Map<string, any>();
-      for (const item of combinedCatalog) {
-        if (belongsToCurrentUser(item)) {
-          const normalized = normalizeRecipe(item);
-          const key = normalized.title.toLowerCase().trim();
-          if (key && !userSavedMap.has(key)) {
-            userSavedMap.set(key, normalized);
-          }
-        }
-      }
-      setUserSavedRecipes(Array.from(userSavedMap.values()));
-
-      const rawBooks = localStorage.getItem('zecratary_recipe_books') || '[]';
-      const parsedBooks = JSON.parse(rawBooks);
-      if (Array.isArray(parsedBooks) && user) {
-        const myBooks = parsedBooks.filter((b: any) => {
-          const bUserId = b.userId;
-          const bCreatedBy = b.createdBy ? b.createdBy.toLowerCase().trim() : '';
-          return (
-            (currentUserId && bUserId === currentUserId) ||
-            (currentUserEmail && bCreatedBy === currentUserEmail)
-          );
-        });
-        setUserBooks(myBooks);
-      } else {
-        setUserBooks([]);
-      }
-
-      const rawPantry = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry') || '[]';
-      const parsedPantry = JSON.parse(rawPantry);
-      if (Array.isArray(parsedPantry) && user) {
-        const userPantry = parsedPantry.filter((item: any) => {
-          const iUserId = item.userId;
-          const iCreatedBy = item.createdBy ? item.createdBy.toLowerCase().trim() : '';
-          return (
-            (currentUserId && iUserId === currentUserId) ||
-            (currentUserEmail && iCreatedBy === currentUserEmail)
-          );
-        });
-        setPantryIngredientsList(userPantry.map((p: any) => (p.name || '').toLowerCase().trim()).filter(Boolean));
-      } else {
-        setPantryIngredientsList([]);
-      }
-
-    } catch (_) {
-      setOtherUsersRecipes([]);
-      setUserSavedRecipes([]);
-      setUserBooks([]);
-      setPantryIngredientsList([]);
-    }
-  }, []);
-
-  const loadUserChatState = useCallback((user: User | null) => {
-    if (typeof window === 'undefined') return;
+  const loadUserPreferences = useCallback(async (user: User | null) => {
     const userKey = getUserKey(user);
-    const chatKey = `zecratary_chef_chat_messages_${userKey}`;
-    const stepKey = `zecratary_chef_wizard_step_${userKey}`;
-    const dataKey = `zecratary_chef_wizard_data_${userKey}`;
 
+    // 1. Try PostgreSQL Endpoint
     try {
-      const savedMessages = localStorage.getItem(chatKey);
-      setMessages(savedMessages ? JSON.parse(savedMessages) : []);
-
-      const savedStep = localStorage.getItem(stepKey);
-      setWizardStep(savedStep !== null ? JSON.parse(savedStep) : null);
-
-      const savedWizardData = localStorage.getItem(dataKey);
-      if (savedWizardData) {
-        setWizardData(JSON.parse(savedWizardData));
-      }
-    } catch (_) {
-      setMessages([]);
-    }
-  }, [getUserKey]);
-
-  const loadUserPreferences = useCallback((user: User | null) => {
-    if (typeof window === 'undefined') return;
-    try {
-      const userKey = getUserKey(user);
-      const userPrefKey = `zecratary_recipe_preferences_${userKey}`;
-      const savedPrefs = localStorage.getItem(userPrefKey) || localStorage.getItem('zecratary_recipe_preferences');
-      if (savedPrefs) {
-        const p = JSON.parse(savedPrefs);
+      const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success && data.preferences) {
+        const p = data.preferences;
         if (typeof p.servings === 'number') setServings(p.servings);
         if (p.country) setCountry(p.country);
         if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
-        else if (p.diet) setSelectedDiets([p.diet]);
         if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
-        else if (p.allergy) setSelectedAllergies([p.allergy]);
         if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
         if (Array.isArray(p.tastes)) setTastesList(p.tastes);
+        return;
       }
     } catch (_) {}
-  }, [getUserKey]);
 
-  useEffect(() => {
-    document.title = `${t('foodieChatHeading') || 'Foodie Chat'} - FoodiePrep`;
-    initAuthStorage();
-    const user = getCurrentUser();
-    setCurrentUser(user);
-    currentUserRef.current = user;
-
-    loadScopedData(user);
-    loadUserChatState(user);
-    loadUserPreferences(user);
-
-    const handleSync = () => {
-      const active = getCurrentUser();
-      setCurrentUser(active);
-      currentUserRef.current = active;
-      loadScopedData(active);
-      loadUserChatState(active);
-      loadUserPreferences(active);
-      fetchTokenAndAiTelemetry();
-    };
-
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_recipes_updated', handleSync);
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
-    window.addEventListener('zecratary_pantry_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
-    window.addEventListener('zecratary_login_success', handleSync);
-
-    return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_pantry_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
-      window.removeEventListener('zecratary_login_success', handleSync);
-    };
-  }, [loadScopedData, loadUserChatState, loadUserPreferences, fetchTokenAndAiTelemetry, t]);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
-
-  const updateMessages = (newMessages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    setMessages(prev => {
-      const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
+    // 2. Fallback to localStorage
+    if (typeof window !== 'undefined') {
       try {
-        if (typeof window === 'undefined') return updated;
-        const active = currentUserRef.current || getCurrentUser();
-        const userKey = getUserKey(active);
-        const chatKey = `zecratary_chef_chat_messages_${userKey}`;
-        if (updated.length > 0) {
-          localStorage.setItem(chatKey, JSON.stringify(updated));
-        } else {
-          localStorage.removeItem(chatKey);
+        const saved = localStorage.getItem(`zecratary_recipe_preferences_${userKey}`) || localStorage.getItem('zecratary_recipe_preferences');
+        if (saved) {
+          const p = JSON.parse(saved);
+          if (typeof p.servings === 'number') setServings(p.servings);
+          if (p.country) setCountry(p.country);
+          if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
+          if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
+          if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
+          if (Array.isArray(p.tastes)) setTastesList(p.tastes);
         }
       } catch (_) {}
-      return updated;
-    });
-  };
-
-  const updateWizardStep = (step: number | null) => {
-    setWizardStep(step);
-    try {
-      if (typeof window === 'undefined') return;
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      const stepKey = `zecratary_chef_wizard_step_${userKey}`;
-      if (step !== null) {
-        localStorage.setItem(stepKey, JSON.stringify(step));
-      } else {
-        localStorage.removeItem(stepKey);
-      }
-    } catch (_) {}
-  };
-
-  const resetChat = () => {
-    setMessages([]);
-    setWizardStep(null);
-    setWizardAnswers({});
-    setActiveTopicTitle('Standard Wizard');
-    setWizardData({
-      days: 3,
-      mealType: 'dinner',
-      theme: 'high-protein',
-      startDate: 'tomorrow',
-      budget: '4'
-    });
-    try {
-      if (typeof window === 'undefined') return;
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
-      localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
-      localStorage.removeItem(`zecratary_chef_wizard_data_${userKey}`);
-    } catch (_) {}
-    showToast("Chat reset.");
-  };
-
-  const handleStartTopicWizard = (sec: any) => {
-    const qList = Array.isArray(sec.questions) && sec.questions.length > 0
-      ? sec.questions
-      : ["How many days would you like to plan for (up to 7 days)?"];
-
-    setActiveTopicTitle(sec.topicTitle);
-    setWizardQuestionsList(qList);
-    setWizardStep(0);
-    setWizardAnswers({});
-
-    updateMessages(prev => [
-      ...prev,
-      { id: 'usr_' + Date.now(), role: 'user', content: `Start: ${sec.topicTitle}` },
-      { 
-        id: 'ast_' + Date.now(), 
-        role: 'assistant', 
-        content: `📋 **${sec.topicTitle}**
-${sec.description || ''}
-
-**Step 1 of ${qList.length}:**
-${qList[0]}` 
-      }
-    ]);
-  };
-
-  const handleStartFullWizard = () => {
-    const activeSections = questionnaireSections.filter((s: any) => s.enabled !== false);
-    const allQuestions = activeSections.flatMap((s: any) => s.questions || []);
-    const qList = allQuestions.length > 0 ? allQuestions : wizardQuestionsList;
-
-    setActiveTopicTitle('Complete Meal Plan Wizard');
-    setWizardQuestionsList(qList);
-    setWizardStep(0);
-    setWizardAnswers({});
-
-    updateMessages(prev => [
-      ...prev,
-      { id: 'usr_' + Date.now(), role: 'user', content: 'Start Dynamic Meal Plan Wizard' },
-      { 
-        id: 'ast_' + Date.now(), 
-        role: 'assistant', 
-        content: `Starting complete meal plan intake wizard (**Step 1 of ${qList.length}**):
-
-${qList[0]}` 
-      }
-    ]);
-  };
+    }
+  }, [getUserKey]);
 
   const handleToggleDiet = (item: string) => {
     if (selectedDiets.includes(item)) {
@@ -614,7 +410,7 @@ ${qList[0]}`
     setTastesList(tastesList.filter(t => t !== item));
   };
 
-  const handleSavePreferences = () => {
+  const handleSavePreferences = async () => {
     const prefs = {
       servings,
       country,
@@ -623,102 +419,421 @@ ${qList[0]}`
       avoid: ingredientsToAvoid,
       tastes: tastesList
     };
-    if (typeof window === 'undefined') return;
+
     const active = currentUserRef.current || getCurrentUser();
     const userKey = getUserKey(active);
-    localStorage.setItem(`zecratary_recipe_preferences_${userKey}`, JSON.stringify(prefs));
-    localStorage.setItem('zecratary_recipe_preferences', JSON.stringify(prefs));
+
+    // Save to local storage
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`zecratary_recipe_preferences_${userKey}`, JSON.stringify(prefs));
+      localStorage.setItem('zecratary_recipe_preferences', JSON.stringify(prefs));
+    }
+
+    // Persist to PostgreSQL
+    try {
+      await fetch('/api/user/preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: userKey, ...prefs })
+      });
+    } catch (err) {
+      console.warn('PostgreSQL preference save notice:', err);
+    }
+
     setShowPreferences(false);
-    showToast("Preferences saved!");
+    showToast("Preferences saved and synchronized!");
   };
 
-  const handleClearAllPreferences = () => {
+  const handleClearAllPreferences = async () => {
     setServings(2);
     setCountry('Singapore');
     setSelectedDiets([]);
     setSelectedAllergies([]);
     setIngredientsToAvoid([]);
     setTastesList([]);
-    if (typeof window === 'undefined') return;
+
     const active = currentUserRef.current || getCurrentUser();
     const userKey = getUserKey(active);
-    localStorage.removeItem(`zecratary_recipe_preferences_${userKey}`);
-    localStorage.removeItem('zecratary_recipe_preferences');
+
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(`zecratary_recipe_preferences_${userKey}`);
+      localStorage.removeItem('zecratary_recipe_preferences');
+    }
+
+    try {
+      await fetch('/api/user/preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userKey,
+          servings: 2,
+          country: 'Singapore',
+          diets: [],
+          allergies: [],
+          avoid: [],
+          tastes: []
+        })
+      });
+    } catch (_) {}
+
     showToast("Preferences cleared!");
   };
 
-  const getDayDetails = (offsetDays: number, startStr: string = 'tomorrow') => {
-    const d = new Date();
-    const lowerStart = (startStr || '').toLowerCase().trim();
-    
-    let baseOffset = 1;
-    if (lowerStart.includes('today')) {
-      baseOffset = 0;
-    } else if (lowerStart.includes('tomorrow')) {
-      baseOffset = 1;
+  // ------------------------------------------------------------------
+  // Telemetry & Settings Synchronization from PostgreSQL admin_settings
+  // ------------------------------------------------------------------
+  const fetchTokenAndAiTelemetry = useCallback(async () => {
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const queryParam = active?.id ? `?userId=${active.id}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
+      
+      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
+      const data = await res.json();
+
+      if (data.success) {
+        setTokenBalance(Number(data.balance ?? 0));
+        setTokenSymbol(data.tokenSymbol || '🪙');
+        setTokenName(data.tokenName || 'Foodie Token');
+        setChefCost(Number(data.costs?.chef ?? 1));
+        if (Array.isArray(data.packages)) {
+          setTokenPackages(data.packages);
+        }
+      }
+
+      try {
+        const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
+        const sData = await sRes.json();
+        const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
+        if (chefCfg) {
+          if (chefCfg.model || sData.aiModel) setActiveAiModel(chefCfg.model || sData.aiModel);
+          if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
+          if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
+          if (Array.isArray(chefCfg.customVocabularyList)) setCustomVocabularyList(chefCfg.customVocabularyList.filter(Boolean));
+          if (Array.isArray(chefCfg.knowledgeBaseList)) setKnowledgeBaseList(chefCfg.knowledgeBaseList.filter(Boolean));
+          if (chefCfg.enableWebSearch !== undefined) setEnableWebSearch(Boolean(chefCfg.enableWebSearch));
+          if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
+          if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
+          if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
+
+          if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
+          if (chefCfg.voiceEngine) setVoiceEngine(chefCfg.voiceEngine);
+          if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
+          if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
+          if (chefCfg.selectedVoiceName) setSelectedVoiceName(chefCfg.selectedVoiceName);
+
+          if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
+            const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
+            const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
+            setQuestionnaireSections(toUse);
+            const allQs = toUse.flatMap((s: any) => s.questions || []);
+            setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
+          }
+        }
+      } catch (_) {}
+
+    } catch (err) {
+      console.warn('Failed to fetch /chef telemetry:', err);
     }
+  }, []);
 
-    d.setDate(d.getDate() + baseOffset + offsetDays);
-    const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
-    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    const fullISO = d.toISOString().split('T')[0];
-    return { dayName, dateStr, fullISO };
-  };
+  const applySavedTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
+  }, []);
 
-  const buildMealPlan = (days: number, theme: string, mealType: string, budget: string, startDateAnswer: string = 'tomorrow') => {
-    const normalizedType = mealType.toLowerCase().trim();
-    const combinedPool = [...userSavedRecipes, ...otherUsersRecipes].filter(r => 
-      !r.mealType || r.mealType.includes(normalizedType) || normalizedType.includes(r.mealType)
-    );
+  useEffect(() => {
+    applySavedTheme();
+    fetchTokenAndAiTelemetry();
 
-    const pool = combinedPool.length > 0 ? combinedPool : (userSavedRecipes.length > 0 ? userSavedRecipes : otherUsersRecipes);
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
+    window.addEventListener('zecratary_admin_settings_updated', fetchTokenAndAiTelemetry);
+    window.addEventListener('zecratary_engine_config_updated', fetchTokenAndAiTelemetry);
+    window.addEventListener('zecratary_chef_ai_settings_updated', fetchTokenAndAiTelemetry);
+    window.addEventListener('storage', fetchTokenAndAiTelemetry);
 
-    const meals: MealItem[] = [];
-    for (let i = 0; i < days; i++) {
-      const { dayName, dateStr } = getDayDetails(i, startDateAnswer);
-      const recipe = pool[i % (pool.length || 1)] || {
-        title: `${theme.replace(/-/g, ' ')} ${normalizedType} Bowl`,
-        description: `Chef-curated nutritious preparation suited to your diet via ${activeAiModel}.`,
-        prep: 15,
-        cook: 20,
-        image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
-        ingredients: ['Olive Oil', 'Seasonings', 'Fresh Vegetables']
-      };
-
-      meals.push({
-        id: 'meal_' + Date.now() + '_' + i,
-        dayIndex: i + 1,
-        dayLabel: `Day ${i + 1} - ${dayName}`,
-        dateStr: dateStr,
-        mealType: normalizedType.toUpperCase(),
-        title: recipe.title,
-        description: recipe.description,
-        prepMinutes: recipe.prep || 15,
-        cookMinutes: recipe.cook || 20,
-        servings: servings,
-        image: recipe.image,
-        ingredients: recipe.ingredients || [],
-        isBatchCook: i === 0
-      });
-    }
-
-    const formattedTheme = theme.replace(/-/g, ' ').replace(/\w/g, c => c.toUpperCase());
-    const formattedMealType = normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1);
-
-    return {
-      title: `${formattedTheme} ${formattedMealType} Plan`,
-      totalDays: days,
-      theme,
-      budgetPerServing: budget,
-      meals
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+      window.removeEventListener('zecratary_admin_settings_updated', fetchTokenAndAiTelemetry);
+      window.removeEventListener('zecratary_engine_config_updated', fetchTokenAndAiTelemetry);
+      window.removeEventListener('zecratary_chef_ai_settings_updated', fetchTokenAndAiTelemetry);
+      window.removeEventListener('storage', fetchTokenAndAiTelemetry);
     };
+  }, [applySavedTheme, fetchTokenAndAiTelemetry]);
+
+  const loadScopedData = useCallback((user: User | null) => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const allRecipesRaw = localStorage.getItem('zecratary_recipes') || '[]';
+      const adminRecipesRaw = localStorage.getItem('zecratary_admin_recipes') || '[]';
+      const savedRecipesRaw = localStorage.getItem('zecratary_saved_recipes') || '[]';
+
+      const combinedCatalog = [...JSON.parse(allRecipesRaw), ...JSON.parse(adminRecipesRaw), ...JSON.parse(savedRecipesRaw)];
+
+      const currentUserId = user?.id;
+      const currentUserEmail = user?.email?.toLowerCase().trim();
+
+      const normalizeRecipe = (r: any) => ({
+        id: r.id || `rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        title: r.title || r.name || 'Untitled Recipe',
+        description: r.description || 'Nutritious chef-curated home recipe.',
+        prep: Number(r.prepTimeMinutes || r.prep || 15),
+        cook: Number(r.cookTimeMinutes || r.cook || 20),
+        servings: Number(r.servings || 2),
+        image: r.imageUrl || r.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
+        ingredients: Array.isArray(r.ingredients) 
+          ? r.ingredients.map((ing: any) => typeof ing === 'string' ? ing : (ing.item || ing.name || ''))
+          : [],
+        mealType: (r.recipeType || r.mealType || r.category || 'dinner').toLowerCase(),
+        userId: r.userId,
+        createdBy: r.createdBy || 'Community Chef',
+        isFavorite: Boolean(r.isFavorite),
+        bookId: r.bookId
+      });
+
+      const otherList: any[] = [];
+      const otherSeen = new Set<string>();
+
+      for (const item of combinedCatalog) {
+        const itemUserId = item.userId;
+        const itemCreatedBy = item.createdBy ? item.createdBy.toLowerCase().trim() : '';
+        const isMine = (currentUserId && itemUserId === currentUserId) || (currentUserEmail && itemCreatedBy === currentUserEmail);
+
+        if (!isMine) {
+          const key = (item.title || item.name || '').toLowerCase().trim();
+          if (key && !otherSeen.has(key)) {
+            otherSeen.add(key);
+            otherList.push(normalizeRecipe(item));
+          }
+        }
+      }
+      setOtherUsersRecipes(otherList);
+
+      const userSavedMap = new Map<string, any>();
+      for (const item of combinedCatalog) {
+        const itemUserId = item.userId;
+        const itemCreatedBy = item.createdBy ? item.createdBy.toLowerCase().trim() : '';
+        const isMine = (currentUserId && itemUserId === currentUserId) || (currentUserEmail && itemCreatedBy === currentUserEmail);
+
+        if (isMine) {
+          const normalized = normalizeRecipe(item);
+          const key = normalized.title.toLowerCase().trim();
+          if (key && !userSavedMap.has(key)) {
+            userSavedMap.set(key, normalized);
+          }
+        }
+      }
+      setUserSavedRecipes(Array.from(userSavedMap.values()));
+
+      const rawPantry = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry') || '[]';
+      const parsedPantry = JSON.parse(rawPantry);
+      if (Array.isArray(parsedPantry) && user) {
+        const userPantry = parsedPantry.filter((item: any) => {
+          return (currentUserId && item.userId === currentUserId) || (currentUserEmail && item.createdBy === currentUserEmail);
+        });
+        setPantryIngredientsList(userPantry.map((p: any) => (p.name || '').toLowerCase().trim()).filter(Boolean));
+      } else {
+        setPantryIngredientsList([]);
+      }
+
+    } catch (_) {
+      setOtherUsersRecipes([]);
+      setUserSavedRecipes([]);
+      setPantryIngredientsList([]);
+    }
+  }, []);
+
+  const loadUserChatState = useCallback((user: User | null) => {
+    if (typeof window === 'undefined') return;
+    const userKey = getUserKey(user);
+    try {
+      const savedMessages = localStorage.getItem(`zecratary_chef_chat_messages_${userKey}`);
+      setMessages(savedMessages ? JSON.parse(savedMessages) : []);
+      const savedStep = localStorage.getItem(`zecratary_chef_wizard_step_${userKey}`);
+      setWizardStep(savedStep !== null ? JSON.parse(savedStep) : null);
+    } catch (_) {
+      setMessages([]);
+    }
+  }, [getUserKey]);
+
+  useEffect(() => {
+    document.title = `${t('foodieChatHeading') || 'Foodie Chat'} - FoodiePrep`;
+    initAuthStorage();
+    const user = getCurrentUser();
+    setCurrentUser(user);
+    currentUserRef.current = user;
+
+    loadScopedData(user);
+    loadUserChatState(user);
+    loadUserPreferences(user);
+
+    const handleSync = () => {
+      const active = getCurrentUser();
+      setCurrentUser(active);
+      currentUserRef.current = active;
+      loadScopedData(active);
+      loadUserChatState(active);
+      loadUserPreferences(active);
+      fetchTokenAndAiTelemetry();
+    };
+
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_pantry_updated', handleSync);
+    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_pantry_updated', handleSync);
+      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+    };
+  }, [loadScopedData, loadUserChatState, loadUserPreferences, fetchTokenAndAiTelemetry, t]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  const updateMessages = (newMessages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    setMessages(prev => {
+      const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
+      try {
+        if (typeof window === 'undefined') return updated;
+        const active = currentUserRef.current || getCurrentUser();
+        const userKey = getUserKey(active);
+        if (updated.length > 0) {
+          localStorage.setItem(`zecratary_chef_chat_messages_${userKey}`, JSON.stringify(updated));
+        } else {
+          localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
+        }
+      } catch (_) {}
+      return updated;
+    });
   };
 
+  const updateWizardStep = (step: number | null) => {
+    setWizardStep(step);
+    try {
+      if (typeof window === 'undefined') return;
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      if (step !== null) {
+        localStorage.setItem(`zecratary_chef_wizard_step_${userKey}`, JSON.stringify(step));
+      } else {
+        localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
+      }
+    } catch (_) {}
+  };
+
+  const resetChat = () => {
+    stopSpeaking();
+    setMessages([]);
+    setWizardStep(null);
+    setWizardAnswers({});
+    setActiveTopicTitle('Standard Wizard');
+    try {
+      if (typeof window === 'undefined') return;
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
+      localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
+    } catch (_) {}
+    showToast("Chat reset.");
+  };
+
+  // ------------------------------------------------------------------
+  // Dynamic Multi-Topic Questionnaire with Preset Options
+  // ------------------------------------------------------------------
+  const handleStartTopicWizard = (sec: any) => {
+    const qList = Array.isArray(sec.questions) && sec.questions.length > 0
+      ? sec.questions
+      : ["How many days would you like to plan for (up to 7 days)?"];
+
+    setActiveTopicTitle(sec.topicTitle);
+    setWizardQuestionsList(qList);
+    setWizardStep(0);
+    setWizardAnswers({});
+
+    const initialMsg: ChatMessage = { 
+      id: 'ast_' + Date.now(), 
+      role: 'assistant', 
+      content: `📋 **${sec.topicTitle}**\n${sec.description || 'Intake questionnaire for your customized meal plan.'}\n\n**Question 1 of ${qList.length}:**\n${qList[0]}` 
+    };
+
+    updateMessages(prev => [
+      ...prev,
+      { id: 'usr_' + Date.now(), role: 'user', content: `Start Questionnaire: ${sec.topicTitle}` },
+      initialMsg
+    ]);
+
+    if (enableVoiceInteraction && voiceAutoPlay) {
+      setTimeout(() => speakText(initialMsg.content || '', initialMsg.id), 200);
+    }
+  };
+
+  const handleStartFullWizard = () => {
+    const activeSections = questionnaireSections.filter((s: any) => s.enabled !== false);
+    const allQuestions = activeSections.flatMap((s: any) => s.questions || []);
+    const qList = allQuestions.length > 0 ? allQuestions : wizardQuestionsList;
+
+    setActiveTopicTitle('Complete Intake Wizard');
+    setWizardQuestionsList(qList);
+    setWizardStep(0);
+    setWizardAnswers({});
+
+    const initialMsg: ChatMessage = { 
+      id: 'ast_' + Date.now(), 
+      role: 'assistant', 
+      content: `Starting complete meal plan intake wizard (**Question 1 of ${qList.length}**):\n\n${qList[0]}` 
+    };
+
+    updateMessages(prev => [
+      ...prev,
+      { id: 'usr_' + Date.now(), role: 'user', content: 'Start Complete Meal Plan Intake Wizard' },
+      initialMsg
+    ]);
+
+    if (enableVoiceInteraction && voiceAutoPlay) {
+      setTimeout(() => speakText(initialMsg.content || '', initialMsg.id), 200);
+    }
+  };
+
+  const currentPresetOptions = useMemo(() => {
+    if (wizardStep === null || !wizardQuestionsList[wizardStep]) return [];
+    const q = wizardQuestionsList[wizardStep].toLowerCase();
+
+    if (q.includes('day') || q.includes('how many')) {
+      const days = [];
+      if (maxPlanDays >= 3) days.push('3 Days');
+      if (maxPlanDays >= 5) days.push('5 Days');
+      days.push(`${maxPlanDays} Days`);
+      return Array.from(new Set(days));
+    }
+    if (q.includes('meal type') || q.includes('types')) {
+      return ['Dinner only', 'Lunch & Dinner', 'All Meals (Breakfast, Lunch, Dinner)'];
+    }
+    if (q.includes('start') || q.includes('date') || q.includes('when')) {
+      return ['Start Today', 'Start Tomorrow', 'Next Monday'];
+    }
+    if (q.includes('theme') || q.includes('preference')) {
+      return ['High-Protein Wholesome', 'Keto / Low-Carb', 'Quick & Easy (Under 25 mins)', 'Mediterranean Fresh', 'Comfort Food'];
+    }
+    if (q.includes('budget')) {
+      return ['Under $5 per serving', '$5 - $8 per serving', '$10 - $15 per serving', 'Flexible target'];
+    }
+
+    return ['Yes, strictly apply', 'Standard recommended', 'Prioritize in-stock pantry items'];
+  }, [wizardStep, wizardQuestionsList, maxPlanDays]);
+
+  // ------------------------------------------------------------------
+  // Chat Execution with LLM & Final Recommended Recipe Generation
+  // ------------------------------------------------------------------
   const handleSend = async (customText?: string) => {
     const textToSend = (customText !== undefined ? customText : prompt).trim();
     if (!textToSend || loading) return;
 
-    // 1. Restriction Check: Client-side dietary filter word verification
     if (strictDietEnforcement && filterWordsList.length > 0) {
       const lower = textToSend.toLowerCase();
       const matchedFilter = filterWordsList.find(word => {
@@ -731,7 +846,6 @@ ${qList[0]}`
       }
     }
 
-    // 2. Token Balance Verification before invocation
     if (tokenBalance < chefCost) {
       showToast(`Insufficient ${tokenName}. Required: ${chefCost} ${tokenSymbol}, Balance: ${tokenBalance} ${tokenSymbol}`);
       setIsTokenPurchaseOpen(true);
@@ -745,26 +859,6 @@ ${qList[0]}`
 
     const lower = textToSend.toLowerCase();
 
-    if (lower === "what's in my pantry?" || lower.includes("what is in my pantry")) {
-      setTimeout(() => {
-        const count = pantryIngredientsList.length;
-        const listDesc = count > 0 
-          ? `You have ${count} ingredients in your pantry: ${pantryIngredientsList.slice(0, 7).join(', ')}${count > 7 ? ` and ${count - 7} more` : ''}. Would you like a meal plan built around them?`
-          : "Your pantry is currently empty! Add items on the Pantry page or tell me what you bought today.";
-
-        updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: listDesc }]);
-        setLoading(false);
-      }, 350);
-      return;
-    }
-
-    const isExplicitMealPlanCommand = /^(?:create|start|make|build)\s+(?:a\s+)?meal\s+plan/i.test(lower) || lower === 'create a meal plan' || lower === 'meal plan';
-    if (isExplicitMealPlanCommand && wizardStep === null) {
-      handleStartFullWizard();
-      setLoading(false);
-      return;
-    }
-
     if (wizardStep !== null) {
       const currentIdx = wizardStep;
       const updatedAnswers = { ...wizardAnswers, [currentIdx]: textToSend };
@@ -774,42 +868,60 @@ ${qList[0]}`
       if (nextIdx < wizardQuestionsList.length) {
         updateWizardStep(nextIdx);
         setTimeout(() => {
-          updateMessages(prev => [
-            ...prev,
-            {
-              id: 'ast_' + Date.now(),
-              role: 'assistant',
-              content: `**Step ${nextIdx + 1} of ${wizardQuestionsList.length}:**
-${wizardQuestionsList[nextIdx]}`
-            }
-          ]);
+          const nextQuestionMsg: ChatMessage = {
+            id: 'ast_' + Date.now(),
+            role: 'assistant',
+            content: `**Question ${nextIdx + 1} of ${wizardQuestionsList.length}:**\n${wizardQuestionsList[nextIdx]}`
+          };
+          updateMessages(prev => [...prev, nextQuestionMsg]);
           setLoading(false);
-        }, 350);
+          if (enableVoiceInteraction && voiceAutoPlay) {
+            speakText(nextQuestionMsg.content || '', nextQuestionMsg.id);
+          }
+        }, 300);
         return;
       } else {
         updateWizardStep(null);
-        setActiveTopicTitle('Standard Wizard');
-        const resolvedDays = parseInt(updatedAnswers[0]) || wizardData.days || 3;
-        const resolvedMealType = updatedAnswers[1] || wizardData.mealType || 'dinner';
-        const resolvedTheme = updatedAnswers[2] || wizardData.theme || 'high-protein';
-        const resolvedStart = updatedAnswers[3] || wizardData.startDate || 'tomorrow';
-        const resolvedBudget = updatedAnswers[4] || wizardData.budget || '4';
+        try {
+          const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+          const res = await fetch('/api/ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              isQuestionnaireComplete: true,
+              topicTitle: activeTopicTitle,
+              questionnaireAnswers: updatedAnswers,
+              userId: activeAuth?.id,
+              userEmail: activeAuth?.email,
+              preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
+              pantry: enablePantryContext ? pantryIngredientsList : []
+            })
+          });
 
-        setTimeout(() => {
-          const generatedPlan = buildMealPlan(resolvedDays, resolvedTheme, resolvedMealType, resolvedBudget, resolvedStart);
-          const buildingMsg = `I have generated your ${resolvedDays}-day ${resolvedTheme} ${resolvedMealType} plan below based on your questionnaire responses. You can inspect or swap any meal before finalizing!`;
+          const data = await res.json();
+          if (!res.ok || !data.success) throw new Error(data.error || 'Failed to synthesize questionnaire results.');
 
-          updateMessages(prev => [
-            ...prev,
-            {
-              id: 'ast_plan_' + Date.now(),
-              role: 'assistant',
-              content: buildingMsg,
-              plan: generatedPlan
-            }
-          ]);
+          if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
+          else setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens || chefCost)));
+
+          const planMsg: ChatMessage = {
+            id: 'ast_plan_' + Date.now(),
+            role: 'assistant',
+            content: data.reply || `I have formulated your meal plan and signature recommended recipe based on your ${activeTopicTitle} questionnaire!`,
+            plan: data.plan,
+            recommendedRecipe: data.recommendedRecipe || data.recipe
+          };
+
+          updateMessages(prev => [...prev, planMsg]);
+          if (enableVoiceInteraction && voiceAutoPlay) {
+            speakText(planMsg.content || '', planMsg.id);
+          }
+        } catch (err: any) {
+          updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message}` }]);
+        } finally {
           setLoading(false);
-        }, 450);
+          setActiveTopicTitle('Standard Wizard');
+        }
         return;
       }
     }
@@ -830,226 +942,30 @@ ${wizardQuestionsList[nextIdx]}`
       });
 
       const data = await res.json();
-
       if (!res.ok || !data.success) {
-        if (data.insufficientTokens) {
-          setIsTokenPurchaseOpen(true);
-        }
-        throw new Error(data.error || 'Chef Foodie could not generate a response.');
+        if (data.insufficientTokens) setIsTokenPurchaseOpen(true);
+        throw new Error(data.error || 'Chef Foodie could not process your query.');
       }
 
-      // Update Token Balance
-      if (typeof data.remainingBalance === 'number') {
-        setTokenBalance(data.remainingBalance);
-      } else {
-        setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens || chefCost)));
-      }
+      if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
+      else setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens || chefCost)));
 
-      if (data.consumedSystemTokens) {
-        showToast(`Consumed ${data.consumedSystemTokens} ${tokenSymbol}`);
-      }
+      const astMsg: ChatMessage = {
+        id: 'ast_' + Date.now(),
+        role: 'assistant',
+        content: data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.",
+        recommendedRecipe: data.recommendedRecipe || data.recipe
+      };
 
-      // Sync user token metrics to profile
-      if (data.tokenUsage && activeAuth) {
-        try {
-          const fresh = { 
-            ...activeAuth, 
-            tokenUsage: data.tokenUsage, 
-            promptTokens: data.tokenUsage.promptTokens, 
-            completionTokens: data.tokenUsage.completionTokens, 
-            totalTokens: data.tokenUsage.totalTokens, 
-            requestCount: data.tokenUsage.requestCount 
-          };
-          localStorage.setItem('zecratary_current_user', JSON.stringify(fresh));
-          window.dispatchEvent(new Event('zecratary_users_updated'));
-        } catch (_) {}
-      }
-
-      if (data.recipe) {
-        updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', recipe: data.recipe }]);
-      } else {
-        updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: data.reply || data.response || "Here are culinary suggestions tailored to your preferences." }]);
+      updateMessages(prev => [...prev, astMsg]);
+      if (enableVoiceInteraction && voiceAutoPlay) {
+        speakText(astMsg.content || '', astMsg.id);
       }
     } catch (err: any) {
-      updateMessages(prev => [
-        ...prev,
-        {
-          id: 'ast_' + Date.now(),
-          role: 'assistant',
-          content: `⚠️ ${err.message || 'Error occurred while contacting Chef Foodie.'}`
-        }
-      ]);
+      updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || 'Error communicating with AI engine.'}` }]);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleInstantShuffleMeal = (msgId: string, mealId: string) => {
-    updateMessages(prev => prev.map(m => {
-      if (m.id !== msgId || !m.plan) return m;
-      const targetMeal = m.plan.meals.find(x => x.id === mealId);
-      const normalizedType = targetMeal?.mealType.toLowerCase() || 'dinner';
-      
-      const available = otherUsersRecipes.filter(p => 
-        p.title.toLowerCase() !== targetMeal?.title.toLowerCase() &&
-        (p.mealType.includes(normalizedType) || normalizedType.includes(p.mealType))
-      );
-
-      const replacement = available.length > 0 
-        ? available[Math.floor(Math.random() * available.length)]
-        : otherUsersRecipes[0] || userSavedRecipes[0];
-
-      if (!replacement) return m;
-
-      const updatedMeals = m.plan.meals.map(meal => {
-        if (meal.id === mealId) {
-          return {
-            ...meal,
-            title: replacement.title,
-            description: replacement.description,
-            prepMinutes: replacement.prep,
-            cookMinutes: replacement.cook,
-            image: replacement.image,
-            ingredients: replacement.ingredients || [],
-            isLeftover: false
-          };
-        }
-        return meal;
-      });
-
-      return { ...m, plan: { ...m.plan, meals: updatedMeals } };
-    }));
-    showToast("Meal shuffled!");
-  };
-
-  const openBatchCook = (msgId: string, meal: MealItem) => {
-    setActiveBatchPlanMsgId(msgId);
-    setActiveBatchMeal(meal);
-    setSelectedBatchDays([]);
-    setShowBatchModal(true);
-  };
-
-  const handleSaveBatchCook = () => {
-    if (!activeBatchPlanMsgId || !activeBatchMeal) return;
-
-    updateMessages(prev => prev.map(m => {
-      if (m.id !== activeBatchPlanMsgId || !m.plan) return m;
-
-      const updatedMeals = m.plan.meals.map(meal => {
-        if (selectedBatchDays.includes(meal.dayIndex)) {
-          return {
-            ...meal,
-            title: activeBatchMeal.title,
-            description: `Leftover portion of ${activeBatchMeal.title}. Simply reheat and serve.`,
-            prepMinutes: 0,
-            cookMinutes: 5,
-            image: activeBatchMeal.image,
-            isLeftover: true,
-            leftoverFrom: activeBatchMeal.dayLabel
-          };
-        }
-        return meal;
-      });
-
-      return {
-        ...m,
-        plan: {
-          ...m.plan,
-          meals: updatedMeals
-        }
-      };
-    }));
-
-    setShowBatchModal(false);
-    showToast("Batch cooking scheduled!");
-  };
-
-  const openSwapMeal = (msgId: string, meal: MealItem, plan: MealPlanData) => {
-    initAuthStorage();
-    const active = getCurrentUser();
-    setCurrentUser(active);
-    currentUserRef.current = active;
-    loadScopedData(active);
-
-    setActiveSwapPlanMsgId(msgId);
-    setActiveSwapMeal(meal);
-    setActiveSwapPlan(plan);
-    setSwapTab('ideas');
-    setIdeasCurrentPage(1);
-    setSavedCurrentPage(1);
-    setSavedSearchName('');
-    setSelectedSavedBookFilter('All Books');
-    setSelectedSavedTagFilter('All');
-    setShowSavedFilterOptions(false);
-    
-    const defaultSearch = `${plan.theme.replace(/-/g, ' ')} ${meal.mealType.toLowerCase()}, budget about SGD ${plan.budgetPerServing || '4.00'}`;
-    setSwapSearchQuery(defaultSearch);
-    setShowSwapModal(true);
-  };
-
-  const handleConfirmSwap = (replacementRecipe: { title: string; description: string; prep: number; cook: number; image?: string; ingredients?: string[] }) => {
-    if (!activeSwapPlanMsgId || !activeSwapMeal) return;
-
-    updateMessages(prev => prev.map(m => {
-      if (m.id !== activeSwapPlanMsgId || !m.plan) return m;
-
-      const updatedMeals = m.plan.meals.map(meal => {
-        if (meal.id === activeSwapMeal.id) {
-          return {
-            ...meal,
-            title: replacementRecipe.title,
-            description: replacementRecipe.description,
-            prepMinutes: replacementRecipe.prep,
-            cookMinutes: replacementRecipe.cook,
-            image: replacementRecipe.image || meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
-            ingredients: replacementRecipe.ingredients || meal.ingredients || [],
-            isLeftover: false
-          };
-        }
-        return meal;
-      });
-
-      return { ...m, plan: { ...m.plan, meals: updatedMeals } };
-    }));
-
-    setShowSwapModal(false);
-    showToast("Meal replaced!");
-  };
-
-  const handleRemoveMeal = (msgId: string, mealId: string) => {
-    updateMessages(prev => prev.map(m => {
-      if (m.id !== msgId || !m.plan) return m;
-      return { ...m, plan: { ...m.plan, meals: m.plan.meals.filter(meal => meal.id !== mealId) } };
-    }));
-    showToast("Meal removed");
-  };
-
-  const handleRefreshAll = (msgId: string) => {
-    updateMessages(prev => prev.map(m => {
-      if (m.id !== msgId || !m.plan) return m;
-      const randomized = m.plan.meals.map((meal, i) => {
-        const replacement = otherUsersRecipes[i % (otherUsersRecipes.length || 1)] || userSavedRecipes[0] || meal;
-        return {
-          ...meal,
-          title: replacement.title,
-          description: replacement.description,
-          prepMinutes: replacement.prep,
-          cookMinutes: replacement.cook,
-          image: replacement.image,
-          ingredients: replacement.ingredients || []
-        };
-      });
-      return { ...m, plan: { ...m.plan, meals: randomized } };
-    }));
-    showToast("All meals refreshed!");
-  };
-
-  const handleCopyPlan = (plan: MealPlanData) => {
-    const nl = String.fromCharCode(10) + String.fromCharCode(10);
-    const summary = `${plan.title} (${plan.totalDays} Days)${nl}` + 
-      plan.meals.map(m => `• ${m.dayLabel}: ${m.title} (${m.prepMinutes + m.cookMinutes}m) - ${m.description}`).join(nl);
-    navigator.clipboard.writeText(summary);
-    showToast("Plan summary copied to clipboard!");
   };
 
   const handleSaveRecipeToBook = (recipe: any) => {
@@ -1067,8 +983,8 @@ ${wizardQuestionsList[nextIdx]}`
         description: recipe.description,
         prepTimeMinutes: recipe.prepMinutes || 15,
         cookTimeMinutes: recipe.cookMinutes || 20,
-        servings: servings,
-        recipeType: 'Main Dish',
+        servings: recipe.servings || servings,
+        recipeType: recipe.mealType || 'Main Dish',
         isFavorite: true,
         ingredients: recipe.ingredients || []
       };
@@ -1083,194 +999,32 @@ ${wizardQuestionsList[nextIdx]}`
     }
   };
 
-  const handleCreatePlan = (plan: MealPlanData) => {
+  const handleAddRecipeIngredientsToGrocery = (recipe: any) => {
     try {
       const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
+      const rawGrocery = localStorage.getItem('zecratary_grocery_list') || '[]';
+      const groceryItems = JSON.parse(rawGrocery);
+      const items = Array.isArray(recipe.ingredients) ? recipe.ingredients : [];
 
-      const newPlannerItems = plan.meals.map((m, idx) => {
-        const { dayName, fullISO, dateStr } = getDayDetails(idx, wizardData.startDate || 'tomorrow');
-        const cleanType = m.mealType.toLowerCase().trim();
-
-        return {
-          id: 'plan_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substring(2, 6),
-          userId: active?.id || 'guest',
-          createdBy: active?.email || 'guest',
-          day: dayName,
-          dayName: dayName,
-          dayOfWeek: dayName,
-          dayShort: dayName.slice(0, 3),
-          dayIndex: idx + 1,
-          dayNumber: String(idx + 1),
-          dayNum: String(idx + 1),
-          dayLabel: m.dayLabel,
-          date: fullISO,
-          dateStr: dateStr,
-          formattedDate: fullISO,
-          type: cleanType,
-          mealType: cleanType,
-          slot: cleanType,
-          category: cleanType,
-          title: m.title,
-          name: m.title,
-          recipeTitle: m.title,
-          recipeName: m.title,
-          description: m.description,
-          time: `${m.prepMinutes + m.cookMinutes} min`,
-          prepMinutes: m.prepMinutes,
-          cookMinutes: m.cookMinutes,
-          prepTimeMinutes: m.prepMinutes,
-          cookTimeMinutes: m.cookMinutes,
-          servings: m.servings,
-          image: m.image,
-          imageUrl: m.image,
-          ingredients: m.ingredients || [],
-          isBatchCook: Boolean(m.isBatchCook),
-          isLeftover: Boolean(m.isLeftover),
-          leftoverFrom: m.leftoverFrom,
-          icon: '🍲'
-        };
-      });
-
-      let existingPlannerMeals: any[] = [];
-      try {
-        const rawExisting = localStorage.getItem('zecratary_planner_meals') || localStorage.getItem('zecratary_meal_plan') || localStorage.getItem('zecratary_planner') || '[]';
-        if (rawExisting) existingPlannerMeals = JSON.parse(rawExisting);
-      } catch (_) {}
-
-      const mergedMeals = [...existingPlannerMeals, ...newPlannerItems];
-
-      localStorage.setItem('zecratary_planner_meals', JSON.stringify(mergedMeals));
-      localStorage.setItem(`zecratary_planner_meals_${userKey}`, JSON.stringify(mergedMeals));
-      localStorage.setItem('zecratary_meal_plan', JSON.stringify(mergedMeals));
-      localStorage.setItem(`zecratary_meal_plan_${userKey}`, JSON.stringify(mergedMeals));
-      localStorage.setItem('zecratary_planner', JSON.stringify(mergedMeals));
-      localStorage.setItem(`zecratary_planner_${userKey}`, JSON.stringify(mergedMeals));
-      localStorage.setItem('zecratary_meals', JSON.stringify(mergedMeals));
-      localStorage.setItem('zecratary_active_plan_info', JSON.stringify({
-        title: plan.title,
-        createdAt: new Date().toISOString(),
-        totalDays: plan.totalDays,
-        theme: plan.theme
+      const newEntries = items.map((item: string) => ({
+        id: 'groc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        userId: active?.id,
+        name: item,
+        item,
+        checked: false,
+        category: 'Chef Recommended Ingredients',
+        fromPlan: recipe.title
       }));
 
-      if (syncToGrocery) {
-        try {
-          const rawGrocery = localStorage.getItem('zecratary_grocery_list') || localStorage.getItem('zecratary_shopping_list') || '[]';
-          const groceryItems = JSON.parse(rawGrocery);
-          const allPlanIngredients = plan.meals.flatMap(m => m.ingredients || []);
-          const uniqueIngredients = Array.from(new Set(allPlanIngredients));
-
-          const newGroceryEntries = uniqueIngredients.map(item => ({
-            id: 'groc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-            userId: active?.id,
-            name: item,
-            item: item,
-            checked: false,
-            category: 'Produce & Essentials',
-            fromPlan: plan.title
-          }));
-
-          const updatedGrocery = [...groceryItems, ...newGroceryEntries];
-          localStorage.setItem('zecratary_grocery_list', JSON.stringify(updatedGrocery));
-          localStorage.setItem('zecratary_shopping_list', JSON.stringify(updatedGrocery));
-          window.dispatchEvent(new Event('zecratary_grocery_updated'));
-        } catch (_) {}
-      }
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('zecratary_planner_updated', { detail: newPlannerItems }));
-        window.dispatchEvent(new Event('zecratary_meals_updated'));
-        window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
-        window.dispatchEvent(new Event('storage'));
-      }
-
-      showToast("Plan created! Opening Planner...");
-      setTimeout(() => {
-        router.push('/planner');
-      }, 250);
-
-    } catch (err) {
-      console.error("Error creating plan:", err);
-      router.push('/planner');
+      const updated = [...groceryItems, ...newEntries];
+      localStorage.setItem('zecratary_grocery_list', JSON.stringify(updated));
+      localStorage.setItem('zecratary_shopping_list', JSON.stringify(updated));
+      window.dispatchEvent(new Event('zecratary_grocery_updated'));
+      showToast(`Added ${newEntries.length} ingredients to your Grocery List!`);
+    } catch (_) {
+      showToast("Could not add to grocery list.");
     }
   };
-
-  const getOtherDaysForBatch = () => {
-    if (!activeBatchPlanMsgId || !activeBatchMeal) return [];
-    const msg = messages.find(m => m.id === activeBatchPlanMsgId);
-    if (!msg || !msg.plan) return [];
-    return msg.plan.meals.filter(m => m.dayIndex > activeBatchMeal.dayIndex);
-  };
-
-  const filteredOtherUserIdeas = useMemo(() => {
-    const rawQuery = swapSearchQuery.trim().toLowerCase();
-    const cleanKeywords = rawQuery
-      .replace(/budget about sgd [a-z0-9.]+/gi, '')
-      .replace(/per serving/gi, '')
-      .replace(/,/g, ' ')
-      .trim();
-
-    let list = otherUsersRecipes;
-
-    if (cleanKeywords.length > 0) {
-      const terms = cleanKeywords.split(/\s+/).filter(t => t.length > 2 && t !== 'and' && t !== 'for');
-      if (terms.length > 0) {
-        list = list.filter(item => {
-          const targetStr = `${item.title} ${item.description} ${(item.ingredients || []).join(' ')}`.toLowerCase();
-          return terms.some(term => targetStr.includes(term));
-        });
-      }
-    }
-
-    if (usePantryIngredients && pantryIngredientsList.length > 0) {
-      const pantryMatched = list.filter(item => 
-        (item.ingredients || []).some((ing: string) => 
-          pantryIngredientsList.some(p => ing.toLowerCase().includes(p) || p.includes(ing.toLowerCase()))
-        )
-      );
-      if (pantryMatched.length > 0) list = pantryMatched;
-    }
-
-    return list;
-  }, [otherUsersRecipes, swapSearchQuery, usePantryIngredients, pantryIngredientsList]);
-
-  const ideasTotalPages = Math.max(1, Math.ceil(filteredOtherUserIdeas.length / IDEAS_ITEMS_PER_PAGE));
-  const ideasStartIndex = (ideasCurrentPage - 1) * IDEAS_ITEMS_PER_PAGE;
-  const paginatedSwapIdeas = filteredOtherUserIdeas.slice(ideasStartIndex, ideasStartIndex + IDEAS_ITEMS_PER_PAGE);
-
-  const filteredUserSavedRecipes = useMemo(() => {
-    return userSavedRecipes.filter((r: any) => {
-      const title = (r.title || r.name || '').toLowerCase();
-      const matchesSearch = !savedSearchName.trim() || title.includes(savedSearchName.toLowerCase().trim());
-      
-      let matchesBook = true;
-      if (selectedSavedBookFilter !== 'All Books') {
-        matchesBook = r.bookId === selectedSavedBookFilter;
-      }
-
-      let matchesTag = true;
-      if (selectedSavedTagFilter !== 'All') {
-        if (selectedSavedTagFilter === 'Favorites') {
-          matchesTag = Boolean(r.isFavorite);
-        } else {
-          const cat = r.recipeType || r.category || r.tags?.[0];
-          matchesTag = cat === selectedSavedTagFilter || (Array.isArray(r.tags) && r.tags.includes(selectedSavedTagFilter));
-        }
-      }
-
-      return matchesSearch && matchesBook && matchesTag;
-    });
-  }, [userSavedRecipes, savedSearchName, selectedSavedBookFilter, selectedSavedTagFilter]);
-
-  const savedTotalPages = Math.max(1, Math.ceil(filteredUserSavedRecipes.length / SAVED_ITEMS_PER_PAGE));
-  const savedStartIndex = (savedCurrentPage - 1) * SAVED_ITEMS_PER_PAGE;
-  const paginatedSavedRecipes = filteredUserSavedRecipes.slice(savedStartIndex, savedStartIndex + SAVED_ITEMS_PER_PAGE);
-
-  const repeatMealsInPlan = useMemo(() => {
-    if (!activeSwapPlan) return [];
-    return activeSwapPlan.meals.filter(m => !activeSwapMeal || m.id !== activeSwapMeal.id);
-  }, [activeSwapPlan, activeSwapMeal]);
 
   const activeQuestionnaireSections = useMemo(() => {
     return questionnaireSections.filter((s: any) => s.enabled !== false);
@@ -1282,6 +1036,7 @@ ${wizardQuestionsList[nextIdx]}`
       style={{ color: 'var(--color-text)' }}
     >
       <AiQuotaBar />
+
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
@@ -1296,15 +1051,15 @@ ${wizardQuestionsList[nextIdx]}`
         </div>
       )}
 
-      {/* Top Header */}
+      {/* TOP HEADER WITH TELEMETRY, VOICE INDICATOR & DIETARY PREFERENCES */}
       <div 
         className="space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
       >
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <div 
-              className="w-10 h-10 rounded-2xl flex items-center justify-center border"
+              className="w-10 h-10 rounded-2xl flex items-center justify-center border shadow-xs"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-primary)',
@@ -1314,45 +1069,72 @@ ${wizardQuestionsList[nextIdx]}`
               <ChefHat className="h-6 w-6" />
             </div>
             <div>
-              <h1 
-                className="text-xl font-bold tracking-tight"
-                style={{ color: 'var(--color-text)' }}
-              >
-                {t('foodieChatHeading') || 'Foodie Chat'}
+              <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                {t('foodieChatHeading', 'Foodie Chat')}
               </h1>
-              <p 
-                className="text-xs"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                {t('foodieChatSubtitle') || 'Ask me anything about recipes and cooking'}
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('foodieChatSubtitle', 'Ask recipes, cooking questions, or launch multi-topic meal plan wizards')}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
-            {/* Active AI Model Badge Synced from /admin/ai-settings */}
+          <div className="flex items-center gap-2">
+            {isSpeaking && (
+              <div 
+                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold animate-pulse shadow-sm"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                }}
+              >
+                <Volume2 className="h-3.5 w-3.5" />
+                <span>Speaking...</span>
+                <button 
+                  type="button" 
+                  onClick={stopSpeaking}
+                  className="hover:underline text-[10px] ml-1 font-extrabold cursor-pointer"
+                >
+                  [Stop]
+                </button>
+              </div>
+            )}
+
+            {enableVoiceInteraction && (
+              <div 
+                className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-emerald)'
+                }}
+                title={`Voice Mode Active (${selectedVoiceName} • ${voiceSpeed}x)`}
+              >
+                <Mic className="h-3.5 w-3.5" />
+                <span className="font-mono text-[10px] truncate max-w-[90px]">{selectedVoiceName.split('-')[0] || 'Voice'}</span>
+              </div>
+            )}
+
             <div 
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               title="Active Model configured in /admin/ai-settings"
             >
-              <Cpu className="h-3.5 w-3.5 text-orange-400" />
+              <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
               <span className="font-mono">{activeAiModel}</span>
             </div>
 
-            {/* Strict Dietary Filter Indicator */}
             {strictDietEnforcement && (
               <div 
-                className="hidden md:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
+                className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-                title={`Strict dietary filters enforced with ${filterWordsList.length} avoided terms.`}
+                title={`Strict dietary filters active with ${filterWordsList.length} avoided terms.`}
               >
                 <ShieldAlert className="h-3 w-3" />
-                <span>{t('strictFiltersBadge', 'Strict Filters Active')}</span>
+                <span>Strict Filters</span>
               </div>
             )}
 
-            {/* Live Token Wallet & Top Up */}
             <div 
               className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-sm"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -1367,41 +1149,43 @@ ${wizardQuestionsList[nextIdx]}`
                 className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                {t('topUpBtn', 'Top Up')}
+                Top Up
               </button>
             </div>
 
+            {/* PREFERENCES SLIDERS BUTTON */}
             <button
               type="button"
               onClick={() => setShowPreferences(true)}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-sm"
+              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text-secondary)'
               }}
-              title={t('preferencesTooltip') || 'Preferences'}
+              title={t('preferencesTooltip', 'Recipe Preferences')}
             >
               <SlidersHorizontal className="h-4 w-4" />
             </button>
+
             <button
               type="button"
               onClick={resetChat}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-sm"
+              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text-secondary)'
               }}
-              title={t('newChatTooltip') || 'New Chat'}
+              title="New Chat"
             >
               <Edit3 className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* Dietary Pills Header */}
-        <div className="flex flex-wrap gap-2 text-xs">
+        {/* RESTORED: USER DIETARY PREFERENCES PILLS HEADER */}
+        <div className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in">
           <span 
             className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
@@ -1410,8 +1194,9 @@ ${wizardQuestionsList[nextIdx]}`
               color: 'var(--color-emerald)'
             }}
           >
-            {t('servingsLabelPref') || 'Servings:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{(t('peopleSuffix') || '{count} people').replace('{count}', String(servings))}</strong>
+            {t('servingsLabelPref', 'Servings:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{(t('peopleSuffix', '{count} people')).replace('{count}', String(servings))}</strong>
           </span>
+
           <span 
             className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
@@ -1420,8 +1205,9 @@ ${wizardQuestionsList[nextIdx]}`
               color: 'var(--color-emerald)'
             }}
           >
-            {t('countryLabelPref') || 'Country:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{country}</strong>
+            {t('countryLabelPref', 'Country:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{country}</strong>
           </span>
+
           {selectedDiets.map((d) => (
             <span 
               key={`diet-${d}`}
@@ -1432,9 +1218,10 @@ ${wizardQuestionsList[nextIdx]}`
                 color: 'var(--color-emerald)'
               }}
             >
-              {t('dietLabelPref') || 'Diet:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{d}</strong>
+              {t('dietLabelPref', 'Diet:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{d}</strong>
             </span>
           ))}
+
           {selectedAllergies.map((a) => (
             <span 
               key={`allergy-${a}`}
@@ -1445,9 +1232,10 @@ ${wizardQuestionsList[nextIdx]}`
                 color: 'var(--color-primary)'
               }}
             >
-              {t('allergyLabelPref') || 'Allergy:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{a}</strong>
+              {t('allergyLabelPref', 'Allergy:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{a}</strong>
             </span>
           ))}
+
           {ingredientsToAvoid.map((av) => (
             <span 
               key={`avoid-${av}`}
@@ -1458,9 +1246,10 @@ ${wizardQuestionsList[nextIdx]}`
                 color: 'var(--color-primary)'
               }}
             >
-              {t('avoidLabelPref') || 'Avoid:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{av}</strong>
+              {t('avoidLabelPref', 'Avoid:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{av}</strong>
             </span>
           ))}
+
           {tastesList.map((itemTaste) => (
             <span 
               key={`taste-${itemTaste}`}
@@ -1471,16 +1260,16 @@ ${wizardQuestionsList[nextIdx]}`
                 color: 'var(--color-primary)'
               }}
             >
-              {t('tasteLabelPref') || 'Taste:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{itemTaste}</strong>
+              {t('tasteLabelPref', 'Taste:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{itemTaste}</strong>
             </span>
           ))}
         </div>
       </div>
 
-      {/* Main Conversation Stream */}
+      {/* MAIN CONVERSATION STREAM */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 custom-scrollbar">
         {messages.length === 0 ? (
-          <div className="text-center my-auto py-12 space-y-6">
+          <div className="text-center my-auto py-10 space-y-6">
             <div 
               className="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto border shadow-lg"
               style={{
@@ -1493,17 +1282,13 @@ ${wizardQuestionsList[nextIdx]}`
             </div>
             <div>
               <h2 className="text-2xl font-black" style={{ color: 'var(--color-text)' }}>
-                {t('heyImChef') || "Hey, I'm Chef Foodie!"}
+                {t('heyImChef', "Hey, I'm Chef Foodie!")}
               </h2>
-              <p 
-                className="text-sm mt-1"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                Choose an intake questionnaire or ask any question to get started
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                Select a questionnaire topic below or speak into the microphone to plan meals
               </p>
             </div>
 
-            {/* SYNCED TOPIC BUTTONS FROM /admin/ai-settings */}
             <div className="flex flex-wrap justify-center gap-2.5 max-w-xl mx-auto">
               <button
                 type="button"
@@ -1533,7 +1318,7 @@ ${wizardQuestionsList[nextIdx]}`
                 >
                   <Layers className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                   <span>{sec.topicTitle}</span>
-                  <span className="text-[10px] opacity-75 font-mono">({(sec.questions || []).length} steps)</span>
+                  <span className="text-[10px] opacity-75 font-mono">({(sec.questions || []).length} questions)</span>
                 </button>
               ))}
             </div>
@@ -1541,11 +1326,13 @@ ${wizardQuestionsList[nextIdx]}`
         ) : (
           messages.map((m) => {
             const isUser = m.role === 'user';
+            const hasAudioActive = isSpeaking && speakingMsgId === m.id;
+
             return (
               <div key={m.id} className={`flex items-start gap-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
                 {!isUser && (
                   <div 
-                    className="w-7 h-7 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
+                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
@@ -1559,7 +1346,7 @@ ${wizardQuestionsList[nextIdx]}`
                 <div className={`max-w-xl sm:max-w-2xl space-y-3.5 ${isUser ? '' : 'w-full'}`}>
                   {m.content && (
                     <div 
-                      className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border'}`}
+                      className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border shadow-xs'}`}
                       style={isUser ? {
                         backgroundColor: 'var(--color-primary)'
                       } : {
@@ -1568,412 +1355,231 @@ ${wizardQuestionsList[nextIdx]}`
                         color: 'var(--color-text)'
                       }}
                     >
-                      <p className="whitespace-pre-line">{m.content}</p>
-                    </div>
-                  )}
-
-                  {/* Multi-Day Plan Compact */}
-                  {m.plan && resultDisplayMode === 'compact' && (
-                    <div 
-                      className="space-y-3 pt-1 border rounded-2xl p-4 shadow-sm"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
-                      <div 
-                        className="flex items-center justify-between border-b pb-2"
-                        style={{ borderColor: 'var(--color-border)' }}
-                      >
-                        <span className="font-extrabold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                          <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {m.plan.title} (Compact View)
-                        </span>
-                        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{m.plan.totalDays} Days</span>
-                      </div>
-                      <div className="space-y-2">
-                        {m.plan.meals.map((meal) => (
-                          <div 
-                            key={meal.id} 
-                            className="flex items-center justify-between p-2.5 rounded-xl border text-xs"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)'
-                            }}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="font-bold shrink-0" style={{ color: 'var(--color-primary)' }}>{meal.dayLabel}:</span>
-                              <span className="truncate font-medium" style={{ color: 'var(--color-text)' }}>{meal.title}</span>
-                            </div>
-                            <div className="flex items-center gap-3 shrink-0" style={{ color: 'var(--color-text-secondary)' }}>
-                              <span>{meal.prepMinutes + meal.cookMinutes}m</span>
-                              <button
-                                type="button"
-                                onClick={() => openSwapMeal(m.id, meal, m.plan!)}
-                                className="font-bold hover:underline cursor-pointer"
-                                style={{ color: 'var(--color-primary)' }}
-                              >
-                                Swap
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex items-center gap-2 pt-2">
-                        <button
-                          type="button"
-                          onClick={() => handleCreatePlan(m.plan!)}
-                          className="w-full py-2.5 rounded-xl text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md hover:brightness-110"
-                          style={{ backgroundColor: 'var(--color-emerald)' }}
-                        >
-                          <CalendarPlus className="h-4 w-4" /> Create Plan
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Multi-Day Plan Detailed */}
-                  {m.plan && resultDisplayMode === 'detailed' && (
-                    <div 
-                      className="space-y-4 pt-1 border rounded-3xl p-5 shadow-sm"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
-                      <div 
-                        className="flex items-center justify-between border-b pb-3"
-                        style={{ borderColor: 'var(--color-border)' }}
-                      >
-                        <div>
-                          <span className="text-[10px] uppercase font-extrabold tracking-wider block" style={{ color: 'var(--color-primary)' }}>Detailed Master Plan</span>
-                          <h3 className="font-black text-base" style={{ color: 'var(--color-text)' }}>{m.plan.title}</h3>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyPlan(m.plan!)}
-                          className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          <Copy className="h-3.5 w-3.5" /> Copy Summary
-                        </button>
-                      </div>
-                      <div className="space-y-4">
-                        {m.plan.meals.map((meal) => (
-                          <div 
-                            key={meal.id} 
-                            className="border rounded-2xl p-4 space-y-3"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)'
-                            }}
-                          >
-                            <div className="flex justify-between items-center text-xs">
-                              <span className="font-extrabold" style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
-                              <span className="uppercase font-bold" style={{ color: 'var(--color-text-secondary)' }}>{meal.mealType}</span>
-                            </div>
-                            <div className="flex gap-3 items-start">
-                              <img src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} alt={meal.title} className="w-14 h-14 rounded-xl object-cover border shrink-0" style={{ borderColor: 'var(--color-border)' }} />
-                              <div className="space-y-1 flex-1 min-w-0">
-                                <h4 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
-                                <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
-                                {Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
-                                  <div className="pt-1 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                                    <strong style={{ color: 'var(--color-text)' }}>Ingredients:</strong> {meal.ingredients.join(', ')}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                            <div 
-                              className="flex justify-end gap-2 pt-2 border-t"
-                              style={{ borderColor: 'var(--color-border)' }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => openSwapMeal(m.id, meal, m.plan!)}
-                                className="px-3 py-1.5 rounded-lg border font-bold text-xs shadow-sm cursor-pointer"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-border)',
-                                  color: 'var(--color-primary)'
-                                }}
-                              >
-                                Swap Meal
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="pt-2">
-                        <button
-                          type="button"
-                          onClick={() => handleCreatePlan(m.plan!)}
-                          className="w-full py-3 rounded-2xl text-white font-extrabold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg hover:brightness-110"
-                          style={{ backgroundColor: 'var(--color-emerald)' }}
-                        >
-                          <CalendarPlus className="h-4 w-4" /> Create & Sync Plan
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Multi-Day Plan Card */}
-                  {m.plan && resultDisplayMode === 'card' && (
-                    <div className="space-y-4 pt-1">
-                      <div className="flex items-center justify-between px-1">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                          <span className="font-extrabold text-sm tracking-wide" style={{ color: 'var(--color-text)' }}>{m.plan.title}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
+                      <div className="flex justify-between items-start gap-3">
+                        <p className="whitespace-pre-line flex-1">{m.content}</p>
+                        {!isUser && enableVoiceInteraction && (
                           <button
                             type="button"
-                            onClick={() => handleCopyPlan(m.plan!)}
-                            className="p-1.5 rounded-lg border transition cursor-pointer shadow-sm"
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text-secondary)'
-                            }}
-                            title="Copy Plan Summary"
+                            onClick={() => speakText(m.content || '', m.id)}
+                            className="p-1 rounded-lg transition shrink-0 cursor-pointer hover:opacity-80"
+                            style={{ color: hasAudioActive ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
+                            title={hasAudioActive ? "Stop speech" : "Read aloud"}
                           >
-                            <Copy className="h-3.5 w-3.5" />
+                            {hasAudioActive ? <Square className="h-4 w-4 fill-current" /> : <Volume2 className="h-4 w-4" />}
                           </button>
-                          <span 
-                            className="text-xs font-bold"
-                            style={{ color: 'var(--color-text-secondary)' }}
-                          >
-                            {m.plan.meals.length}/{m.plan.totalDays}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3.5">
-                        {m.plan.meals.map((meal) => {
-                          const matchedPantryCount = (meal.ingredients || []).filter(ing => 
-                            pantryIngredientsList.some(p => ing.toLowerCase().includes(p) || p.includes(ing.toLowerCase()))
-                          ).length;
-
-                          return (
-                            <div 
-                              key={meal.id} 
-                              className="rounded-2xl overflow-hidden border shadow-sm transition"
-                              style={{
-                                backgroundColor: 'var(--color-card)',
-                                borderColor: 'var(--color-border)'
-                              }}
-                            >
-                              <div 
-                                className="text-white px-4 py-2.5 flex items-center justify-between font-bold text-sm"
-                                style={{ backgroundColor: 'var(--color-primary)' }}
-                              >
-                                <span>{meal.dayLabel}</span>
-                                <span className="text-xs opacity-90">{meal.dateStr}</span>
-                              </div>
-
-                              <div className="p-4 space-y-2.5">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="flex items-start gap-3.5 min-w-0 flex-1">
-                                    <img
-                                      src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
-                                      alt={meal.title}
-                                      className="w-16 h-16 rounded-xl object-cover border shrink-0"
-                                      style={{ borderColor: 'var(--color-border)' }}
-                                    />
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-center gap-2">
-                                        <span 
-                                          className="text-[11px] font-black tracking-wider uppercase"
-                                          style={{ color: 'var(--color-primary)' }}
-                                        >
-                                          {meal.mealType} {meal.isLeftover && <span style={{ color: 'var(--color-emerald)' }} className="lowercase">(leftover)</span>}
-                                        </span>
-                                        {matchedPantryCount > 0 && (
-                                          <span 
-                                            className="text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1"
-                                            style={{
-                                              backgroundColor: 'var(--color-inner-dark)',
-                                              borderColor: 'var(--color-emerald)',
-                                              color: 'var(--color-emerald)'
-                                            }}
-                                          >
-                                            <Package className="h-3 w-3" /> {matchedPantryCount} in pantry
-                                          </span>
-                                        )}
-                                      </div>
-
-                                      <h3 className="font-black text-base mt-0.5 leading-snug truncate" style={{ color: 'var(--color-text)' }}>{meal.title}</h3>
-                                      <p 
-                                        className="text-xs leading-relaxed font-normal mt-1 line-clamp-2"
-                                        style={{ color: 'var(--color-text-secondary)' }}
-                                      >
-                                        {meal.description}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleInstantShuffleMeal(m.id, meal.id)}
-                                      className="p-1 transition cursor-pointer hover:scale-110"
-                                      style={{ color: 'var(--color-text-secondary)' }}
-                                      title="Shuffle meal"
-                                    >
-                                      <Dices className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRemoveMeal(m.id, meal.id)}
-                                      className="p-1 transition cursor-pointer hover:scale-110"
-                                      style={{ color: 'var(--color-text-secondary)' }}
-                                      title={t('removeMealTooltip') || 'Remove meal'}
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                </div>
-
-                                <div 
-                                  className="flex items-center gap-4 text-xs pt-1 font-medium"
-                                  style={{ color: 'var(--color-text-secondary)' }}
-                                >
-                                  <span className="flex items-center gap-1.5">
-                                    <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} /> {meal.prepMinutes} mins
-                                  </span>
-                                  <span className="flex items-center gap-1.5">
-                                    <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {meal.cookMinutes} mins
-                                  </span>
-                                  <span className="flex items-center gap-1.5">
-                                    <Users className="h-3.5 w-3.5" /> {meal.servings} {t('servings') || 'servings'}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div 
-                                className="grid grid-cols-2 border-t text-xs font-bold divide-x"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-border)'
-                                }}
-                              >
-                                {meal.isBatchCook ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => openBatchCook(m.id, meal)}
-                                    className="py-3 flex items-center justify-center gap-2 hover:opacity-80 transition cursor-pointer"
-                                    style={{ color: 'var(--color-text)' }}
-                                  >
-                                    <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('batchCookBtn') || 'Batch cook'}
-                                  </button>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  onClick={() => openSwapMeal(m.id, meal, m.plan!)}
-                                  className={`py-3 flex items-center justify-center gap-2 hover:opacity-80 transition cursor-pointer ${!meal.isBatchCook ? 'col-span-2' : ''}`}
-                                  style={{ color: 'var(--color-text)' }}
-                                >
-                                  <ArrowLeftRight className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('swapMealBtn') || 'Swap meal'}
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Grocery List Sync */}
-                      <div 
-                        onClick={() => setSyncToGrocery(!syncToGrocery)}
-                        className="flex items-center justify-between p-3 rounded-2xl border cursor-pointer select-none"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        <span className="text-xs font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                          <ShoppingCart className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-                          Add ingredients to Grocery Shopping List
-                        </span>
-                        <div 
-                          className="w-9 h-5 rounded-full p-0.5 transition"
-                          style={{ backgroundColor: syncToGrocery ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}
-                        >
-                          <div className={`w-4 h-4 rounded-full bg-white transition transform ${syncToGrocery ? 'translate-x-4' : 'translate-x-0'}`} />
-                        </div>
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className="flex items-center gap-3 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => handleRefreshAll(m.id)}
-                          className="flex-1 py-3 px-4 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-2 transition cursor-pointer shadow-sm"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          <RefreshCw className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('refreshAllMealsBtn') || 'Refresh all meals'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCreatePlan(m.plan!)}
-                          className="flex-1 py-3 px-4 rounded-xl text-white text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-lg hover:brightness-110"
-                          style={{ backgroundColor: 'var(--color-emerald)' }}
-                        >
-                          <CalendarPlus className="h-4 w-4" /> {t('createPlanBtn') || 'Create plan'}
-                        </button>
+                        )}
                       </div>
                     </div>
                   )}
 
-                  {/* Single AI Recipe Created View */}
-                  {m.recipe && (
+                  {/* FINAL RECOMMENDED RECIPE SHOWCASE CARD */}
+                  {m.recommendedRecipe && (
                     <div 
-                      className="p-4 rounded-2xl border space-y-3 shadow-sm"
+                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-primary)'
+                      }}
+                    >
+                      <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                        <div className="flex items-center gap-2">
+                          <Award className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                          <div>
+                            <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                              Final Recommended Recipe
+                            </span>
+                            <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
+                              {m.recommendedRecipe.title}
+                            </h3>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {enableVoiceInteraction && (
+                            <button
+                              type="button"
+                              onClick={() => speakText(`${m.recommendedRecipe.title}. ${m.recommendedRecipe.description}. Instructions: ${m.recommendedRecipe.instructions.join('. ')}`, `rec_${m.id}`)}
+                              className="p-1.5 rounded-xl border text-xs font-bold transition cursor-pointer shadow-xs hover:opacity-80"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: isSpeaking && speakingMsgId === `rec_${m.id}` ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                              }}
+                              title="Listen to recipe instructions"
+                            >
+                              <Volume2 className="h-4 w-4" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleSaveRecipeToBook(m.recommendedRecipe)}
+                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-80"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-emerald)',
+                              color: 'var(--color-emerald)'
+                            }}
+                          >
+                            <Bookmark className="h-3.5 w-3.5" /> Save Recipe
+                          </button>
+                        </div>
+                      </div>
+
+                      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                        {m.recommendedRecipe.description}
+                      </p>
+
+                      <div className="flex flex-wrap items-center gap-4 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} /> Prep: {m.recommendedRecipe.prepMinutes || 15}m
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> Cook: {m.recommendedRecipe.cookMinutes || 20}m
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Users className="h-3.5 w-3.5" /> Serves: {m.recommendedRecipe.servings || servings}
+                        </span>
+                        {m.recommendedRecipe.calories && (
+                          <span className="font-mono text-emerald-500 font-bold">
+                            {m.recommendedRecipe.calories} kcal
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                        <div className="space-y-2">
+                          <h4 className="font-bold text-xs uppercase tracking-wider flex items-center justify-between" style={{ color: 'var(--color-primary)' }}>
+                            <span>Ingredients ({m.recommendedRecipe.ingredients?.length || 0})</span>
+                            <button
+                              type="button"
+                              onClick={() => handleAddRecipeIngredientsToGrocery(m.recommendedRecipe)}
+                              className="text-[10px] font-extrabold flex items-center gap-1 text-emerald-500 hover:underline cursor-pointer"
+                            >
+                              <ShoppingCart className="h-3 w-3" /> + Add to Cart
+                            </button>
+                          </h4>
+                          <ul className="space-y-1 text-xs">
+                            {(m.recommendedRecipe.ingredients || []).map((ing: string, i: number) => {
+                              const inPantry = pantryIngredientsList.some(p => ing.toLowerCase().includes(p) || p.includes(ing.toLowerCase()));
+                              return (
+                                <li key={i} className="flex items-center justify-between p-1.5 rounded-lg border text-[11px]" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                                  <span style={{ color: 'var(--color-text)' }}>• {ing}</span>
+                                  {inPantry && (
+                                    <span className="text-[9px] font-black uppercase text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                      Pantry ✓
+                                    </span>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+
+                        <div className="space-y-2">
+                          <h4 className="font-bold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                            Step-by-Step Directions
+                          </h4>
+                          <ol className="space-y-1.5 text-xs">
+                            {(m.recommendedRecipe.instructions || []).map((step: string, sIdx: number) => (
+                              <li key={sIdx} className="flex items-start gap-2 text-[11px] leading-snug">
+                                <span className="font-extrabold text-[10px] w-4 h-4 rounded-full flex items-center justify-center shrink-0 border mt-0.5" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}>
+                                  {sIdx + 1}
+                                </span>
+                                <span style={{ color: 'var(--color-text-secondary)' }}>{step}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      </div>
+
+                      {m.recommendedRecipe.chefTip && (
+                        <div 
+                          className="p-3 rounded-2xl border flex items-start gap-2.5 text-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          <Zap className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
+                          <div className="space-y-0.5">
+                            <strong className="block text-[11px]" style={{ color: 'var(--color-primary)' }}>Chef Foodie Pro Tip:</strong>
+                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                              {m.recommendedRecipe.chefTip}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* MULTI-DAY PLAN PRESENTATION */}
+                  {m.plan && (
+                    <div 
+                      className="border rounded-3xl p-5 space-y-4 shadow-sm transition-colors duration-200"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)'
                       }}
                     >
-                      <div className="flex items-center justify-between">
-                        <span 
-                          className="text-[10px] font-bold uppercase tracking-wider block"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          AI Recipe Created
+                      <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                          <h3 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
+                            {m.plan.title} ({m.plan.totalDays} Days • {resultDisplayMode.toUpperCase()} VIEW)
+                          </h3>
+                        </div>
+                        <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                          Budget: {m.plan.budgetPerServing || '$4.00'}/serv
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => handleSaveRecipeToBook(m.recipe)}
-                          className="text-xs font-bold px-3 py-1 rounded-lg border flex items-center gap-1.5 transition cursor-pointer shadow-sm"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-emerald)'
-                          }}
-                        >
-                          <Bookmark className="h-3.5 w-3.5" /> Save to Recipes
-                        </button>
                       </div>
-                      <h3 className="text-lg font-extrabold" style={{ color: 'var(--color-text)' }}>{m.recipe.title}</h3>
-                      <p 
-                        className="text-xs leading-relaxed"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                      >
-                        {m.recipe.description}
-                      </p>
+
+                      {resultDisplayMode === 'compact' ? (
+                        <div className="space-y-2">
+                          {m.plan.meals.map((meal) => (
+                            <div 
+                              key={meal.id} 
+                              className="flex items-center justify-between p-2.5 rounded-xl border text-xs"
+                              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-bold shrink-0" style={{ color: 'var(--color-primary)' }}>{meal.dayLabel}:</span>
+                                <span className="truncate font-medium" style={{ color: 'var(--color-text)' }}>{meal.title}</span>
+                              </div>
+                              <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{meal.prepMinutes + meal.cookMinutes}m</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {m.plan.meals.map((meal) => (
+                            <div 
+                              key={meal.id}
+                              className="border rounded-2xl p-3.5 space-y-2"
+                              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                            >
+                              <div className="flex justify-between items-center text-xs font-bold">
+                                <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
+                                <span className="uppercase text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{meal.mealType}</span>
+                              </div>
+                              <div className="flex items-start gap-3">
+                                <img src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} alt={meal.title} className="w-14 h-14 rounded-xl object-cover border shrink-0" style={{ borderColor: 'var(--color-border)' }} />
+                                <div className="space-y-0.5 flex-1 min-w-0">
+                                  <h4 className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
+                                  <p className="text-[11px] line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
+
                 </div>
 
                 {isUser && (
                   <div 
-                    className="w-7 h-7 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
+                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -1997,17 +1603,63 @@ ${wizardQuestionsList[nextIdx]}`
               color: 'var(--color-text-secondary)'
             }}
           >
-            <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} /> {t('chefThinking') || 'Chef Foodie is thinking...'}
+            <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} /> 
+            {t('chefThinking', 'Chef Foodie is formulating your recipes...')}
           </div>
         )}
         <div ref={chatEndRef} />
       </div>
 
-      {/* Suggested Topic Buttons Bar */}
+      {/* PRESET QUESTIONS (ACTIVE DURING QUESTIONNAIRE) */}
+      {wizardStep !== null && currentPresetOptions.length > 0 && (
+        <div 
+          className="p-3 rounded-2xl border space-y-2 animate-in fade-in transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div className="flex items-center justify-between text-[11px] font-bold">
+            <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+              <Sparkles className="h-3.5 w-3.5" /> Preset Answers (Step {wizardStep + 1} of {wizardQuestionsList.length}):
+            </span>
+            <button
+              type="button"
+              onClick={() => { updateWizardStep(null); showToast("Exited wizard"); }}
+              className="text-[10px] hover:underline cursor-pointer"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              Cancel Wizard
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {currentPresetOptions.map((opt, oIdx) => (
+              <button
+                key={oIdx}
+                type="button"
+                onClick={() => handleSend(opt)}
+                className="text-xs font-semibold px-3 py-1.5 rounded-xl border transition shadow-xs cursor-pointer hover:scale-[1.02]"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* TOPIC LAUNCHER CHIPS */}
       {wizardStep === null && activeQuestionnaireSections.length > 0 && (
         <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0">
           <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
-            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> Topics:
+            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> Questionnaires:
           </span>
           {activeQuestionnaireSections.map((sec) => (
             <button
@@ -2023,14 +1675,14 @@ ${wizardQuestionsList[nextIdx]}`
               onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
               onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
             >
-              <Layers className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
+              <Layers className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
               <span>{sec.topicTitle}</span>
             </button>
           ))}
         </div>
       )}
 
-      {/* Input Prompt Box with Token Consumption Indication */}
+      {/* PROMPT INPUT BAR */}
       <div 
         className="border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
@@ -2038,17 +1690,32 @@ ${wizardQuestionsList[nextIdx]}`
           borderColor: 'var(--color-border)'
         }}
       >
+        {enableVoiceInteraction && (
+          <button
+            type="button"
+            onClick={toggleSpeechRecognition}
+            className={`p-2.5 rounded-xl border transition cursor-pointer flex items-center justify-center ${isListening ? 'animate-pulse' : 'hover:opacity-80'}`}
+            style={{
+              backgroundColor: isListening ? 'var(--color-primary)' : 'var(--color-inner-dark)',
+              borderColor: isListening ? 'var(--color-primary)' : 'var(--color-border)',
+              color: isListening ? '#ffffff' : 'var(--color-text-secondary)'
+            }}
+            title={isListening ? "Listening... click to stop" : "Speak your message via microphone"}
+          >
+            {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          </button>
+        )}
+
         <input
           type="text"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={`${t('askPromptPlaceholder', 'Ask about recipes, cooking tips, ingredients...')} (${chefCost} ${tokenSymbol})`}
-          className="bg-transparent border-none text-sm px-3.5 flex-1 outline-none font-normal"
+          placeholder={isListening ? "Listening to your voice..." : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${chefCost} ${tokenSymbol})`}
+          className="bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
           style={{ color: 'var(--color-text)' }}
         />
         
-        {/* Token Cost Pill & Send Action */}
         <div className="flex items-center gap-1.5 pr-1">
           <span 
             className="text-[10px] font-mono font-bold px-2 py-1 rounded-lg border hidden sm:inline-block"
@@ -2057,7 +1724,7 @@ ${wizardQuestionsList[nextIdx]}`
               borderColor: 'var(--color-border)',
               color: 'var(--color-text-secondary)'
             }}
-            title={`Each message deducts ${chefCost} ${tokenName}`}
+            title={`Each prompt costs ${chefCost} ${tokenName}`}
           >
             {chefCost} {tokenSymbol}
           </span>
@@ -2066,10 +1733,8 @@ ${wizardQuestionsList[nextIdx]}`
             type="button"
             onClick={() => handleSend()}
             disabled={loading || !prompt.trim()}
-            className="disabled:opacity-40 text-white p-2.5 rounded-xl transition cursor-pointer shadow-md flex items-center gap-1"
+            className="disabled:opacity-40 text-white p-2.5 rounded-xl transition cursor-pointer shadow-md flex items-center gap-1 hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
             title={`Send message (${chefCost} ${tokenSymbol})`}
           >
             <Send className="h-4 w-4" />
@@ -2077,731 +1742,7 @@ ${wizardQuestionsList[nextIdx]}`
         </div>
       </div>
 
-      {/* 1. BATCH COOK MODAL */}
-      {showBatchModal && activeBatchMeal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div 
-            className="border rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl relative text-xs animate-in fade-in"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <button 
-              onClick={() => setShowBatchModal(false)}
-              className="absolute top-4 right-4 p-1 cursor-pointer transition"
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            <div className="space-y-1.5 pr-6">
-              <h2 
-                className="text-base font-extrabold tracking-tight"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                {t('cookOnceEatAgain') || 'Cook once, eat again'}
-              </h2>
-              <p 
-                className="text-xs leading-relaxed"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                {(t('leftoversOfPrefix') || 'Leftovers of {title}.').replace('{title}', activeBatchMeal.title)} {t('leftoverSubText') || "Pick the days you'll eat this as leftovers."}
-              </p>
-            </div>
-
-            <div className="space-y-3 pt-1">
-              {getOtherDaysForBatch().map((d) => {
-                const isChecked = selectedBatchDays.includes(d.dayIndex);
-                return (
-                  <div key={d.dayIndex} className="space-y-1.5">
-                    <span 
-                      className="text-[11px] font-bold uppercase tracking-wide block"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      {d.dayLabel.toUpperCase()}
-                    </span>
-                    <div 
-                      onClick={() => {
-                        if (isChecked) {
-                          setSelectedBatchDays(prev => prev.filter(idx => idx !== d.dayIndex));
-                        } else {
-                          setSelectedBatchDays(prev => [...prev, d.dayIndex]);
-                        }
-                      }}
-                      className="p-3 rounded-xl border flex items-center justify-between cursor-pointer transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: isChecked ? 'var(--color-primary)' : 'var(--color-border)'
-                      }}
-                    >
-                      <div className="space-y-0.5">
-                        <span className="text-xs font-bold block capitalize" style={{ color: 'var(--color-text)' }}>{d.mealType.toLowerCase()}</span>
-                        <p 
-                          className="text-[11px]"
-                          style={{ color: 'var(--color-text-secondary)' }}
-                        >
-                          {d.title}
-                        </p>
-                      </div>
-                      <div 
-                        className="w-5 h-5 rounded-md border flex items-center justify-center transition"
-                        style={{
-                          backgroundColor: isChecked ? 'var(--color-primary)' : 'transparent',
-                          borderColor: 'var(--color-primary)'
-                        }}
-                      >
-                        {isChecked && <Check className="h-3.5 w-3.5 text-white" />}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                type="button"
-                onClick={() => setShowBatchModal(false)}
-                className="py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer shadow-sm"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                {t('cancel') || 'Cancel'}
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveBatchCook}
-                className="py-2.5 rounded-xl text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
-                style={{ backgroundColor: 'var(--color-emerald)' }}
-              >
-                <Check className="h-4 w-4" /> {t('saveBtn') || 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2. SWAP MEAL MODAL */}
-      {showSwapModal && activeSwapMeal && (
-        <div 
-          onClick={() => setShowSwapModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl relative text-xs max-h-[92vh] flex flex-col justify-between animate-in fade-in cursor-default"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <button 
-              onClick={() => setShowSwapModal(false)}
-              className="absolute top-4 right-4 p-1 cursor-pointer transition"
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            <div className="space-y-3.5 overflow-hidden flex flex-col">
-              <div>
-                <h2 
-                  className="text-lg font-black tracking-tight"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {(t('chooseMealTypeHeading') || 'Choose {mealType}').replace('{mealType}', activeSwapMeal.mealType.charAt(0) + activeSwapMeal.mealType.slice(1).toLowerCase())}
-                </h2>
-                <p 
-                  className="text-xs mt-0.5"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  {activeSwapMeal.dayLabel}
-                </p>
-              </div>
-
-              {/* Top Tabs */}
-              <div 
-                className="grid grid-cols-3 gap-1 p-1 rounded-xl border"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setSwapTab('ideas')}
-                  className="py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  style={{
-                    backgroundColor: swapTab === 'ideas' ? 'var(--color-card)' : 'transparent',
-                    color: swapTab === 'ideas' ? 'var(--color-text)' : 'var(--color-text-secondary)'
-                  }}
-                >
-                  <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('newIdeasTab') || 'New Ideas'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSwapTab('saved');
-                    setSavedCurrentPage(1);
-                  }}
-                  className="py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  style={{
-                    backgroundColor: swapTab === 'saved' ? 'var(--color-card)' : 'transparent',
-                    color: swapTab === 'saved' ? 'var(--color-text)' : 'var(--color-text-secondary)'
-                  }}
-                >
-                  <Bookmark className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} /> {t('savedTab') || 'Saved'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSwapTab('repeat')}
-                  className="py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  style={{
-                    backgroundColor: swapTab === 'repeat' ? 'var(--color-card)' : 'transparent',
-                    color: swapTab === 'repeat' ? 'var(--color-text)' : 'var(--color-text-secondary)'
-                  }}
-                >
-                  <RotateCcw className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} /> {(t('repeatTab') || 'Repeat ({count})').replace('{count}', String(repeatMealsInPlan.length))}
-                </button>
-              </div>
-
-              {/* TAB 1: NEW IDEAS */}
-              {swapTab === 'ideas' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label 
-                      className="text-[11px] font-bold block"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      {t('ideasForLabel') || 'Ideas for'}
-                    </label>
-                    <div 
-                      onClick={() => ideasInputRef.current?.focus()}
-                      className="flex items-center gap-2 border rounded-xl px-3 py-2 text-xs cursor-text transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      <Search className="h-4 w-4 shrink-0 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
-                      <input
-                        ref={ideasInputRef}
-                        type="text"
-                        value={swapSearchQuery}
-                        onChange={(e) => {
-                          setSwapSearchQuery(e.target.value);
-                          setIdeasCurrentPage(1);
-                        }}
-                        placeholder={t('searchOrDescribeIdeas') || "Search or describe ideas..."}
-                        className="bg-transparent flex-1 text-xs outline-none w-full"
-                        style={{ color: 'var(--color-text)' }}
-                      />
-                      <button 
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          ideasInputRef.current?.focus();
-                          ideasInputRef.current?.select();
-                        }}
-                        className="cursor-pointer p-0.5"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                        title={t('editQueryTooltip') || 'Click to edit query'}
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div 
-                    onClick={() => {
-                      setUsePantryIngredients(!usePantryIngredients);
-                      setIdeasCurrentPage(1);
-                    }}
-                    className="flex items-center justify-between p-2.5 rounded-xl border cursor-pointer select-none"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)'
-                    }}
-                  >
-                    <span className="text-xs font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                      <Package className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('useMyPantryIngredients') || 'Use my pantry ingredients'}
-                      <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>({(t('inStockSuffix') || '{count} in stock').replace('{count}', String(pantryIngredientsList.length))})</span>
-                    </span>
-                    <div 
-                      className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: usePantryIngredients ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}
-                    >
-                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${usePantryIngredients ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-                    {paginatedSwapIdeas.length === 0 ? (
-                      <div className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                        No recipe ideas from other users found.
-                      </div>
-                    ) : (
-                      paginatedSwapIdeas.map((rec, idx) => {
-                        const matchedCount = (rec.ingredients || []).filter((ing: string) => 
-                          pantryIngredientsList.some(p => ing.toLowerCase().includes(p) || p.includes(ing.toLowerCase()))
-                        ).length;
-
-                        return (
-                          <div 
-                            key={rec.id || idx} 
-                            className="p-3.5 rounded-2xl border space-y-2.5 shadow-sm"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)'
-                            }}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span 
-                                className="border text-[10px] font-extrabold px-2.5 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)',
-                                  color: 'var(--color-primary)'
-                                }}
-                              >
-                                🍽 {activeSwapMeal.mealType}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                {matchedCount > 0 && (
-                                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-emerald)' }}>
-                                    ✓ {matchedCount} in pantry
-                                  </span>
-                                )}
-                                <span 
-                                  className="text-xs flex items-center gap-1"
-                                  style={{ color: 'var(--color-text-secondary)' }}
-                                >
-                                  <Users className="h-3.5 w-3.5" /> {servings}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-start gap-3">
-                              <img
-                                src={rec.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
-                                alt={rec.title}
-                                className="w-16 h-16 rounded-xl object-cover border shrink-0"
-                                style={{ borderColor: 'var(--color-border)' }}
-                              />
-                              <div className="space-y-1 min-w-0 flex-1">
-                                <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text)' }}>{rec.title}</h3>
-                                <p 
-                                  className="text-xs leading-relaxed line-clamp-2"
-                                  style={{ color: 'var(--color-text-secondary)' }}
-                                >
-                                  {rec.description}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div 
-                              className="flex items-center gap-4 text-xs font-medium"
-                              style={{ color: 'var(--color-text-secondary)' }}
-                            >
-                              <span className="flex items-center gap-1.5">
-                                <Clock className="h-3.5 w-3.5" /> {rec.prep} mins
-                              </span>
-                              <span className="flex items-center gap-1.5">
-                                <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {rec.cook} mins
-                              </span>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => handleConfirmSwap(rec)}
-                              className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md mt-1"
-                              style={{ backgroundColor: 'var(--color-emerald)' }}
-                            >
-                              {(t('addToMealTypeBtn') || '+ Add to {mealType}').replace('{mealType}', activeSwapMeal.mealType.charAt(0) + activeSwapMeal.mealType.slice(1).toLowerCase())}
-                            </button>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-
-                  {filteredOtherUserIdeas.length > IDEAS_ITEMS_PER_PAGE && (
-                    <div 
-                      className="pt-2 border-t flex items-center justify-between text-xs"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    >
-                      <span style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('showing') || 'Showing'} {ideasStartIndex + 1} - {Math.min(ideasStartIndex + IDEAS_ITEMS_PER_PAGE, filteredOtherUserIdeas.length)} {t('of') || 'of'} {filteredOtherUserIdeas.length}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={ideasCurrentPage <= 1}
-                          onClick={() => setIdeasCurrentPage(p => Math.max(1, p - 1))}
-                          className="p-1 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          <ChevronLeft className="h-3.5 w-3.5" />
-                        </button>
-                        
-                        {Array.from({ length: ideasTotalPages }, (_, i) => i + 1).map((num) => (
-                          <button
-                            key={num}
-                            type="button"
-                            onClick={() => setIdeasCurrentPage(num)}
-                            className="min-w-[26px] h-6 rounded-md text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-sm"
-                            style={ideasCurrentPage === num ? {
-                              backgroundColor: 'var(--color-primary)',
-                              borderColor: 'var(--color-primary)',
-                              color: '#ffffff'
-                            } : {
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                          >
-                            {num}
-                          </button>
-                        ))}
-
-                        <button
-                          type="button"
-                          disabled={ideasCurrentPage >= ideasTotalPages}
-                          onClick={() => setIdeasCurrentPage(p => Math.min(ideasTotalPages, p + 1))}
-                          className="p-1 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 2: SAVED */}
-              {swapTab === 'saved' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
-                        <input
-                          type="text"
-                          placeholder={t('searchByNamePlaceholder') || 'Search by name'}
-                          value={savedSearchName}
-                          onChange={(e) => {
-                            setSavedSearchName(e.target.value);
-                            setSavedCurrentPage(1);
-                          }}
-                          className="w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        />
-                      </div>
-
-                      <div className="relative">
-                        <select
-                          value={selectedSavedBookFilter}
-                          onChange={(e) => {
-                            setSelectedSavedBookFilter(e.target.value);
-                            setSavedCurrentPage(1);
-                          }}
-                          className="border font-bold text-xs rounded-xl pl-3 pr-7 py-2 outline-none appearance-none cursor-pointer"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-emerald)',
-                            color: 'var(--color-primary)'
-                          }}
-                        >
-                          <option value="All Books">{t('allBooksOption') || 'All Books'}</option>
-                          {userBooks.map((b: any) => (
-                            <option key={b.id} value={b.id}>{b.title}</option>
-                          ))}
-                        </select>
-                        <ChevronDown className="h-3.5 w-3.5 absolute right-2.5 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setShowSavedFilterOptions(!showSavedFilterOptions)}
-                        className="border font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-sm"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-emerald)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('filterBtn') || 'Filter'}
-                      </button>
-                    </div>
-
-                    {showSavedFilterOptions && (
-                      <div className="flex flex-wrap gap-1.5 pt-1 animate-in fade-in">
-                        {[
-                          { key: 'All', label: t('allTag') || 'All' },
-                          { key: 'Favorites', label: t('favoritesTag') || 'Favorites' },
-                          { key: 'Main Dish', label: t('mainDishTag') || 'Main Dish' },
-                          { key: 'Appetiser', label: 'Appetiser' },
-                          { key: 'Dessert', label: 'Dessert' }
-                        ].map((tag) => (
-                          <button
-                            key={tag.key}
-                            type="button"
-                            onClick={() => {
-                              setSelectedSavedTagFilter(tag.key);
-                              setSavedCurrentPage(1);
-                            }}
-                            className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shadow-sm"
-                            style={selectedSavedTagFilter === tag.key ? {
-                              backgroundColor: 'var(--color-primary)',
-                              borderColor: 'var(--color-primary)',
-                              color: '#ffffff'
-                            } : {
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text-secondary)'
-                            }}
-                          >
-                            {tag.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-                    {paginatedSavedRecipes.length === 0 ? (
-                      <div className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('noSavedRecipesProfile') || 'No saved recipes found for your current profile.'}
-                      </div>
-                    ) : (
-                      paginatedSavedRecipes.map((rec: any, idx: number) => (
-                        <div 
-                          key={rec.id || idx} 
-                          className="p-3.5 rounded-2xl border space-y-2.5 shadow-sm"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <div className="flex items-start gap-3">
-                            <img
-                              src={rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=400&q=80'}
-                              alt={rec.title || rec.name}
-                              className="w-16 h-16 rounded-xl object-cover border shrink-0"
-                              style={{ borderColor: 'var(--color-border)' }}
-                            />
-                            <div className="space-y-1 min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span 
-                                  className="text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full"
-                                  style={{ backgroundColor: 'var(--color-primary)' }}
-                                >
-                                  {rec.recipeType || rec.category || 'Main Dish'}
-                                </span>
-                                <Heart className="h-3.5 w-3.5 fill-[var(--color-primary)] text-[var(--color-primary)]" />
-                              </div>
-
-                              <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text)' }}>
-                                {rec.title || rec.name}
-                              </h3>
-
-                              <div className="flex items-center gap-3 text-xs font-medium pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                                <span className="flex items-center gap-1">
-                                  <Users className="h-3.5 w-3.5" /> {rec.servings || servings}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Clock className="h-3.5 w-3.5" /> {rec.prep || 15} mins
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {rec.cook || 10} mins
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => handleConfirmSwap({
-                              title: rec.title || rec.name,
-                              description: rec.description || '',
-                              prep: rec.prep || 15,
-                              cook: rec.cook || 10,
-                              image: rec.imageUrl || rec.image,
-                              ingredients: rec.ingredients || []
-                            })}
-                            className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
-                            style={{ backgroundColor: 'var(--color-emerald)' }}
-                          >
-                            {(t('addToMealTypeBtn') || '+ Add to {mealType}').replace('{mealType}', activeSwapMeal.mealType.charAt(0) + activeSwapMeal.mealType.slice(1).toLowerCase())}
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {filteredUserSavedRecipes.length > SAVED_ITEMS_PER_PAGE && (
-                    <div 
-                      className="pt-2 border-t flex items-center justify-between text-xs"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    >
-                      <span style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('showing') || 'Showing'} {savedStartIndex + 1} - {Math.min(savedStartIndex + SAVED_ITEMS_PER_PAGE, filteredUserSavedRecipes.length)} {t('of') || 'of'} {filteredUserSavedRecipes.length}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={savedCurrentPage <= 1}
-                          onClick={() => setSavedCurrentPage(p => Math.max(1, p - 1))}
-                          className="p-1 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          <ChevronLeft className="h-3.5 w-3.5" />
-                        </button>
-                        
-                        {Array.from({ length: savedTotalPages }, (_, i) => i + 1).map((num) => (
-                          <button
-                            key={num}
-                            type="button"
-                            onClick={() => setSavedCurrentPage(num)}
-                            className="min-w-[26px] h-6 rounded-md text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-sm"
-                            style={savedCurrentPage === num ? {
-                              backgroundColor: 'var(--color-primary)',
-                              borderColor: 'var(--color-primary)',
-                              color: '#ffffff'
-                            } : {
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                          >
-                            {num}
-                          </button>
-                        ))}
-
-                        <button
-                          type="button"
-                          disabled={savedCurrentPage >= savedTotalPages}
-                          onClick={() => setSavedCurrentPage(p => Math.min(savedTotalPages, p + 1))}
-                          className="p-1 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 3: REPEAT */}
-              {swapTab === 'repeat' && (
-                <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
-                  {repeatMealsInPlan.length === 0 ? (
-                    <div className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noOtherMealsToRepeat') || 'No other meals in this plan available to repeat.'}
-                    </div>
-                  ) : (
-                    repeatMealsInPlan.map((m) => (
-                      <div 
-                        key={m.id} 
-                        className="p-3.5 rounded-2xl border space-y-2.5 shadow-sm"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span 
-                            className="border text-[10px] font-extrabold px-2.5 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1"
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-primary)'
-                            }}
-                          >
-                            🔄 {m.dayLabel}
-                          </span>
-                          <span 
-                            className="text-xs flex items-center gap-1"
-                            style={{ color: 'var(--color-text-secondary)' }}
-                          >
-                            <Clock className="h-3.5 w-3.5" /> {m.prepMinutes + m.cookMinutes} mins
-                          </span>
-                        </div>
-
-                        <div className="flex items-start gap-3">
-                          <img
-                            src={m.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
-                            alt={m.title}
-                            className="w-16 h-16 rounded-xl object-cover border shrink-0"
-                            style={{ borderColor: 'var(--color-border)' }}
-                          />
-                          <div className="space-y-1 min-w-0 flex-1">
-                            <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text)' }}>{m.title}</h3>
-                            <p 
-                              className="text-xs leading-relaxed line-clamp-2"
-                              style={{ color: 'var(--color-text-secondary)' }}
-                            >
-                              {m.description}
-                            </p>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleConfirmSwap({
-                            title: m.title,
-                            description: m.description,
-                            prep: m.prepMinutes,
-                            cook: m.cookMinutes,
-                            image: m.image,
-                            ingredients: m.ingredients || []
-                          })}
-                          className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md mt-1"
-                          style={{ backgroundColor: 'var(--color-emerald)' }}
-                        >
-                          {t('repeatThisMealBtn') || '+ Repeat this meal'}
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 3. RECIPE PREFERENCES MODAL */}
+      {/* RESTORED: RECIPE PREFERENCES MODAL */}
       {showPreferences && (
         <div 
           onClick={() => setShowPreferences(false)}
@@ -2822,20 +1763,20 @@ ${wizardQuestionsList[nextIdx]}`
                   className="text-xl font-black tracking-tight"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('recipePreferencesTitle') || 'Recipe Preferences'}
+                  {t('recipePreferencesTitle', 'Recipe Preferences')}
                 </h2>
                 <p 
                   className="text-xs mt-0.5"
                   style={{ color: 'var(--color-text-secondary)' }}
                 >
-                  {t('recipePreferencesSub') || 'Personalise your cooking experience'}
+                  {t('recipePreferencesSub', 'Personalise your cooking experience')}
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={() => setShowPreferences(false)}
-                className="p-2 rounded-xl border transition cursor-pointer shadow-sm"
+                className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -2847,18 +1788,16 @@ ${wizardQuestionsList[nextIdx]}`
             </div>
 
             <div className="overflow-y-auto flex-1 space-y-5 pr-1 text-xs">
+              {/* Servings */}
               <div className="space-y-2">
-                <label 
-                  className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('servingsTitle') || 'Servings'}
+                <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  {t('servingsTitle', 'Servings')}
                 </label>
                 <div className="flex items-center gap-3.5">
                   <button
                     type="button"
                     onClick={() => setServings(Math.max(1, servings - 1))}
-                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm"
+                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2868,12 +1807,12 @@ ${wizardQuestionsList[nextIdx]}`
                     -
                   </button>
                   <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
-                    {(t('peopleSuffix') || '{count} people').replace('{count}', String(servings))}
+                    {(t('peopleSuffix', '{count} people')).replace('{count}', String(servings))}
                   </span>
                   <button
                     type="button"
                     onClick={() => setServings(servings + 1)}
-                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm"
+                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2885,18 +1824,16 @@ ${wizardQuestionsList[nextIdx]}`
                 </div>
               </div>
 
+              {/* Country */}
               <div className="space-y-2">
-                <label 
-                  className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('countryTitle') || 'Country'}
+                <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  {t('countryTitle', 'Country')}
                 </label>
                 <div className="relative">
                   <select
                     value={country}
                     onChange={(e) => setCountry(e.target.value)}
-                    className="w-full border rounded-xl px-4 py-2.5 text-xs outline-none cursor-pointer appearance-none shadow-sm"
+                    className="w-full border rounded-xl px-4 py-2.5 text-xs outline-none cursor-pointer appearance-none shadow-sm font-medium"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2904,19 +1841,17 @@ ${wizardQuestionsList[nextIdx]}`
                     }}
                   >
                     {COUNTRIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
+                      <option key={c} value={c} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{c}</option>
                     ))}
                   </select>
                   <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: 'var(--color-primary)' }} />
                 </div>
               </div>
 
+              {/* Dietary Preferences */}
               <div className="space-y-2">
-                <label 
-                  className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('dietaryPreferencesTitle') || 'Dietary Preferences'}
+                <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  {t('dietaryPreferencesTitle', 'Dietary Preferences')}
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {DIETARY_OPTIONS.map((item) => {
@@ -2944,12 +1879,10 @@ ${wizardQuestionsList[nextIdx]}`
                 </div>
               </div>
 
+              {/* Allergies */}
               <div className="space-y-2">
-                <label 
-                  className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('allergiesTitle') || 'Allergies'}
+                <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  {t('allergiesTitle', 'Allergies')}
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {ALLERGY_OPTIONS.map((item) => {
@@ -2977,17 +1910,15 @@ ${wizardQuestionsList[nextIdx]}`
                 </div>
               </div>
 
+              {/* Ingredients to Avoid */}
               <div className="space-y-2">
-                <label 
-                  className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('ingredientsToAvoidTitle') || 'Ingredients to Avoid'}
+                <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
                 </label>
                 <form onSubmit={handleAddAvoid} className="flex gap-2">
                   <input
                     type="text"
-                    placeholder={t('typeIngredientPlaceholder') || 'Type an ingredient...'}
+                    placeholder={t('typeIngredientPlaceholder', 'Type an ingredient...')}
                     value={newAvoidInput}
                     onChange={(e) => setNewAvoidInput(e.target.value)}
                     className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
@@ -2999,7 +1930,7 @@ ${wizardQuestionsList[nextIdx]}`
                   />
                   <button
                     type="submit"
-                    className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md"
+                    className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-4 w-4" />
@@ -3014,7 +1945,9 @@ ${wizardQuestionsList[nextIdx]}`
                   }}
                 >
                   {ingredientsToAvoid.length === 0 ? (
-                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>{t('noIngredientsAvoid') || 'No ingredients added to avoid list'}</span>
+                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('noIngredientsAvoid', 'No ingredients added to avoid list')}
+                    </span>
                   ) : (
                     ingredientsToAvoid.map((item) => (
                       <span 
@@ -3040,24 +1973,19 @@ ${wizardQuestionsList[nextIdx]}`
                 </div>
               </div>
 
+              {/* Tastes */}
               <div className="space-y-2">
-                <label 
-                  className="block font-bold text-xs"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('tastesTitle') || 'Tastes'}
+                <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  {t('tastesTitle', 'Tastes')}
                 </label>
-                <p 
-                  className="text-[11px] leading-relaxed"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  {t('tastesDesc') || "Anything else about how you like to eat. We'll factor these into your recipes."}
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('tastesDesc', "Anything else about how you like to eat. We'll factor these into your recipes.")}
                 </p>
 
                 <form onSubmit={handleAddTaste} className="flex gap-2">
                   <input
                     type="text"
-                    placeholder={t('tastesPlaceholder') || 'e.g. prefers larger portions, loves umami...'}
+                    placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami...')}
                     value={newTasteInput}
                     onChange={(e) => setNewTasteInput(e.target.value)}
                     className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
@@ -3069,7 +1997,7 @@ ${wizardQuestionsList[nextIdx]}`
                   />
                   <button
                     type="submit"
-                    className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md"
+                    className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-4 w-4" />
@@ -3084,7 +2012,9 @@ ${wizardQuestionsList[nextIdx]}`
                   }}
                 >
                   {tastesList.length === 0 ? (
-                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>{t('noTastesSpecified') || 'No taste preferences specified'}</span>
+                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('noTastesSpecified', 'No taste preferences specified')}
+                    </span>
                   ) : (
                     tastesList.map((item) => (
                       <span 
@@ -3109,7 +2039,6 @@ ${wizardQuestionsList[nextIdx]}`
                   )}
                 </div>
               </div>
-
             </div>
 
             <div 
@@ -3119,40 +2048,39 @@ ${wizardQuestionsList[nextIdx]}`
               <button
                 type="button"
                 onClick={() => setShowPreferences(false)}
-                className="px-5 py-2.5 border rounded-xl font-bold text-xs transition cursor-pointer shadow-sm"
+                className="px-5 py-2.5 border rounded-xl font-bold text-xs transition cursor-pointer shadow-sm hover:opacity-80"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                {t('cancel') || 'Cancel'}
+                {t('cancel', 'Cancel')}
               </button>
 
               <button
                 type="button"
                 onClick={handleClearAllPreferences}
-                className="px-4 py-2.5 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md"
+                className="px-4 py-2.5 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md hover:opacity-90"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                <Trash2 className="h-3.5 w-3.5" /> {t('clearAllBtn') || 'Clear All'}
+                <Trash2 className="h-3.5 w-3.5" /> {t('clearAllBtn', 'Clear All')}
               </button>
 
               <button
                 type="button"
                 onClick={handleSavePreferences}
-                className="px-6 py-2.5 text-white font-bold text-xs rounded-xl transition shadow-lg cursor-pointer"
+                className="px-6 py-2.5 text-white font-bold text-xs rounded-xl transition shadow-lg cursor-pointer hover:opacity-90"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                {t('saveBtn') || 'Save'}
+                {t('saveBtn', 'Save')}
               </button>
             </div>
-
           </div>
         </div>
       )}
 
-      {/* 4. TOKEN PURCHASE MODAL */}
+      {/* TOKEN PURCHASE MODAL */}
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
@@ -3165,7 +2093,6 @@ ${wizardQuestionsList[nextIdx]}`
           showToast(`Tokens added! New balance: ${newBal} ${tokenSymbol}`);
         }}
       />
-
     </div>
   );
 }

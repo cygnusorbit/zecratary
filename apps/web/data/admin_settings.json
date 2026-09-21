@@ -3,7 +3,7 @@
   "taxRate": 0,
   "currency": "USD",
   "siteName": "Zecratary",
-  "updatedAt": "2026-09-21T03:30:54.290Z",
+  "updatedAt": "2026-09-21T03:41:03.224Z",
   "aiProvider": "gemini",
   "recipeTypes": [
     "Breakfast",
@@ -82,7 +82,7 @@
       }
     ],
     "maxTokens": 4096,
-    "updatedAt": "2026-09-21T03:30:54.290Z",
+    "updatedAt": "2026-09-21T03:41:03.224Z",
     "voiceSpeed": 1,
     "maxPlanDays": 7,
     "temperature": 0.7,
@@ -379,7 +379,7 @@
       }
     ],
     "strictDietEnforcement": true,
-    "enableVoiceInteraction": false
+    "enableVoiceInteraction": true
   },
   "maintenanceMode": false,
   "siteDescription": "Smart Meal Planning & Recipe Assistant",
