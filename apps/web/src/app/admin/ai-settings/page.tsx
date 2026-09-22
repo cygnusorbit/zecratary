@@ -5,7 +5,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Radio, Compass, ExternalLink, ChevronDown, ChevronUp, FileText, Search, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Key, Sliders, Sparkles, Globe, PackageCheck, 
-  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle
+  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle,
+  BookmarkCheck
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -78,6 +79,7 @@ export default function ChefAISettingsPage() {
     }
   } catch (_) {}
 
+  // Synchronized activeTab with session and URL parameter support to prevent reload bounce
   const [activeTab, setActiveTab] = useState<'general' | 'questionnaire' | 'voice' | 'advanced'>('general');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
@@ -108,6 +110,7 @@ export default function ChefAISettingsPage() {
   const [enableWebSearch, setEnableWebSearch] = useState(true);
   const [enablePantryContext, setEnablePantryContext] = useState(true);
   const [strictDietEnforcement, setStrictDietEnforcement] = useState(true);
+  const [enableSavedRecipeSearch, setEnableSavedRecipeSearch] = useState(true);
   const [maxPlanDays, setMaxPlanDays] = useState(7);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
   
@@ -154,6 +157,41 @@ export default function ChefAISettingsPage() {
   const [saved, setSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Restore active tab from URL or Session Storage without writing to LocalStorage
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const tabParam = params.get('tab');
+        if (tabParam === 'questionnaire' || tabParam === 'voice' || tabParam === 'advanced' || tabParam === 'general') {
+          setActiveTab(tabParam);
+          return;
+        }
+        const hash = window.location.hash.replace('#', '');
+        if (hash === 'questionnaire' || hash === 'voice' || hash === 'advanced' || hash === 'general') {
+          setActiveTab(hash);
+          return;
+        }
+        const savedTab = sessionStorage.getItem('zecratary_ai_settings_tab');
+        if (savedTab === 'questionnaire' || savedTab === 'voice' || savedTab === 'advanced' || savedTab === 'general') {
+          setActiveTab(savedTab as any);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  const handleTabChange = (tabId: 'general' | 'questionnaire' | 'voice' | 'advanced') => {
+    setActiveTab(tabId);
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('zecratary_ai_settings_tab', tabId);
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', tabId);
+        window.history.replaceState({}, '', url.toString());
+      }
+    } catch (_) {}
+  };
 
   // Dynamic Theme Synchronization
   const applySavedTheme = useCallback((incomingColors?: any) => {
@@ -301,6 +339,7 @@ export default function ChefAISettingsPage() {
         if (c.enableWebSearch !== undefined) setEnableWebSearch(c.enableWebSearch);
         if (c.enablePantryContext !== undefined) setEnablePantryContext(c.enablePantryContext);
         if (c.strictDietEnforcement !== undefined) setStrictDietEnforcement(c.strictDietEnforcement);
+        if (c.enableSavedRecipeSearch !== undefined) setEnableSavedRecipeSearch(c.enableSavedRecipeSearch);
         if (c.maxPlanDays !== undefined) setMaxPlanDays(c.maxPlanDays);
         if (c.resultDisplayMode !== undefined) setResultDisplayMode(c.resultDisplayMode);
         
@@ -808,6 +847,7 @@ export default function ChefAISettingsPage() {
       enableWebSearch,
       enablePantryContext,
       strictDietEnforcement,
+      enableSavedRecipeSearch,
       maxPlanDays,
       resultDisplayMode,
       enableVoiceInteraction,
@@ -982,7 +1022,7 @@ export default function ChefAISettingsPage() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => handleTabChange(tab.id as any)}
               className={`flex items-center gap-2 pb-3 text-xs font-bold border-b-2 transition shrink-0 cursor-pointer ${
                 isActive ? '' : 'border-transparent hover:opacity-80'
               }`}
@@ -999,885 +1039,966 @@ export default function ChefAISettingsPage() {
 
       <div className="space-y-6">
         
-        {/* TAB 1: GENERAL & MODEL CONFIG */}
-        {activeTab === 'general' && (
-          <div className="space-y-6 animate-in fade-in">
-            <div 
-              className="border rounded-3xl p-6 space-y-5 shadow-sm transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 
-                    className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <Sparkles className="h-4 w-4" /> {t('aiEngineProviderTitle', 'AI Engine Provider & Model Selection')}
-                  </h2>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('aiEngineProviderDesc', 'Select your active AI provider and model version. This choice controls which model processes prompts in')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/api/ai</span>.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={autoConnectGemini}
-                    disabled={autoConnecting}
-                    className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 shadow-xs hover:opacity-90"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-primary)',
-                      color: 'var(--color-primary)'
-                    }}
-                    title="Auto-connect and sync Gemini API key and models"
-                  >
-                    <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse' : ''}`} style={{ color: autoConnecting ? '#f59e0b' : 'var(--color-primary)' }} />
-                    <span>{autoConnecting ? t('connecting', 'Connecting...') : t('autoConnectGemini', 'Auto-Connect Gemini')}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleReloadEnvKey}
-                    className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs hover:opacity-80"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-secondary)'
-                    }}
-                    title="Reload API Key from .env"
-                  >
-                    <RefreshCw className={`h-3 w-3 ${syncingEnvKey ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald)' }} />
-                    <span>{t('syncFromEnv', 'Sync from .env')}</span>
-                  </button>
-                </div>
+        {/* TAB 1: GENERAL & MODEL CONFIG (Kept in DOM with hidden class to prevent unmounting password prompt) */}
+        <div className={activeTab === 'general' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
+          <div 
+            className="border rounded-3xl p-6 space-y-5 shadow-sm transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 
+                  className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  <Sparkles className="h-4 w-4" /> {t('aiEngineProviderTitle', 'AI Engine Provider & Model Selection')}
+                </h2>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('aiEngineProviderDesc', 'Select your active AI provider and model version. This choice controls which model processes prompts in')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/api/ai</span>.
+                </p>
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handleProviderChange('gemini')}
-                  className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
+                  onClick={autoConnectGemini}
+                  disabled={autoConnecting}
+                  className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 shadow-xs hover:opacity-90"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: provider === 'gemini' ? 'var(--color-primary)' : 'var(--color-border)',
-                    color: provider === 'gemini' ? 'var(--color-text)' : 'var(--color-text-secondary)'
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-primary)'
                   }}
+                  title="Auto-connect and sync Gemini API key and models"
                 >
-                  <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
-                  <div>
-                    <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>Google Gemini</span>
-                    <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 3.6 / 1.5</span>
-                  </div>
+                  <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse' : ''}`} style={{ color: autoConnecting ? '#f59e0b' : 'var(--color-primary)' }} />
+                  <span>{autoConnecting ? t('connecting', 'Connecting...') : t('autoConnectGemini', 'Auto-Connect Gemini')}</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleProviderChange('openai')}
-                  className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
+                  onClick={handleReloadEnvKey}
+                  className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs hover:opacity-80"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: provider === 'openai' ? 'var(--color-emerald)' : 'var(--color-border)',
-                    color: provider === 'openai' ? 'var(--color-text)' : 'var(--color-text-secondary)'
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
+                  title="Reload API Key from .env"
                 >
-                  <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
-                  <div>
-                    <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>OpenAI GPT</span>
-                    <span className="text-[11px] opacity-75">GPT-4o / GPT-4 Turbo / o1</span>
-                  </div>
+                  <RefreshCw className={`h-3 w-3 ${syncingEnvKey ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald)' }} />
+                  <span>{t('syncFromEnv', 'Sync from .env')}</span>
                 </button>
               </div>
+            </div>
 
-              <div className="pt-2 space-y-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <button
+                type="button"
+                onClick={() => handleProviderChange('gemini')}
+                className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: provider === 'gemini' ? 'var(--color-primary)' : 'var(--color-border)',
+                  color: provider === 'gemini' ? 'var(--color-text)' : 'var(--color-text-secondary)'
+                }}
+              >
+                <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                 <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('apiKeyLabel', 'API Key')}</label>
-                    <span className="text-[10px] font-mono font-bold" style={{ color: 'var(--color-primary)' }}>
-                      {provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}
-                    </span>
-                  </div>
-                  <div className="relative flex items-center">
-                    <input
-                      type={showApiKey ? 'text' : 'password'}
-                      value={apiKey}
-                      onChange={(e) => { setApiKey(e.target.value); setTestResult(null); }}
-                      placeholder={provider === 'gemini' ? "AIzaSy..." : "sk-..."}
-                      className="settings-input w-full border rounded-xl px-4 py-3 pr-36 font-mono text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                    />
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setShowApiKey(!showApiKey)}
-                        className="p-1.5 transition cursor-pointer"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                        title={showApiKey ? 'Hide API key' : 'Show API key'}
-                      >
-                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleTestApiKey}
-                        disabled={testingKey}
-                        className="px-2.5 py-1.5 rounded-lg text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-md disabled:opacity-50 hover:opacity-90"
-                        style={{ backgroundColor: 'var(--color-primary)' }}
-                        title="Test API Key connection live and sync models"
-                      >
-                        {testingKey ? (
-                          <>
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            <span>{t('testing', 'Testing...')}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Activity className="h-3 w-3" />
-                            <span>{t('testConnection', 'Test Connection')}</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
+                  <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>Google Gemini</span>
+                  <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 3.6 / 1.5</span>
+                </div>
+              </button>
 
-                  {testResult && (
-                    <div 
-                      className="mt-2 p-3 rounded-xl border text-xs font-semibold flex items-start gap-2.5 animate-in fade-in shadow-xs transition-colors duration-200"
-                      style={{
-                        borderColor: testResult.success ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
-                        color: testResult.success ? 'var(--color-emerald)' : '#ef4444',
-                        backgroundColor: 'var(--color-inner-dark)'
-                      }}
-                    >
-                      {testResult.success ? (
-                        <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald)' }} />
-                      ) : (
-                        <XCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
-                      )}
-                      <span className="leading-snug">{testResult.message}</span>
-                    </div>
-                  )}
-                  <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('persistedServerSyncNotice', 'Persisted directly to server storage and synced to disk environment.')}
+              <button
+                type="button"
+                onClick={() => handleProviderChange('openai')}
+                className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: provider === 'openai' ? 'var(--color-emerald)' : 'var(--color-border)',
+                  color: provider === 'openai' ? 'var(--color-text)' : 'var(--color-text-secondary)'
+                }}
+              >
+                <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
+                <div>
+                  <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>OpenAI GPT</span>
+                  <span className="text-[11px] opacity-75">GPT-4o / GPT-4 Turbo / o1</span>
+                </div>
+              </button>
+            </div>
+
+            <div className="pt-2 space-y-4 text-xs">
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('apiKeyLabel', 'API Key')}</label>
+                  <span className="text-[10px] font-mono font-bold" style={{ color: 'var(--color-primary)' }}>
+                    {provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}
                   </span>
                 </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('modelVersionIdentifier', 'Model Version Identifier')}
-                    </label>
-                    <button
-                      type="button"
-                      onClick={handleSyncModels}
-                      disabled={syncingModels}
-                      className="border font-bold text-[10px] px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:opacity-80"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-primary)'
-                      }}
-                      title="Query live Gemini API catalog and update dropdown"
-                    >
-                      <RefreshCw className={`h-3 w-3 ${syncingModels ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
-                      <span>{syncingModels ? t('syncingModels', 'Syncing Models...') : t('syncModelsFromApi', 'Sync Models from API')}</span>
-                    </button>
-                  </div>
-
-                  <select
-                    value={model}
-                    onChange={(e) => {
-                      const sel = e.target.value;
-                      setModel(sel);
-                      modelRef.current = sel;
-                    }}
-                    className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition font-medium"
+                <div className="relative flex items-center">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    id="cfg_ai_api_key_secret"
+                    name="cfg_ai_api_key_secret"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    value={apiKey}
+                    onChange={(e) => { setApiKey(e.target.value); setTestResult(null); }}
+                    placeholder={provider === 'gemini' ? "AIzaSy..." : "sk-..."}
+                    className="settings-input w-full border rounded-xl px-4 py-3 pr-36 font-mono text-xs outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                  >
-                    {!currentModelInList && model && (
-                      <option value={model} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                        {model} ({t('currentlyConfigured', 'Current Configured')})
-                      </option>
-                    )}
-                    {activeModelsList.map((m) => (
-                      <option key={m.id} value={m.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                        {m.label || m.name || m.id}
-                      </option>
-                    ))}
-                  </select>
-
-                  <div className="flex items-center justify-between text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    <span>{t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}</span>
-                    <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
-                      {activeModelsList.length} {t('modelsAvailableDynamically', 'models available dynamically')}
-                    </span>
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="p-1.5 transition cursor-pointer"
+                      style={{ color: 'var(--color-text-secondary)' }}
+                      title={showApiKey ? 'Hide API key' : 'Show API key'}
+                    >
+                      {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTestApiKey}
+                      disabled={testingKey}
+                      className="px-2.5 py-1.5 rounded-lg text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-md disabled:opacity-50 hover:opacity-90"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                      title="Test API Key connection live and sync models"
+                    >
+                      {testingKey ? (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span>{t('testing', 'Testing...')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Activity className="h-3 w-3" />
+                          <span>{t('testConnection', 'Test Connection')}</span>
+                        </>
+                      )}
+                    </button>
                   </div>
+                </div>
+
+                {testResult && (
+                  <div 
+                    className="mt-2 p-3 rounded-xl border text-xs font-semibold flex items-start gap-2.5 animate-in fade-in shadow-xs transition-colors duration-200"
+                    style={{
+                      borderColor: testResult.success ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
+                      color: testResult.success ? 'var(--color-emerald)' : '#ef4444',
+                      backgroundColor: 'var(--color-inner-dark)'
+                    }}
+                  >
+                    {testResult.success ? (
+                      <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald)' }} />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                    )}
+                    <span className="leading-snug">{testResult.message}</span>
+                  </div>
+                )}
+                <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('persistedServerSyncNotice', 'Persisted directly to server storage and synced to disk environment.')}
+                </span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('modelVersionIdentifier', 'Model Version Identifier')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleSyncModels}
+                    disabled={syncingModels}
+                    className="border font-bold text-[10px] px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:opacity-80"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                    title="Query live Gemini API catalog and update dropdown"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${syncingModels ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+                    <span>{syncingModels ? t('syncingModels', 'Syncing Models...') : t('syncModelsFromApi', 'Sync Models from API')}</span>
+                  </button>
+                </div>
+
+                <select
+                  value={model}
+                  onChange={(e) => {
+                    const sel = e.target.value;
+                    setModel(sel);
+                    modelRef.current = sel;
+                  }}
+                  className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  {!currentModelInList && model && (
+                    <option value={model} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {model} ({t('currentlyConfigured', 'Current Configured')})
+                    </option>
+                  )}
+                  {activeModelsList.map((m) => (
+                    <option key={m.id} value={m.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {m.label || m.name || m.id}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="flex items-center justify-between text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span>{t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}</span>
+                  <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
+                    {activeModelsList.length} {t('modelsAvailableDynamically', 'models available dynamically')}
+                  </span>
                 </div>
               </div>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER */}
-        {activeTab === 'questionnaire' && (
-          <div className="space-y-6 animate-in fade-in">
-            <div 
-              className="border rounded-3xl p-6 space-y-5 shadow-sm text-xs transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-                <div>
-                  <h2 
-                    className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <Layers className="h-4 w-4" /> {t('questionnaireManagerTitle', 'Multi-Topic Questionnaire & Wizard Manager')}
-                  </h2>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
-                  </p>
-                </div>
-                <span 
-                  className="border px-3 py-1 rounded-full font-bold text-xs shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-primary)',
-                    color: 'var(--color-primary)'
-                  }}
+        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER (Fully Shielded from Password Managers) */}
+        <div className={activeTab === 'questionnaire' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
+          <div 
+            className="border rounded-3xl p-6 space-y-5 shadow-sm text-xs transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h2 
+                  className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
+                  style={{ color: 'var(--color-primary)' }}
                 >
-                  {sections.filter(s => s.enabled !== false).length}/{sections.length} {t('topicsActiveBadge', 'Topics Active')}
-                </span>
+                  <Layers className="h-4 w-4" /> {t('questionnaireManagerTitle', 'Multi-Topic Questionnaire & Wizard Manager')}
+                </h2>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
+                </p>
               </div>
+              <span 
+                className="border px-3 py-1 rounded-full font-bold text-xs shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                }}
+              >
+                {sections.filter(s => s.enabled !== false).length}/{sections.length} {t('topicsActiveBadge', 'Topics Active')}
+              </span>
+            </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
-                <div className="lg:col-span-5 space-y-3">
-                  <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('questionnaireTopicsHeader', 'Questionnaire Topics')}
-                  </label>
-                  
-                  <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-                    {sections.map((sec) => {
-                      const isActive = sec.id === activeTopicId;
-                      const isEnabled = sec.enabled !== false;
-                      return (
-                        <div
-                          key={sec.id}
-                          onClick={() => setActiveTopicId(sec.id)}
-                          className="p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: isActive ? 'var(--color-primary)' : 'var(--color-border)',
-                            opacity: isEnabled ? 1 : 0.65
-                          }}
-                        >
-                          <div className="space-y-0.5 min-w-0 pr-2 flex-1">
-                            <div className="font-bold text-xs truncate flex items-center justify-between" style={{ color: 'var(--color-text)' }}>
-                              <span className="flex items-center gap-1.5 truncate">
-                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isEnabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
-                                <span className="truncate">{sec.topicTitle}</span>
-                              </span>
-                              <span 
-                                className="text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase shrink-0 border"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: isEnabled ? 'var(--color-emerald)' : 'var(--color-border)',
-                                  color: isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
-                                }}
-                              >
-                                {isEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
-                              </span>
-                            </div>
-                            <p className="text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{sec.description}</p>
-                          </div>
-
-                          <div className="flex items-center gap-2 shrink-0 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
-                            <button
-                              type="button"
-                              onClick={(e) => handleToggleSectionEnabled(sec.id, e)}
-                              className="p-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[10px] font-bold"
-                              title={isEnabled ? 'Disable topic' : 'Enable topic'}
-                            >
-                              {isEnabled ? (
-                                <ToggleRight className="h-6 w-6" style={{ color: 'var(--color-emerald)' }} />
-                              ) : (
-                                <ToggleLeft className="h-6 w-6 text-slate-400" />
-                              )}
-                            </button>
-
-                            {sections.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleDeleteSection(sec.id); }}
-                                className="p-1 rounded-lg hover:text-red-500 transition cursor-pointer"
-                                style={{ color: 'var(--color-text-secondary)' }}
-                                title="Delete topic section"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div 
-                    className="p-4 rounded-2xl border space-y-3 mt-4 transition-colors duration-200"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)'
-                    }}
-                  >
-                    <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                      <FolderPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('addNewTopicHeader', 'Add New Questionnaire Topic')}
-                    </span>
-                    <input
-                      type="text"
-                      placeholder={t('topicTitlePlaceholder', 'Topic Title (e.g. Fitness & Macros)...')}
-                      value={newTopicTitle}
-                      onChange={(e) => setNewTopicTitle(e.target.value)}
-                      className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                    />
-                    <input
-                      type="text"
-                      placeholder={t('topicDescPlaceholder', 'Topic Description...')}
-                      value={newTopicDesc}
-                      onChange={(e) => setNewTopicDesc(e.target.value)}
-                      className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddTopicSection}
-                      disabled={!newTopicTitle.trim()}
-                      className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
-                    >
-                      {t('createTopicBtn', 'Create Topic Category')}
-                    </button>
-                  </div>
-                </div>
-
-                <div 
-                  className="lg:col-span-7 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    opacity: activeSection?.enabled !== false ? 1 : 0.7
-                  }}
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                      <div className="flex-1 min-w-0 pr-4">
-                        <div className="flex items-center gap-2 mb-1">
-                          <ListPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} /> 
-                          <input
-                            type="text"
-                            value={activeSection?.topicTitle || ''}
-                            onChange={(e) => {
-                              const newTitle = e.target.value;
-                              setSections(sections.map(s => s.id === activeSection?.id ? { ...s, topicTitle: newTitle } : s));
-                            }}
-                            className="font-bold text-sm bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none min-w-[200px] transition-colors truncate"
-                            style={{ color: 'var(--color-text)' }}
-                            placeholder="Topic Title..."
-                            title="Edit Topic Title"
-                          />
-                          <span 
-                            className="text-[9px] px-2 py-0.5 rounded font-extrabold uppercase shrink-0 border"
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: activeSection?.enabled !== false ? 'var(--color-emerald)' : 'var(--color-border)',
-                              color: activeSection?.enabled !== false ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
-                            }}
-                          >
-                            {activeSection?.enabled !== false ? t('statusActive', 'Status: Active') : t('statusDisabled', 'Status: Disabled')}
-                          </span>
-                        </div>
-                        <input
-                          type="text"
-                          value={activeSection?.description || ''}
-                          onChange={(e) => {
-                            const newDesc = e.target.value;
-                            setSections(sections.map(s => s.id === activeSection?.id ? { ...s, description: newDesc } : s));
-                          }}
-                          className="text-[11px] bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none w-full transition-colors truncate"
-                          style={{ color: 'var(--color-text-secondary)' }}
-                          placeholder="Topic Description..."
-                          title="Edit Topic Description"
-                        />
-                      </div>
-                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        {activeSection?.questions.length || 0} {t('questionsCount', 'Questions')}
-                      </span>
-                    </div>
-
-                    <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                      {activeSection?.questions.length === 0 ? (
-                        <div className="text-center py-8 text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
-                          {t('noQuestionsYet', 'No questions in this topic yet. Add one below.')}
-                        </div>
-                      ) : (
-                        activeSection?.questions.map((qText, qIdx) => (
-                          <div 
-                            key={qIdx} 
-                            className="flex items-center gap-2.5 border rounded-xl p-3 shadow-xs"
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: 'var(--color-border)'
-                            }}
-                          >
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
+              <div className="lg:col-span-5 space-y-3">
+                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('questionnaireTopicsHeader', 'Questionnaire Topics')}
+                </label>
+                
+                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                  {sections.map((sec) => {
+                    const isActive = sec.id === activeTopicId;
+                    const isEnabled = sec.enabled !== false;
+                    return (
+                      <div
+                        key={sec.id}
+                        onClick={() => setActiveTopicId(sec.id)}
+                        className="p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: isActive ? 'var(--color-primary)' : 'var(--color-border)',
+                          opacity: isEnabled ? 1 : 0.65
+                        }}
+                      >
+                        <div className="space-y-0.5 min-w-0 pr-2 flex-1">
+                          <div className="font-bold text-xs truncate flex items-center justify-between" style={{ color: 'var(--color-text)' }}>
+                            <span className="flex items-center gap-1.5 truncate">
+                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isEnabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
+                              <span className="truncate">{sec.topicTitle}</span>
+                            </span>
                             <span 
-                              className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
+                              className="text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase shrink-0 border"
                               style={{
                                 backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-primary)',
-                                color: 'var(--color-primary)'
+                                borderColor: isEnabled ? 'var(--color-emerald)' : 'var(--color-border)',
+                                color: isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
                               }}
                             >
-                              {qIdx + 1}
+                              {isEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                             </span>
-                            <input
-                              type="text"
-                              value={qText}
-                              onChange={(e) => {
-                                const updatedQ = e.target.value;
-                                setSections(sections.map(s => {
-                                  if (s.id === activeSection.id) {
-                                    const qs = [...s.questions];
-                                    qs[qIdx] = updatedQ;
-                                    return { ...s, questions: qs };
-                                  }
-                                  return s;
-                                }));
-                              }}
-                              className="bg-transparent border-none text-xs outline-none flex-1 font-medium"
-                              style={{ color: 'var(--color-text)' }}
-                            />
+                          </div>
+                          <p className="text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{sec.description}</p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => handleToggleSectionEnabled(sec.id, e)}
+                            className="p-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[10px] font-bold"
+                            title={isEnabled ? 'Disable topic' : 'Enable topic'}
+                          >
+                            {isEnabled ? (
+                              <ToggleRight className="h-6 w-6" style={{ color: 'var(--color-emerald)' }} />
+                            ) : (
+                              <ToggleLeft className="h-6 w-6 text-slate-400" />
+                            )}
+                          </button>
+
+                          {sections.length > 1 && (
                             <button
                               type="button"
-                              onClick={() => handleRemoveQuestionFromTopic(activeSection.id, qIdx)}
-                              className="hover:text-red-500 transition p-1 cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); handleDeleteSection(sec.id); }}
+                              className="p-1 rounded-lg hover:text-red-500 transition cursor-pointer"
                               style={{ color: 'var(--color-text-secondary)' }}
-                              title="Remove question"
+                              title="Delete topic section"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                    <input
-                      type="text"
-                      placeholder={`${t('addQuestionPrefix', 'Add question to')} "${activeSection?.topicTitle}"...`}
-                      value={newQuestionText}
-                      onChange={(e) => setNewQuestionText(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
-                      className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToTopic(activeSection.id)}
-                      className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90"
-                      style={{ backgroundColor: 'var(--color-emerald)' }}
-                    >
-                      <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
-                    </button>
-                  </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            </div>
 
-            {/* Results Appearance Section with Live UI Preview */}
-            <div 
-              className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs mt-6 transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-                <div>
-                  <h2 
-                    className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
-                  </h2>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('resultsAppearanceDesc', 'Select and preview how multi-day meal plans and recipes render to users inside the /chef chat stream.')}
-                  </p>
-                </div>
-                <span 
-                  className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border uppercase shrink-0"
+                {/* ADD NEW TOPIC CARD (Shielded with neutral configuration names) */}
+                <div 
+                  className="p-4 rounded-2xl border space-y-3 mt-4 transition-colors duration-200"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-primary)',
-                    color: 'var(--color-primary)'
-                  }}
-                >
-                  {resultDisplayMode === 'card' ? t('modeCardTitle', 'Standard Cards View') : resultDisplayMode === 'compact' ? t('modeCompactTitle', 'Compact Table View') : t('modeDetailedTitle', 'Detailed Master View')}
-                </span>
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {[
-                  { id: 'card', title: t('modeCardTitle', 'Standard Cards View'), desc: t('modeCardDesc', 'Full interactive meal cards with images and batch cooking options.') },
-                  { id: 'compact', title: t('modeCompactTitle', 'Compact Table View'), desc: t('modeCompactDesc', 'Condensed list view optimized for quick overview and rapid swapping.') },
-                  { id: 'detailed', title: t('modeDetailedTitle', 'Detailed Master View'), desc: t('modeDetailedDesc', 'Expanded view displaying full ingredient breakdowns inline.') }
-                ].map((mode) => {
-                  const isSel = resultDisplayMode === mode.id;
-                  return (
-                    <div
-                      key={mode.id}
-                      onClick={() => setResultDisplayMode(mode.id as any)}
-                      className="p-4 rounded-2xl border cursor-pointer transition space-y-2 shadow-xs hover:opacity-90"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: isSel ? 'var(--color-primary)' : 'var(--color-border)',
-                        color: isSel ? 'var(--color-text)' : 'var(--color-text-secondary)'
-                      }}
-                    >
-                      <div className="flex items-center justify-between font-bold" style={{ color: 'var(--color-text)' }}>
-                        <span>{mode.title}</span>
-                        {isSel && <Check className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />}
-                      </div>
-                      <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{mode.desc}</p>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* RESTORED LIVE UI PREVIEW IN /chef CHAT */}
-              <div 
-                className="p-5 rounded-2xl border space-y-4 shadow-inner transition-colors duration-200"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                    <span className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                      {t('liveUiPreviewHeader', 'Live UI Preview in /chef Chat')}
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('previewSimulationNotice', 'Interactive simulation based on active theme & selected mode')}
-                  </span>
-                </div>
-
-                {/* SIMULATED PLAN CONTAINER */}
-                <div 
-                  className="border rounded-2xl p-4 space-y-4 shadow-sm transition-colors duration-200"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)'
                   }}
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                      <h3 className="font-black text-xs" style={{ color: 'var(--color-text)' }}>
-                        5-Day High-Protein Wholesome Plan
-                      </h3>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        Budget: $6.50/serv
-                      </span>
-                      <span 
-                        className="text-[9px] px-2 py-0.5 rounded font-black uppercase border"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
+                  <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                    <FolderPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('addNewTopicHeader', 'Add New Questionnaire Topic')}
+                  </span>
+                  <input
+                    type="text"
+                    id="cfg_wizard_new_topic_title"
+                    name="cfg_wizard_new_topic_title"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    placeholder={t('topicTitlePlaceholder', 'Topic Title (e.g. Fitness & Macros)...')}
+                    value={newTopicTitle}
+                    onChange={(e) => setNewTopicTitle(e.target.value)}
+                    className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <input
+                    type="text"
+                    id="cfg_wizard_new_topic_desc"
+                    name="cfg_wizard_new_topic_desc"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    placeholder={t('topicDescPlaceholder', 'Topic Description...')}
+                    value={newTopicDesc}
+                    onChange={(e) => setNewTopicDesc(e.target.value)}
+                    className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddTopicSection}
+                    disabled={!newTopicTitle.trim()}
+                    className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    {t('createTopicBtn', 'Create Topic Category')}
+                  </button>
+                </div>
+              </div>
+
+              {/* TOPIC QUESTIONS EDITOR (Shielded from Password Autofill Heuristics) */}
+              <div 
+                className="lg:col-span-7 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  opacity: activeSection?.enabled !== false ? 1 : 0.7
+                }}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                    <div className="flex-1 min-w-0 pr-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <ListPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} /> 
+                        <input
+                          type="text"
+                          id={`cfg_sec_title_${activeSection?.id || 'default'}`}
+                          name={`cfg_sec_title_${activeSection?.id || 'default'}`}
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck="false"
+                          data-lpignore="true"
+                          data-1p-ignore="true"
+                          data-bwignore="true"
+                          data-form-type="other"
+                          role="presentation"
+                          readOnly
+                          onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                          onBlur={(e) => { e.currentTarget.readOnly = true; }}
+                          value={activeSection?.topicTitle || ''}
+                          onChange={(e) => {
+                            const newTitle = e.target.value;
+                            setSections(sections.map(s => s.id === activeSection?.id ? { ...s, topicTitle: newTitle } : s));
+                          }}
+                          className="font-bold text-sm bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none min-w-[200px] transition-colors truncate"
+                          style={{ color: 'var(--color-text)' }}
+                          placeholder="Topic Title..."
+                          title="Edit Topic Title"
+                        />
+                        <span 
+                          className="text-[9px] px-2 py-0.5 rounded font-extrabold uppercase shrink-0 border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: activeSection?.enabled !== false ? 'var(--color-emerald)' : 'var(--color-border)',
+                            color: activeSection?.enabled !== false ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {activeSection?.enabled !== false ? t('statusActive', 'Status: Active') : t('statusDisabled', 'Status: Disabled')}
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        id={`cfg_sec_desc_${activeSection?.id || 'default'}`}
+                        name={`cfg_sec_desc_${activeSection?.id || 'default'}`}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        spellCheck="false"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-bwignore="true"
+                        data-form-type="other"
+                        role="presentation"
+                        readOnly
+                        onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                        onBlur={(e) => { e.currentTarget.readOnly = true; }}
+                        value={activeSection?.description || ''}
+                        onChange={(e) => {
+                          const newDesc = e.target.value;
+                          setSections(sections.map(s => s.id === activeSection?.id ? { ...s, description: newDesc } : s));
                         }}
-                      >
-                        5 Days
-                      </span>
+                        className="text-[11px] bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none w-full transition-colors truncate"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                        placeholder="Topic Description..."
+                        title="Edit Topic Description"
+                      />
                     </div>
+                    <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      {activeSection?.questions.length || 0} {t('questionsCount', 'Questions')}
+                    </span>
                   </div>
 
-                  {/* 1. STANDARD CARDS VIEW PREVIEW */}
-                  {resultDisplayMode === 'card' && (
-                    <div className="space-y-3">
-                      {[
-                        {
-                          id: 'prev_1',
-                          day: 'Day 1 • Monday',
-                          type: 'Dinner',
-                          title: 'Avocado Quinoa Power Bowl',
-                          desc: 'Fluffy tri-color quinoa tossed with crisp edamame, Hass avocado, cherry tomatoes, and lemon tahini drizzle.',
-                          time: '25m',
-                          servings: 2,
-                          calories: 480,
-                          image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
-                          batch: true
-                        },
-                        {
-                          id: 'prev_2',
-                          day: 'Day 2 • Tuesday',
-                          type: 'Dinner',
-                          title: 'Pan-Seared Salmon with Asparagus',
-                          desc: 'Crispy skin Atlantic salmon filet served with garlic-roasted tender asparagus and fresh dill sauce.',
-                          time: '20m',
-                          servings: 2,
-                          calories: 540,
-                          image: 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?auto=format&fit=crop&w=400&q=80',
-                          batch: false
-                        }
-                      ].map((item) => (
+                  <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                    {activeSection?.questions.length === 0 ? (
+                      <div className="text-center py-8 text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
+                        {t('noQuestionsYet', 'No questions in this topic yet. Add one below.')}
+                      </div>
+                    ) : (
+                      activeSection?.questions.map((qText, qIdx) => (
                         <div 
-                          key={item.id}
-                          className="border rounded-2xl p-3.5 space-y-2.5 transition shadow-xs"
+                          key={qIdx} 
+                          className="flex items-center gap-2.5 border rounded-xl p-3 shadow-xs"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark)',
+                            backgroundColor: 'var(--color-card)',
                             borderColor: 'var(--color-border)'
                           }}
                         >
-                          <div className="flex justify-between items-center text-xs font-bold">
-                            <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
-                            <div className="flex items-center gap-1.5">
-                              {item.batch && (
-                                <span 
-                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
-                                  style={{
-                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                    borderColor: 'var(--color-emerald)',
-                                    color: 'var(--color-emerald)'
-                                  }}
-                                >
-                                  Batch Cook
-                                </span>
-                              )}
-                              <span 
-                                className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)',
-                                  color: 'var(--color-text-secondary)'
-                                }}
-                              >
-                                {item.type}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-start gap-3">
-                            <img 
-                              src={item.image} 
-                              alt={item.title} 
-                              className="w-16 h-16 rounded-xl object-cover border shrink-0" 
-                              style={{ borderColor: 'var(--color-border)' }} 
-                            />
-                            <div className="space-y-1 flex-1 min-w-0">
-                              <h4 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
-                                {item.title}
-                              </h4>
-                              <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                                {item.desc}
-                              </p>
-                              <div className="flex items-center gap-3 text-[10px] font-semibold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                                <span className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {item.time}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Users className="h-3 w-3" /> {item.servings} serv
-                                </span>
-                                <span className="font-mono" style={{ color: 'var(--color-primary)' }}>
-                                  {item.calories} kcal
-                                </span>
-                              </div>
-                            </div>
-                          </div>
+                          <span 
+                            className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-primary)',
+                              color: 'var(--color-primary)'
+                            }}
+                          >
+                            {qIdx + 1}
+                          </span>
+                          <input
+                            type="text"
+                            id={`cfg_q_item_${activeSection?.id || 'default'}_${qIdx}`}
+                            name={`cfg_q_item_${activeSection?.id || 'default'}_${qIdx}`}
+                            autoComplete="off"
+                            autoCorrect="off"
+                            spellCheck="false"
+                            data-lpignore="true"
+                            data-1p-ignore="true"
+                            data-bwignore="true"
+                            data-form-type="other"
+                            role="presentation"
+                            readOnly
+                            onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                            onBlur={(e) => { e.currentTarget.readOnly = true; }}
+                            value={qText}
+                            onChange={(e) => {
+                              const updatedQ = e.target.value;
+                              setSections(sections.map(s => {
+                                if (s.id === activeSection.id) {
+                                  const qs = [...s.questions];
+                                  qs[qIdx] = updatedQ;
+                                  return { ...s, questions: qs };
+                                }
+                                return s;
+                              }));
+                            }}
+                            className="bg-transparent border-none text-xs outline-none flex-1 font-medium"
+                            style={{ color: 'var(--color-text)' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveQuestionFromTopic(activeSection.id, qIdx)}
+                            className="hover:text-red-500 transition p-1 cursor-pointer"
+                            style={{ color: 'var(--color-text-secondary)' }}
+                            title="Remove question"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      ))
+                    )}
+                  </div>
+                </div>
 
-                  {/* 2. COMPACT TABLE VIEW PREVIEW */}
-                  {resultDisplayMode === 'compact' && (
-                    <div className="border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                  <input
+                    type="text"
+                    id="cfg_new_question_text_input"
+                    name="cfg_new_question_text_input"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    placeholder={`${t('addQuestionPrefix', 'Add question to')} "${activeSection?.topicTitle}"...`}
+                    value={newQuestionText}
+                    onChange={(e) => setNewQuestionText(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddQuestionToTopic(activeSection.id)}
+                    className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-emerald)' }}
+                  >
+                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Results Appearance Section with Live UI Preview */}
+          <div 
+            className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs mt-6 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h2 
+                  className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
+                </h2>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('resultsAppearanceDesc', 'Select and preview how multi-day meal plans and recipes render to users inside the /chef chat stream.')}
+                </p>
+              </div>
+              <span 
+                className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border uppercase shrink-0"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                }}
+              >
+                {resultDisplayMode === 'card' ? t('modeCardTitle', 'Standard Cards View') : resultDisplayMode === 'compact' ? t('modeCompactTitle', 'Compact Table View') : t('modeDetailedTitle', 'Detailed Master View')}
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                { id: 'card', title: t('modeCardTitle', 'Standard Cards View'), desc: t('modeCardDesc', 'Full interactive meal cards with images and batch cooking options.') },
+                { id: 'compact', title: t('modeCompactTitle', 'Compact Table View'), desc: t('modeCompactDesc', 'Condensed list view optimized for quick overview and rapid swapping.') },
+                { id: 'detailed', title: t('modeDetailedTitle', 'Detailed Master View'), desc: t('modeDetailedDesc', 'Expanded view displaying full ingredient breakdowns inline.') }
+              ].map((mode) => {
+                const isSel = resultDisplayMode === mode.id;
+                return (
+                  <div
+                    key={mode.id}
+                    onClick={() => setResultDisplayMode(mode.id as any)}
+                    className="p-4 rounded-2xl border cursor-pointer transition space-y-2 shadow-xs hover:opacity-90"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: isSel ? 'var(--color-primary)' : 'var(--color-border)',
+                      color: isSel ? 'var(--color-text)' : 'var(--color-text-secondary)'
+                    }}
+                  >
+                    <div className="flex items-center justify-between font-bold" style={{ color: 'var(--color-text)' }}>
+                      <span>{mode.title}</span>
+                      {isSel && <Check className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />}
+                    </div>
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{mode.desc}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* RESTORED LIVE UI PREVIEW IN /chef CHAT */}
+            <div 
+              className="p-5 rounded-2xl border space-y-4 shadow-inner transition-colors duration-200"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex items-center gap-2">
+                  <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                  <span className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                    {t('liveUiPreviewHeader', 'Live UI Preview in /chef Chat')}
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('previewSimulationNotice', 'Interactive simulation based on active theme & selected mode')}
+                </span>
+              </div>
+
+              {/* SIMULATED PLAN CONTAINER */}
+              <div 
+                className="border rounded-2xl p-4 space-y-4 shadow-sm transition-colors duration-200"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)'
+                }}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                    <h3 className="font-black text-xs" style={{ color: 'var(--color-text)' }}>
+                      5-Day High-Protein Wholesome Plan
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      Budget: $6.50/serv
+                    </span>
+                    <span 
+                      className="text-[9px] px-2 py-0.5 rounded font-black uppercase border"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      5 Days
+                    </span>
+                  </div>
+                </div>
+
+                {/* 1. STANDARD CARDS VIEW PREVIEW */}
+                {resultDisplayMode === 'card' && (
+                  <div className="space-y-3">
+                    {[
+                      {
+                        id: 'prev_1',
+                        day: 'Day 1 • Monday',
+                        type: 'Dinner',
+                        title: 'Avocado Quinoa Power Bowl',
+                        desc: 'Fluffy tri-color quinoa tossed with crisp edamame, Hass avocado, cherry tomatoes, and lemon tahini drizzle.',
+                        time: '25m',
+                        servings: 2,
+                        calories: 480,
+                        image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
+                        batch: true
+                      },
+                      {
+                        id: 'prev_2',
+                        day: 'Day 2 • Tuesday',
+                        type: 'Dinner',
+                        title: 'Pan-Seared Salmon with Asparagus',
+                        desc: 'Crispy skin Atlantic salmon filet served with garlic-roasted tender asparagus and fresh dill sauce.',
+                        time: '20m',
+                        servings: 2,
+                        calories: 540,
+                        image: 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?auto=format&fit=crop&w=400&q=80',
+                        batch: false
+                      }
+                    ].map((item) => (
                       <div 
-                        className="grid grid-cols-12 gap-2 p-2.5 font-extrabold text-[10px] uppercase border-b"
+                        key={item.id}
+                        className="border rounded-2xl p-3.5 space-y-2.5 transition shadow-xs"
                         style={{
                           backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text-secondary)'
+                          borderColor: 'var(--color-border)'
                         }}
                       >
-                        <span className="col-span-3">Day / Schedule</span>
-                        <span className="col-span-2">Meal Type</span>
-                        <span className="col-span-5">Recipe Title</span>
-                        <span className="col-span-2 text-right">Time & Cals</span>
-                      </div>
-                      {[
-                        { day: 'Day 1 (Mon)', type: 'Dinner', title: 'Avocado Quinoa Power Bowl', time: '25m', cals: '480 kcal' },
-                        { day: 'Day 2 (Tue)', type: 'Dinner', title: 'Pan-Seared Salmon with Asparagus', time: '20m', cals: '540 kcal' },
-                        { day: 'Day 3 (Wed)', type: 'Lunch', title: 'Mediterranean Lentil Salad', time: '15m', cals: '410 kcal' }
-                      ].map((row, rIdx) => (
-                        <div 
-                          key={rIdx}
-                          className="grid grid-cols-12 gap-2 p-2.5 text-xs items-center border-b last:border-none transition hover:opacity-90"
-                          style={{
-                            backgroundColor: rIdx % 2 === 0 ? 'var(--color-card)' : 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <span className="col-span-3 font-bold" style={{ color: 'var(--color-primary)' }}>{row.day}</span>
-                          <span className="col-span-2">
+                        <div className="flex justify-between items-center text-xs font-bold">
+                          <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
+                          <div className="flex items-center gap-1.5">
+                            {item.batch && (
+                              <span 
+                                className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                style={{
+                                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                  borderColor: 'var(--color-emerald)',
+                                  color: 'var(--color-emerald)'
+                                }}
+                              >
+                                Batch Cook
+                              </span>
+                            )}
                             <span 
-                              className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border"
+                              className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
                               style={{
                                 backgroundColor: 'var(--color-card)',
                                 borderColor: 'var(--color-border)',
                                 color: 'var(--color-text-secondary)'
                               }}
                             >
-                              {row.type}
+                              {item.type}
                             </span>
-                          </span>
-                          <span className="col-span-5 font-semibold truncate" style={{ color: 'var(--color-text)' }}>{row.title}</span>
-                          <span className="col-span-2 text-right font-mono text-[11px]" style={{ color: 'var(--color-emerald)' }}>{row.time} • {row.cals}</span>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
 
-                  {/* 3. DETAILED MASTER VIEW PREVIEW */}
-                  {resultDisplayMode === 'detailed' && (
-                    <div className="space-y-3">
-                      {[
-                        {
-                          id: 'det_1',
-                          day: 'Day 1 • Monday',
-                          type: 'Dinner',
-                          title: 'Avocado Quinoa Power Bowl',
-                          desc: 'Balanced high-protein bowl with citrus tahini infusion.',
-                          time: '25 mins total',
-                          servings: 2,
-                          cals: 480,
-                          ingredients: ['Tri-color Quinoa', 'Hass Avocado', 'Edamame', 'Cherry Tomatoes', 'Lemon Tahini', 'Extra Virgin Olive Oil']
-                        },
-                        {
-                          id: 'det_2',
-                          day: 'Day 2 • Tuesday',
-                          type: 'Dinner',
-                          title: 'Pan-Seared Salmon with Asparagus',
-                          desc: 'Crisp Atlantic salmon accompanied by garlic butter asparagus.',
-                          time: '20 mins total',
-                          servings: 2,
-                          cals: 540,
-                          ingredients: ['Fresh Salmon Filet', 'Asparagus Spears', 'Minced Garlic', 'Fresh Dill', 'Lemon Wedges', 'Sea Salt']
-                        }
-                      ].map((item) => (
-                        <div 
-                          key={item.id}
-                          className="border rounded-2xl p-4 space-y-3 transition shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <div className="flex justify-between items-center text-xs font-bold border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                            <div className="flex items-center gap-2">
-                              <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
-                              <span 
-                                className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-emerald)',
-                                  color: 'var(--color-emerald)'
-                                }}
-                              >
-                                {item.type}
+                        <div className="flex items-start gap-3">
+                          <img 
+                            src={item.image} 
+                            alt={item.title} 
+                            className="w-16 h-16 rounded-xl object-cover border shrink-0" 
+                            style={{ borderColor: 'var(--color-border)' }} 
+                          />
+                          <div className="space-y-1 flex-1 min-w-0">
+                            <h4 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
+                              {item.title}
+                            </h4>
+                            <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                              {item.desc}
+                            </p>
+                            <div className="flex items-center gap-3 text-[10px] font-semibold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {item.time}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Users className="h-3 w-3" /> {item.servings} serv
+                              </span>
+                              <span className="font-mono" style={{ color: 'var(--color-primary)' }}>
+                                {item.calories} kcal
                               </span>
                             </div>
-                            <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                              {item.time} • {item.servings} servings • {item.cals} kcal
-                            </span>
-                          </div>
-
-                          <div className="space-y-1">
-                            <h4 className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>{item.title}</h4>
-                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{item.desc}</p>
-                          </div>
-
-                          {/* Inline Ingredient Breakdown Tags */}
-                          <div className="space-y-1.5 pt-1">
-                            <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
-                              Inline Ingredients Breakdown:
-                            </span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {item.ingredients.map((ing, iIdx) => (
-                                <span 
-                                  key={iIdx}
-                                  className="text-[10px] font-medium px-2 py-0.5 rounded-lg border shadow-2xs"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: 'var(--color-text)'
-                                  }}
-                                >
-                                  • {ing}
-                                </span>
-                              ))}
-                            </div>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-                </div>
+                {/* 2. COMPACT TABLE VIEW PREVIEW */}
+                {resultDisplayMode === 'compact' && (
+                  <div className="border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                    <div 
+                      className="grid grid-cols-12 gap-2 p-2.5 font-extrabold text-[10px] uppercase border-b"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      <span className="col-span-3">Day / Schedule</span>
+                      <span className="col-span-2">Meal Type</span>
+                      <span className="col-span-5">Recipe Title</span>
+                      <span className="col-span-2 text-right">Time & Cals</span>
+                    </div>
+                    {[
+                      { day: 'Day 1 (Mon)', type: 'Dinner', title: 'Avocado Quinoa Power Bowl', time: '25m', cals: '480 kcal' },
+                      { day: 'Day 2 (Tue)', type: 'Dinner', title: 'Pan-Seared Salmon with Asparagus', time: '20m', cals: '540 kcal' },
+                      { day: 'Day 3 (Wed)', type: 'Lunch', title: 'Mediterranean Lentil Salad', time: '15m', cals: '410 kcal' }
+                    ].map((row, rIdx) => (
+                      <div 
+                        key={rIdx}
+                        className="grid grid-cols-12 gap-2 p-2.5 text-xs items-center border-b last:border-none transition hover:opacity-90"
+                        style={{
+                          backgroundColor: rIdx % 2 === 0 ? 'var(--color-card)' : 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <span className="col-span-3 font-bold" style={{ color: 'var(--color-primary)' }}>{row.day}</span>
+                        <span className="col-span-2">
+                          <span 
+                            className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border"
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)'
+                            }}
+                          >
+                            {row.type}
+                          </span>
+                        </span>
+                        <span className="col-span-5 font-semibold truncate" style={{ color: 'var(--color-text)' }}>{row.title}</span>
+                        <span className="col-span-2 text-right font-mono text-[11px]" style={{ color: 'var(--color-emerald)' }}>{row.time} • {row.cals}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 3. DETAILED MASTER VIEW PREVIEW */}
+                {resultDisplayMode === 'detailed' && (
+                  <div className="space-y-3">
+                    {[
+                      {
+                        id: 'det_1',
+                        day: 'Day 1 • Monday',
+                        type: 'Dinner',
+                        title: 'Avocado Quinoa Power Bowl',
+                        desc: 'Balanced high-protein bowl with citrus tahini infusion.',
+                        time: '25 mins total',
+                        servings: 2,
+                        cals: 480,
+                        ingredients: ['Tri-color Quinoa', 'Hass Avocado', 'Edamame', 'Cherry Tomatoes', 'Lemon Tahini', 'Extra Virgin Olive Oil']
+                      },
+                      {
+                        id: 'det_2',
+                        day: 'Day 2 • Tuesday',
+                        type: 'Dinner',
+                        title: 'Pan-Seared Salmon with Asparagus',
+                        desc: 'Crisp Atlantic salmon accompanied by garlic butter asparagus.',
+                        time: '20 mins total',
+                        servings: 2,
+                        cals: 540,
+                        ingredients: ['Fresh Salmon Filet', 'Asparagus Spears', 'Minced Garlic', 'Fresh Dill', 'Lemon Wedges', 'Sea Salt']
+                      }
+                    ].map((item) => (
+                      <div 
+                        key={item.id}
+                        className="border rounded-2xl p-4 space-y-3 transition shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <div className="flex justify-between items-center text-xs font-bold border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                          <div className="flex items-center gap-2">
+                            <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
+                            <span 
+                              className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-emerald)',
+                                color: 'var(--color-emerald)'
+                              }}
+                            >
+                              {item.type}
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                            {item.time} • {item.servings} servings • {item.cals} kcal
+                          </span>
+                        </div>
+
+                        <div className="space-y-1">
+                          <h4 className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>{item.title}</h4>
+                          <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{item.desc}</p>
+                        </div>
+
+                        {/* Inline Ingredient Breakdown Tags */}
+                        <div className="space-y-1.5 pt-1">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                            Inline Ingredients Breakdown:
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {item.ingredients.map((ing, iIdx) => (
+                              <span 
+                                key={iIdx}
+                                className="text-[10px] font-medium px-2 py-0.5 rounded-lg border shadow-2xs"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text)'
+                                }}
+                              >
+                                • {ing}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
               </div>
             </div>
           </div>
-        )}
+        </div>
 
         {/* TAB 3: VOICE INTERACTION SETTINGS */}
-        {activeTab === 'voice' && (
+        <div className={activeTab === 'voice' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
           <div 
-            className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
+            className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)'
@@ -2008,720 +2129,192 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
           </div>
-        )}
+        </div>
 
         {/* TAB 4: AGENT PARAMETERS & RECOMMENDED RECIPES URL */}
-        {activeTab === 'advanced' && (
-          <div className="space-y-6 animate-in fade-in">
-            {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
-            <div 
-              className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
+        <div className={activeTab === 'advanced' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
+          {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
+          <div 
+            className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <h2 
+              className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+              style={{ color: 'var(--color-primary)' }}
             >
-              <h2 
-                className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                style={{ color: 'var(--color-primary)' }}
+              <Globe className="h-4 w-4" /> {t('autonomousCapabilitiesHeader', 'Autonomous Capabilities & Search Scope Control')}
+            </h2>
+            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('autonomousCapabilitiesDesc', 'Control what data sources the AI agent searches and incorporates when responding on')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span>.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+              <div 
+                onClick={() => setEnableWebSearch(!enableWebSearch)}
+                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: enableWebSearch ? 'var(--color-primary)' : 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
               >
-                <Globe className="h-4 w-4" /> {t('autonomousCapabilitiesHeader', 'Autonomous Capabilities & Search Scope Control')}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('autonomousCapabilitiesDesc', 'Control what data sources the AI agent searches and incorporates when responding on')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span>.
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-                <div 
-                  onClick={() => setEnableWebSearch(!enableWebSearch)}
-                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: enableWebSearch ? 'var(--color-primary)' : 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <Globe className="h-5 w-5" style={{ color: enableWebSearch ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
-                    <div 
-                      className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: enableWebSearch ? 'var(--color-primary)' : 'var(--color-border)' }}
-                    >
-                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableWebSearch ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </div>
-                  </div>
-                  <div>
-                    <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('liveWebSearch', 'Live Web Search')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('liveWebSearchDesc', 'Allows AI to search external culinary web data, trends, and ingredient substitutes.')}
-                    </span>
+                <div className="flex items-center justify-between">
+                  <Globe className="h-5 w-5" style={{ color: enableWebSearch ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
+                  <div 
+                    className="w-9 h-5 rounded-full p-0.5 transition"
+                    style={{ backgroundColor: enableWebSearch ? 'var(--color-primary)' : 'var(--color-border)' }}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableWebSearch ? 'translate-x-4' : 'translate-x-0'}`} />
                   </div>
                 </div>
+                <div>
+                  <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('liveWebSearch', 'Live Web Search')}</span>
+                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('liveWebSearchDesc', 'Allows AI to search external culinary web data, trends, and ingredient substitutes.')}
+                  </span>
+                </div>
+              </div>
 
-                <div 
-                  onClick={() => setEnablePantryContext(!enablePantryContext)}
-                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }} />
-                    <div 
-                      className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-border)' }}
-                    >
-                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${enablePantryContext ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </div>
-                  </div>
-                  <div>
-                    <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('pantryContextSearch', 'Pantry Context Search')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('pantryContextSearchDesc', 'Automatically scans user pantry inventory to build recipes matching in-stock ingredients.')}
-                    </span>
+              <div 
+                onClick={() => setEnablePantryContext(!enablePantryContext)}
+                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }} />
+                  <div 
+                    className="w-9 h-5 rounded-full p-0.5 transition"
+                    style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-border)' }}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${enablePantryContext ? 'translate-x-4' : 'translate-x-0'}`} />
                   </div>
                 </div>
+                <div>
+                  <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('pantryContextSearch', 'Pantry Context Search')}</span>
+                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('pantryContextSearchDesc', 'Automatically scans user pantry inventory to build recipes matching in-stock ingredients.')}
+                  </span>
+                </div>
+              </div>
 
-                <div 
-                  onClick={() => setStrictDietEnforcement(!strictDietEnforcement)}
-                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
-                    <div 
-                      className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)' }}
-                    >
-                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </div>
+              <div 
+                onClick={() => setStrictDietEnforcement(!strictDietEnforcement)}
+                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
+                  <div 
+                    className="w-9 h-5 rounded-full p-0.5 transition"
+                    style={{ backgroundColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)' }}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
                   </div>
-                  <div>
-                    <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('strictDietaryFilters', 'Strict Dietary Filters')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('strictDietaryFiltersDesc', 'Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.')}
-                    </span>
+                </div>
+                <div>
+                  <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('strictDietaryFilters', 'Strict Dietary Filters')}</span>
+                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('strictDietaryFiltersDesc', 'Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.')}
+                  </span>
+                </div>
+              </div>
+
+              {/* All Saved Recipe Search */}
+              <div 
+                onClick={() => setEnableSavedRecipeSearch(!enableSavedRecipeSearch)}
+                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: enableSavedRecipeSearch ? 'var(--color-emerald)' : 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <BookmarkCheck className="h-5 w-5" style={{ color: enableSavedRecipeSearch ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }} />
+                  <div 
+                    className="w-9 h-5 rounded-full p-0.5 transition"
+                    style={{ backgroundColor: enableSavedRecipeSearch ? 'var(--color-emerald)' : 'var(--color-border)' }}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableSavedRecipeSearch ? 'translate-x-4' : 'translate-x-0'}`} />
                   </div>
+                </div>
+                <div>
+                  <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('allSavedRecipeSearch', 'All Saved Recipe Search')}</span>
+                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('allSavedRecipeSearchDesc', 'Automatically searches and incorporates all user and database saved recipes into AI recommendations.')}
+                  </span>
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* TUNING PARAMETERS, KNOWLEDGE BASE, CUSTOM VOCABULARY & FILTER WORDS */}
-            <div 
-              className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
+          {/* TUNING PARAMETERS, KNOWLEDGE BASE, CUSTOM VOCABULARY & FILTER WORDS */}
+          <div 
+            className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <h2 
+              className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+              style={{ color: 'var(--color-primary)' }}
             >
-              <h2 
-                className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                <SlidersHorizontal className="h-4 w-4" /> {t('agentParametersHeader', 'Agent Parameters & Knowledge Tuning')}
-              </h2>
+              <SlidersHorizontal className="h-4 w-4" /> {t('agentParametersHeader', 'Agent Parameters & Knowledge Tuning')}
+            </h2>
 
-              {/* CREATIVITY & MAX PLAN DAYS */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="space-y-2">
-                  <div className="flex justify-between font-bold">
-                    <span style={{ color: 'var(--color-text-secondary)' }}>{t('temperatureLabel', 'Temperature (Creativity)')}: {temperature}</span>
-                    <span style={{ color: 'var(--color-emerald)' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={temperature}
-                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                    className="w-full cursor-pointer"
-                    style={{ accentColor: 'var(--color-primary)' }}
-                  />
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('temperatureDesc', 'Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.')}
-                  </p>
+            {/* CREATIVITY & MAX PLAN DAYS */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="space-y-2">
+                <div className="flex justify-between font-bold">
+                  <span style={{ color: 'var(--color-text-secondary)' }}>{t('temperatureLabel', 'Temperature (Creativity)')}: {temperature}</span>
+                  <span style={{ color: 'var(--color-emerald)' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
                 </div>
-
-                <div className="space-y-2">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('maxPlanDaysCap', 'Max Plan Days Limit (Wizard Cap)')}
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="14"
-                    value={maxPlanDays}
-                    onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
-                    className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                  />
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('maxPlanDaysDesc', 'Maximum number of days the AI can structure in a single meal plan wizard sequence.')}
-                  </p>
-                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={temperature}
+                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                  className="w-full cursor-pointer"
+                  style={{ accentColor: 'var(--color-primary)' }}
+                />
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('temperatureDesc', 'Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.')}
+                </p>
               </div>
 
-              {/* RECOMMENDED RECIPES URL WITH CRAWLER & SLUG DISCOVERY */}
-              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                  <div>
-                    <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
-                      <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('recommendedRecipesUrlHeader', 'Recommended Recipes Url')}
-                    </h3>
-                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('recommendedRecipesUrlDesc', 'Configure primary source URLs for recipe recommendations. When users ask for recipes on /chef, AI will search and prioritize these URLs as the primary source.')}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span 
-                      className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border shrink-0"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
-                        color: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)'
-                      }}
-                    >
-                      {recommendedRecipeUrls.length} {t('urlsActiveBadge', 'Active URLs (Primary)')}
-                    </span>
-                    {recommendedRecipeUrls.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={handleClearAllRecommendedUrls}
-                        className="text-[10px] text-red-400 hover:text-red-500 font-bold transition cursor-pointer"
-                      >
-                        {t('clearAll', 'Clear All')}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <div 
-                      className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      <input
-                        type="text"
-                        placeholder={t('recommendedRecipeUrlPlaceholder', 'Add recipe URL (paste single or multiple separated by commas or newlines)...')}
-                        value={newRecipeUrlInput}
-                        onChange={(e) => setNewRecipeUrlInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleAddRecommendedUrls();
-                          }
-                        }}
-                        className="bg-transparent border-none outline-none w-full text-xs font-medium"
-                        style={{ color: 'var(--color-text)' }}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleAddRecommendedUrls()}
-                      disabled={!newRecipeUrlInput.trim()}
-                      className="px-4 py-2.5 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md disabled:opacity-40 hover:opacity-90 shrink-0"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
-                    >
-                      <Plus className="h-4 w-4" /> {t('addUrlBtn', 'Add URL')}
-                    </button>
-                  </div>
-                  <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
-                    💡 {t('multiUrlHint', 'Tip: You can paste multiple URLs at once separated by commas or newlines. Chef AI will prioritize these as primary culinary references.')}
-                  </span>
-                </div>
-
-                {/* URL List with Index Crawler and Discovered Slugs Drawer */}
-                <div className="space-y-2 pt-1">
-                  {recommendedRecipeUrls.length === 0 ? (
-                    <div 
-                      className="p-4 text-center border border-dashed rounded-2xl text-xs space-y-0.5"
-                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-                    >
-                      <span className="font-semibold block">{t('noRecommendedUrlsTitle', 'No Recommended Recipe URLs configured.')}</span>
-                      <span className="text-[11px] block">{t('noRecommendedUrlsDesc', 'Add your preferred food blog or recipe URLs above to make /chef recommend recipes from them first.')}</span>
-                    </div>
-                  ) : (
-                    <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                      {recommendedRecipeUrls.map((urlStr, idx) => {
-                        let domain = 'Website';
-                        try {
-                          domain = new URL(urlStr).hostname.replace(/^www\./, '');
-                        } catch (_) {}
-
-                        const isIndex = /recipes|\/category\/|\/categories\/|\/collection\/|\/tag\/|\/archive\/|\/all/i.test(urlStr) || urlStr.endsWith('/recipes/');
-                        const cache = crawlResults[urlStr];
-                        const isCrawlingThis = crawlingUrl === urlStr;
-                        const isExpanded = expandedIndexUrl === urlStr;
-
-                        return (
-                          <div 
-                            key={idx}
-                            className="rounded-2xl border transition shadow-xs overflow-hidden"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: isExpanded ? 'var(--color-primary)' : 'var(--color-border)'
-                            }}
-                          >
-                            <div className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                                  <span 
-                                    className="text-[9px] font-black uppercase px-2 py-0.5 rounded border truncate"
-                                    style={{
-                                      backgroundColor: 'var(--color-card)',
-                                      borderColor: 'var(--color-border)',
-                                      color: 'var(--color-primary)'
-                                    }}
-                                  >
-                                    {domain}
-                                  </span>
-                                  <span 
-                                    className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
-                                    style={{
-                                      backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                      color: 'var(--color-emerald)'
-                                    }}
-                                  >
-                                    {t('primaryTag', 'Primary')}
-                                  </span>
-                                  {isIndex && (
-                                    <span 
-                                      className="text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase border"
-                                      style={{
-                                        backgroundColor: 'var(--color-card)',
-                                        borderColor: 'var(--color-primary)',
-                                        color: 'var(--color-primary)'
-                                      }}
-                                    >
-                                      {t('indexCollectionTag', 'Index / Collection')}
-                                    </span>
-                                  )}
-                                  {cache && (
-                                    <span 
-                                      className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
-                                      style={{
-                                        backgroundColor: 'var(--color-card)',
-                                        borderColor: 'var(--color-emerald)',
-                                        color: 'var(--color-emerald)'
-                                      }}
-                                    >
-                                      {cache.count} {t('slugsDiscoveredBadge', 'Slugs Discovered')}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text)' }} title={urlStr}>
-                                  {urlStr}
-                                </p>
-                              </div>
-
-                              <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
-                                <button
-                                  type="button"
-                                  onClick={() => handleCrawlIndexUrl(urlStr)}
-                                  disabled={isCrawlingThis}
-                                  className="px-2.5 py-1.5 rounded-lg border font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-90 disabled:opacity-50"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-primary)',
-                                    color: 'var(--color-primary)'
-                                  }}
-                                  title="Crawl index page and discover matching recipe slugs"
-                                >
-                                  {isCrawlingThis ? (
-                                    <>
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                      <span>{t('crawling', 'Crawling...')}</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Compass className="h-3 w-3" />
-                                      <span>{t('crawlIndexBtn', 'Crawl & Discover Slugs')}</span>
-                                    </>
-                                  )}
-                                </button>
-
-                                {cache && cache.discovered?.length > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setExpandedIndexUrl(isExpanded ? null : urlStr)}
-                                    className="p-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
-                                    style={{
-                                      backgroundColor: 'var(--color-card)',
-                                      borderColor: 'var(--color-border)',
-                                      color: 'var(--color-text)'
-                                    }}
-                                    title="Expand or collapse discovered recipe slugs"
-                                  >
-                                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                                  </button>
-                                )}
-
-                                <a
-                                  href={urlStr}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="p-1.5 rounded-lg border transition cursor-pointer hover:opacity-80"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: 'var(--color-primary)'
-                                  }}
-                                  title={t('openUrlTooltip', 'Open in new tab')}
-                                >
-                                  <Globe className="h-3.5 w-3.5" />
-                                </a>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveRecommendedUrl(idx)}
-                                  className="p-1.5 rounded-lg border hover:text-red-500 transition cursor-pointer"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: 'var(--color-text-secondary)'
-                                  }}
-                                  title={t('removeUrlTooltip', 'Remove URL')}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Collapsible Discovered Slugs Drawer */}
-                            {isExpanded && cache && (
-                              <div 
-                                className="border-t p-3.5 space-y-2.5 transition-colors duration-200"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)'
-                                }}
-                              >
-                                <div className="flex items-center justify-between text-[11px] font-bold">
-                                  <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
-                                    <Layers className="h-3.5 w-3.5" /> {t('discoveredSlugsTitle', 'Discovered Recipe Slugs')} ({cache.discovered.length})
-                                  </span>
-                                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                                    {t('crawledAtNotice', 'Crawled')}: {new Date(cache.crawledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </span>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
-                                  {cache.discovered.map((item, dIdx) => (
-                                    <div
-                                      key={dIdx}
-                                      className="p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition"
-                                      style={{
-                                        backgroundColor: 'var(--color-inner-dark)',
-                                        borderColor: 'var(--color-border)'
-                                      }}
-                                    >
-                                      <div className="min-w-0 flex-1">
-                                        <p className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
-                                          {item.title}
-                                        </p>
-                                        <p className="text-[10px] font-mono truncate" style={{ color: 'var(--color-text-secondary)' }}>
-                                          /{item.slug}
-                                        </p>
-                                      </div>
-
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        <button
-                                          type="button"
-                                          onClick={() => handlePullIndividualRecipe(item.url)}
-                                          disabled={isPullingRecipe && selectedSlugUrl === item.url}
-                                          className="px-2 py-1 rounded-lg border text-[10px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-90 shadow-xs"
-                                          style={{
-                                            backgroundColor: 'var(--color-card)',
-                                            borderColor: 'var(--color-emerald)',
-                                            color: 'var(--color-emerald)'
-                                          }}
-                                          title="Pull individual recipe details and preview image/ingredients"
-                                        >
-                                          {isPullingRecipe && selectedSlugUrl === item.url ? (
-                                            <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                                          ) : (
-                                            <Sparkles className="h-2.5 w-2.5" />
-                                          )}
-                                          <span>{t('pullBtn', 'Pull')}</span>
-                                        </button>
-
-                                        <button
-                                          type="button"
-                                          onClick={() => handleAddDiscoveredAsDirectUrl(item.url)}
-                                          className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
-                                          style={{
-                                            backgroundColor: 'var(--color-card)',
-                                            borderColor: 'var(--color-border)',
-                                            color: 'var(--color-primary)'
-                                          }}
-                                          title={t('addDirectTooltip', 'Add as direct source')}
-                                        >
-                                          <Plus className="h-3 w-3" />
-                                        </button>
-
-                                        <a
-                                          href={item.url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
-                                          style={{
-                                            backgroundColor: 'var(--color-card)',
-                                            borderColor: 'var(--color-border)',
-                                            color: 'var(--color-text-secondary)'
-                                          }}
-                                          title="Open recipe link"
-                                        >
-                                          <ExternalLink className="h-3 w-3" />
-                                        </a>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* KNOWLEDGE BASE FEATURE */}
-              <div className="space-y-3 pt-1">
-                <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                    <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('knowledgeBaseHeader', 'Knowledge Base')}
-                  </h3>
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('knowledgeBaseDesc', 'Fine-tune the assistant to your needs by adding reference source documents or databases.')}
-                  </p>
-                </div>
-
-                <form onSubmit={handleAddKnowledgeBase} className="flex gap-2">
-                  <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <input
-                      type="text"
-                      placeholder={t('knowledgeBasePlaceholder', 'Knowledge Base reference (e.g. Culinary Masterclass DB, Keto Guidelines)...')}
-                      value={newKbInput}
-                      onChange={(e) => setNewKbInput(e.target.value)}
-                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
-                      style={{ color: 'var(--color-text)' }}
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
-                  </button>
-                </form>
-
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {knowledgeBaseList.length === 0 ? (
-                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noKnowledgeBaseEntries', 'No knowledge base references added yet.')}
-                    </span>
-                  ) : (
-                    knowledgeBaseList.map((item, idx) => (
-                      <span 
-                        key={idx}
-                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        {item}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveKnowledgeBase(idx)}
-                          className="hover:opacity-75 cursor-pointer ml-0.5"
-                          title="Remove reference"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* CUSTOM VOCABULARY FEATURE */}
-              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-                <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                    <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
-                  </h3>
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('customVocabularyDesc', 'Enhance accuracy with specialized culinary or business terminology.')}
-                  </p>
-                </div>
-
-                <form onSubmit={handleAddCustomVocabulary} className="flex gap-2">
-                  <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <input
-                      type="text"
-                      placeholder={t('startTypingToAddVocab', 'Add custom culinary terminology (e.g. Umami, Sous-vide, Chiffonade)...')}
-                      value={newVocabInput}
-                      onChange={(e) => setNewVocabInput(e.target.value)}
-                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
-                      style={{ color: 'var(--color-text)' }}
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
-                    style={{ backgroundColor: 'var(--color-emerald)' }}
-                  >
-                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
-                  </button>
-                </form>
-
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {customVocabularyList.length === 0 ? (
-                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noCustomVocabularyEntries', 'No custom vocabulary terms added yet.')}
-                    </span>
-                  ) : (
-                    customVocabularyList.map((item, idx) => (
-                      <span 
-                        key={idx}
-                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-emerald)',
-                          color: 'var(--color-emerald)'
-                        }}
-                      >
-                        {item}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveCustomVocabulary(idx)}
-                          className="hover:opacity-75 cursor-pointer ml-0.5"
-                          title="Remove term"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* FILTER WORDS FEATURE */}
-              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-                <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                    <Ban className="h-4 w-4 text-red-500" /> {t('filterWordsHeader', 'Filter Words')}
-                  </h3>
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('filterWordsDesc', 'Restricted words or ingredients remain unspoken or avoided in AI outputs.')}
-                  </p>
-                </div>
-
-                <form onSubmit={handleAddFilterWord} className="flex gap-2">
-                  <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <input
-                      type="text"
-                      placeholder={t('startTypingToAddFilter', 'Add restricted word or prohibited ingredient (e.g. Trans fats, MSG)...')}
-                      value={newFilterInput}
-                      onChange={(e) => setNewFilterInput(e.target.value)}
-                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
-                      style={{ color: 'var(--color-text)' }}
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
-                    style={{ backgroundColor: '#ef4444' }}
-                  >
-                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
-                  </button>
-                </form>
-
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {filterWordsList.length === 0 ? (
-                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noFilterWordsEntries', 'No filter words configured.')}
-                    </span>
-                  ) : (
-                    filterWordsList.map((item, idx) => (
-                      <span 
-                        key={idx}
-                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'rgba(239, 68, 68, 0.5)',
-                          color: '#ef4444'
-                        }}
-                      >
-                        {item}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveFilterWord(idx)}
-                          className="hover:opacity-75 cursor-pointer ml-0.5"
-                          title="Remove filter word"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* SYSTEM PROMPT / PERSONA */}
-              <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
+              <div className="space-y-2">
+                <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('maxPlanDaysCap', 'Max Plan Days Limit (Wizard Cap)')}
                 </label>
-                <textarea
-                  rows={5}
-                  value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
-                  className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition font-medium"
+                <input
+                  type="number"
+                  min="1"
+                  max="14"
+                  id="cfg_ai_max_plan_days"
+                  name="cfg_ai_max_plan_days"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
+                  value={maxPlanDays}
+                  onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
+                  className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -2731,12 +2324,619 @@ export default function ChefAISettingsPage() {
                   onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
                 <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('systemPromptDesc', 'Defines how the AI agent behaves, formats responses, and handles user queries on the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('pageSuffix', 'page.')}
+                  {t('maxPlanDaysDesc', 'Maximum number of days the AI can structure in a single meal plan wizard sequence.')}
                 </p>
               </div>
             </div>
+
+            {/* RECOMMENDED RECIPES URL WITH CRAWLER & SLUG DISCOVERY */}
+            <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <div>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                    <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('recommendedRecipesUrlHeader', 'Recommended Recipes Url')}
+                  </h3>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('recommendedRecipesUrlDesc', 'Configure primary source URLs for recipe recommendations. When users ask for recipes on /chef, AI will search and prioritize these URLs as the primary source.')}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span 
+                    className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
+                      color: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                    }}
+                  >
+                    {recommendedRecipeUrls.length} {t('urlsActiveBadge', 'Active URLs (Primary)')}
+                  </span>
+                  {recommendedRecipeUrls.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={handleClearAllRecommendedUrls}
+                      className="text-[10px] text-red-400 hover:text-red-500 font-bold transition cursor-pointer"
+                    >
+                      {t('clearAll', 'Clear All')}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div 
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <input
+                      type="text"
+                      id="cfg_rec_url_input"
+                      name="cfg_rec_url_input"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      role="presentation"
+                      placeholder={t('recommendedRecipeUrlPlaceholder', 'Add recipe URL (paste single or multiple separated by commas or newlines)...')}
+                      value={newRecipeUrlInput}
+                      onChange={(e) => setNewRecipeUrlInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddRecommendedUrls();
+                        }
+                      }}
+                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                      style={{ color: 'var(--color-text)' }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleAddRecommendedUrls()}
+                    disabled={!newRecipeUrlInput.trim()}
+                    className="px-4 py-2.5 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md disabled:opacity-40 hover:opacity-90 shrink-0"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    <Plus className="h-4 w-4" /> {t('addUrlBtn', 'Add URL')}
+                  </button>
+                </div>
+                <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
+                  💡 {t('multiUrlHint', 'Tip: You can paste multiple URLs at once separated by commas or newlines. Chef AI will prioritize these as primary culinary references.')}
+                </span>
+              </div>
+
+              {/* URL List with Index Crawler and Discovered Slugs Drawer */}
+              <div className="space-y-2 pt-1">
+                {recommendedRecipeUrls.length === 0 ? (
+                  <div 
+                    className="p-4 text-center border border-dashed rounded-2xl text-xs space-y-0.5"
+                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  >
+                    <span className="font-semibold block">{t('noRecommendedUrlsTitle', 'No Recommended Recipe URLs configured.')}</span>
+                    <span className="text-[11px] block">{t('noRecommendedUrlsDesc', 'Add your preferred food blog or recipe URLs above to make /chef recommend recipes from them first.')}</span>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                    {recommendedRecipeUrls.map((urlStr, idx) => {
+                      let domain = 'Website';
+                      try {
+                        domain = new URL(urlStr).hostname.replace(/^www\./, '');
+                      } catch (_) {}
+
+                      const isIndex = /recipes|\/category\/|\/categories\/|\/collection\/|\/tag\/|\/archive\/|\/all/i.test(urlStr) || urlStr.endsWith('/recipes/');
+                      const cache = crawlResults[urlStr];
+                      const isCrawlingThis = crawlingUrl === urlStr;
+                      const isExpanded = expandedIndexUrl === urlStr;
+
+                      return (
+                        <div 
+                          key={idx}
+                          className="rounded-2xl border transition shadow-xs overflow-hidden"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: isExpanded ? 'var(--color-primary)' : 'var(--color-border)'
+                          }}
+                        >
+                          <div className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                                <span 
+                                  className="text-[9px] font-black uppercase px-2 py-0.5 rounded border truncate"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-primary)'
+                                  }}
+                                >
+                                  {domain}
+                                </span>
+                                <span 
+                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
+                                  style={{
+                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                    color: 'var(--color-emerald)'
+                                  }}
+                                >
+                                  {t('primaryTag', 'Primary')}
+                                </span>
+                                {isIndex && (
+                                  <span 
+                                    className="text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase border"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-primary)',
+                                      color: 'var(--color-primary)'
+                                    }}
+                                  >
+                                    {t('indexCollectionTag', 'Index / Collection')}
+                                  </span>
+                                )}
+                                {cache && (
+                                  <span 
+                                    className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-emerald)',
+                                      color: 'var(--color-emerald)'
+                                    }}
+                                  >
+                                    {cache.count} {t('slugsDiscoveredBadge', 'Slugs Discovered')}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text)' }} title={urlStr}>
+                                {urlStr}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                              <button
+                                type="button"
+                                onClick={() => handleCrawlIndexUrl(urlStr)}
+                                disabled={isCrawlingThis}
+                                className="px-2.5 py-1.5 rounded-lg border font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-90 disabled:opacity-50"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-primary)',
+                                  color: 'var(--color-primary)'
+                                }}
+                                title="Crawl index page and discover matching recipe slugs"
+                              >
+                                {isCrawlingThis ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    <span>{t('crawling', 'Crawling...')}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Compass className="h-3 w-3" />
+                                    <span>{t('crawlIndexBtn', 'Crawl & Discover Slugs')}</span>
+                                  </>
+                                )}
+                              </button>
+
+                              {cache && cache.discovered?.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedIndexUrl(isExpanded ? null : urlStr)}
+                                  className="p-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                  title="Expand or collapse discovered recipe slugs"
+                                >
+                                  {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                </button>
+                              )}
+
+                              <a
+                                href={urlStr}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-primary)'
+                                }}
+                                title={t('openUrlTooltip', 'Open in new tab')}
+                              >
+                                <Globe className="h-3.5 w-3.5" />
+                              </a>
+
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveRecommendedUrl(idx)}
+                                className="p-1.5 rounded-lg border hover:text-red-500 transition cursor-pointer"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                                title={t('removeUrlTooltip', 'Remove URL')}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Collapsible Discovered Slugs Drawer */}
+                          {isExpanded && cache && (
+                            <div 
+                              className="border-t p-3.5 space-y-2.5 transition-colors duration-200"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-border)'
+                              }}
+                            >
+                              <div className="flex items-center justify-between text-[11px] font-bold">
+                                <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                                  <Layers className="h-3.5 w-3.5" /> {t('discoveredSlugsTitle', 'Discovered Recipe Slugs')} ({cache.discovered.length})
+                                </span>
+                                <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {t('crawledAtNotice', 'Crawled')}: {new Date(cache.crawledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
+                                {cache.discovered.map((item, dIdx) => (
+                                  <div
+                                    key={dIdx}
+                                    className="p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition"
+                                    style={{
+                                      backgroundColor: 'var(--color-inner-dark)',
+                                      borderColor: 'var(--color-border)'
+                                    }}
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <p className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
+                                        {item.title}
+                                      </p>
+                                      <p className="text-[10px] font-mono truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                                        /{item.slug}
+                                      </p>
+                                    </div>
+
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => handlePullIndividualRecipe(item.url)}
+                                        disabled={isPullingRecipe && selectedSlugUrl === item.url}
+                                        className="px-2 py-1 rounded-lg border text-[10px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-90 shadow-xs"
+                                        style={{
+                                          backgroundColor: 'var(--color-card)',
+                                          borderColor: 'var(--color-emerald)',
+                                          color: 'var(--color-emerald)'
+                                        }}
+                                        title="Pull individual recipe details and preview image/ingredients"
+                                      >
+                                        {isPullingRecipe && selectedSlugUrl === item.url ? (
+                                          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                        ) : (
+                                          <Sparkles className="h-2.5 w-2.5" />
+                                        )}
+                                        <span>{t('pullBtn', 'Pull')}</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAddDiscoveredAsDirectUrl(item.url)}
+                                        className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                        style={{
+                                          backgroundColor: 'var(--color-card)',
+                                          borderColor: 'var(--color-border)',
+                                          color: 'var(--color-primary)'
+                                        }}
+                                        title={t('addDirectTooltip', 'Add as direct source')}
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                      </button>
+
+                                      <a
+                                        href={item.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                        style={{
+                                          backgroundColor: 'var(--color-card)',
+                                          borderColor: 'var(--color-border)',
+                                          color: 'var(--color-text-secondary)'
+                                        }}
+                                        title="Open recipe link"
+                                      >
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* KNOWLEDGE BASE FEATURE */}
+            <div className="space-y-3 pt-1">
+              <div>
+                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('knowledgeBaseHeader', 'Knowledge Base')}
+                </h3>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('knowledgeBaseDesc', 'Fine-tune the assistant to your needs by adding reference source documents or databases.')}
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <div 
+                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  <input
+                    type="text"
+                    id="cfg_kb_ref_input"
+                    name="cfg_kb_ref_input"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    placeholder={t('knowledgeBasePlaceholder', 'Knowledge Base reference (e.g. Culinary Masterclass DB, Keto Guidelines)...')}
+                    value={newKbInput}
+                    onChange={(e) => setNewKbInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddKnowledgeBase())}
+                    className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                    style={{ color: 'var(--color-text)' }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAddKnowledgeBase()}
+                  className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {knowledgeBaseList.length === 0 ? (
+                  <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('noKnowledgeBaseEntries', 'No knowledge base references added yet.')}
+                  </span>
+                ) : (
+                  knowledgeBaseList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveKnowledgeBase(idx)}
+                        className="hover:opacity-75 cursor-pointer ml-0.5"
+                        title="Remove reference"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* CUSTOM VOCABULARY FEATURE */}
+            <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
+                </h3>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('customVocabularyDesc', 'Enhance accuracy with specialized culinary or business terminology.')}
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <div 
+                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  <input
+                    type="text"
+                    id="cfg_custom_vocab_input"
+                    name="cfg_custom_vocab_input"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    placeholder={t('startTypingToAddVocab', 'Add custom culinary terminology (e.g. Umami, Sous-vide, Chiffonade)...')}
+                    value={newVocabInput}
+                    onChange={(e) => setNewVocabInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddCustomVocabulary())}
+                    className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                    style={{ color: 'var(--color-text)' }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAddCustomVocabulary()}
+                  className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                  style={{ backgroundColor: 'var(--color-emerald)' }}
+                >
+                  <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {customVocabularyList.length === 0 ? (
+                  <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('noCustomVocabularyEntries', 'No custom vocabulary terms added yet.')}
+                  </span>
+                ) : (
+                  customVocabularyList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCustomVocabulary(idx)}
+                        className="hover:opacity-75 cursor-pointer ml-0.5"
+                        title="Remove term"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* FILTER WORDS FEATURE */}
+            <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <Ban className="h-4 w-4 text-red-500" /> {t('filterWordsHeader', 'Filter Words')}
+                </h3>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('filterWordsDesc', 'Restricted words or ingredients remain unspoken or avoided in AI outputs.')}
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <div 
+                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  <input
+                    type="text"
+                    id="cfg_filter_words_input"
+                    name="cfg_filter_words_input"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    placeholder={t('startTypingToAddFilter', 'Add restricted word or prohibited ingredient (e.g. Trans fats, MSG)...')}
+                    value={newFilterInput}
+                    onChange={(e) => setNewFilterInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddFilterWord())}
+                    className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                    style={{ color: 'var(--color-text)' }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAddFilterWord()}
+                  className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                  style={{ backgroundColor: '#ef4444' }}
+                >
+                  <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {filterWordsList.length === 0 ? (
+                  <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('noFilterWordsEntries', 'No filter words configured.')}
+                  </span>
+                ) : (
+                  filterWordsList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'rgba(239, 68, 68, 0.5)',
+                        color: '#ef4444'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFilterWord(idx)}
+                        className="hover:opacity-75 cursor-pointer ml-0.5"
+                        title="Remove filter word"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* SYSTEM PROMPT / PERSONA */}
+            <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+              <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
+              </label>
+              <textarea
+                rows={5}
+                id="cfg_sys_prompt_textarea"
+                name="cfg_sys_prompt_textarea"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                role="presentation"
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition font-medium"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              />
+              <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('systemPromptDesc', 'Defines how the AI agent behaves, formats responses, and handles user queries on the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('pageSuffix', 'page.')}
+              </p>
+            </div>
           </div>
-        )}
+        </div>
 
       </div>
 

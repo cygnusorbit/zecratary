@@ -11,7 +11,6 @@ import {
   RefreshCw, 
   Palette,
   AlertCircle,
-  Utensils,
   Type
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
@@ -134,7 +133,7 @@ export default function AdminSettingsPage() {
   const translate = langContext?.t;
   const t = useCallback((key: string, fallback: string) => {
     if (typeof translate === 'function') {
-      const val = translate(key);
+      const val = translate(key, fallback);
       if (val && val !== key) return val;
     }
     return fallback;
@@ -209,6 +208,11 @@ export default function AdminSettingsPage() {
     border: string,
     textSec: string
   ) => {
+    const root = typeof document !== 'undefined' ? document.documentElement : null;
+    const isDay = typeof window !== 'undefined' 
+      ? (localStorage.getItem('zecratary_theme_mode') === 'light' || localStorage.getItem('zecratary_theme_mode') === 'day' || (root && root.classList.contains('light')))
+      : false;
+
     applyThemeToDocument({
       primary,
       primaryColor: primary,
@@ -224,6 +228,24 @@ export default function AdminSettingsPage() {
       cardBorder: border,
       textSecondary: textSec
     });
+
+    if (root) {
+      if (isDay) {
+        root.classList.remove('dark');
+        root.classList.add('light');
+        if (document.body) {
+          document.body.style.backgroundColor = 'var(--color-bg)';
+          document.body.style.color = 'var(--color-text)';
+        }
+      } else {
+        root.classList.remove('light');
+        root.classList.add('dark');
+        if (document.body) {
+          document.body.style.backgroundColor = bg || 'var(--color-bg)';
+          document.body.style.color = 'var(--color-text)';
+        }
+      }
+    }
   };
 
   const applyFontLocally = (fontName: string, sz: string = fontSize, spacing: string = fontLetterSpacing) => {
@@ -235,17 +257,34 @@ export default function AdminSettingsPage() {
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
-      const serverData = await fetchServerAdminSettings();
+      let serverData = await fetchServerAdminSettings();
+      if (!serverData) {
+        const res = await fetch('/api/admin/settings?t=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          serverData = await res.json();
+        }
+      }
+
       if (serverData) {
         const payload: any = serverData.settings || serverData;
 
-        if (payload.siteName) setSiteName(payload.siteName);
-        if (payload.titlebarEmoji) setTitlebarEmoji(payload.titlebarEmoji);
-        if (payload.titlebarImage !== undefined) setTitlebarImage(payload.titlebarImage);
-        if (payload.faviconEmoji) setFaviconEmoji(payload.faviconEmoji);
-        if (payload.faviconImage !== undefined) setFaviconImage(payload.faviconImage);
+        if (payload.siteName || payload.site_name) {
+          setSiteName(payload.siteName || payload.site_name);
+        }
+        if (payload.titlebarEmoji || payload.titlebar_emoji) {
+          setTitlebarEmoji(payload.titlebarEmoji || payload.titlebar_emoji);
+        }
+        if (payload.titlebarImage !== undefined || payload.titlebar_image !== undefined) {
+          setTitlebarImage(payload.titlebarImage ?? payload.titlebar_image ?? '');
+        }
+        if (payload.faviconEmoji || payload.favicon_emoji) {
+          setFaviconEmoji(payload.faviconEmoji || payload.favicon_emoji);
+        }
+        if (payload.faviconImage !== undefined || payload.favicon_image !== undefined) {
+          setFaviconImage(payload.faviconImage ?? payload.favicon_image ?? '');
+        }
 
-        const tc = payload.themeColors || serverData.themeColors || getMemoryThemeColors() || {};
+        const tc = payload.themeColors || payload.theme_colors || serverData.themeColors || serverData.theme_colors || (typeof getMemoryThemeColors === 'function' ? getMemoryThemeColors() : null) || {};
         const p = tc.primary || tc.primaryColor || '#E05638';
         const ph = tc.primaryHover || '#c94529';
         const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
@@ -264,9 +303,9 @@ export default function AdminSettingsPage() {
         setCardBorderColor(border);
         setSecondaryTextColor(textSec);
 
-        const ff = payload.fontFamily || payload.font_family || 'Inter';
-        const fs = payload.fontSize || payload.font_size || '16px';
-        const fls = payload.fontLetterSpacing || payload.letter_spacing || '0em';
+        const ff = payload.fontFamily || payload.font_family || serverData.fontFamily || serverData.font_family || 'Inter';
+        const fs = payload.fontSize || payload.font_size || serverData.fontSize || serverData.font_size || '16px';
+        const fls = payload.fontLetterSpacing || payload.letter_spacing || payload.font_letter_spacing || serverData.fontLetterSpacing || '0em';
 
         setFontFamily(ff);
         setFontSize(fs);
@@ -305,30 +344,31 @@ export default function AdminSettingsPage() {
     const handleModeChange = () => {
       try {
         const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-        const day = mode === 'light' || mode === 'day';
+        const root = typeof document !== 'undefined' ? document.documentElement : null;
+        const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
         setIsDayMode(day);
         const cur = colorsRef.current;
-        applyThemeToDocument({
-          primary: cur.primary,
-          primaryHover: cur.primaryHover,
-          accentEmerald: cur.accent,
-          accentColor: cur.accent,
-          accent: cur.accent,
-          sidebarIconColor: cur.sidebarIcon,
-          sidebarIcon: cur.sidebarIcon,
-          backgroundColor: cur.background,
-          backgroundDark: cur.background,
-          cardBackground: cur.card,
-          cardBorder: cur.border,
-          textSecondary: cur.textSecondary,
-        });
+        applyColorsLocally(
+          cur.primary,
+          cur.primaryHover,
+          cur.accent,
+          cur.sidebarIcon,
+          cur.background,
+          cur.card,
+          cur.border,
+          cur.textSecondary
+        );
       } catch (_) {}
     };
 
     handleModeChange();
     window.addEventListener('zecratary_theme_mode_changed', handleModeChange);
+    window.addEventListener('zecratary_theme_changed', handleModeChange);
+    window.addEventListener('storage', handleModeChange);
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', handleModeChange);
+      window.removeEventListener('zecratary_theme_changed', handleModeChange);
+      window.removeEventListener('storage', handleModeChange);
     };
   }, []);
 
@@ -396,6 +436,7 @@ export default function AdminSettingsPage() {
     if (e && typeof e.preventDefault === 'function') {
       e.preventDefault();
     }
+    if (isSaving) return;
     setIsSaving(true);
     isSavingRef.current = true;
     setSaveError('');
@@ -404,12 +445,16 @@ export default function AdminSettingsPage() {
       const updatedBranding: SiteIdentityConfig = {
         siteName: siteName.trim() || DEFAULT_SITE_NAME,
         titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
-        titlebarImage,
+        titlebarImage: titlebarImage || '',
         faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
-        faviconImage
+        faviconImage: faviconImage || ''
       };
 
       setMemorySiteConfig(updatedBranding);
+      if (typeof saveSiteConfig === 'function') {
+        await saveSiteConfig(updatedBranding).catch(() => null);
+      }
+
       if (faviconImage) {
         updateFavicon(faviconImage);
       } else if (faviconEmoji) {
@@ -446,31 +491,54 @@ export default function AdminSettingsPage() {
       );
       applyFontLocally(fontFamily, fontSize, fontLetterSpacing);
 
-      await saveThemeColors(themeColors);
-
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('zecratary_font_family', fontFamily);
-        localStorage.setItem('zecratary_font_size', fontSize);
-        localStorage.setItem('zecratary_font_spacing', fontLetterSpacing);
+      if (typeof saveThemeColors === 'function') {
+        await saveThemeColors(themeColors).catch(() => null);
       }
 
-      const success = await persistServerAdminSettings({
+      const payloadToSave = {
         siteName: updatedBranding.siteName,
+        site_name: updatedBranding.siteName,
         titlebarEmoji: updatedBranding.titlebarEmoji,
+        titlebar_emoji: updatedBranding.titlebarEmoji,
         titlebarImage: updatedBranding.titlebarImage || '',
+        titlebar_image: updatedBranding.titlebarImage || '',
         faviconEmoji: updatedBranding.faviconEmoji,
+        favicon_emoji: updatedBranding.faviconEmoji,
         faviconImage: updatedBranding.faviconImage || '',
+        favicon_image: updatedBranding.faviconImage || '',
         themeColors,
+        theme_colors: themeColors,
         fontFamily,
         font_family: fontFamily,
         fontSize,
         font_size: fontSize,
         fontLetterSpacing,
+        font_letter_spacing: fontLetterSpacing,
         letter_spacing: fontLetterSpacing
+      };
+
+      // 1. Commit directly to PostgreSQL /api/admin/settings
+      const settingsRes = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadToSave)
       });
 
-      if (!success) {
-        throw new Error(t('admin.saveFailed', 'Failed to commit settings to database endpoint.'));
+      if (!settingsRes.ok) {
+        const errJson = await settingsRes.json().catch(() => ({}));
+        throw new Error(errJson?.error || t('admin.saveFailed', 'Failed to commit settings to database endpoint.'));
+      }
+
+      // 2. Commit directly to PostgreSQL /api/user/theme
+      await fetch('/api/user/theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ themeColors, theme_colors: themeColors })
+      }).catch(() => null);
+
+      // 3. Fallback sync helper
+      if (typeof persistServerAdminSettings === 'function') {
+        await persistServerAdminSettings(payloadToSave).catch(() => null);
       }
 
       if (typeof window !== 'undefined') {
@@ -478,10 +546,11 @@ export default function AdminSettingsPage() {
         window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
         window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily, fontSize, fontLetterSpacing } }));
         window.dispatchEvent(new Event('zecratary_theme_changed'));
+        window.dispatchEvent(new Event('zecratary_settings_updated'));
       }
 
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setTimeout(() => setSaved(false), 3500);
     } catch (err: any) {
       console.error('[AdminSettingsPage] Save failure:', err);
       setSaveError(err?.message || 'Failed to save settings to server store');
@@ -490,7 +559,7 @@ export default function AdminSettingsPage() {
       setIsSaving(false);
       setTimeout(() => {
         isSavingRef.current = false;
-      }, 600);
+      }, 800);
     }
   };
 
@@ -506,6 +575,7 @@ export default function AdminSettingsPage() {
 
   const handleResetDefaults = async () => {
     if (!confirm(t('admin.confirmReset', 'Reset branding, theme, and font settings to defaults?'))) return;
+    if (isSaving) return;
     setIsSaving(true);
     isSavingRef.current = true;
     setSaveError('');
@@ -546,10 +616,15 @@ export default function AdminSettingsPage() {
 
       const defaultBranding = {
         siteName: defaultName,
+        site_name: defaultName,
         titlebarEmoji: defaultIcon,
+        titlebar_emoji: defaultIcon,
         titlebarImage: '',
+        titlebar_image: '',
         faviconEmoji: defaultIcon,
-        faviconImage: ''
+        favicon_emoji: defaultIcon,
+        faviconImage: '',
+        favicon_image: ''
       };
 
       const defaultColors = {
@@ -586,40 +661,59 @@ export default function AdminSettingsPage() {
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
       updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
 
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('zecratary_font_family', defaultFont);
-        localStorage.setItem('zecratary_font_size', defaultSize);
-        localStorage.setItem('zecratary_font_spacing', defaultSpacing);
+      if (typeof saveThemeColors === 'function') {
+        await saveThemeColors(defaultColors).catch(() => null);
+      }
+      if (typeof saveSiteConfig === 'function') {
+        await saveSiteConfig(defaultBranding).catch(() => null);
       }
 
-      await saveThemeColors(defaultColors);
-      await persistServerAdminSettings({
+      const resetPayload = {
         ...defaultBranding,
         themeColors: defaultColors,
+        theme_colors: defaultColors,
         fontFamily: defaultFont,
         font_family: defaultFont,
         fontSize: defaultSize,
         font_size: defaultSize,
         fontLetterSpacing: defaultSpacing,
+        font_letter_spacing: defaultSpacing,
         letter_spacing: defaultSpacing
-      });
+      };
+
+      await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(resetPayload)
+      }).catch(() => null);
+
+      await fetch('/api/user/theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ themeColors: defaultColors, theme_colors: defaultColors })
+      }).catch(() => null);
+
+      if (typeof persistServerAdminSettings === 'function') {
+        await persistServerAdminSettings(resetPayload).catch(() => null);
+      }
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
         window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
         window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily: defaultFont, fontSize: defaultSize, fontLetterSpacing: defaultSpacing } }));
         window.dispatchEvent(new Event('zecratary_theme_changed'));
+        window.dispatchEvent(new Event('zecratary_settings_updated'));
       }
 
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setTimeout(() => setSaved(false), 3500);
     } catch (err: any) {
       setSaveError(err?.message || 'Failed to reset settings');
     } finally {
       setIsSaving(false);
       setTimeout(() => {
         isSavingRef.current = false;
-      }, 600);
+      }, 800);
     }
   };
 
@@ -631,6 +725,19 @@ export default function AdminSettingsPage() {
       className="max-w-5xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
+      <style dangerouslySetInnerHTML={{ __html: `
+        .admin-input:-webkit-autofill,
+        .admin-input:-webkit-autofill:hover,
+        .admin-input:-webkit-autofill:focus,
+        .admin-input:-webkit-autofill:active {
+          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          -webkit-text-fill-color: var(--color-text) !important;
+          caret-color: var(--color-text) !important;
+          transition: background-color 50000s ease-in-out 0s !important;
+        }
+      `}} />
+
       {/* HEADER */}
       <div 
         className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" 
@@ -653,7 +760,7 @@ export default function AdminSettingsPage() {
             type="button"
             onClick={loadSettingsFromServer}
             disabled={isLoading || isSaving}
-            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 hover:opacity-80"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
@@ -667,7 +774,7 @@ export default function AdminSettingsPage() {
 
           {saved && (
             <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold animate-in fade-in"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-emerald)',
@@ -680,7 +787,7 @@ export default function AdminSettingsPage() {
 
           {saveError && (
             <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold animate-in fade-in"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'rgba(239, 68, 68, 0.4)',
@@ -690,6 +797,26 @@ export default function AdminSettingsPage() {
               <AlertCircle className="h-4 w-4 text-red-500" /> {saveError}
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving}
+            className="text-white font-extrabold text-xs px-4 py-2 rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+          >
+            {isSaving ? (
+              <>
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                <span>{t('admin.saving', 'Saving...')}</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>{t('admin.saveBtn', 'Save')}</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
@@ -759,7 +886,7 @@ export default function AdminSettingsPage() {
         </button>
       </div>
 
-      {/* SETTINGS CONTAINER */}
+      {/* SETTINGS CONTAINER (Decoupled from Form Autofill Heuristics) */}
       <div onKeyDown={handleKeyDown} className="space-y-6">
         {/* TAB 1: BRANDING */}
         <div className={activeTab === 'branding' ? 'space-y-6' : 'hidden'}>
@@ -779,18 +906,23 @@ export default function AdminSettingsPage() {
               </label>
               <input 
                 type="text" 
-                id="site_display_name_setting"
-                name="site_display_name_setting"
+                id="cfg_app_branding_title"
+                name="cfg_app_branding_title"
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck="false"
                 data-lpignore="true"
                 data-1p-ignore="true"
+                data-bwignore="true"
                 data-form-type="other"
+                role="presentation"
+                readOnly
+                onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                 value={siteName} 
                 onChange={(e) => setSiteName(e.target.value)} 
                 placeholder="e.g. Zecratary" 
-                className="w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
+                className="admin-input w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
                 style={{ 
                   backgroundColor: 'var(--color-inner-dark)', 
                   borderColor: 'var(--color-border)', 
@@ -872,18 +1004,22 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center gap-3">
                   <input 
                     type="text" 
-                    id="site_titlebar_emoji_setting"
-                    name="site_titlebar_emoji_setting"
+                    id="cfg_titlebar_symbol"
+                    name="cfg_titlebar_symbol"
                     autoComplete="off"
                     autoCorrect="off"
                     spellCheck="false"
                     data-lpignore="true"
                     data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                     value={titlebarEmoji} 
-                    onChange={(e) => setTitlebarEmoji(e.target.value)} 
-                    maxLength={4} 
-                    className="w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
+                    onChange={(e) => setTitlebarEmoji(e.target.value.slice(0, 8))} 
+                    className="admin-input w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
                     style={{ 
                       backgroundColor: 'var(--color-inner-dark)', 
                       borderColor: 'var(--color-border)', 
@@ -992,18 +1128,22 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center gap-3">
                   <input 
                     type="text" 
-                    id="site_favicon_emoji_setting"
-                    name="site_favicon_emoji_setting"
+                    id="cfg_favicon_symbol"
+                    name="cfg_favicon_symbol"
                     autoComplete="off"
                     autoCorrect="off"
                     spellCheck="false"
                     data-lpignore="true"
                     data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                     value={faviconEmoji} 
-                    onChange={(e) => setFaviconEmoji(e.target.value)} 
-                    maxLength={4} 
-                    className="w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
+                    onChange={(e) => setFaviconEmoji(e.target.value.slice(0, 8))} 
+                    className="admin-input w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
                     style={{ 
                       backgroundColor: 'var(--color-inner-dark)', 
                       borderColor: 'var(--color-border)', 
@@ -1027,7 +1167,7 @@ export default function AdminSettingsPage() {
                   backgroundColor: 'var(--color-inner-dark)', 
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
-                }}
+                }} 
               >
                 <div className="flex items-center gap-2 truncate">
                   {isFaviconImageActive ? (
@@ -1150,8 +1290,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_primary_color"
-                      name="theme_primary_color"
+                      id="cfg_theme_primary_color"
+                      name="cfg_theme_primary_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={primaryColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1160,7 +1307,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(val, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -1188,8 +1335,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_primary_hover_color"
-                      name="theme_primary_hover_color"
+                      id="cfg_theme_primary_hover_color"
+                      name="cfg_theme_primary_hover_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={primaryHoverColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1198,7 +1352,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, val, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -1226,8 +1380,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_accent_color"
-                      name="theme_accent_color"
+                      id="cfg_theme_accent_color"
+                      name="cfg_theme_accent_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={accentColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1236,7 +1397,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, val, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -1264,8 +1425,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_sidebar_icon_color"
-                      name="theme_sidebar_icon_color"
+                      id="cfg_theme_sidebar_icon_color"
+                      name="cfg_theme_sidebar_icon_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={sidebarIconColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1274,7 +1442,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -1310,6 +1478,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="cfg_theme_bg_color"
+                      name="cfg_theme_bg_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={backgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1318,7 +1495,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -1346,6 +1523,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="cfg_theme_card_bg_color"
+                      name="cfg_theme_card_bg_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={cardBackgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1354,7 +1540,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -1382,6 +1568,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="cfg_theme_card_border_color"
+                      name="cfg_theme_card_border_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={cardBorderColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1390,7 +1585,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -1418,6 +1613,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="cfg_theme_text_secondary_color"
+                      name="cfg_theme_text_secondary_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={secondaryTextColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1426,7 +1630,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -1690,7 +1894,7 @@ export default function AdminSettingsPage() {
             type="button"
             onClick={handleSave}
             disabled={isSaving}
-            className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
             {isSaving ? (

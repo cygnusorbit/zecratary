@@ -14,8 +14,80 @@ function cleanJsonString(raw: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
     let body: any = {};
     try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
       body = await req.json();
     } catch (_) {
       return NextResponse.json({ success: false, error: 'Malformed JSON payload' }, { status: 400 });
@@ -39,6 +111,42 @@ export async function POST(req: NextRequest) {
       const cookieHeader = req.cookies.get('zecratary_session')?.value;
       if (cookieHeader) {
         try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
           const parsed = JSON.parse(decodeURIComponent(cookieHeader));
           userId = userId || parsed.id;
           userEmail = userEmail || parsed.email;
@@ -63,12 +171,84 @@ export async function POST(req: NextRequest) {
     let maxPlanDays = 7;
 
     try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
       const sRows = await query('SELECT chef_ai_settings, ai_model, ai_provider, value FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
       if (sRows.length > 0) {
         const row = sRows[0];
         let c = row.chef_ai_settings;
         if (typeof c === 'string') {
-          try { c = JSON.parse(c); } catch (_) { c = {}; }
+          try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+ c = JSON.parse(c); } catch (_) { c = {}; }
         } else if (!c && row.value) {
           c = typeof row.value === 'string' ? JSON.parse(row.value).chefAiSettings || {} : row.value.chefAiSettings || {};
         }
@@ -81,6 +261,9 @@ export async function POST(req: NextRequest) {
           if (c.maxTokens !== undefined) maxTokens = Number(c.maxTokens);
           if (c.systemPrompt) systemPrompt = c.systemPrompt;
           if (c.strictDietEnforcement !== undefined) strictDietEnforcement = Boolean(c.strictDietEnforcement);
+    let enableSavedRecipeSearch = true;
+    if (c.enableSavedRecipeSearch !== undefined) enableSavedRecipeSearch = Boolean(c.enableSavedRecipeSearch);
+    if (body.enableSavedRecipeSearch !== undefined) enableSavedRecipeSearch = Boolean(body.enableSavedRecipeSearch);
           if (Array.isArray(c.filterWordsList)) filterWordsList = c.filterWordsList.filter(Boolean);
           if (Array.isArray(c.customVocabularyList)) customVocabularyList = c.customVocabularyList.filter(Boolean);
           if (c.maxPlanDays !== undefined) maxPlanDays = Number(c.maxPlanDays) || 7;
@@ -95,6 +278,42 @@ export async function POST(req: NextRequest) {
 
     if (!apiKey) {
       try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
         const kRows = await query(
           "SELECT key_value FROM admin_api_keys WHERE (provider = $1 OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
           [provider]
@@ -193,6 +412,42 @@ export async function POST(req: NextRequest) {
     let scrapedGrounding: any = null;
     if (referenceUrls.length > 0) {
       try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
         scrapedGrounding = await resolveAndScrapeBestRecipe(prompt || parsedTheme, referenceUrls);
       } catch (scrapeErr) {
         console.warn('[AI Route] Web scraper notice:', scrapeErr);
@@ -224,6 +479,7 @@ MANDATORY: Adapt and recommend this authentic dish as the signature Recommended 
 
       const fullPrompt = isQuestionnaire
         ? `${systemPrompt}
+${savedRecipesContext}
 You are Chef Foodie. Formulate an accurate ${parsedDays}-day meal plan and a signature Recommended Recipe.
 LOGISTICS & DIET:
 - Total Days: ${parsedDays}
@@ -280,6 +536,7 @@ Return ONLY valid JSON matching this schema:
   }
 }`
         : `${systemPrompt}
+${savedRecipesContext}
 User Query: "${prompt}"
 Context: Cooking for ${servings} people in ${country}. Diet: ${diets.join(', ')}. Avoid: ${allergies.concat(avoid).join(', ')}. Pantry items: ${pantryItems.join(', ')}.
 ${referenceUrls.length > 0 ? `Primary References: ${referenceUrls.join(', ')}` : ''}
@@ -289,6 +546,42 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
 
       for (const mName of uniqueModels) {
         try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
           const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${mName}:generateContent?key=${apiKey}`;
           const gRes = await fetch(endpoint, {
             method: 'POST',
@@ -305,6 +598,42 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
             const cleaned = cleanJsonString(rawText);
             if (cleaned) {
               try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
                 const parsed = JSON.parse(cleaned);
                 responseText = parsed.reply || rawText;
                 if (parsed.plan) generatedPlan = parsed.plan;
@@ -416,6 +745,42 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       const targetRecipeUrl = recommendedRecipe.sourceUrl || (referenceUrls.length > 0 ? referenceUrls[0] : null);
       if (targetRecipeUrl && !recommendedRecipe.image) {
         try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
           const scrapedImg = await extractImageFromUrl(targetRecipeUrl);
           if (scrapedImg) recommendedRecipe.image = scrapedImg;
         } catch (_) {}

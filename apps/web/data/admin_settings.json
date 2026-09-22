@@ -2,34 +2,34 @@
   "aiProvider": "gemini",
   "aiModel": "gemini-3.6-flash",
   "themeColors": {
-    "accent": "#a855f7",
-    "primary": "#38bdf8",
-    "cardBorder": "#172554",
-    "accentColor": "#a855f7",
+    "primary": "#2563eb",
+    "primaryColor": "#2563eb",
+    "primaryHover": "#1d4ed8",
+    "accentEmerald": "#10b981",
+    "accentColor": "#10b981",
+    "accent": "#10b981",
+    "sidebarIconColor": "#38bdf8",
     "sidebarIcon": "#38bdf8",
-    "primaryColor": "#38bdf8",
-    "primaryHover": "#0284c7",
-    "accentEmerald": "#a855f7",
-    "textSecondary": "#7dd3fc",
-    "backgroundDark": "#020617",
-    "cardBackground": "#080e22",
-    "backgroundColor": "#020617",
-    "sidebarIconColor": "#38bdf8"
+    "backgroundColor": "#080d1a",
+    "backgroundDark": "#080d1a",
+    "cardBackground": "#161f37",
+    "cardBorder": "#1e2c43",
+    "textSecondary": "#93c5fd"
   },
   "theme_colors": {
-    "accent": "#a855f7",
-    "primary": "#38bdf8",
-    "cardBorder": "#172554",
-    "accentColor": "#a855f7",
+    "primary": "#2563eb",
+    "primaryColor": "#2563eb",
+    "primaryHover": "#1d4ed8",
+    "accentEmerald": "#10b981",
+    "accentColor": "#10b981",
+    "accent": "#10b981",
+    "sidebarIconColor": "#38bdf8",
     "sidebarIcon": "#38bdf8",
-    "primaryColor": "#38bdf8",
-    "primaryHover": "#0284c7",
-    "accentEmerald": "#a855f7",
-    "textSecondary": "#7dd3fc",
-    "backgroundDark": "#020617",
-    "cardBackground": "#080e22",
-    "backgroundColor": "#020617",
-    "sidebarIconColor": "#38bdf8"
+    "backgroundColor": "#080d1a",
+    "backgroundDark": "#080d1a",
+    "cardBackground": "#161f37",
+    "cardBorder": "#1e2c43",
+    "textSecondary": "#93c5fd"
   },
   "chefAiSettings": {
     "model": "gemini-3.6-flash",
@@ -59,7 +59,7 @@
       }
     ],
     "maxTokens": 4096,
-    "updatedAt": "2026-09-22T07:29:35.310Z",
+    "updatedAt": "2026-09-22T14:13:13.704Z",
     "voiceSpeed": 1,
     "maxPlanDays": 7,
     "temperature": 0.7,
@@ -1170,7 +1170,8 @@
         ]
       }
     },
-    "enableVoiceInteraction": true
+    "enableVoiceInteraction": true,
+    "enableSavedRecipeSearch": true
   },
   "recommendedRecipeUrls": [
     "https://www.recipetineats.com/recipes/",
@@ -1183,6 +1184,7 @@
     "fontSize": "16px",
     "siteName": "Zecratary",
     "font_size": "16px",
+    "site_name": "Zecratary",
     "updatedAt": "2026-09-18T08:24:02.536Z",
     "aiProvider": "gemini",
     "fontFamily": "Inter",
@@ -1218,37 +1220,39 @@
       "requireEmailVerification": true
     },
     "themeColors": {
-      "accent": "#a855f7",
-      "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#a855f7",
+      "primary": "#2563eb",
+      "primaryColor": "#2563eb",
+      "primaryHover": "#1d4ed8",
+      "accentEmerald": "#10b981",
+      "accentColor": "#10b981",
+      "accent": "#10b981",
+      "sidebarIconColor": "#38bdf8",
       "sidebarIcon": "#38bdf8",
-      "primaryColor": "#38bdf8",
-      "primaryHover": "#0284c7",
-      "accentEmerald": "#a855f7",
-      "textSecondary": "#7dd3fc",
-      "backgroundDark": "#020617",
-      "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "backgroundColor": "#080d1a",
+      "backgroundDark": "#080d1a",
+      "cardBackground": "#161f37",
+      "cardBorder": "#1e2c43",
+      "textSecondary": "#93c5fd"
     },
     "faviconEmoji": "🍳",
     "faviconImage": "",
     "theme_colors": {
-      "accent": "#a855f7",
-      "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#a855f7",
+      "primary": "#2563eb",
+      "primaryColor": "#2563eb",
+      "primaryHover": "#1d4ed8",
+      "accentEmerald": "#10b981",
+      "accentColor": "#10b981",
+      "accent": "#10b981",
+      "sidebarIconColor": "#38bdf8",
       "sidebarIcon": "#38bdf8",
-      "primaryColor": "#38bdf8",
-      "primaryHover": "#0284c7",
-      "accentEmerald": "#a855f7",
-      "textSecondary": "#7dd3fc",
-      "backgroundDark": "#020617",
-      "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "backgroundColor": "#080d1a",
+      "backgroundDark": "#080d1a",
+      "cardBackground": "#161f37",
+      "cardBorder": "#1e2c43",
+      "textSecondary": "#93c5fd"
     },
+    "favicon_emoji": "🍳",
+    "favicon_image": "",
     "titlebarEmoji": "🍳",
     "titlebarImage": "",
     "chefAiSettings": {
@@ -1279,7 +1283,7 @@
         }
       ],
       "maxTokens": 4096,
-      "updatedAt": "2026-09-22T07:29:35.310Z",
+      "updatedAt": "2026-09-22T14:13:13.704Z",
       "voiceSpeed": 1,
       "maxPlanDays": 7,
       "temperature": 0.7,
@@ -2390,9 +2394,12 @@
           ]
         }
       },
-      "enableVoiceInteraction": true
+      "enableVoiceInteraction": true,
+      "enableSavedRecipeSearch": true
     },
     "letter_spacing": "0em",
+    "titlebar_emoji": "🍳",
+    "titlebar_image": "",
     "maintenanceMode": false,
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -2481,6 +2488,7 @@
         "lastUpdated": "2026-09-18T10:38:11.128Z"
       }
     ],
+    "font_letter_spacing": "0em",
     "ingredientCategories": [
       "Produce",
       "Dairy & Eggs",
@@ -2509,6 +2517,7 @@
     "fontSize": "16px",
     "siteName": "Zecratary",
     "font_size": "16px",
+    "site_name": "Zecratary",
     "updatedAt": "2026-09-18T08:24:02.536Z",
     "aiProvider": "gemini",
     "fontFamily": "Inter",
@@ -2544,37 +2553,39 @@
       "requireEmailVerification": true
     },
     "themeColors": {
-      "accent": "#a855f7",
-      "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#a855f7",
+      "primary": "#2563eb",
+      "primaryColor": "#2563eb",
+      "primaryHover": "#1d4ed8",
+      "accentEmerald": "#10b981",
+      "accentColor": "#10b981",
+      "accent": "#10b981",
+      "sidebarIconColor": "#38bdf8",
       "sidebarIcon": "#38bdf8",
-      "primaryColor": "#38bdf8",
-      "primaryHover": "#0284c7",
-      "accentEmerald": "#a855f7",
-      "textSecondary": "#7dd3fc",
-      "backgroundDark": "#020617",
-      "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "backgroundColor": "#080d1a",
+      "backgroundDark": "#080d1a",
+      "cardBackground": "#161f37",
+      "cardBorder": "#1e2c43",
+      "textSecondary": "#93c5fd"
     },
     "faviconEmoji": "🍳",
     "faviconImage": "",
     "theme_colors": {
-      "accent": "#a855f7",
-      "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#a855f7",
+      "primary": "#2563eb",
+      "primaryColor": "#2563eb",
+      "primaryHover": "#1d4ed8",
+      "accentEmerald": "#10b981",
+      "accentColor": "#10b981",
+      "accent": "#10b981",
+      "sidebarIconColor": "#38bdf8",
       "sidebarIcon": "#38bdf8",
-      "primaryColor": "#38bdf8",
-      "primaryHover": "#0284c7",
-      "accentEmerald": "#a855f7",
-      "textSecondary": "#7dd3fc",
-      "backgroundDark": "#020617",
-      "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "backgroundColor": "#080d1a",
+      "backgroundDark": "#080d1a",
+      "cardBackground": "#161f37",
+      "cardBorder": "#1e2c43",
+      "textSecondary": "#93c5fd"
     },
+    "favicon_emoji": "🍳",
+    "favicon_image": "",
     "titlebarEmoji": "🍳",
     "titlebarImage": "",
     "chefAiSettings": {
@@ -2605,7 +2616,7 @@
         }
       ],
       "maxTokens": 4096,
-      "updatedAt": "2026-09-22T07:29:35.310Z",
+      "updatedAt": "2026-09-22T14:13:13.704Z",
       "voiceSpeed": 1,
       "maxPlanDays": 7,
       "temperature": 0.7,
@@ -3716,9 +3727,12 @@
           ]
         }
       },
-      "enableVoiceInteraction": true
+      "enableVoiceInteraction": true,
+      "enableSavedRecipeSearch": true
     },
     "letter_spacing": "0em",
+    "titlebar_emoji": "🍳",
+    "titlebar_image": "",
     "maintenanceMode": false,
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3807,6 +3821,7 @@
         "lastUpdated": "2026-09-18T10:38:11.128Z"
       }
     ],
+    "font_letter_spacing": "0em",
     "ingredientCategories": [
       "Produce",
       "Dairy & Eggs",
@@ -3828,5 +3843,5 @@
       "https://www.taste.com.au/recipes"
     ]
   },
-  "updatedAt": "2026-09-22T07:29:35.496Z"
+  "updatedAt": "2026-09-22T14:30:34.127Z"
 }

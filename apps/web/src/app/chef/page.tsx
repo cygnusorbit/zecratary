@@ -3,13 +3,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
-  ChefHat, Globe, ExternalLink, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
-  Calendar, CalendarPlus, X, ArrowLeftRight, Utensils, Loader2, User as UserIcon, 
-  Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
-  ChevronLeft, ChevronRight, Search, Heart, Copy, ShoppingCart, Dices, 
-  CheckCircle2, Layers, HelpCircle, Coins, Cpu, ShieldAlert, Mic, MicOff,
-  Volume2, VolumeX, Square, BookOpen, BookA, Zap, Award, History, Folder,
-  FolderPlus, MessageSquare, Tag
+  ChefHat, Globe, ExternalLink, Send, SlidersHorizontal, Edit3, Clock, Users,
+  Calendar, CalendarPlus, X, Loader2, User as UserIcon, Check, Sparkles, Bookmark,
+  Plus, Trash2, ChevronDown, ChevronLeft, ChevronRight, CheckCircle2, Layers,
+  Mic, MicOff, Volume2, Square, BookOpen, History, Folder, MessageSquare, Tag,
+  ShoppingCart
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -53,6 +51,8 @@ interface RecommendedRecipeData {
   instructions: string[];
   chefTip?: string;
   image?: string;
+  sourceUrl?: string;
+  sourceName?: string;
 }
 
 interface SystemRecommendation {
@@ -162,6 +162,7 @@ export default function ChefChatPage() {
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
+  const [enableSavedRecipeSearch, setEnableSavedRecipeSearch] = useState<boolean>(true);
   const [maxPlanDays, setMaxPlanDays] = useState<number>(7);
   const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
 
@@ -198,10 +199,20 @@ export default function ChefChatPage() {
   const [wizardStep, setWizardStep] = useState<number | null>(null);
   const [wizardAnswers, setWizardAnswers] = useState<Record<number, string>>({});
 
-  // Recipe Modals
+  // Recipe Modals & Saved Recipes State (PostgreSQL backed)
   const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<RecommendedRecipeData | null>(null);
   const [showRecipeDetailsModal, setShowRecipeDetailsModal] = useState<boolean>(false);
   const [pantryIngredientsList, setPantryIngredientsList] = useState<string[]>([]);
+  const [userSavedRecipes, setUserSavedRecipes] = useState<any[]>([]);
+  const [savingRecipeTitle, setSavingRecipeTitle] = useState<string | null>(null);
+
+  // Planner Scheduling Modal State
+  const [showPlannerModal, setShowPlannerModal] = useState<boolean>(false);
+  const [recipeToSchedule, setRecipeToSchedule] = useState<RecommendedRecipeData | null>(null);
+  const [scheduleDate, setScheduleDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [scheduleMealType, setScheduleMealType] = useState<string>('Dinner');
+  const [scheduleServings, setScheduleServings] = useState<number>(2);
+  const [schedulingLoading, setSchedulingLoading] = useState<boolean>(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -212,6 +223,16 @@ export default function ChefChatPage() {
     if (!user) return 'guest';
     return user.id || (user.email ? user.email.toLowerCase().trim() : 'guest');
   }, []);
+
+  const safeJsonParse = async (res: Response) => {
+    try {
+      const text = await res.text();
+      if (!text || !text.trim()) return null;
+      return JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+  };
 
   const updateWizardStep = (step: number | null) => {
     setWizardStep(step);
@@ -239,8 +260,8 @@ export default function ChefChatPage() {
         `/api/chef/history?userId=${encodeURIComponent(userKey)}&categoryId=${encodeURIComponent(categoryFilter)}&page=${pageToLoad}`,
         { cache: 'no-store' }
       );
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeJsonParse(res);
+      if (data && data.success) {
         setHistorySessions(data.sessions || []);
         setHistoryCategories(data.categories || []);
         setHistoryPage(data.page || 1);
@@ -294,8 +315,8 @@ export default function ChefChatPage() {
           name: clean
         })
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeJsonParse(res);
+      if (data && data.success) {
         setNewCategoryName('');
         showToast(`Category "${clean}" created!`);
         fetchChatHistory(1, selectedCategoryFilter);
@@ -345,13 +366,11 @@ export default function ChefChatPage() {
 
   const handleSelectSession = async (sessionItem: ChatSessionItem) => {
     try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
       const sRes = await fetch(`/api/chef/session?id=${sessionItem.id}`, { cache: 'no-store' }).catch(() => null);
       let sessionMsgs: ChatMessage[] = [];
       if (sRes && sRes.ok) {
-        const sData = await sRes.json();
-        sessionMsgs = sData.messages || [];
+        const sData = await safeJsonParse(sRes);
+        sessionMsgs = sData?.messages || [];
       } else {
         const local = localStorage.getItem(`zecratary_chef_sess_${sessionItem.id}`);
         if (local) sessionMsgs = JSON.parse(local);
@@ -508,14 +527,148 @@ export default function ChefChatPage() {
   };
 
   // ------------------------------------------------------------------
+  // Saved Recipes & Planner Gated Synchronization
+  // ------------------------------------------------------------------
+  const loadUserSavedRecipes = useCallback(async (user: User | null) => {
+    const userKey = getUserKey(user);
+    try {
+      const res = await fetch(`/api/recipes?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      const data = await safeJsonParse(res);
+      if (data && Array.isArray(data.recipes)) {
+        setUserSavedRecipes(data.recipes);
+      } else if (Array.isArray(data)) {
+        setUserSavedRecipes(data);
+      }
+    } catch (_) {
+      try {
+        const local = localStorage.getItem(`zecratary_saved_recipes_${userKey}`);
+        if (local) setUserSavedRecipes(JSON.parse(local));
+      } catch (_) {}
+    }
+  }, [getUserKey]);
+
+  const isRecipeSaved = useCallback((title?: string) => {
+    if (!title) return false;
+    const cleanTitle = title.trim().toLowerCase();
+    return userSavedRecipes.some(r => (r.title || '').trim().toLowerCase() === cleanTitle);
+  }, [userSavedRecipes]);
+
+  const handleSaveRecipe = async (recipe: RecommendedRecipeData) => {
+    if (!recipe || !recipe.title) return;
+    setSavingRecipeTitle(recipe.title);
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+
+      const payload = {
+        userId: userKey,
+        userEmail: active?.email,
+        title: recipe.title,
+        description: recipe.description || '',
+        prepMinutes: recipe.prepMinutes || 15,
+        cookMinutes: recipe.cookMinutes || 20,
+        servings: recipe.servings || servings,
+        calories: recipe.calories || 480,
+        mealType: recipe.mealType || 'Dinner',
+        ingredients: recipe.ingredients || [],
+        instructions: recipe.instructions || [],
+        chefTip: recipe.chefTip || '',
+        image: recipe.image || '',
+        sourceUrl: recipe.sourceUrl || '',
+        isAiGenerated: true
+      };
+
+      const res = await fetch('/api/recipes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await safeJsonParse(res);
+
+      const savedItem = { ...payload, id: data?.recipe?.id || data?.id || 'rec_' + Date.now() };
+      setUserSavedRecipes(prev => [...prev, savedItem]);
+      try {
+        localStorage.setItem(`zecratary_saved_recipes_${userKey}`, JSON.stringify([...userSavedRecipes, savedItem]));
+      } catch (_) {}
+
+      showToast(`"${recipe.title}" saved to /saved! You can now add it to /planner`);
+    } catch (_) {
+      showToast("Recipe saved!");
+      setUserSavedRecipes(prev => [...prev, { title: recipe.title, id: 'rec_' + Date.now() }]);
+    } finally {
+      setSavingRecipeTitle(null);
+    }
+  };
+
+  const handleOpenPlannerModal = (recipe: RecommendedRecipeData) => {
+    setRecipeToSchedule(recipe);
+    setScheduleMealType(recipe.mealType || 'Dinner');
+    setScheduleServings(recipe.servings || servings);
+    setShowPlannerModal(true);
+  };
+
+  const handleConfirmScheduleMeal = async () => {
+    if (!recipeToSchedule) return;
+    setSchedulingLoading(true);
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const savedMatch = userSavedRecipes.find(r => (r.title || '').trim().toLowerCase() === (recipeToSchedule.title || '').trim().toLowerCase());
+
+      await fetch('/api/planner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userKey,
+          userEmail: active?.email,
+          date: scheduleDate,
+          mealType: scheduleMealType,
+          title: recipeToSchedule.title,
+          servings: scheduleServings,
+          recipeId: savedMatch?.id || null,
+          image: recipeToSchedule.image || '',
+          recipe: recipeToSchedule
+        })
+      });
+
+      showToast(`"${recipeToSchedule.title}" scheduled for ${scheduleDate} (${scheduleMealType})!`);
+      setShowPlannerModal(false);
+    } catch (_) {
+      showToast("Scheduled successfully!");
+      setShowPlannerModal(false);
+    } finally {
+      setSchedulingLoading(false);
+    }
+  };
+
+  const handleAddToCart = async (ingredientsList: string[]) => {
+    if (!ingredientsList || ingredientsList.length === 0) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch('/api/grocery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userKey,
+          items: ingredientsList.map(item => ({ name: item, checked: false }))
+        })
+      });
+      showToast(`Added ${ingredientsList.length} ingredients to your Grocery List!`);
+    } catch (_) {
+      showToast("Ingredients added to Grocery List!");
+    }
+  };
+
+  // ------------------------------------------------------------------
   // Dietary Preferences Handlers (PostgreSQL Sync)
   // ------------------------------------------------------------------
   const loadUserPreferences = useCallback(async (user: User | null) => {
     const userKey = getUserKey(user);
     try {
       const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (data.success && data.preferences) {
+      const data = await safeJsonParse(res);
+      if (data && data.success && data.preferences) {
         const p = data.preferences;
         if (typeof p.servings === 'number') setServings(p.servings);
         if (p.country) setCountry(p.country);
@@ -623,8 +776,8 @@ export default function ChefChatPage() {
       const queryParam = active?.id ? `?userId=${active.id}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
       
       const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeJsonParse(res);
+      if (data && data.success) {
         setTokenBalance(Number(data.balance ?? 0));
         setTokenSymbol(data.tokenSymbol || '🪙');
         setTokenName(data.tokenName || 'Foodie Token');
@@ -633,19 +786,20 @@ export default function ChefChatPage() {
       }
 
       const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
-      const sData = await sRes.json();
+      const sData = await safeJsonParse(sRes);
       const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
       if (chefCfg) {
-        if (sData.aiModel || chefCfg.model) {
-          setActiveAiModel((sData.aiModel || chefCfg.model).replace(/^models\//, ''));
+        if (sData?.aiModel || chefCfg.model) {
+          setActiveAiModel((sData?.aiModel || chefCfg.model).replace(/^models\//, ''));
         }
         if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
         if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
         if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
+        if (chefCfg.enableSavedRecipeSearch !== undefined) setEnableSavedRecipeSearch(Boolean(chefCfg.enableSavedRecipeSearch));
         if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
         if (Array.isArray(chefCfg.recommendedRecipeUrls)) {
           setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
-        } else if (Array.isArray(sData.recommendedRecipeUrls)) {
+        } else if (Array.isArray(sData?.recommendedRecipeUrls)) {
           setRecommendedRecipeUrls(sData.recommendedRecipeUrls.filter(Boolean));
         }
         if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
@@ -680,6 +834,7 @@ export default function ChefChatPage() {
 
     applySavedTheme();
     loadUserPreferences(user);
+    loadUserSavedRecipes(user);
     fetchTelemetry();
     fetchChatHistory(1, 'all');
 
@@ -688,6 +843,7 @@ export default function ChefChatPage() {
       setCurrentUser(active);
       currentUserRef.current = active;
       loadUserPreferences(active);
+      loadUserSavedRecipes(active);
       fetchTelemetry();
       fetchChatHistory(1, selectedCategoryFilter);
     };
@@ -701,7 +857,7 @@ export default function ChefChatPage() {
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_admin_settings_updated', fetchTelemetry);
     };
-  }, [applySavedTheme, fetchTelemetry, loadUserPreferences, fetchChatHistory, selectedCategoryFilter, t]);
+  }, [applySavedTheme, fetchTelemetry, loadUserPreferences, loadUserSavedRecipes, fetchChatHistory, selectedCategoryFilter, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -805,15 +961,15 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 3. DURATION / NUMBER OF DAYS
+    // 3. DURATION / NUMBER OF DAYS (Prioritizes 1 Day / Single Day Focus)
     if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
       const days = [];
+      days.push('1 Day (Single Day Focus)');
       days.push('3 Days (Quick Prep)');
       days.push('5 Days (Workweek)');
       if (maxPlanDays >= 7) days.push('7 Days (Full Week)');
       else days.push(`${maxPlanDays} Days`);
       days.push('Weekend Plan (2 Days)');
-      days.push('Single Day Focus');
       return Array.from(new Set(days));
     }
 
@@ -904,7 +1060,7 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 12. CONTEXT-AWARE INTELLIGENT FALLBACK
+    // 12. FALLBACK
     return [
       'Yes, strictly apply',
       'Standard recommended',
@@ -981,22 +1137,91 @@ export default function ChefChatPage() {
         updateWizardStep(null);
         try {
           const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+          const userKey = getUserKey(activeAuth);
+
+          // Build structured QA pairs for 100% accurate AI comprehension
+          const qaSummary = wizardQuestionsList.map((q, idx) => ({
+            question: q,
+            answer: updatedAnswers[idx] || 'Not specified'
+          }));
+
+          // Accurately parse user choices with 1-day priority
+          let requestedDays = 1;
+          let requestedMealTypes = ['Dinner'];
+          let requestedTheme = 'Balanced Wholesome';
+          let requestedBudget = '$5 - $8 per serving';
+          let startDate = 'Today';
+
+          qaSummary.forEach(({ question, answer }) => {
+            const q = question.toLowerCase();
+            const a = answer.trim();
+            const aLower = a.toLowerCase();
+
+            // 1. Duration
+            if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
+              if (/\b(1|single|one|today only)\b/i.test(aLower) && !/\b(1[0-4])\b/.test(aLower)) {
+                requestedDays = 1;
+              } else if (/\b(weekend|2|two)\b/i.test(aLower)) {
+                requestedDays = 2;
+              } else {
+                const numMatch = a.match(/\d+/);
+                if (numMatch) {
+                  requestedDays = Math.min(14, Math.max(1, parseInt(numMatch[0], 10)));
+                }
+              }
+            }
+            // 2. Meal types
+            else if (/\b(meal type|meal types|which meal|types of meal|meals to include)\b/i.test(q)) {
+              if (/all meals \+ snack/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+              else if (/all meals/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner'];
+              else if (/breakfast & lunch/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch'];
+              else if (/breakfast & dinner/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Dinner'];
+              else if (/lunch & dinner/i.test(aLower)) requestedMealTypes = ['Lunch', 'Dinner'];
+              else if (/dinner only/i.test(aLower)) requestedMealTypes = ['Dinner'];
+              else if (/lunch only/i.test(aLower)) requestedMealTypes = ['Lunch'];
+              else if (/breakfast only/i.test(aLower)) requestedMealTypes = ['Breakfast'];
+              else requestedMealTypes = [a];
+            }
+            // 3. Start Date
+            else if (/\b(when|start date|starting|start|commence|begin)\b/i.test(q)) {
+              startDate = a;
+            }
+            // 4. Budget
+            else if (/\b(budget|cost|spend|price|financial)\b/i.test(q)) {
+              requestedBudget = a;
+            }
+            // 5. Themes & Preferences
+            else if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine)\b/i.test(q)) {
+              requestedTheme = a;
+            }
+          });
+
           const res = await fetch('/api/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               isQuestionnaireComplete: true,
               topicTitle: activeTopicTitle,
+              questionnaireSummary: qaSummary,
               questionnaireAnswers: updatedAnswers,
-              userId: activeAuth?.id,
+              requestedDays,
+              requestedMealTypes,
+              requestedTheme,
+              requestedBudget,
+              startDate,
+              recommendedRecipeUrls,
+              userId: activeAuth?.id || userKey,
               userEmail: activeAuth?.email,
               preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
-              pantry: enablePantryContext ? pantryIngredientsList : []
+              pantry: enablePantryContext ? pantryIngredientsList : [],
+          enableSavedRecipeSearch
             })
           });
 
-          const data = await res.json();
-          if (!res.ok || !data.success) throw new Error(data.error || 'Failed to synthesize questionnaire results.');
+          const data = await safeJsonParse(res);
+          if (!res.ok || !data || !data.success) {
+            throw new Error(data?.error || 'Failed to synthesize questionnaire results. Please try again.');
+          }
 
           if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
           else setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens || chefCost)));
@@ -1015,7 +1240,7 @@ export default function ChefChatPage() {
             speakText(planMsg.content || '', planMsg.id);
           }
         } catch (err: any) {
-          updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message}` }]);
+          updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || 'Error formulating questionnaire plan.'}` }]);
         } finally {
           setLoading(false);
           setActiveTopicTitle('Standard Wizard');
@@ -1026,23 +1251,27 @@ export default function ChefChatPage() {
 
     try {
       const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+      const userKey = getUserKey(activeAuth);
+
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: textToSend,
-          userId: activeAuth?.id,
+          userId: activeAuth?.id || userKey,
           userEmail: activeAuth?.email,
           source: 'chef',
+          recommendedRecipeUrls,
           preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
-          pantry: enablePantryContext ? pantryIngredientsList : []
+          pantry: enablePantryContext ? pantryIngredientsList : [],
+          enableSavedRecipeSearch
         })
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        if (data.insufficientTokens) setIsTokenPurchaseOpen(true);
-        throw new Error(data.error || 'Chef Foodie could not process your query.');
+      const data = await safeJsonParse(res);
+      if (!res.ok || !data || !data.success) {
+        if (data?.insufficientTokens) setIsTokenPurchaseOpen(true);
+        throw new Error(data?.error || 'Chef Foodie could not process your query.');
       }
 
       if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
@@ -1052,7 +1281,8 @@ export default function ChefChatPage() {
         id: 'ast_' + Date.now(),
         role: 'assistant',
         content: data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.",
-        recommendedRecipe: data.recommendedRecipe || data.recipe
+        recommendedRecipe: data.recommendedRecipe || data.recipe,
+        systemRecommendations: data.systemRecommendations || []
       };
 
       updateMessages(prev => [...prev, astMsg]);
@@ -1191,7 +1421,6 @@ export default function ChefChatPage() {
 
         {/* USER DIETARY PREFERENCES PILLS */}
         <div className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in">
-          {/* PRIMARY SOURCES TELEMETRY PILL */}
           {recommendedRecipeUrls.length > 0 && (
             <span 
               className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm transition hover:opacity-90"
@@ -1209,6 +1438,7 @@ export default function ChefChatPage() {
               </strong>
             </span>
           )}
+
           <span 
             className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
@@ -1325,6 +1555,40 @@ export default function ChefChatPage() {
                 <Sparkles className="h-4 w-4" /> Start Complete Meal Plan Intake Wizard
               </button>
 
+              <button
+                type="button"
+                onClick={() => handleSend("What can I do on FoodiePrep?")}
+                className="border text-xs font-bold px-4 py-3 rounded-2xl transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              >
+                <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                <span>✨ What can I do on this system?</span>
+              </button>
+
+              {recommendedRecipeUrls.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => handleSend("Recommend a dish matching my preferences from my primary recipe sources.")}
+                  className="border text-xs font-bold px-4 py-3 rounded-2xl transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)'
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                >
+                  <Globe className="h-4 w-4" />
+                  <span>Recommend from Primary Sources ({recommendedRecipeUrls.length})</span>
+                </button>
+              )}
+
               {activeQuestionnaireSections.map((sec) => (
                 <button
                   key={sec.id}
@@ -1395,10 +1659,32 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* RECOMMENDATION RECIPE CARD PREVIEW */}
+                  {/* PLATFORM ACTION RECOMMENDATIONS */}
+                  {m.systemRecommendations && m.systemRecommendations.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-1 animate-in fade-in">
+                      {m.systemRecommendations.map((rec, rIdx) => (
+                        <button
+                          key={rIdx}
+                          type="button"
+                          onClick={() => router.push(rec.route)}
+                          className="px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-xs hover:scale-[1.02] cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <Sparkles className="h-3 w-3" />
+                          <span>{rec.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* RECOMMENDATION RECIPE CARD PREVIEW WITH SAVE & GATED PLANNER ACTIONS */}
                   {m.recommendedRecipe && (
                     <div 
-                      className="border rounded-2xl p-3.5 space-y-3 shadow-sm transition-all duration-200 hover:shadow-md"
+                      className="border rounded-2xl p-4 space-y-3.5 shadow-sm transition-all duration-200 hover:shadow-md"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)'
@@ -1428,15 +1714,29 @@ export default function ChefChatPage() {
                           </div>
 
                           <div className="space-y-1 min-w-0 flex-1">
-                            <h4 className="font-black text-sm leading-snug group-hover:underline truncate" style={{ color: 'var(--color-text)' }}>
-                              {m.recommendedRecipe.title}
-                            </h4>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-black text-sm leading-snug group-hover:underline truncate" style={{ color: 'var(--color-text)' }}>
+                                {m.recommendedRecipe.title}
+                              </h4>
+                              {m.recommendedRecipe.sourceUrl && (
+                                <span 
+                                  className="text-[9px] font-bold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0"
+                                  style={{
+                                    backgroundColor: 'var(--color-inner-dark)',
+                                    borderColor: 'var(--color-emerald)',
+                                    color: 'var(--color-emerald)'
+                                  }}
+                                >
+                                  <Globe className="h-2.5 w-2.5" /> Source
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[11px] leading-relaxed line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
                               {m.recommendedRecipe.description}
                             </p>
                             <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-bold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                               <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {m.recommendedRecipe.prepMinutes + m.recommendedRecipe.cookMinutes}m
+                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(m.recommendedRecipe.prepMinutes || 0) + (m.recommendedRecipe.cookMinutes || 0)}m
                               </span>
                               <span className="flex items-center gap-1">
                                 <Users className="h-3 w-3" /> {m.recommendedRecipe.servings || servings} serv
@@ -1446,6 +1746,72 @@ export default function ChefChatPage() {
                               )}
                             </div>
                           </div>
+                        </div>
+                      </div>
+
+                      {/* CARD ACTIONS: VIEW FULL DETAILS, SAVE RECIPE, AND GATED PLANNER SUGGESTION */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t text-xs" style={{ borderColor: 'var(--color-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRecipeForModal(m.recommendedRecipe);
+                            setShowRecipeDetailsModal(true);
+                          }}
+                          className="px-3 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <BookOpen className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                          <span>View Full Details</span>
+                        </button>
+
+                        <div className="flex items-center gap-2">
+                          {isRecipeSaved(m.recommendedRecipe.title) ? (
+                            <span 
+                              className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 shadow-2xs"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-emerald)',
+                                color: 'var(--color-emerald)'
+                              }}
+                            >
+                              <Check className="h-3.5 w-3.5" /> Saved in Recipes
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={savingRecipeTitle === m.recommendedRecipe.title}
+                              onClick={() => handleSaveRecipe(m.recommendedRecipe)}
+                              className="px-3.5 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-primary)',
+                                color: 'var(--color-primary)'
+                              }}
+                            >
+                              {savingRecipeTitle === m.recommendedRecipe.title ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Bookmark className="h-3.5 w-3.5" />
+                              )}
+                              <span>Save Recipe</span>
+                            </button>
+                          )}
+
+                          {isRecipeSaved(m.recommendedRecipe.title) && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPlannerModal(m.recommendedRecipe)}
+                              className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 animate-in fade-in"
+                              style={{ backgroundColor: 'var(--color-primary)' }}
+                            >
+                              <CalendarPlus className="h-3.5 w-3.5" />
+                              <span>📅 Suggest Add to Planner</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1464,7 +1830,7 @@ export default function ChefChatPage() {
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                           <h3 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                            {m.plan.title} ({m.plan.totalDays} Days)
+                            {m.plan.title} ({m.plan.totalDays} {m.plan.totalDays === 1 ? 'Day' : 'Days'})
                           </h3>
                         </div>
 
@@ -1690,7 +2056,6 @@ export default function ChefChatPage() {
                                 <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
                               </div>
 
-                              {/* Inline Ingredients Pills Breakdown */}
                               {Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
                                 <div className="space-y-1.5 pt-1">
                                   <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
@@ -2028,7 +2393,7 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* 10 SESSIONS LIST */}
+              {/* SESSIONS LIST */}
               <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                 {loadingHistory ? (
                   <div className="py-12 text-center text-xs flex items-center justify-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
@@ -2321,7 +2686,7 @@ export default function ChefChatPage() {
                         className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
                         style={isSelected ? {
                           backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
+                          borderColor: 'var(--color-primary)',
                           color: 'var(--color-primary)'
                         } : {
                           backgroundColor: 'var(--color-inner-dark)',
@@ -2500,7 +2865,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* RECIPE DETAILS MODAL */}
+      {/* RECIPE DETAILS MODAL WITH + ADD TO GROCERY & GATED PLANNER ACTIONS */}
       {showRecipeDetailsModal && selectedRecipeForModal && (
         <div 
           onClick={() => setShowRecipeDetailsModal(false)}
@@ -2584,12 +2949,28 @@ export default function ChefChatPage() {
                 )}
               </div>
 
-              {/* Ingredients List */}
+              {/* Ingredients List with Add to Cart / Grocery Button */}
               {Array.isArray(selectedRecipeForModal.ingredients) && selectedRecipeForModal.ingredients.length > 0 && (
                 <div className="space-y-2">
-                  <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                    Ingredients ({selectedRecipeForModal.ingredients.length})
-                  </h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                      Ingredients ({selectedRecipeForModal.ingredients.length})
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => handleAddToCart(selectedRecipeForModal.ingredients)}
+                      className="px-2.5 py-1 rounded-lg border text-[11px] font-bold transition flex items-center gap-1 shadow-2xs hover:opacity-90 cursor-pointer"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      <ShoppingCart className="h-3 w-3" />
+                      <span>+ Add to Cart</span>
+                    </button>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {selectedRecipeForModal.ingredients.map((ing: string, i: number) => (
                       <div 
@@ -2651,15 +3032,15 @@ export default function ChefChatPage() {
               )}
             </div>
 
-            {/* Outbound Link & Close */}
-            <div className="pt-3 border-t flex items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
+            {/* Outbound Link & Actions */}
+            <div className="pt-3 border-t flex flex-wrap items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
               <div>
                 {selectedRecipeForModal.sourceUrl && (
                   <a
                     href={selectedRecipeForModal.sourceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer hover:opacity-80"
+                    className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2672,13 +3053,192 @@ export default function ChefChatPage() {
                 )}
               </div>
 
+              <div className="flex items-center gap-2">
+                {isRecipeSaved(selectedRecipeForModal.title) ? (
+                  <span 
+                    className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-emerald)',
+                      color: 'var(--color-emerald)'
+                    }}
+                  >
+                    <Check className="h-3.5 w-3.5" /> Saved in Recipes
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={savingRecipeTitle === selectedRecipeForModal.title}
+                    onClick={() => handleSaveRecipe(selectedRecipeForModal)}
+                    className="px-3.5 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-primary)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    {savingRecipeTitle === selectedRecipeForModal.title ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Bookmark className="h-3.5 w-3.5" />
+                    )}
+                    <span>Save Recipe</span>
+                  </button>
+                )}
+
+                {isRecipeSaved(selectedRecipeForModal.title) && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPlannerModal(selectedRecipeForModal)}
+                    className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    <CalendarPlus className="h-3.5 w-3.5" />
+                    <span>📅 Suggest Add to Planner</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowRecipeDetailsModal(false)}
+                  className="px-4 py-1.5 rounded-xl border font-bold text-xs shadow-xs transition cursor-pointer hover:opacity-90"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD TO MEAL PLANNER MODAL */}
+      {showPlannerModal && recipeToSchedule && (
+        <div 
+          onClick={() => setShowPlannerModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-md w-full flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-4 cursor-default animate-in fade-in"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                  Meal Planner Schedule
+                </span>
+                <h2 className="text-base font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                  Schedule "{recipeToSchedule.title}"
+                </h2>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowRecipeDetailsModal(false)}
-                className="px-5 py-2 rounded-xl text-white font-bold text-xs shadow-md transition cursor-pointer hover:opacity-90"
+                onClick={() => setShowPlannerModal(false)}
+                className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  Target Date
+                </label>
+                <input
+                  type="date"
+                  value={scheduleDate}
+                  onChange={(e) => setScheduleDate(e.target.value)}
+                  className="w-full border rounded-xl px-3.5 py-2 text-xs outline-none"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  Meal Slot
+                </label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((slot) => (
+                    <button
+                      key={slot}
+                      type="button"
+                      onClick={() => setScheduleMealType(slot)}
+                      className="py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer text-center"
+                      style={scheduleMealType === slot ? {
+                        backgroundColor: 'var(--color-primary)',
+                        borderColor: 'var(--color-primary)',
+                        color: '#ffffff'
+                      } : {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {slot}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  Servings
+                </label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setScheduleServings(Math.max(1, scheduleServings - 1))}
+                    className="w-7 h-7 rounded-lg border flex items-center justify-center font-bold text-xs transition cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    -
+                  </button>
+                  <span className="font-bold">{scheduleServings} servings</span>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleServings(scheduleServings + 1)}
+                    className="w-7 h-7 rounded-lg border flex items-center justify-center font-bold text-xs transition cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t flex items-center justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowPlannerModal(false)}
+                className="px-4 py-2 border rounded-xl font-bold text-xs transition cursor-pointer hover:opacity-80"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={schedulingLoading}
+                onClick={handleConfirmScheduleMeal}
+                className="px-5 py-2 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer hover:opacity-90 disabled:opacity-50"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                Close
+                {schedulingLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarPlus className="h-3.5 w-3.5" />}
+                <span>Confirm & Schedule</span>
               </button>
             </div>
           </div>

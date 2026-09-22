@@ -1269,13 +1269,6 @@ export default function ProfilePage() {
   const PlanHeaderIcon = userPlanBadge.icon;
   const activeExpiryDate = (user as any).planExpiryDate || (user as any).expiryDate;
 
-  const isUnlimited = tokenUsage.monthlyLimit === -1 || tokenUsage.monthlyLimit >= 999999999;
-  const tokenPercentage = isUnlimited 
-    ? 0 
-    : tokenUsage.monthlyLimit > 0 
-      ? Math.min(Math.round((tokenUsage.totalTokens / tokenUsage.monthlyLimit) * 100), 100) 
-      : 100;
-
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200 min-h-screen"
@@ -1709,32 +1702,6 @@ export default function ProfilePage() {
                     <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                       {tokenIdentity.tokenName}
                     </span>
-                  </div>
-
-                  {/* Plan Allocation & Capacity Progress Bar */}
-                  <div className="space-y-1.5 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                    <div className="flex justify-between items-center text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      <span>{t('planAllowanceLimit', 'Plan Allowance Quota:')}</span>
-                      <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>
-                        {isUnlimited ? t('unlimitedTokensLabel', '∞ Unlimited') : `${tokenUsage.monthlyLimit.toLocaleString()} ${tokenIdentity.tokenSymbol}`}
-                      </span>
-                    </div>
-
-                    <div 
-                      className="border rounded-full h-2.5 overflow-hidden p-0.5 shadow-inner"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
-                      <div 
-                        className="h-full rounded-full transition-all duration-500" 
-                        style={{ 
-                          width: isUnlimited ? '100%' : `${tokenPercentage}%`,
-                          backgroundColor: isUnlimited ? 'var(--color-emerald)' : tokenPercentage > 85 ? '#ef4444' : tokenPercentage > 60 ? '#f59e0b' : 'var(--color-primary)'
-                        }}
-                      />
-                    </div>
                   </div>
                 </div>
 
