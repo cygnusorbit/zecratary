@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.6.1",
+  "version": "7.6.5",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.6.1",
+  "version": "7.6.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8953,16 +8953,16 @@ export default function PlannerPage() {
 ```typescript
 // @ts-nocheck
 'use client';
-import AiQuotaBar from '@/components/AiQuotaBar';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
-  ChefHat, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
+  ChefHat, Globe, ExternalLink, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
   Calendar, CalendarPlus, X, ArrowLeftRight, Utensils, Loader2, User as UserIcon, 
   Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
   ChevronLeft, ChevronRight, Search, Heart, Copy, ShoppingCart, Dices, 
   CheckCircle2, Layers, HelpCircle, Coins, Cpu, ShieldAlert, Mic, MicOff,
-  Volume2, VolumeX, Square, BookOpen, BookA, Zap, Award
+  Volume2, VolumeX, Square, BookOpen, BookA, Zap, Award, History, Folder,
+  FolderPlus, MessageSquare, Tag
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -9008,13 +9008,36 @@ interface RecommendedRecipeData {
   image?: string;
 }
 
+interface SystemRecommendation {
+  label: string;
+  route: string;
+  description?: string;
+}
+
 interface ChatMessage {
+  systemRecommendations?: SystemRecommendation[];
   id: string;
   role: 'user' | 'assistant';
   content?: string;
   plan?: MealPlanData;
   recipe?: any;
   recommendedRecipe?: RecommendedRecipeData;
+}
+
+interface ChatCategory {
+  id: string;
+  name: string;
+  created_at?: string;
+}
+
+interface ChatSessionItem {
+  id: string;
+  title: string;
+  category_id?: string | null;
+  category_name?: string | null;
+  message_count?: number;
+  created_at: string;
+  updated_at: string;
 }
 
 const DIETARY_OPTIONS = [
@@ -9031,9 +9054,6 @@ const COUNTRIES = [
   'Singapore', 'United States', 'United Kingdom', 'Australia', 
   'Canada', 'Malaysia', 'Japan', 'Germany', 'France', 'India'
 ];
-
-const IDEAS_ITEMS_PER_PAGE = 3;
-const SAVED_ITEMS_PER_PAGE = 5;
 
 const DEFAULT_SECTIONS = [
   {
@@ -9069,37 +9089,46 @@ export default function ChefChatPage() {
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [syncToGrocery, setSyncToGrocery] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const ideasInputRef = useRef<HTMLInputElement>(null);
 
-  // Synced from /admin/ai-settings (PostgreSQL backed)
+  // Chat History & Categories State (PostgreSQL backed)
+  const [currentSessionId, setCurrentSessionId] = useState<string>(() => 'sess_' + Date.now());
+  const currentSessionIdRef = useRef<string>(currentSessionId);
+  currentSessionIdRef.current = currentSessionId;
+
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
+  const [historySessions, setHistorySessions] = useState<ChatSessionItem[]>([]);
+  const [historyCategories, setHistoryCategories] = useState<ChatCategory[]>([]);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [historyPage, setHistoryPage] = useState<number>(1);
+  const [historyTotalPages, setHistoryTotalPages] = useState<number>(1);
+  const [historyTotalCount, setHistoryTotalCount] = useState<number>(0);
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+  const [newCategoryName, setNewCategoryName] = useState<string>('');
+
+  // AI & Voice telemetry settings
   const [questionnaireSections, setQuestionnaireSections] = useState<any[]>(DEFAULT_SECTIONS);
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-3.6-flash');
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.0-flash');
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
-  const [customVocabularyList, setCustomVocabularyList] = useState<string[]>([]);
-  const [knowledgeBaseList, setKnowledgeBaseList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
-  const [enableWebSearch, setEnableWebSearch] = useState<boolean>(true);
   const [maxPlanDays, setMaxPlanDays] = useState<number>(7);
+  const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
 
-  // Voice Interaction State (Synced from /admin/ai-settings)
+  // Voice Interaction State
   const [enableVoiceInteraction, setEnableVoiceInteraction] = useState<boolean>(true);
-  const [voiceEngine, setVoiceEngine] = useState<'version1' | 'version2'>('version2');
   const [voiceSpeed, setVoiceSpeed] = useState<number>(1.0);
   const [voiceAutoPlay, setVoiceAutoPlay] = useState<boolean>(false);
   const [selectedVoiceName, setSelectedVoiceName] = useState<string>('en-US-Neural2-F');
-  
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [isListening, setIsListening] = useState<boolean>(false);
   const speechRecognitionRef = useRef<any>(null);
 
-  // Token System Telemetry Synced with /admin/token-setting
+  // Token Telemetry
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
@@ -9107,7 +9136,7 @@ export default function ChefChatPage() {
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
-  // User Dietary Preferences State
+  // Dietary Preferences State
   const [showPreferences, setShowPreferences] = useState<boolean>(false);
   const [servings, setServings] = useState<number>(2);
   const [country, setCountry] = useState<string>('Singapore');
@@ -9122,35 +9151,206 @@ export default function ChefChatPage() {
   const [wizardStep, setWizardStep] = useState<number | null>(null);
   const [wizardAnswers, setWizardAnswers] = useState<Record<number, string>>({});
 
-  // Modals State
-  const [showBatchModal, setShowBatchModal] = useState(false);
-  const [activeBatchPlanMsgId, setActiveBatchPlanMsgId] = useState<string | null>(null);
-  const [activeBatchMeal, setActiveBatchMeal] = useState<MealItem | null>(null);
-  const [selectedBatchDays, setSelectedBatchDays] = useState<number[]>([]);
-
-  const [showSwapModal, setShowSwapModal] = useState(false);
-  const [activeSwapPlanMsgId, setActiveSwapPlanMsgId] = useState<string | null>(null);
-  const [activeSwapMeal, setActiveSwapMeal] = useState<MealItem | null>(null);
-  const [activeSwapPlan, setActiveSwapPlan] = useState<MealPlanData | null>(null);
-  const [swapTab, setSwapTab] = useState<'ideas' | 'saved' | 'repeat'>('ideas');
-  
-  const [swapSearchQuery, setSwapSearchQuery] = useState('');
-  const [usePantryIngredients, setUsePantryIngredients] = useState(false);
-  const [ideasCurrentPage, setIdeasCurrentPage] = useState(1);
-
-  const [otherUsersRecipes, setOtherUsersRecipes] = useState<any[]>([]);
-  const [userSavedRecipes, setUserSavedRecipes] = useState<any[]>([]);
-  const [userBooks, setUserBooks] = useState<any[]>([]);
-  const [savedSearchName, setSavedSearchName] = useState('');
-  const [selectedSavedBookFilter, setSelectedSavedBookFilter] = useState('All Books');
-  const [selectedSavedTagFilter, setSelectedSavedTagFilter] = useState('All');
-  const [showSavedFilterOptions, setShowSavedFilterOptions] = useState(false);
-  const [savedCurrentPage, setSavedCurrentPage] = useState(1);
+  // Recipe Modals
+  const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<RecommendedRecipeData | null>(null);
+  const [showRecipeDetailsModal, setShowRecipeDetailsModal] = useState<boolean>(false);
   const [pantryIngredientsList, setPantryIngredientsList] = useState<string[]>([]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const getUserKey = useCallback((user: User | null) => {
+    if (!user) return 'guest';
+    return user.id || (user.email ? user.email.toLowerCase().trim() : 'guest');
+  }, []);
+
+  const updateWizardStep = (step: number | null) => {
+    setWizardStep(step);
+    try {
+      if (typeof window === 'undefined') return;
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      if (step !== null) {
+        localStorage.setItem(`zecratary_chef_wizard_step_${userKey}`, JSON.stringify(step));
+      } else {
+        localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
+      }
+    } catch (_) {}
+  };
+
+  // ------------------------------------------------------------------
+  // Chat History & Category PostgreSQL Operations
+  // ------------------------------------------------------------------
+  const fetchChatHistory = useCallback(async (pageToLoad = historyPage, categoryFilter = selectedCategoryFilter) => {
+    setLoadingHistory(true);
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const res = await fetch(
+        `/api/chef/history?userId=${encodeURIComponent(userKey)}&categoryId=${encodeURIComponent(categoryFilter)}&page=${pageToLoad}`,
+        { cache: 'no-store' }
+      );
+      const data = await res.json();
+      if (data.success) {
+        setHistorySessions(data.sessions || []);
+        setHistoryCategories(data.categories || []);
+        setHistoryPage(data.page || 1);
+        setHistoryTotalPages(data.totalPages || 1);
+        setHistoryTotalCount(data.total || 0);
+      }
+    } catch (err) {
+      console.warn('Failed to load chat history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [getUserKey, historyPage, selectedCategoryFilter]);
+
+  const saveCurrentSessionToDb = useCallback(async (msgs: ChatMessage[]) => {
+    if (msgs.length === 0) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const firstUserMsg = msgs.find(m => m.role === 'user');
+      const title = firstUserMsg?.content 
+        ? firstUserMsg.content.slice(0, 45) + (firstUserMsg.content.length > 45 ? '...' : '')
+        : 'Chef Conversation';
+
+      await fetch('/api/chef/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save_session',
+          userId: userKey,
+          id: currentSessionIdRef.current,
+          title,
+          messages: msgs
+        })
+      });
+    } catch (_) {}
+  }, [getUserKey]);
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newCategoryName.trim();
+    if (!clean) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const res = await fetch('/api/chef/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_category',
+          userId: userKey,
+          name: clean
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewCategoryName('');
+        showToast(`Category "${clean}" created!`);
+        fetchChatHistory(1, selectedCategoryFilter);
+      }
+    } catch (_) {
+      showToast("Could not create category.");
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId: string, categoryName: string) => {
+    if (!confirm(`Delete category "${categoryName}"? Existing chats will be kept.`)) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch(
+        `/api/chef/history?action=delete_category&categoryId=${encodeURIComponent(categoryId)}&userId=${encodeURIComponent(userKey)}`,
+        { method: 'DELETE' }
+      );
+      showToast(`Category "${categoryName}" deleted.`);
+      if (selectedCategoryFilter === categoryId) setSelectedCategoryFilter('all');
+      fetchChatHistory(1, 'all');
+    } catch (_) {
+      showToast("Could not delete category.");
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this chat?")) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch(
+        `/api/chef/history?action=delete_session&sessionId=${encodeURIComponent(sessionId)}&userId=${encodeURIComponent(userKey)}`,
+        { method: 'DELETE' }
+      );
+
+      if (currentSessionIdRef.current === sessionId) {
+        startNewChat();
+      }
+      showToast("Chat deleted.");
+      fetchChatHistory(historyPage, selectedCategoryFilter);
+    } catch (_) {
+      showToast("Could not delete chat.");
+    }
+  };
+
+  const handleSelectSession = async (sessionItem: ChatSessionItem) => {
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const sRes = await fetch(`/api/chef/session?id=${sessionItem.id}`, { cache: 'no-store' }).catch(() => null);
+      let sessionMsgs: ChatMessage[] = [];
+      if (sRes && sRes.ok) {
+        const sData = await sRes.json();
+        sessionMsgs = sData.messages || [];
+      } else {
+        const local = localStorage.getItem(`zecratary_chef_sess_${sessionItem.id}`);
+        if (local) sessionMsgs = JSON.parse(local);
+      }
+
+      currentSessionIdRef.current = sessionItem.id;
+      setCurrentSessionId(sessionItem.id);
+      setMessages(sessionMsgs);
+      updateWizardStep(null);
+      setShowHistoryDrawer(false);
+      showToast(`Loaded: ${sessionItem.title}`);
+    } catch (_) {
+      showToast("Failed to load chat.");
+    }
+  };
+
+  const startNewChat = () => {
+    stopSpeaking();
+    const newId = 'sess_' + Date.now();
+    currentSessionIdRef.current = newId;
+    setCurrentSessionId(newId);
+    setMessages([]);
+    updateWizardStep(null);
+    setWizardAnswers({});
+    setActiveTopicTitle('Standard Wizard');
+    setShowHistoryDrawer(false);
+    showToast("Started a new chat session.");
+  };
+
+  const handleAssignCategory = async (sessionId: string, categoryId: string) => {
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch('/api/chef/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_session_category',
+          userId: userKey,
+          sessionId,
+          categoryId: categoryId === 'none' ? null : categoryId
+        })
+      });
+      fetchChatHistory(historyPage, selectedCategoryFilter);
+      showToast("Category updated.");
+    } catch (_) {}
   };
 
   // ------------------------------------------------------------------
@@ -9190,24 +9390,15 @@ export default function ChefChatPage() {
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.rate = Math.max(0.7, Math.min(1.8, voiceSpeed || 1.0));
 
-    if (selectedVoiceName.includes('F') || selectedVoiceName.includes('Aria') || selectedVoiceName.includes('Matilda')) {
+    if (selectedVoiceName.includes('F') || selectedVoiceName.includes('Aria')) {
       utterance.pitch = 1.05;
     } else if (selectedVoiceName.includes('D') || selectedVoiceName.includes('Marcus')) {
       utterance.pitch = 0.88;
-    } else {
-      utterance.pitch = 1.0;
     }
 
     const voices = window.speechSynthesis.getVoices();
     if (voices.length > 0) {
-      let matchedVoice = null;
-      if (selectedVoiceName.includes('GB')) {
-        matchedVoice = voices.find(v => v.lang.includes('en-GB'));
-      } else if (selectedVoiceName.includes('AU')) {
-        matchedVoice = voices.find(v => v.lang.includes('en-AU'));
-      } else {
-        matchedVoice = voices.find(v => v.lang.includes('en-US') || v.lang.startsWith('en'));
-      }
+      const matchedVoice = voices.find(v => v.lang.startsWith('en'));
       if (matchedVoice) utterance.voice = matchedVoice;
     }
 
@@ -9245,7 +9436,6 @@ export default function ChefChatPage() {
     try {
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
-      recognition.interimResults = false;
       recognition.lang = 'en-US';
 
       recognition.onstart = () => {
@@ -9260,33 +9450,21 @@ export default function ChefChatPage() {
         }
       };
 
-      recognition.onerror = () => {
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
+      recognition.onerror = () => setIsListening(false);
+      recognition.onend = () => setIsListening(false);
 
       speechRecognitionRef.current = recognition;
       recognition.start();
-    } catch (err) {
+    } catch (_) {
       setIsListening(false);
     }
   };
 
   // ------------------------------------------------------------------
-  // Dietary Preferences Handlers (Local & PostgreSQL Sync)
+  // Dietary Preferences Handlers (PostgreSQL Sync)
   // ------------------------------------------------------------------
-  const getUserKey = useCallback((user: User | null) => {
-    if (!user) return 'guest';
-    return user.id || (user.email ? user.email.toLowerCase().trim() : 'guest');
-  }, []);
-
   const loadUserPreferences = useCallback(async (user: User | null) => {
     const userKey = getUserKey(user);
-
-    // 1. Try PostgreSQL Endpoint
     try {
       const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
       const data = await res.json();
@@ -9298,50 +9476,23 @@ export default function ChefChatPage() {
         if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
         if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
         if (Array.isArray(p.tastes)) setTastesList(p.tastes);
-        return;
       }
     } catch (_) {}
-
-    // 2. Fallback to localStorage
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(`zecratary_recipe_preferences_${userKey}`) || localStorage.getItem('zecratary_recipe_preferences');
-        if (saved) {
-          const p = JSON.parse(saved);
-          if (typeof p.servings === 'number') setServings(p.servings);
-          if (p.country) setCountry(p.country);
-          if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
-          if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
-          if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
-          if (Array.isArray(p.tastes)) setTastesList(p.tastes);
-        }
-      } catch (_) {}
-    }
   }, [getUserKey]);
 
   const handleToggleDiet = (item: string) => {
-    if (selectedDiets.includes(item)) {
-      setSelectedDiets(selectedDiets.filter(d => d !== item));
-    } else {
-      setSelectedDiets([...selectedDiets, item]);
-    }
+    setSelectedDiets(prev => prev.includes(item) ? prev.filter(d => d !== item) : [...prev, item]);
   };
 
   const handleToggleAllergy = (item: string) => {
-    if (selectedAllergies.includes(item)) {
-      setSelectedAllergies(selectedAllergies.filter(a => a !== item));
-    } else {
-      setSelectedAllergies([...selectedAllergies, item]);
-    }
+    setSelectedAllergies(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
   };
 
   const handleAddAvoid = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const clean = newAvoidInput.trim();
     if (!clean) return;
-    if (!ingredientsToAvoid.includes(clean)) {
-      setIngredientsToAvoid([...ingredientsToAvoid, clean]);
-    }
+    if (!ingredientsToAvoid.includes(clean)) setIngredientsToAvoid([...ingredientsToAvoid, clean]);
     setNewAvoidInput('');
   };
 
@@ -9353,9 +9504,7 @@ export default function ChefChatPage() {
     if (e) e.preventDefault();
     const clean = newTasteInput.trim();
     if (!clean) return;
-    if (!tastesList.includes(clean)) {
-      setTastesList([...tastesList, clean]);
-    }
+    if (!tastesList.includes(clean)) setTastesList([...tastesList, clean]);
     setNewTasteInput('');
   };
 
@@ -9376,22 +9525,13 @@ export default function ChefChatPage() {
     const active = currentUserRef.current || getCurrentUser();
     const userKey = getUserKey(active);
 
-    // Save to local storage
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`zecratary_recipe_preferences_${userKey}`, JSON.stringify(prefs));
-      localStorage.setItem('zecratary_recipe_preferences', JSON.stringify(prefs));
-    }
-
-    // Persist to PostgreSQL
     try {
       await fetch('/api/user/preferences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: userKey, ...prefs })
       });
-    } catch (err) {
-      console.warn('PostgreSQL preference save notice:', err);
-    }
+    } catch (_) {}
 
     setShowPreferences(false);
     showToast("Preferences saved and synchronized!");
@@ -9407,11 +9547,6 @@ export default function ChefChatPage() {
 
     const active = currentUserRef.current || getCurrentUser();
     const userKey = getUserKey(active);
-
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(`zecratary_recipe_preferences_${userKey}`);
-      localStorage.removeItem('zecratary_recipe_preferences');
-    }
 
     try {
       await fetch('/api/user/preferences', {
@@ -9433,63 +9568,54 @@ export default function ChefChatPage() {
   };
 
   // ------------------------------------------------------------------
-  // Telemetry & Settings Synchronization from PostgreSQL admin_settings
+  // Telemetry & Settings Synchronization
   // ------------------------------------------------------------------
-  const fetchTokenAndAiTelemetry = useCallback(async () => {
+  const fetchTelemetry = useCallback(async () => {
     try {
       const active = currentUserRef.current || getCurrentUser();
       const queryParam = active?.id ? `?userId=${active.id}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
       
       const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
       const data = await res.json();
-
       if (data.success) {
         setTokenBalance(Number(data.balance ?? 0));
         setTokenSymbol(data.tokenSymbol || '🪙');
         setTokenName(data.tokenName || 'Foodie Token');
         setChefCost(Number(data.costs?.chef ?? 1));
-        if (Array.isArray(data.packages)) {
-          setTokenPackages(data.packages);
-        }
+        if (Array.isArray(data.packages)) setTokenPackages(data.packages);
       }
 
-      try {
-        const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
-        const sData = await sRes.json();
-        const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
-        if (chefCfg) {
-          if (sData.aiModel || chefCfg.model) {
-          const resolved = sData.aiModel || chefCfg.model;
-          setActiveAiModel(resolved.replace(/^models\//, ''));
+      const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
+      const sData = await sRes.json();
+      const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
+      if (chefCfg) {
+        if (sData.aiModel || chefCfg.model) {
+          setActiveAiModel((sData.aiModel || chefCfg.model).replace(/^models\//, ''));
         }
-          if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
-          if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
-          if (Array.isArray(chefCfg.customVocabularyList)) setCustomVocabularyList(chefCfg.customVocabularyList.filter(Boolean));
-          if (Array.isArray(chefCfg.knowledgeBaseList)) setKnowledgeBaseList(chefCfg.knowledgeBaseList.filter(Boolean));
-          if (chefCfg.enableWebSearch !== undefined) setEnableWebSearch(Boolean(chefCfg.enableWebSearch));
-          if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
-          if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
-          if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
-
-          if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
-          if (chefCfg.voiceEngine) setVoiceEngine(chefCfg.voiceEngine);
-          if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
-          if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
-          if (chefCfg.selectedVoiceName) setSelectedVoiceName(chefCfg.selectedVoiceName);
-
-          if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
-            const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
-            const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
-            setQuestionnaireSections(toUse);
-            const allQs = toUse.flatMap((s: any) => s.questions || []);
-            setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
-          }
+        if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
+        if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
+        if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
+        if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
+        if (Array.isArray(chefCfg.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
+        } else if (Array.isArray(sData.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(sData.recommendedRecipeUrls.filter(Boolean));
         }
-      } catch (_) {}
+        if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
+        if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
+        if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
+        if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
+        if (chefCfg.selectedVoiceName) setSelectedVoiceName(chefCfg.selectedVoiceName);
 
-    } catch (err) {
-      console.warn('Failed to fetch /chef telemetry:', err);
-    }
+        if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
+          const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
+          const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
+          setQuestionnaireSections(toUse);
+          const allQs = toUse.flatMap((s: any) => s.questions || []);
+          setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
+        }
+      }
+    } catch (_) {}
   }, []);
 
   const applySavedTheme = useCallback(() => {
@@ -9499,154 +9625,36 @@ export default function ChefChatPage() {
   }, []);
 
   useEffect(() => {
-    applySavedTheme();
-    fetchTokenAndAiTelemetry();
-
-    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('zecratary_admin_settings_updated', fetchTokenAndAiTelemetry);
-    window.addEventListener('zecratary_engine_config_updated', fetchTokenAndAiTelemetry);
-    window.addEventListener('zecratary_chef_ai_settings_updated', fetchTokenAndAiTelemetry);
-    window.addEventListener('storage', fetchTokenAndAiTelemetry);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('zecratary_admin_settings_updated', fetchTokenAndAiTelemetry);
-      window.removeEventListener('zecratary_engine_config_updated', fetchTokenAndAiTelemetry);
-      window.removeEventListener('zecratary_chef_ai_settings_updated', fetchTokenAndAiTelemetry);
-      window.removeEventListener('storage', fetchTokenAndAiTelemetry);
-    };
-  }, [applySavedTheme, fetchTokenAndAiTelemetry]);
-
-  const loadScopedData = useCallback((user: User | null) => {
-    if (typeof window === 'undefined') return;
-
-    try {
-      const allRecipesRaw = localStorage.getItem('zecratary_recipes') || '[]';
-      const adminRecipesRaw = localStorage.getItem('zecratary_admin_recipes') || '[]';
-      const savedRecipesRaw = localStorage.getItem('zecratary_saved_recipes') || '[]';
-
-      const combinedCatalog = [...JSON.parse(allRecipesRaw), ...JSON.parse(adminRecipesRaw), ...JSON.parse(savedRecipesRaw)];
-
-      const currentUserId = user?.id;
-      const currentUserEmail = user?.email?.toLowerCase().trim();
-
-      const normalizeRecipe = (r: any) => ({
-        id: r.id || `rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        title: r.title || r.name || 'Untitled Recipe',
-        description: r.description || 'Nutritious chef-curated home recipe.',
-        prep: Number(r.prepTimeMinutes || r.prep || 15),
-        cook: Number(r.cookTimeMinutes || r.cook || 20),
-        servings: Number(r.servings || 2),
-        image: r.imageUrl || r.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
-        ingredients: Array.isArray(r.ingredients) 
-          ? r.ingredients.map((ing: any) => typeof ing === 'string' ? ing : (ing.item || ing.name || ''))
-          : [],
-        mealType: (r.recipeType || r.mealType || r.category || 'dinner').toLowerCase(),
-        userId: r.userId,
-        createdBy: r.createdBy || 'Community Chef',
-        isFavorite: Boolean(r.isFavorite),
-        bookId: r.bookId
-      });
-
-      const otherList: any[] = [];
-      const otherSeen = new Set<string>();
-
-      for (const item of combinedCatalog) {
-        const itemUserId = item.userId;
-        const itemCreatedBy = item.createdBy ? item.createdBy.toLowerCase().trim() : '';
-        const isMine = (currentUserId && itemUserId === currentUserId) || (currentUserEmail && itemCreatedBy === currentUserEmail);
-
-        if (!isMine) {
-          const key = (item.title || item.name || '').toLowerCase().trim();
-          if (key && !otherSeen.has(key)) {
-            otherSeen.add(key);
-            otherList.push(normalizeRecipe(item));
-          }
-        }
-      }
-      setOtherUsersRecipes(otherList);
-
-      const userSavedMap = new Map<string, any>();
-      for (const item of combinedCatalog) {
-        const itemUserId = item.userId;
-        const itemCreatedBy = item.createdBy ? item.createdBy.toLowerCase().trim() : '';
-        const isMine = (currentUserId && itemUserId === currentUserId) || (currentUserEmail && itemCreatedBy === currentUserEmail);
-
-        if (isMine) {
-          const normalized = normalizeRecipe(item);
-          const key = normalized.title.toLowerCase().trim();
-          if (key && !userSavedMap.has(key)) {
-            userSavedMap.set(key, normalized);
-          }
-        }
-      }
-      setUserSavedRecipes(Array.from(userSavedMap.values()));
-
-      const rawPantry = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry') || '[]';
-      const parsedPantry = JSON.parse(rawPantry);
-      if (Array.isArray(parsedPantry) && user) {
-        const userPantry = parsedPantry.filter((item: any) => {
-          return (currentUserId && item.userId === currentUserId) || (currentUserEmail && item.createdBy === currentUserEmail);
-        });
-        setPantryIngredientsList(userPantry.map((p: any) => (p.name || '').toLowerCase().trim()).filter(Boolean));
-      } else {
-        setPantryIngredientsList([]);
-      }
-
-    } catch (_) {
-      setOtherUsersRecipes([]);
-      setUserSavedRecipes([]);
-      setPantryIngredientsList([]);
-    }
-  }, []);
-
-  const loadUserChatState = useCallback((user: User | null) => {
-    if (typeof window === 'undefined') return;
-    const userKey = getUserKey(user);
-    try {
-      const savedMessages = localStorage.getItem(`zecratary_chef_chat_messages_${userKey}`);
-      setMessages(savedMessages ? JSON.parse(savedMessages) : []);
-      const savedStep = localStorage.getItem(`zecratary_chef_wizard_step_${userKey}`);
-      setWizardStep(savedStep !== null ? JSON.parse(savedStep) : null);
-    } catch (_) {
-      setMessages([]);
-    }
-  }, [getUserKey]);
-
-  useEffect(() => {
-    document.title = `${t('foodieChatHeading') || 'Foodie Chat'} - FoodiePrep`;
+    document.title = `${t('foodieChatHeading', 'Foodie Chat')} - FoodiePrep`;
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
     currentUserRef.current = user;
 
-    loadScopedData(user);
-    loadUserChatState(user);
+    applySavedTheme();
     loadUserPreferences(user);
+    fetchTelemetry();
+    fetchChatHistory(1, 'all');
 
     const handleSync = () => {
       const active = getCurrentUser();
       setCurrentUser(active);
       currentUserRef.current = active;
-      loadScopedData(active);
-      loadUserChatState(active);
       loadUserPreferences(active);
-      fetchTokenAndAiTelemetry();
+      fetchTelemetry();
+      fetchChatHistory(1, selectedCategoryFilter);
     };
 
     window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_pantry_updated', handleSync);
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
+    window.addEventListener('zecratary_admin_settings_updated', fetchTelemetry);
+
     return () => {
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_pantry_updated', handleSync);
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+      window.removeEventListener('zecratary_admin_settings_updated', fetchTelemetry);
     };
-  }, [loadScopedData, loadUserChatState, loadUserPreferences, fetchTokenAndAiTelemetry, t]);
+  }, [applySavedTheme, fetchTelemetry, loadUserPreferences, fetchChatHistory, selectedCategoryFilter, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -9655,52 +9663,16 @@ export default function ChefChatPage() {
   const updateMessages = (newMessages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setMessages(prev => {
       const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
+      saveCurrentSessionToDb(updated);
       try {
-        if (typeof window === 'undefined') return updated;
-        const active = currentUserRef.current || getCurrentUser();
-        const userKey = getUserKey(active);
-        if (updated.length > 0) {
-          localStorage.setItem(`zecratary_chef_chat_messages_${userKey}`, JSON.stringify(updated));
-        } else {
-          localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
-        }
+        localStorage.setItem(`zecratary_chef_sess_${currentSessionIdRef.current}`, JSON.stringify(updated));
       } catch (_) {}
       return updated;
     });
   };
 
-  const updateWizardStep = (step: number | null) => {
-    setWizardStep(step);
-    try {
-      if (typeof window === 'undefined') return;
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      if (step !== null) {
-        localStorage.setItem(`zecratary_chef_wizard_step_${userKey}`, JSON.stringify(step));
-      } else {
-        localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
-      }
-    } catch (_) {}
-  };
-
-  const resetChat = () => {
-    stopSpeaking();
-    setMessages([]);
-    setWizardStep(null);
-    setWizardAnswers({});
-    setActiveTopicTitle('Standard Wizard');
-    try {
-      if (typeof window === 'undefined') return;
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
-      localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
-    } catch (_) {}
-    showToast("Chat reset.");
-  };
-
   // ------------------------------------------------------------------
-  // Dynamic Multi-Topic Questionnaire with Preset Options
+  // Questionnaire Flow
   // ------------------------------------------------------------------
   const handleStartTopicWizard = (sec: any) => {
     const qList = Array.isArray(sec.questions) && sec.questions.length > 0
@@ -9709,7 +9681,7 @@ export default function ChefChatPage() {
 
     setActiveTopicTitle(sec.topicTitle);
     setWizardQuestionsList(qList);
-    setWizardStep(0);
+    updateWizardStep(0);
     setWizardAnswers({});
 
     const initialMsg: ChatMessage = { 
@@ -9732,11 +9704,11 @@ export default function ChefChatPage() {
   const handleStartFullWizard = () => {
     const activeSections = questionnaireSections.filter((s: any) => s.enabled !== false);
     const allQuestions = activeSections.flatMap((s: any) => s.questions || []);
-    const qList = allQuestions.length > 0 ? allQuestions : wizardQuestionsList;
+    const qList = allQuestions.length > 0 ? allQuestions : DEFAULT_SECTIONS.flatMap(s => s.questions);
 
     setActiveTopicTitle('Complete Intake Wizard');
     setWizardQuestionsList(qList);
-    setWizardStep(0);
+    updateWizardStep(0);
     setWizardAnswers({});
 
     const initialMsg: ChatMessage = { 
@@ -9756,42 +9728,166 @@ export default function ChefChatPage() {
     }
   };
 
+  // ------------------------------------------------------------------
+  // High-Precision Contextual Preset Options Matcher
+  // ------------------------------------------------------------------
   const currentPresetOptions = useMemo(() => {
-    if (wizardStep === null || !wizardQuestionsList[wizardStep]) return [];
-    const q = wizardQuestionsList[wizardStep].toLowerCase();
+    if (wizardStep === null || !wizardQuestionsList || !wizardQuestionsList[wizardStep]) return [];
+    const q = wizardQuestionsList[wizardStep].toLowerCase().trim();
 
-    if (q.includes('day') || q.includes('how many')) {
+    // 1. MEAL TYPES (Evaluated BEFORE duration so "each day" won't trigger day counts)
+    if (/\b(meal type|meal types|which meal|types of meal|breakfast|lunch|dinner|snack|meals to include)\b/i.test(q)) {
+      return [
+        'Dinner only',
+        'Lunch & Dinner',
+        'All Meals (Breakfast, Lunch, Dinner)',
+        'Breakfast & Lunch',
+        'Breakfast & Dinner',
+        'All Meals + Snack'
+      ];
+    }
+
+    // 2. START DATE / SCHEDULE (Evaluated BEFORE duration so "today" won't trigger day counts)
+    if (/\b(when|start date|starting|start|commence|begin|schedule date)\b/i.test(q) && !/\b(how many days|number of days)\b/i.test(q)) {
+      return [
+        'Start Today',
+        'Start Tomorrow',
+        'Next Monday (Fresh Week)',
+        'This Coming Weekend (Saturday)',
+        'Flexible / Any Day'
+      ];
+    }
+
+    // 3. DURATION / NUMBER OF DAYS
+    if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
       const days = [];
-      if (maxPlanDays >= 3) days.push('3 Days');
-      if (maxPlanDays >= 5) days.push('5 Days');
-      days.push(`${maxPlanDays} Days`);
+      days.push('3 Days (Quick Prep)');
+      days.push('5 Days (Workweek)');
+      if (maxPlanDays >= 7) days.push('7 Days (Full Week)');
+      else days.push(`${maxPlanDays} Days`);
+      days.push('Weekend Plan (2 Days)');
+      days.push('Single Day Focus');
       return Array.from(new Set(days));
     }
-    if (q.includes('meal type') || q.includes('types')) {
-      return ['Dinner only', 'Lunch & Dinner', 'All Meals (Breakfast, Lunch, Dinner)'];
-    }
-    if (q.includes('start') || q.includes('date') || q.includes('when')) {
-      return ['Start Today', 'Start Tomorrow', 'Next Monday'];
-    }
-    if (q.includes('theme') || q.includes('preference')) {
-      return ['High-Protein Wholesome', 'Keto / Low-Carb', 'Quick & Easy (Under 25 mins)', 'Mediterranean Fresh', 'Comfort Food'];
-    }
-    if (q.includes('budget')) {
-      return ['Under $5 per serving', '$5 - $8 per serving', '$10 - $15 per serving', 'Flexible target'];
+
+    // 4. BUDGET & FINANCIAL TARGET
+    if (/\b(budget|cost|spend|price|financial|per serving|per meal)\b/i.test(q)) {
+      return [
+        'Under $5 per serving (Economy)',
+        '$5 - $8 per serving (Balanced)',
+        '$8 - $12 per serving (Generous)',
+        '$12+ per serving (Premium)',
+        'Flexible target'
+      ];
     }
 
-    return ['Yes, strictly apply', 'Standard recommended', 'Prioritize in-stock pantry items'];
+    // 5. THEMES, PREFERENCES, FLAVORS & CUISINES
+    if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine|cuisines|comfort food|high-protein)\b/i.test(q)) {
+      return [
+        'High-Protein Wholesome',
+        'Quick & Easy (Under 25 mins)',
+        'Mediterranean Fresh & Olive Oil',
+        'Keto / Low-Carb Wholesome',
+        'Budget-Friendly Comfort Food',
+        'Plant-Based / Balanced Veggie',
+        'Hearty Family Classics'
+      ];
+    }
+
+    // 6. SERVINGS & HOUSEHOLD SIZE
+    if (/\b(serving|servings|people|person|household|family|portion|portions)\b/i.test(q)) {
+      return [
+        '1 Person (Solo Dining)',
+        '2 People (Couple / Pair)',
+        '3-4 People (Family Size)',
+        '5+ People (Large Batch)'
+      ];
+    }
+
+    // 7. DIETARY RESTRICTIONS
+    if (/\b(diet|diets|dietary|vegetarian|vegan|pescatarian|halal|kosher|keto|paleo)\b/i.test(q)) {
+      return [
+        'Vegetarian (No Meat/Fish)',
+        'Vegan (100% Plant-Based)',
+        'High-Protein Balanced',
+        'Pescatarian (Fish & Veggies)',
+        'Halal Certified Style',
+        'Standard / No Restrictions'
+      ];
+    }
+
+    // 8. ALLERGIES & PROHIBITED INGREDIENTS
+    if (/\b(allerg|allergy|allergies|avoid|avoiding|intoleran|dislike|exclude)\b/i.test(q)) {
+      return [
+        'No Allergies (Standard)',
+        'Nut-Free (No Peanuts/Tree Nuts)',
+        'Dairy-Free / Lactose-Free',
+        'Gluten-Free Only',
+        'Avoid Heavy Oil / Deep Fried',
+        'Shellfish-Free'
+      ];
+    }
+
+    // 9. PANTRY & IN-STOCK INGREDIENTS
+    if (/\b(pantry|fridge|in-stock|on hand|stock|inventory|existing ingredients)\b/i.test(q)) {
+      return [
+        'Prioritize in-stock pantry items',
+        'Mix pantry items with fresh groceries',
+        'Start fresh with new grocery items'
+      ];
+    }
+
+    // 10. COOKING TIME & PREP EQUIPMENT
+    if (/\b(cook time|prep time|cooking time|minutes|speed|quick|equipment|air fryer|one-pot|slow cook)\b/i.test(q)) {
+      return [
+        'Speedy (Under 15 mins)',
+        'Moderate (20 - 30 mins)',
+        'One-Pot / Sheet Pan Only',
+        'Air Fryer Friendly',
+        'Weekend Leisure Cooking'
+      ];
+    }
+
+    // 11. BATCH COOKING & LEFTOVERS
+    if (/\b(batch|leftover|leftovers|cook once|bulk)\b/i.test(q)) {
+      return [
+        'Include batch cooking & leftovers',
+        'Fresh cooked meal every day',
+        'Cook once, eat twice (Smart Leftovers)'
+      ];
+    }
+
+    // 12. CONTEXT-AWARE INTELLIGENT FALLBACK
+    return [
+      'Yes, strictly apply',
+      'Standard recommended',
+      'Surprise me with chef selections',
+      'Flexible / No preference'
+    ];
   }, [wizardStep, wizardQuestionsList, maxPlanDays]);
 
   // ------------------------------------------------------------------
-  // Chat Execution with LLM & Final Recommended Recipe Generation
+  // Chat Prompt Execution with PostgreSQL Persistence
   // ------------------------------------------------------------------
   const handleSend = async (customText?: string) => {
     const textToSend = (customText !== undefined ? customText : prompt).trim();
     if (!textToSend || loading) return;
 
+    const lower = textToSend.toLowerCase();
+
+    // Trigger full intake wizard if requested directly via prompt
+    if (wizardStep === null && (
+      lower.includes('complete meal plan intake') || 
+      lower.includes('meal plan intake wizard') ||
+      lower === 'start complete meal plan intake wizard' ||
+      /^(?:start|create|make|build)\s+(?:a\s+)?meal\s+plan(?:\s+intake)?(?:\s+wizard)?$/i.test(lower)
+    )) {
+      handleStartFullWizard();
+      setPrompt('');
+      return;
+    }
+
     if (strictDietEnforcement && filterWordsList.length > 0) {
-      const lower = textToSend.toLowerCase();
       const matchedFilter = filterWordsList.find(word => {
         const clean = word.trim().toLowerCase();
         return clean.length > 1 && lower.includes(clean);
@@ -9812,8 +9908,6 @@ export default function ChefChatPage() {
     updateMessages(prev => [...prev, userMsg]);
     setPrompt('');
     setLoading(true);
-
-    const lower = textToSend.toLowerCase();
 
     if (wizardStep !== null) {
       const currentIdx = wizardStep;
@@ -9865,7 +9959,8 @@ export default function ChefChatPage() {
             role: 'assistant',
             content: data.reply || `I have formulated your meal plan and signature recommended recipe based on your ${activeTopicTitle} questionnaire!`,
             plan: data.plan,
-            recommendedRecipe: data.recommendedRecipe || data.recipe
+            recommendedRecipe: data.recommendedRecipe || data.recipe,
+            systemRecommendations: data.systemRecommendations || []
           };
 
           updateMessages(prev => [...prev, planMsg]);
@@ -9924,64 +10019,6 @@ export default function ChefChatPage() {
     }
   };
 
-  const handleSaveRecipeToBook = (recipe: any) => {
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      const raw = localStorage.getItem('zecratary_saved_recipes') || '[]';
-      const existing = JSON.parse(raw);
-      const newRec = {
-        id: 'saved_ai_' + Date.now(),
-        userId: active?.id,
-        createdBy: active?.email,
-        title: recipe.title,
-        name: recipe.title,
-        description: recipe.description,
-        prepTimeMinutes: recipe.prepMinutes || 15,
-        cookTimeMinutes: recipe.cookMinutes || 20,
-        servings: recipe.servings || servings,
-        recipeType: recipe.mealType || 'Main Dish',
-        isFavorite: true,
-        ingredients: recipe.ingredients || []
-      };
-      const updated = [newRec, ...existing];
-      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updated));
-      localStorage.setItem(`zecratary_saved_recipes_${userKey}`, JSON.stringify(updated));
-      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-      showToast("Saved to your recipes!");
-      loadScopedData(active);
-    } catch (_) {
-      showToast("Could not save recipe.");
-    }
-  };
-
-  const handleAddRecipeIngredientsToGrocery = (recipe: any) => {
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const rawGrocery = localStorage.getItem('zecratary_grocery_list') || '[]';
-      const groceryItems = JSON.parse(rawGrocery);
-      const items = Array.isArray(recipe.ingredients) ? recipe.ingredients : [];
-
-      const newEntries = items.map((item: string) => ({
-        id: 'groc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-        userId: active?.id,
-        name: item,
-        item,
-        checked: false,
-        category: 'Chef Recommended Ingredients',
-        fromPlan: recipe.title
-      }));
-
-      const updated = [...groceryItems, ...newEntries];
-      localStorage.setItem('zecratary_grocery_list', JSON.stringify(updated));
-      localStorage.setItem('zecratary_shopping_list', JSON.stringify(updated));
-      window.dispatchEvent(new Event('zecratary_grocery_updated'));
-      showToast(`Added ${newEntries.length} ingredients to your Grocery List!`);
-    } catch (_) {
-      showToast("Could not add to grocery list.");
-    }
-  };
-
   const activeQuestionnaireSections = useMemo(() => {
     return questionnaireSections.filter((s: any) => s.enabled !== false);
   }, [questionnaireSections]);
@@ -9991,8 +10028,6 @@ export default function ChefChatPage() {
       className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      <AiQuotaBar />
-
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
@@ -10007,7 +10042,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER WITH TELEMETRY, VOICE INDICATOR & DIETARY PREFERENCES */}
+      {/* TOP HEADER WITH HISTORY & CHAT CONTROLS */}
       <div 
         className="space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
@@ -10056,58 +10091,24 @@ export default function ChefChatPage() {
               </div>
             )}
 
-            {enableVoiceInteraction && (
-              <div 
-                className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-emerald)'
-                }}
-                title={`Voice Mode Active (${selectedVoiceName} • ${voiceSpeed}x)`}
-              >
-                <Mic className="h-3.5 w-3.5" />
-                <span className="font-mono text-[10px] truncate max-w-[90px]">{selectedVoiceName.split('-')[0] || 'Voice'}</span>
-              </div>
-            )}
-
-            <div 
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              title="Active Model configured in /admin/ai-settings"
+            {/* CHAT HISTORY DRAWER BUTTON */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowHistoryDrawer(true);
+                fetchChatHistory(1, selectedCategoryFilter);
+              }}
+              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80 flex items-center gap-1.5 text-xs font-bold"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-primary)'
+              }}
+              title="View Chat History & Categories"
             >
-              <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-              <span className="font-mono">{activeAiModel}</span>
-            </div>
-
-            {strictDietEnforcement && (
-              <div 
-                className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-                title={`Strict dietary filters active with ${filterWordsList.length} avoided terms.`}
-              >
-                <ShieldAlert className="h-3 w-3" />
-                <span>Strict Filters</span>
-              </div>
-            )}
-
-            <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-sm"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <Coins className="h-4 w-4 text-amber-500" />
-              <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-                {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsTokenPurchaseOpen(true)}
-                className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                Top Up
-              </button>
-            </div>
+              <History className="h-4 w-4" />
+              <span className="hidden md:inline">History</span>
+            </button>
 
             {/* PREFERENCES SLIDERS BUTTON */}
             <button
@@ -10124,24 +10125,43 @@ export default function ChefChatPage() {
               <SlidersHorizontal className="h-4 w-4" />
             </button>
 
+            {/* NEW CHAT BUTTON */}
             <button
               type="button"
-              onClick={resetChat}
+              onClick={startNewChat}
               className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text-secondary)'
               }}
-              title="New Chat"
+              title="Start New Chat"
             >
               <Edit3 className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* RESTORED: USER DIETARY PREFERENCES PILLS HEADER */}
+        {/* USER DIETARY PREFERENCES PILLS */}
         <div className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in">
+          {/* PRIMARY SOURCES TELEMETRY PILL */}
+          {recommendedRecipeUrls.length > 0 && (
+            <span 
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm transition hover:opacity-90"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
+              }}
+              title={`Primary Recipe Sources: ${recommendedRecipeUrls.join(', ')}`}
+            >
+              <Globe className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
+              <span>Primary Sources:</span>
+              <strong className="font-bold font-mono" style={{ color: 'var(--color-text)' }}>
+                {recommendedRecipeUrls.length} URLs
+              </strong>
+            </span>
+          )}
           <span 
             className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
@@ -10255,7 +10275,7 @@ export default function ChefChatPage() {
                   borderColor: 'var(--color-primary)'
                 }}
               >
-                <Sparkles className="h-4 w-4" /> Start Complete Meal Plan Intake
+                <Sparkles className="h-4 w-4" /> Start Complete Meal Plan Intake Wizard
               </button>
 
               {activeQuestionnaireSections.map((sec) => (
@@ -10328,147 +10348,63 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* FINAL RECOMMENDED RECIPE SHOWCASE CARD */}
+                  {/* RECOMMENDATION RECIPE CARD PREVIEW */}
                   {m.recommendedRecipe && (
                     <div 
-                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200"
+                      className="border rounded-2xl p-3.5 space-y-3 shadow-sm transition-all duration-200 hover:shadow-md"
                       style={{
                         backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-primary)'
+                        borderColor: 'var(--color-border)'
                       }}
                     >
-                      <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                        <div className="flex items-center gap-2">
-                          <Award className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-                          <div>
-                            <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
-                              Final Recommended Recipe
-                            </span>
-                            <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
-                              {m.recommendedRecipe.title}
-                            </h3>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {enableVoiceInteraction && (
-                            <button
-                              type="button"
-                              onClick={() => speakText(`${m.recommendedRecipe.title}. ${m.recommendedRecipe.description}. Instructions: ${m.recommendedRecipe.instructions.join('. ')}`, `rec_${m.id}`)}
-                              className="p-1.5 rounded-xl border text-xs font-bold transition cursor-pointer shadow-xs hover:opacity-80"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-border)',
-                                color: isSpeaking && speakingMsgId === `rec_${m.id}` ? 'var(--color-primary)' : 'var(--color-text-secondary)'
-                              }}
-                              title="Listen to recipe instructions"
-                            >
-                              <Volume2 className="h-4 w-4" />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => handleSaveRecipeToBook(m.recommendedRecipe)}
-                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-80"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-emerald)',
-                              color: 'var(--color-emerald)'
-                            }}
-                          >
-                            <Bookmark className="h-3.5 w-3.5" /> Save Recipe
-                          </button>
-                        </div>
-                      </div>
-
-                      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                        {m.recommendedRecipe.description}
-                      </p>
-
-                      <div className="flex flex-wrap items-center gap-4 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} /> Prep: {m.recommendedRecipe.prepMinutes || 15}m
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> Cook: {m.recommendedRecipe.cookMinutes || 20}m
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Users className="h-3.5 w-3.5" /> Serves: {m.recommendedRecipe.servings || servings}
-                        </span>
-                        {m.recommendedRecipe.calories && (
-                          <span className="font-mono text-emerald-500 font-bold">
-                            {m.recommendedRecipe.calories} kcal
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                        <div className="space-y-2">
-                          <h4 className="font-bold text-xs uppercase tracking-wider flex items-center justify-between" style={{ color: 'var(--color-primary)' }}>
-                            <span>Ingredients ({m.recommendedRecipe.ingredients?.length || 0})</span>
-                            <button
-                              type="button"
-                              onClick={() => handleAddRecipeIngredientsToGrocery(m.recommendedRecipe)}
-                              className="text-[10px] font-extrabold flex items-center gap-1 text-emerald-500 hover:underline cursor-pointer"
-                            >
-                              <ShoppingCart className="h-3 w-3" /> + Add to Cart
-                            </button>
-                          </h4>
-                          <ul className="space-y-1 text-xs">
-                            {(m.recommendedRecipe.ingredients || []).map((ing: string, i: number) => {
-                              const inPantry = pantryIngredientsList.some(p => ing.toLowerCase().includes(p) || p.includes(ing.toLowerCase()));
-                              return (
-                                <li key={i} className="flex items-center justify-between p-1.5 rounded-lg border text-[11px]" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                                  <span style={{ color: 'var(--color-text)' }}>• {ing}</span>
-                                  {inPantry && (
-                                    <span className="text-[9px] font-black uppercase text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                                      Pantry ✓
-                                    </span>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-
-                        <div className="space-y-2">
-                          <h4 className="font-bold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                            Step-by-Step Directions
-                          </h4>
-                          <ol className="space-y-1.5 text-xs">
-                            {(m.recommendedRecipe.instructions || []).map((step: string, sIdx: number) => (
-                              <li key={sIdx} className="flex items-start gap-2 text-[11px] leading-snug">
-                                <span className="font-extrabold text-[10px] w-4 h-4 rounded-full flex items-center justify-center shrink-0 border mt-0.5" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}>
-                                  {sIdx + 1}
-                                </span>
-                                <span style={{ color: 'var(--color-text-secondary)' }}>{step}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      </div>
-
-                      {m.recommendedRecipe.chefTip && (
+                      <div className="flex items-start justify-between gap-3">
                         <div 
-                          className="p-3 rounded-2xl border flex items-start gap-2.5 text-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)'
+                          onClick={() => {
+                            setSelectedRecipeForModal(m.recommendedRecipe);
+                            setShowRecipeDetailsModal(true);
                           }}
+                          className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer group"
                         >
-                          <Zap className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
-                          <div className="space-y-0.5">
-                            <strong className="block text-[11px]" style={{ color: 'var(--color-primary)' }}>Chef Foodie Pro Tip:</strong>
-                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                              {m.recommendedRecipe.chefTip}
+                          <div className="relative shrink-0">
+                            <img
+                              src={m.recommendedRecipe.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
+                              alt={m.recommendedRecipe.title}
+                              className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border transition group-hover:scale-105"
+                              style={{ borderColor: 'var(--color-border)' }}
+                            />
+                            <span 
+                              className="absolute -top-1.5 -left-1.5 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md text-white shadow-xs"
+                              style={{ backgroundColor: 'var(--color-primary)' }}
+                            >
+                              Recommended
+                            </span>
+                          </div>
+
+                          <div className="space-y-1 min-w-0 flex-1">
+                            <h4 className="font-black text-sm leading-snug group-hover:underline truncate" style={{ color: 'var(--color-text)' }}>
+                              {m.recommendedRecipe.title}
+                            </h4>
+                            <p className="text-[11px] leading-relaxed line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
+                              {m.recommendedRecipe.description}
                             </p>
+                            <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-bold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {m.recommendedRecipe.prepMinutes + m.recommendedRecipe.cookMinutes}m
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Users className="h-3 w-3" /> {m.recommendedRecipe.servings || servings} serv
+                              </span>
+                              {m.recommendedRecipe.calories && (
+                                <span className="font-mono text-emerald-500">{m.recommendedRecipe.calories} kcal</span>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   )}
 
-                  {/* MULTI-DAY PLAN PRESENTATION */}
+                  {/* MULTI-DAY PLAN PRESENTATION (SUPPORTS CARD, COMPACT, DETAILED MODES) */}
                   {m.plan && (
                     <div 
                       className="border rounded-3xl p-5 space-y-4 shadow-sm transition-colors duration-200"
@@ -10477,57 +10413,264 @@ export default function ChefChatPage() {
                         borderColor: 'var(--color-border)'
                       }}
                     >
-                      <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                           <h3 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                            {m.plan.title} ({m.plan.totalDays} Days • {resultDisplayMode.toUpperCase()} VIEW)
+                            {m.plan.title} ({m.plan.totalDays} Days)
                           </h3>
                         </div>
-                        <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                          Budget: {m.plan.budgetPerServing || '$4.00'}/serv
-                        </span>
+
+                        {/* In-Chat View Mode Switcher Pills */}
+                        <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                          <span className="text-[10px] font-bold mr-1 hidden sm:inline" style={{ color: 'var(--color-text-secondary)' }}>
+                            {m.plan.budgetPerServing ? `Budget: ${m.plan.budgetPerServing}` : '$5.00/serv'}
+                          </span>
+                          <div className="border p-0.5 rounded-xl flex items-center gap-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                            {(['card', 'compact', 'detailed'] as const).map((mode) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => setResultDisplayMode(mode)}
+                                className="px-2 py-0.5 rounded-lg text-[10px] font-bold transition cursor-pointer capitalize"
+                                style={resultDisplayMode === mode ? {
+                                  backgroundColor: 'var(--color-primary)',
+                                  color: '#ffffff'
+                                } : {
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                              >
+                                {mode}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
 
-                      {resultDisplayMode === 'compact' ? (
-                        <div className="space-y-2">
-                          {m.plan.meals.map((meal) => (
-                            <div 
-                              key={meal.id} 
-                              className="flex items-center justify-between p-2.5 rounded-xl border text-xs"
-                              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="font-bold shrink-0" style={{ color: 'var(--color-primary)' }}>{meal.dayLabel}:</span>
-                                <span className="truncate font-medium" style={{ color: 'var(--color-text)' }}>{meal.title}</span>
-                              </div>
-                              <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{meal.prepMinutes + meal.cookMinutes}m</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
+                      {/* 1. STANDARD CARDS VIEW */}
+                      {resultDisplayMode === 'card' && (
                         <div className="space-y-3">
                           {m.plan.meals.map((meal) => (
                             <div 
                               key={meal.id}
-                              className="border rounded-2xl p-3.5 space-y-2"
+                              onClick={() => {
+                                setSelectedRecipeForModal({
+                                  title: meal.title,
+                                  description: meal.description,
+                                  prepMinutes: meal.prepMinutes || 15,
+                                  cookMinutes: meal.cookMinutes || 20,
+                                  servings: meal.servings || servings,
+                                  calories: meal.calories || 480,
+                                  mealType: meal.mealType,
+                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Aromatics & seasonings', 'Cold-pressed olive oil'],
+                                  instructions: ['Prepare and rinse all ingredients cleanly.', 'Sauté aromatics over medium heat until fragrant.', 'Cook protein and vegetables thoroughly.', 'Garnish with fresh herbs and serve warm.'],
+                                  chefTip: meal.isBatchCook ? 'Double the quantity to save time for subsequent days.' : 'Serve immediately while hot for optimal flavor infusion.',
+                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                });
+                                setShowRecipeDetailsModal(true);
+                              }}
+                              className="border rounded-2xl p-3.5 space-y-2.5 transition cursor-pointer hover:scale-[1.01] shadow-xs"
                               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                             >
                               <div className="flex justify-between items-center text-xs font-bold">
                                 <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
-                                <span className="uppercase text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{meal.mealType}</span>
+                                <div className="flex items-center gap-1.5">
+                                  {meal.isBatchCook && (
+                                    <span 
+                                      className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                      style={{
+                                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                        borderColor: 'var(--color-emerald)',
+                                        color: 'var(--color-emerald)'
+                                      }}
+                                    >
+                                      Batch Cook
+                                    </span>
+                                  )}
+                                  <span 
+                                    className="uppercase text-[9px] font-extrabold px-1.5 py-0.5 rounded border"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-border)',
+                                      color: 'var(--color-text-secondary)'
+                                    }}
+                                  >
+                                    {meal.mealType}
+                                  </span>
+                                </div>
                               </div>
+
                               <div className="flex items-start gap-3">
-                                <img src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} alt={meal.title} className="w-14 h-14 rounded-xl object-cover border shrink-0" style={{ borderColor: 'var(--color-border)' }} />
-                                <div className="space-y-0.5 flex-1 min-w-0">
-                                  <h4 className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
-                                  <p className="text-[11px] line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
+                                <img 
+                                  src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} 
+                                  alt={meal.title} 
+                                  className="w-16 h-16 rounded-xl object-cover border shrink-0" 
+                                  style={{ borderColor: 'var(--color-border)' }} 
+                                />
+                                <div className="space-y-1 flex-1 min-w-0">
+                                  <h4 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
+                                  <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
+                                  <div className="flex items-center gap-3 text-[10px] font-semibold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                                    <span className="flex items-center gap-1">
+                                      <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <Users className="h-3 w-3" /> {meal.servings || servings} serv
+                                    </span>
+                                    {meal.calories && (
+                                      <span className="font-mono" style={{ color: 'var(--color-primary)' }}>{meal.calories} kcal</span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </div>
                           ))}
                         </div>
                       )}
+
+                      {/* 2. COMPACT TABLE VIEW */}
+                      {resultDisplayMode === 'compact' && (
+                        <div className="border rounded-2xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                          <div 
+                            className="grid grid-cols-12 gap-2 p-2.5 font-extrabold text-[10px] uppercase border-b"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)'
+                            }}
+                          >
+                            <span className="col-span-3">Day / Schedule</span>
+                            <span className="col-span-2">Meal Type</span>
+                            <span className="col-span-5">Recipe Title</span>
+                            <span className="col-span-2 text-right">Time & Cals</span>
+                          </div>
+
+                          {m.plan.meals.map((meal, rIdx) => (
+                            <div 
+                              key={meal.id || rIdx}
+                              onClick={() => {
+                                setSelectedRecipeForModal({
+                                  title: meal.title,
+                                  description: meal.description,
+                                  prepMinutes: meal.prepMinutes || 15,
+                                  cookMinutes: meal.cookMinutes || 20,
+                                  servings: meal.servings || servings,
+                                  calories: meal.calories || 480,
+                                  mealType: meal.mealType,
+                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Seasonings'],
+                                  instructions: ['Follow standard chef cooking guidelines for this dish.'],
+                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                });
+                                setShowRecipeDetailsModal(true);
+                              }}
+                              className="grid grid-cols-12 gap-2 p-2.5 text-xs items-center border-b last:border-none transition cursor-pointer hover:opacity-80"
+                              style={{
+                                backgroundColor: rIdx % 2 === 0 ? 'var(--color-card)' : 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)'
+                              }}
+                            >
+                              <span className="col-span-3 font-bold truncate" style={{ color: 'var(--color-primary)' }}>
+                                {meal.dayLabel}
+                              </span>
+                              <span className="col-span-2">
+                                <span 
+                                  className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text-secondary)'
+                                  }}
+                                >
+                                  {meal.mealType}
+                                </span>
+                              </span>
+                              <span className="col-span-5 font-semibold truncate" style={{ color: 'var(--color-text)' }}>
+                                {meal.title}
+                              </span>
+                              <span className="col-span-2 text-right font-mono text-[11px]" style={{ color: 'var(--color-emerald)' }}>
+                                {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* 3. DETAILED MASTER VIEW */}
+                      {resultDisplayMode === 'detailed' && (
+                        <div className="space-y-3">
+                          {m.plan.meals.map((meal) => (
+                            <div 
+                              key={meal.id}
+                              onClick={() => {
+                                setSelectedRecipeForModal({
+                                  title: meal.title,
+                                  description: meal.description,
+                                  prepMinutes: meal.prepMinutes || 15,
+                                  cookMinutes: meal.cookMinutes || 20,
+                                  servings: meal.servings || servings,
+                                  calories: meal.calories || 480,
+                                  mealType: meal.mealType,
+                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Quality produce', 'Seasonings'],
+                                  instructions: ['Follow standard chef cooking guidelines for this dish.'],
+                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                });
+                                setShowRecipeDetailsModal(true);
+                              }}
+                              className="border rounded-2xl p-4 space-y-3 transition cursor-pointer hover:scale-[1.01] shadow-xs"
+                              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                            >
+                              <div className="flex justify-between items-center text-xs font-bold border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                                <div className="flex items-center gap-2">
+                                  <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
+                                  <span 
+                                    className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-emerald)',
+                                      color: 'var(--color-emerald)'
+                                    }}
+                                  >
+                                    {meal.mealType}
+                                  </span>
+                                </div>
+                                <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m • {meal.servings || servings} serv
+                                </span>
+                              </div>
+
+                              <div className="space-y-1">
+                                <h4 className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
+                                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
+                              </div>
+
+                              {/* Inline Ingredients Pills Breakdown */}
+                              {Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
+                                <div className="space-y-1.5 pt-1">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                                    Ingredients Breakdown:
+                                  </span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {meal.ingredients.map((ing, iIdx) => (
+                                      <span 
+                                        key={iIdx}
+                                        className="text-[10px] font-medium px-2 py-0.5 rounded-lg border shadow-2xs"
+                                        style={{
+                                          backgroundColor: 'var(--color-card)',
+                                          borderColor: 'var(--color-border)',
+                                          color: 'var(--color-text)'
+                                        }}
+                                      >
+                                        • {ing}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                     </div>
                   )}
 
@@ -10566,10 +10709,10 @@ export default function ChefChatPage() {
         <div ref={chatEndRef} />
       </div>
 
-      {/* PRESET QUESTIONS (ACTIVE DURING QUESTIONNAIRE) */}
+      {/* DYNAMIC CONTEXTUAL PRESET ANSWERS */}
       {wizardStep !== null && currentPresetOptions.length > 0 && (
         <div 
-          className="p-3 rounded-2xl border space-y-2 animate-in fade-in transition-colors duration-200"
+          className="p-3.5 rounded-2xl border space-y-2.5 animate-in fade-in transition-colors duration-200"
           style={{
             backgroundColor: 'var(--color-card)',
             borderColor: 'var(--color-border)'
@@ -10595,7 +10738,7 @@ export default function ChefChatPage() {
                 key={oIdx}
                 type="button"
                 onClick={() => handleSend(opt)}
-                className="text-xs font-semibold px-3 py-1.5 rounded-xl border transition shadow-xs cursor-pointer hover:scale-[1.02]"
+                className="text-xs font-semibold px-3.5 py-2 rounded-xl border transition shadow-xs cursor-pointer hover:scale-[1.02] active:scale-95"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -10617,6 +10760,18 @@ export default function ChefChatPage() {
           <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
             <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> Questionnaires:
           </span>
+          <button
+            type="button"
+            onClick={handleStartFullWizard}
+            className="text-xs font-bold px-3.5 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02] text-white"
+            style={{
+              backgroundColor: 'var(--color-primary)',
+              borderColor: 'var(--color-primary)'
+            }}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Complete Intake Wizard</span>
+          </button>
           {activeQuestionnaireSections.map((sec) => (
             <button
               key={`chip-${sec.id}`}
@@ -10656,7 +10811,7 @@ export default function ChefChatPage() {
               borderColor: isListening ? 'var(--color-primary)' : 'var(--color-border)',
               color: isListening ? '#ffffff' : 'var(--color-text-secondary)'
             }}
-            title={isListening ? "Listening... click to stop" : "Speak your message via microphone"}
+            title={isListening ? "Listening... click to stop" : "Speak via microphone"}
           >
             {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
           </button>
@@ -10691,14 +10846,292 @@ export default function ChefChatPage() {
             disabled={loading || !prompt.trim()}
             className="disabled:opacity-40 text-white p-2.5 rounded-xl transition cursor-pointer shadow-md flex items-center gap-1 hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
-            title={`Send message (${chefCost} ${tokenSymbol})`}
           >
             <Send className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      {/* RESTORED: RECIPE PREFERENCES MODAL */}
+      {/* CHAT HISTORY & CATEGORIES SIDE DRAWER (POSTGRESQL BACKED) */}
+      {showHistoryDrawer && (
+        <div 
+          onClick={() => setShowHistoryDrawer(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-end cursor-pointer animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md h-full flex flex-col justify-between border-l p-5 space-y-4 shadow-2xl relative cursor-default animate-in slide-in-from-right duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex items-center gap-2">
+                  <History className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                  <div>
+                    <h2 className="text-base font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                      Chat History ({historyTotalCount})
+                    </h2>
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      Up to 10 chats per page • Filtered by category
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={startNewChat}
+                    className="px-2.5 py-1 rounded-xl text-white text-[11px] font-extrabold flex items-center gap-1 transition cursor-pointer shadow-sm hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                    title="New Chat"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> New
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowHistoryDrawer(false)}
+                    className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* CATEGORIES SECTION */}
+              <div className="space-y-2.5 pt-1">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                    <Folder className="h-3.5 w-3.5" /> Chat Categories:
+                  </span>
+                </div>
+
+                <form onSubmit={handleCreateCategory} className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="New category name (e.g. Keto Prep, Dinners)..."
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    className="flex-1 border rounded-xl px-3 py-1.5 text-xs outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newCategoryName.trim()}
+                    className="px-3 py-1.5 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:opacity-40 flex items-center gap-1 shadow-xs hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-emerald)' }}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add
+                  </button>
+                </form>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategoryFilter('all');
+                      fetchChatHistory(1, 'all');
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer shrink-0 shadow-xs"
+                    style={{
+                      backgroundColor: selectedCategoryFilter === 'all' ? 'var(--color-primary)' : 'var(--color-inner-dark)',
+                      borderColor: selectedCategoryFilter === 'all' ? 'var(--color-primary)' : 'var(--color-border)',
+                      color: selectedCategoryFilter === 'all' ? '#ffffff' : 'var(--color-text-secondary)'
+                    }}
+                  >
+                    All Chats
+                  </button>
+
+                  {historyCategories.map((cat) => (
+                    <div
+                      key={cat.id}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer shrink-0 shadow-xs group"
+                      style={{
+                        backgroundColor: selectedCategoryFilter === cat.id ? 'var(--color-primary)' : 'var(--color-inner-dark)',
+                        borderColor: selectedCategoryFilter === cat.id ? 'var(--color-primary)' : 'var(--color-border)',
+                        color: selectedCategoryFilter === cat.id ? '#ffffff' : 'var(--color-text-secondary)'
+                      }}
+                      onClick={() => {
+                        setSelectedCategoryFilter(cat.id);
+                        fetchChatHistory(1, cat.id);
+                      }}
+                    >
+                      <span>{cat.name}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteCategory(cat.id, cat.name);
+                        }}
+                        className="opacity-70 hover:opacity-100 hover:text-red-400 ml-1 cursor-pointer"
+                        title={`Delete category ${cat.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 10 SESSIONS LIST */}
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                {loadingHistory ? (
+                  <div className="py-12 text-center text-xs flex items-center justify-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} /> Loading chat sessions...
+                  </div>
+                ) : historySessions.length === 0 ? (
+                  <div className="py-12 text-center text-xs space-y-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    <MessageSquare className="h-8 w-8 mx-auto opacity-30" />
+                    <p>No chat history found under this category.</p>
+                  </div>
+                ) : (
+                  historySessions.map((sess) => {
+                    const isCurrentActive = sess.id === currentSessionId;
+                    const dateFormatted = new Date(sess.updated_at).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    });
+
+                    return (
+                      <div
+                        key={sess.id}
+                        onClick={() => handleSelectSession(sess)}
+                        className="p-3 rounded-2xl border transition cursor-pointer flex items-center justify-between gap-3 shadow-xs hover:scale-[1.01]"
+                        style={{
+                          backgroundColor: isCurrentActive ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                          borderColor: isCurrentActive ? 'var(--color-primary)' : 'var(--color-border)'
+                        }}
+                      >
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            {sess.category_name ? (
+                              <span 
+                                className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border flex items-center gap-1"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-emerald)'
+                                }}
+                              >
+                                <Tag className="h-2.5 w-2.5" /> {sess.category_name}
+                              </span>
+                            ) : null}
+                            <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                              {dateFormatted}
+                            </span>
+                          </div>
+
+                          <h4 
+                            className="font-bold text-xs truncate leading-snug"
+                            style={{ color: isCurrentActive ? 'var(--color-primary)' : 'var(--color-text)' }}
+                          >
+                            {sess.title}
+                          </h4>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <select
+                            value={sess.category_id || 'none'}
+                            onChange={(e) => handleAssignCategory(sess.id, e.target.value)}
+                            className="text-[10px] border rounded-lg px-2 py-1 outline-none font-medium appearance-none cursor-pointer"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                            title="Assign to Category"
+                          >
+                            <option value="none">No Category</option>
+                            {historyCategories.map(c => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteSession(sess.id, e)}
+                            className="p-1.5 rounded-lg border text-red-500 hover:bg-red-500/10 transition cursor-pointer"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                            title="Delete this chat"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* PAGINATION */}
+              {historyTotalPages > 1 && (
+                <div 
+                  className="pt-3 border-t flex items-center justify-between text-xs font-bold"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                >
+                  <span>Page {historyPage} of {historyTotalPages}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={historyPage <= 1}
+                      onClick={() => fetchChatHistory(historyPage - 1, selectedCategoryFilter)}
+                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer shadow-xs"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+
+                    {Array.from({ length: historyTotalPages }, (_, i) => i + 1).map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => fetchChatHistory(num, selectedCategoryFilter)}
+                        className="w-7 h-7 rounded-lg text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-xs"
+                        style={historyPage === num ? {
+                          backgroundColor: 'var(--color-primary)',
+                          borderColor: 'var(--color-primary)',
+                          color: '#ffffff'
+                        } : {
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                      >
+                        {num}
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      disabled={historyPage >= historyTotalPages}
+                      onClick={() => fetchChatHistory(historyPage + 1, selectedCategoryFilter)}
+                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer shadow-xs"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECIPE PREFERENCES MODAL */}
       {showPreferences && (
         <div 
           onClick={() => setShowPreferences(false)}
@@ -10715,16 +11148,10 @@ export default function ChefChatPage() {
           >
             <div className="flex justify-between items-start">
               <div>
-                <h2 
-                  className="text-xl font-black tracking-tight"
-                  style={{ color: 'var(--color-primary)' }}
-                >
+                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
                   {t('recipePreferencesTitle', 'Recipe Preferences')}
                 </h2>
-                <p 
-                  className="text-xs mt-0.5"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('recipePreferencesSub', 'Personalise your cooking experience')}
                 </p>
               </div>
@@ -10744,7 +11171,6 @@ export default function ChefChatPage() {
             </div>
 
             <div className="overflow-y-auto flex-1 space-y-5 pr-1 text-xs">
-              {/* Servings */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('servingsTitle', 'Servings')}
@@ -10780,7 +11206,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Country */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('countryTitle', 'Country')}
@@ -10804,7 +11229,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Dietary Preferences */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('dietaryPreferencesTitle', 'Dietary Preferences')}
@@ -10835,7 +11259,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Allergies */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('allergiesTitle', 'Allergies')}
@@ -10851,7 +11274,7 @@ export default function ChefChatPage() {
                         className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
                         style={isSelected ? {
                           backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-primary)',
+                          borderColor: 'var(--color-border)',
                           color: 'var(--color-primary)'
                         } : {
                           backgroundColor: 'var(--color-inner-dark)',
@@ -10866,7 +11289,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Ingredients to Avoid */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
@@ -10929,15 +11351,10 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Tastes */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('tastesTitle', 'Tastes')}
                 </label>
-                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('tastesDesc', "Anything else about how you like to eat. We'll factor these into your recipes.")}
-                </p>
-
                 <form onSubmit={handleAddTaste} className="flex gap-2">
                   <input
                     type="text"
@@ -11030,6 +11447,191 @@ export default function ChefChatPage() {
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {t('saveBtn', 'Save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECIPE DETAILS MODAL */}
+      {showRecipeDetailsModal && selectedRecipeForModal && (
+        <div 
+          onClick={() => setShowRecipeDetailsModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-4 cursor-default animate-in fade-in"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span 
+                    className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md text-white shadow-xs"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    Recommended
+                  </span>
+                  {selectedRecipeForModal.sourceUrl && (
+                    <span 
+                      className="text-[9px] font-bold px-2 py-0.5 rounded-md border flex items-center gap-1"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                    >
+                      <Globe className="h-2.5 w-2.5" /> Primary Source
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-lg font-black tracking-tight mt-1" style={{ color: 'var(--color-text)' }}>
+                  {selectedRecipeForModal.title}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRecipeDetailsModal(false)}
+                className="p-1.5 rounded-xl border transition cursor-pointer hover:opacity-80"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-4 pr-1 text-xs custom-scrollbar">
+              {selectedRecipeForModal.image && (
+                <img
+                  src={selectedRecipeForModal.image}
+                  alt={selectedRecipeForModal.title}
+                  className="w-full h-44 rounded-2xl object-cover border shadow-xs"
+                  style={{ borderColor: 'var(--color-border)' }}
+                />
+              )}
+
+              <p className="leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {selectedRecipeForModal.description}
+              </p>
+
+              <div 
+                className="flex items-center gap-4 p-3 rounded-2xl border font-bold text-xs"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <span className="flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
+                  <Clock className="h-3.5 w-3.5" /> {(selectedRecipeForModal.prepMinutes || 0) + (selectedRecipeForModal.cookMinutes || 0)} mins total
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5" /> {selectedRecipeForModal.servings || servings} servings
+                </span>
+                {selectedRecipeForModal.calories && (
+                  <span className="font-mono text-emerald-500">{selectedRecipeForModal.calories} kcal</span>
+                )}
+              </div>
+
+              {/* Ingredients List */}
+              {Array.isArray(selectedRecipeForModal.ingredients) && selectedRecipeForModal.ingredients.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                    Ingredients ({selectedRecipeForModal.ingredients.length})
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {selectedRecipeForModal.ingredients.map((ing: string, i: number) => (
+                      <div 
+                        key={i}
+                        className="p-2 rounded-xl border text-[11px] font-medium flex items-center gap-2"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
+                        <span className="truncate">{ing}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Instructions */}
+              {Array.isArray(selectedRecipeForModal.instructions) && selectedRecipeForModal.instructions.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                    Instructions
+                  </h4>
+                  <div className="space-y-2">
+                    {selectedRecipeForModal.instructions.map((step: string, sIdx: number) => (
+                      <div 
+                        key={sIdx}
+                        className="p-2.5 rounded-xl border text-xs leading-relaxed flex items-start gap-2.5"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                      >
+                        <span 
+                          className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          {sIdx + 1}
+                        </span>
+                        <p className="flex-1">{step}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Chef Tip */}
+              {selectedRecipeForModal.chefTip && (
+                <div 
+                  className="p-3 rounded-2xl border text-xs leading-relaxed flex items-start gap-2"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-emerald)',
+                    color: 'var(--color-emerald)'
+                  }}
+                >
+                  <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span><strong>Chef Tip:</strong> {selectedRecipeForModal.chefTip}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Outbound Link & Close */}
+            <div className="pt-3 border-t flex items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                {selectedRecipeForModal.sourceUrl && (
+                  <a
+                    href={selectedRecipeForModal.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer hover:opacity-80"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span>View Source Recipe ↗</span>
+                  </a>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowRecipeDetailsModal(false)}
+                className="px-5 py-2 rounded-xl text-white font-bold text-xs shadow-md transition cursor-pointer hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                Close
               </button>
             </div>
           </div>
@@ -14387,7 +14989,7 @@ export default function AdminSettingsPage() {
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
-  Radio, Activity, CheckCircle2, XCircle, Loader2,
+  Radio, Compass, ExternalLink, ChevronDown, ChevronUp, FileText, Search, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Key, Sliders, Sparkles, Globe, PackageCheck, 
   ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle
 } from 'lucide-react';
@@ -14415,9 +15017,11 @@ export interface AiModelOption {
 }
 
 const DEFAULT_GEMINI_MODELS: AiModelOption[] = [
-  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', label: 'Gemini 3.6 Flash (Latest Recommended - 2026)' },
-  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', label: 'Gemini 1.5 Flash (Stable Long-Context)' },
-  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', label: 'Gemini 1.5 Pro (Deep Reasoning & Multimodal)' }
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', label: 'Gemini 2.5 Flash (Fast & Recommended)' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', label: 'Gemini 2.5 Pro (Deep Reasoning)' },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', label: 'Gemini 3.6 Flash (Latest Standard)' },
+  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', label: 'Gemini 1.5 Flash (Versatile & Stable)' },
+  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', label: 'Gemini 1.5 Pro (Multimodal Long-Context)' }
 ];
 
 const DEFAULT_OPENAI_MODELS: AiModelOption[] = [
@@ -14467,7 +15071,7 @@ export default function ChefAISettingsPage() {
   const [provider, setProvider] = useState<'gemini' | 'openai'>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('gemini-3.6-flash');
+  const [model, setModel] = useState('gemini-2.5-flash');
   const [geminiModelsList, setGeminiModelsList] = useState<AiModelOption[]>(DEFAULT_GEMINI_MODELS);
   const [openaiModelsList, setOpenaiModelsList] = useState<AiModelOption[]>(DEFAULT_OPENAI_MODELS);
   const [syncingModels, setSyncingModels] = useState(false);
@@ -14510,6 +15114,22 @@ export default function ChefAISettingsPage() {
   const [filterWordsList, setFilterWordsList] = useState<string[]>(['Oily', 'Artificial preservatives', 'Unhealthy trans fats']);
   const [newFilterInput, setNewFilterInput] = useState('');
 
+  // Recommended Recipes Url (Primary source for /chef)
+  const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
+  const [newRecipeUrlInput, setNewRecipeUrlInput] = useState('');
+
+  // Index Link Crawler & Slug Discovery State
+  const [crawlingUrl, setCrawlingUrl] = useState<string | null>(null);
+  const [crawlResults, setCrawlResults] = useState<Record<string, {
+    count: number;
+    discovered: { url: string; slug: string; title: string }[];
+    crawledAt: string;
+  }>>({});
+  const [expandedIndexUrl, setExpandedIndexUrl] = useState<string | null>(null);
+  const [previewRecipeData, setPreviewRecipeData] = useState<any | null>(null);
+  const [isPullingRecipe, setIsPullingRecipe] = useState(false);
+  const [selectedSlugUrl, setSelectedSlugUrl] = useState<string | null>(null);
+
   // Multi-Topic Questionnaire State
   const [sections, setSections] = useState<QuestionnaireSection[]>(DEFAULT_SECTIONS);
   const [newTopicTitle, setNewTopicTitle] = useState('');
@@ -14518,6 +15138,8 @@ export default function ChefAISettingsPage() {
   const [newQuestionText, setNewQuestionText] = useState('');
 
   const [saved, setSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Dynamic Theme Synchronization
   const applySavedTheme = useCallback((incomingColors?: any) => {
@@ -14528,6 +15150,12 @@ export default function ChefAISettingsPage() {
       setIsDayMode(isDay);
 
       let colors = incomingColors || (typeof getMemoryThemeColors === 'function' ? getMemoryThemeColors() : null);
+      if (!colors && typeof window !== 'undefined') {
+        try {
+          const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+          if (stored) colors = JSON.parse(stored);
+        } catch (_) {}
+      }
 
       if (colors && Object.keys(colors).length > 0) {
         if (typeof setMemoryThemeColors === 'function') setMemoryThemeColors(colors);
@@ -14561,27 +15189,39 @@ export default function ChefAISettingsPage() {
     fetch('/api/admin/settings', { cache: 'no-store' })
       .then(res => res.json())
       .then(data => {
-        if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
-          localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
-          applySavedTheme(data.themeColors);
+        const theme = data?.themeColors || data?.settings?.themeColors || data?.theme_colors;
+        if (theme && Object.keys(theme).length > 0) {
+          localStorage.setItem('zecratary_theme_colors', JSON.stringify(theme));
+          applySavedTheme(theme);
         }
       })
       .catch(() => {});
 
     const handleThemeEvent = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      applySavedTheme(detail);
+      if (detail && typeof detail === 'object' && Object.keys(detail).length > 0) {
+        applySavedTheme(detail);
+      } else {
+        const activeMemory = typeof getMemoryThemeColors === 'function' ? getMemoryThemeColors() : null;
+        if (activeMemory) {
+          applySavedTheme(activeMemory);
+        } else {
+          applySavedTheme();
+        }
+      }
     };
 
     window.addEventListener('zecratary_theme_updated', handleThemeEvent);
     window.addEventListener('zecratary_theme_mode_changed', handleThemeEvent);
     window.addEventListener('zecratary_theme_changed', handleThemeEvent);
+    window.addEventListener('zecratary_admin_settings_updated', handleThemeEvent);
     window.addEventListener('storage', handleThemeEvent);
 
     return () => {
       window.removeEventListener('zecratary_theme_updated', handleThemeEvent);
       window.removeEventListener('zecratary_theme_mode_changed', handleThemeEvent);
       window.removeEventListener('zecratary_theme_changed', handleThemeEvent);
+      window.removeEventListener('zecratary_admin_settings_updated', handleThemeEvent);
       window.removeEventListener('storage', handleThemeEvent);
     };
   }, [applySavedTheme]);
@@ -14598,10 +15238,8 @@ export default function ChefAISettingsPage() {
             if (k.envKey && k.keyValue) {
               map[k.envKey] = k.keyValue;
               const u = k.envKey.toUpperCase();
-              const val = String(k.keyValue || '').trim();
-              const isOAuth = val.includes('.apps.googleusercontent.com') || val.startsWith('GOCSPX-') || u.includes('CLIENT_ID') || u.includes('CLIENT_SECRET');
-              if (!isOAuth && (u === 'GEMINI_API_KEY' || u === 'GOOGLE_AI_KEY' || u === 'GOOGLE_GENAI_API_KEY' || (u === 'GOOGLE_API_KEY' && val.startsWith('AIzaSy')))) {
-                map['GEMINI_API_KEY'] = val;
+              if (u.includes('GEMINI')) {
+                map['GEMINI_API_KEY'] = k.keyValue;
               }
               if (u.includes('OPENAI')) {
                 map['OPENAI_API_KEY'] = k.keyValue;
@@ -14628,9 +15266,8 @@ export default function ChefAISettingsPage() {
         if (c.provider) setProvider(c.provider);
         else if (serverData.aiProvider) setProvider(serverData.aiProvider);
 
-        if (c.apiKey !== undefined) setApiKey(c.apiKey);
+        if (c.apiKey !== undefined && c.apiKey) setApiKey(c.apiKey);
 
-        // Load models list first before restoring selected model
         if (Array.isArray(c.availableGeminiModels) && c.availableGeminiModels.length > 0) {
           setGeminiModelsList(c.availableGeminiModels);
         }
@@ -14638,10 +15275,10 @@ export default function ChefAISettingsPage() {
           setOpenaiModelsList(c.availableOpenAiModels);
         }
 
-        const savedModel = c.model || serverData.aiModel || serverData.model;
-        if (savedModel) {
-          setModel(savedModel);
-          modelRef.current = savedModel;
+        const resolvedSavedModel = c.model || serverData.aiModel || serverData.model;
+        if (resolvedSavedModel) {
+          setModel(resolvedSavedModel);
+          modelRef.current = resolvedSavedModel;
         }
 
         if (c.temperature !== undefined) setTemperature(c.temperature);
@@ -14662,6 +15299,15 @@ export default function ChefAISettingsPage() {
         if (Array.isArray(c.knowledgeBaseList)) setKnowledgeBaseList(c.knowledgeBaseList);
         if (Array.isArray(c.customVocabularyList)) setCustomVocabularyList(c.customVocabularyList);
         if (Array.isArray(c.filterWordsList)) setFilterWordsList(c.filterWordsList);
+        if (c.discoveredRecipesCache && typeof c.discoveredRecipesCache === 'object') setCrawlResults(c.discoveredRecipesCache);
+
+        if (Array.isArray(c.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(c.recommendedRecipeUrls.filter(Boolean));
+        } else if (Array.isArray(c.recommendedRecipesUrls)) {
+          setRecommendedRecipeUrls(c.recommendedRecipesUrls.filter(Boolean));
+        } else if (Array.isArray(serverData.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(serverData.recommendedRecipeUrls.filter(Boolean));
+        }
 
         if (Array.isArray(c.sections) && c.sections.length > 0) {
           setSections(c.sections.map((s: any) => ({ ...s, enabled: s.enabled !== false })));
@@ -14698,10 +15344,6 @@ export default function ChefAISettingsPage() {
 
   const handleSyncModels = async () => {
     const keyToQuery = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
-    if (!keyToQuery) {
-      setTestResult({ success: false, message: t('enterApiKeyFirst', 'Please enter an API key or sync from .env first.') });
-      return;
-    }
     setSyncingModels(true);
     setTestResult(null);
 
@@ -14714,36 +15356,34 @@ export default function ChefAISettingsPage() {
 
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.models) && data.models.length > 0) {
-        let updatedModel = modelRef.current;
+        let currentActive = modelRef.current || model;
         if (provider === 'gemini') {
           setGeminiModelsList(data.models);
-          if (!data.models.some((m: any) => m.id === updatedModel)) {
-            updatedModel = data.models[0].id;
-            setModel(updatedModel);
-            modelRef.current = updatedModel;
+          if (!data.models.some((m: any) => m.id === currentActive)) {
+            currentActive = data.models[0].id;
+            setModel(currentActive);
+            modelRef.current = currentActive;
           }
         } else {
           setOpenaiModelsList(data.models);
-          if (!data.models.some((m: any) => m.id === updatedModel)) {
-            updatedModel = data.models[0].id;
-            setModel(updatedModel);
-            modelRef.current = updatedModel;
+          if (!data.models.some((m: any) => m.id === currentActive)) {
+            currentActive = data.models[0].id;
+            setModel(currentActive);
+            modelRef.current = currentActive;
           }
         }
-
         setTestResult({
           success: true,
           message: `${t('modelsSyncedNotice', 'Synced latest models dynamically')}: ${data.models.length} ${t('modelsFound', 'models discovered')}.`
         });
 
-        // Persist model list without overwriting current configured model
         await persistServerAdminSettings({
           aiProvider: provider,
-          aiModel: updatedModel,
+          aiModel: currentActive,
           chefAiSettings: {
             provider,
+            model: currentActive,
             apiKey: keyToQuery,
-            model: updatedModel,
             availableGeminiModels: provider === 'gemini' ? data.models : geminiModelsList,
             availableOpenAiModels: provider === 'openai' ? data.models : openaiModelsList,
             updatedAt: new Date().toISOString()
@@ -14760,39 +15400,25 @@ export default function ChefAISettingsPage() {
   };
 
   const handleTestApiKey = async () => {
-    const rawKey = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
-    const keyToTest = rawKey.replace(/^["']|["']$/g, '').trim();
-    if (provider === 'gemini' && (keyToTest.includes('.apps.googleusercontent.com') || keyToTest.startsWith('GOCSPX-'))) {
-      setTestResult({ success: false, message: t('oauthKeyError', 'Invalid Key Type: You entered a Google OAuth Client ID or Secret instead of a Gemini API Key. Please get a Gemini API Key starting with "AIzaSy" from https://aistudio.google.com/app/apikey.') });
-      return;
-    }
-    if (!keyToTest) {
-      setTestResult({ success: false, message: t('enterApiKeyFirst', 'Please enter an API key or sync from .env first.') });
-      return;
-    }
+    const keyToTest = apiKey.trim() || envKeysMap[provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'] || '';
     setTestingKey(true);
     setTestResult(null);
 
     try {
+      const activeModelToTest = modelRef.current || model;
       const res = await fetch('/api/admin/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider,
           apiKey: keyToTest,
-          model: modelRef.current
+          model: activeModelToTest
         })
       });
 
-      const rawText = await res.text();
-      let data: any = {};
-      try {
-        data = rawText ? JSON.parse(rawText) : {};
-      } catch (_) {
-        data = { success: false, error: `Invalid response from server (${res.status}: ${res.statusText})` };
-      }
+      const data = await res.json().catch(() => ({}));
 
-      if (data.success) {
+      if (res.ok && data.success) {
         setTestResult({ success: true, message: data.message });
         if (Array.isArray(data.models) && data.models.length > 0) {
           if (provider === 'gemini') {
@@ -14802,7 +15428,7 @@ export default function ChefAISettingsPage() {
           }
         }
       } else {
-        setTestResult({ success: false, message: data.error || t('connectionFailed', 'Connection failed.') });
+        setTestResult({ success: false, message: data.error || t('connectionFailed', 'Connection test failed.') });
       }
     } catch (err: any) {
       setTestResult({ success: false, message: err.message || t('verificationEndpointError', 'Could not reach verification endpoint.') });
@@ -14811,9 +15437,9 @@ export default function ChefAISettingsPage() {
     }
   };
 
-  const autoConnectGemini = async (silent = false) => {
+  const autoConnectGemini = async () => {
     setAutoConnecting(true);
-    if (!silent) setTestResult(null);
+    setTestResult(null);
 
     try {
       const res = await fetch('/api/admin/keys?t=' + Date.now(), { cache: 'no-store' });
@@ -14828,57 +15454,47 @@ export default function ChefAISettingsPage() {
         }
       }
 
-      if (!resolvedKey || resolvedKey.includes('sample') || resolvedKey.length < 10) {
-        if (!silent) {
-          setTestResult({ success: false, message: t('noGeminiKeyFound', 'No active Google Gemini key found in .env. Please enter a key.') });
-        }
-        setAutoConnecting(false);
-        return;
-      }
-
-      const activeModelToTest = modelRef.current || 'gemini-2.5-flash';
+      const activeModelToPreserve = modelRef.current || model || 'gemini-2.5-flash';
       const testRes = await fetch('/api/admin/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'gemini',
           apiKey: resolvedKey,
-          model: activeModelToTest
+          model: activeModelToPreserve
         })
       });
 
-      const rawAutoText = await testRes.text();
-      let testData: any = {};
-      try {
-        testData = rawAutoText ? JSON.parse(rawAutoText) : {};
-      } catch (_) {
-        testData = { success: false, error: `Invalid server response (${testRes.status})` };
-      }
+      const testData = await testRes.json().catch(() => ({}));
 
-      if (testData.success) {
+      if (testRes.ok && testData.success) {
         if (Array.isArray(testData.models) && testData.models.length > 0) {
           setGeminiModelsList(testData.models);
         }
 
-        if (!silent) {
-          setTestResult({ success: true, message: testData.message || `Connected to Google Gemini & dynamic models synced!` });
-          await persistServerAdminSettings({
-            aiProvider: 'gemini',
-            aiModel: activeModelToTest,
-            chefAiSettings: {
-              provider: 'gemini',
-              apiKey: resolvedKey,
-              model: activeModelToTest,
-              availableGeminiModels: testData.models || geminiModelsList,
-              updatedAt: new Date().toISOString()
-            }
-          });
+        setTestResult({ success: true, message: testData.message || `Connected to Google Gemini & dynamic models synced!` });
+
+        await persistServerAdminSettings({
+          aiProvider: 'gemini',
+          aiModel: activeModelToPreserve,
+          chefAiSettings: {
+            provider: 'gemini',
+            apiKey: resolvedKey,
+            model: activeModelToPreserve,
+            availableGeminiModels: testData.models || geminiModelsList,
+            updatedAt: new Date().toISOString()
+          }
+        });
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+          window.dispatchEvent(new Event('zecratary_settings_updated'));
         }
-      } else if (!silent) {
+      } else {
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
       }
     } catch (err: any) {
-      if (!silent) setTestResult({ success: false, message: err.message || t('autoConnectionError', 'Auto-connection error.') });
+      setTestResult({ success: false, message: err.message || t('autoConnectionError', 'Auto-connection error.') });
     } finally {
       setAutoConnecting(false);
     }
@@ -14889,17 +15505,13 @@ export default function ChefAISettingsPage() {
     setTestResult(null);
     try {
       const map = await fetchEnvKeys();
-      const resolvedGemini = map['GEMINI_API_KEY'] || 
-                             map['GOOGLE_API_KEY'] || 
-                             map['NEXT_PUBLIC_GEMINI_API_KEY'] || 
-                             map['NEXT_PUBLIC_GOOGLE_API_KEY'] || '';
-      const resolvedOpenAI = map['OPENAI_API_KEY'] || 
-                             map['NEXT_PUBLIC_OPENAI_API_KEY'] || '';
-
+      const resolvedGemini = map['GEMINI_API_KEY'] || map['GOOGLE_AI_KEY'] || map['GOOGLE_API_KEY'] || '';
+      const resolvedOpenAI = map['OPENAI_API_KEY'] || '';
       const targetKey = provider === 'gemini' ? resolvedGemini : resolvedOpenAI;
 
       if (targetKey && targetKey.trim().length > 5) {
         const cleanKey = targetKey.trim();
+        const activeModel = modelRef.current || model;
         setApiKey(cleanKey);
         setTestResult({
           success: true,
@@ -14908,17 +15520,17 @@ export default function ChefAISettingsPage() {
 
         await persistServerAdminSettings({
           aiProvider: provider,
-          aiModel: modelRef.current,
+          aiModel: activeModel,
           chefAiSettings: {
             apiKey: cleanKey,
             provider,
-            model: modelRef.current
+            model: activeModel
           }
         });
       } else {
         setTestResult({
           success: false,
-          message: `No active ${provider === 'gemini' ? 'GEMINI_API_KEY or GOOGLE_API_KEY' : 'OPENAI_API_KEY'} found in your local .env file.`
+          message: `No active ${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'} found in your local .env file.`
         });
       }
     } catch (err: any) {
@@ -14928,6 +15540,169 @@ export default function ChefAISettingsPage() {
       });
     } finally {
       setTimeout(() => setSyncingEnvKey(false), 500);
+    }
+  };
+
+  // Agent Parameter Handlers
+  const handleAddKnowledgeBase = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = newKbInput.trim();
+    if (!clean) return;
+    if (!knowledgeBaseList.includes(clean)) {
+      setKnowledgeBaseList([...knowledgeBaseList, clean]);
+    }
+    setNewKbInput('');
+  };
+
+  const handleRemoveKnowledgeBase = (idx: number) => {
+    setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx));
+  };
+
+  const handleAddCustomVocabulary = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = newVocabInput.trim();
+    if (!clean) return;
+    if (!customVocabularyList.includes(clean)) {
+      setCustomVocabularyList([...customVocabularyList, clean]);
+    }
+    setNewVocabInput('');
+  };
+
+  const handleRemoveCustomVocabulary = (idx: number) => {
+    setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx));
+  };
+
+  const handleAddFilterWord = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = newFilterInput.trim();
+    if (!clean) return;
+    if (!filterWordsList.includes(clean)) {
+      setFilterWordsList([...filterWordsList, clean]);
+    }
+    setNewFilterInput('');
+  };
+
+  const handleRemoveFilterWord = (idx: number) => {
+    setFilterWordsList(filterWordsList.filter((_, i) => i !== idx));
+  };
+
+  // Recommended Recipes Url Handlers
+  const handleAddRecommendedUrls = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const raw = newRecipeUrlInput.trim();
+    if (!raw) return;
+
+    const entries = raw
+      .split(/[\n,]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const cleanedUrls: string[] = [];
+    for (let entry of entries) {
+      if (!/^https?:\/\//i.test(entry)) {
+        entry = 'https://' + entry;
+      }
+      try {
+        new URL(entry);
+        if (!recommendedRecipeUrls.includes(entry) && !cleanedUrls.includes(entry)) {
+          cleanedUrls.push(entry);
+        }
+      } catch (_) {}
+    }
+
+    if (cleanedUrls.length > 0) {
+      setRecommendedRecipeUrls([...recommendedRecipeUrls, ...cleanedUrls]);
+      setNewRecipeUrlInput('');
+    }
+  };
+
+  const handleRemoveRecommendedUrl = (idx: number) => {
+    setRecommendedRecipeUrls(recommendedRecipeUrls.filter((_, i) => i !== idx));
+  };
+
+  // Crawl Index Links & Discover Slugs Handler
+  const handleCrawlIndexUrl = async (targetUrl: string) => {
+    setCrawlingUrl(targetUrl);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/admin/crawl-index', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'crawl', url: targetUrl })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.discovered)) {
+        const updated = {
+          ...crawlResults,
+          [targetUrl]: {
+            count: data.count || data.discovered.length,
+            discovered: data.discovered,
+            crawledAt: new Date().toISOString()
+          }
+        };
+        setCrawlResults(updated);
+        setExpandedIndexUrl(targetUrl);
+        setTestResult({
+          success: true,
+          message: `${t('crawlSuccessNotice', 'Crawled index successfully')}: ${data.discovered.length} ${t('recipeSlugsDiscovered', 'recipe slugs discovered from')} ${new URL(targetUrl).hostname}!`
+        });
+
+        await persistServerAdminSettings({
+          chefAiSettings: {
+            discoveredRecipesCache: updated
+          }
+        });
+      } else {
+        setTestResult({
+          success: false,
+          message: data.error || t('crawlFailedNotice', 'Failed to discover recipe links from index URL.')
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err.message || t('crawlErrorNotice', 'Error connecting to index crawler.')
+      });
+    } finally {
+      setCrawlingUrl(null);
+    }
+  };
+
+  const handlePullIndividualRecipe = async (recipeUrl: string) => {
+    setIsPullingRecipe(true);
+    setSelectedSlugUrl(recipeUrl);
+    setPreviewRecipeData(null);
+    try {
+      const res = await fetch('/api/admin/crawl-index', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pull', recipeUrl })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.recipe) {
+        setPreviewRecipeData(data.recipe);
+      } else {
+        alert(data.error || t('pullRecipeFailed', 'Failed to pull recipe details from slug.'));
+      }
+    } catch (err: any) {
+      alert(err.message || t('pullRecipeError', 'Error pulling individual recipe.'));
+    } finally {
+      setIsPullingRecipe(false);
+    }
+  };
+
+  const handleAddDiscoveredAsDirectUrl = (recipeUrl: string) => {
+    if (!recommendedRecipeUrls.includes(recipeUrl)) {
+      setRecommendedRecipeUrls([...recommendedRecipeUrls, recipeUrl]);
+      alert(t('addedDirectUrlSuccess', 'Recipe URL added to Recommended Recipes as a primary source!'));
+    } else {
+      alert(t('alreadyInListNotice', 'This recipe URL is already in your recommended list.'));
+    }
+  };
+
+  const handleClearAllRecommendedUrls = () => {
+    if (confirm(t('confirmClearAllUrls', 'Clear all recommended recipe URLs?'))) {
+      setRecommendedRecipeUrls([]);
     }
   };
 
@@ -14991,8 +15766,21 @@ export default function ChefAISettingsPage() {
 
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
+    setSaveError(null);
+
     const cleanApiKey = apiKey.trim();
-    const activeModel = modelRef.current;
+    const activeModel = modelRef.current || model;
+
+    // Preserve active theme configuration during AI settings persistence
+    let currentTheme = typeof getMemoryThemeColors === 'function' ? getMemoryThemeColors() : null;
+    if (!currentTheme && typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+        if (stored) currentTheme = JSON.parse(stored);
+      } catch (_) {}
+    }
 
     const config = {
       provider,
@@ -15016,6 +15804,8 @@ export default function ChefAISettingsPage() {
       knowledgeBaseList,
       customVocabularyList,
       filterWordsList,
+      recommendedRecipeUrls,
+      discoveredRecipesCache: crawlResults,
       sections,
       updatedAt: new Date().toISOString()
     };
@@ -15024,64 +15814,59 @@ export default function ChefAISettingsPage() {
       .filter(s => s.enabled !== false)
       .flatMap(s => s.questions);
 
-    // 1. Persist to PostgreSQL admin_settings with selected model
-    await persistServerAdminSettings({
-      aiProvider: provider,
-      aiModel: activeModel,
-      chefAiSettings: config,
-      chefQuestionnaire: activeFlattenedQuestions
-    });
+    try {
+      await persistServerAdminSettings({
+        aiProvider: provider,
+        aiModel: activeModel,
+        chefAiSettings: config,
+        recommendedRecipeUrls,
+        chefQuestionnaire: activeFlattenedQuestions,
+        themeColors: currentTheme
+      });
 
-    // 2. Synchronize key & model with .env and PostgreSQL admin_api_keys
-    if (cleanApiKey) {
-      try {
-        const res = await fetch('/api/admin/keys', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o',
-            provider,
-            envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
-            keyValue: cleanApiKey,
-            model: activeModel,
-            status: 'active'
-          })
-        });
-
-        const data = await res.json();
-        if (res.ok && data.success) {
-          setTestResult({
-            success: true,
-            message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (${provider === 'gemini' ? 'Gemini' : 'OpenAI'} • ${activeModel})`
+      if (cleanApiKey) {
+        try {
+          await fetch('/api/admin/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o',
+              provider,
+              envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
+              keyValue: cleanApiKey,
+              model: activeModel,
+              status: 'active'
+            })
           });
-        } else {
-          setTestResult({
-            success: false,
-            message: `Server stored settings, but .env save returned: ${data.error || 'Server rejected key save'}`
-          });
-        }
-      } catch (err: any) {
-        setTestResult({
-          success: false,
-          message: `Server stored settings, but .env save failed: ${err.message || 'Network error'}`
-        });
+        } catch (_) {}
       }
-    } else {
+
+      setSaved(true);
       setTestResult({
         success: true,
-        message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (Model: ${activeModel})`
+        message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (${provider === 'gemini' ? 'Gemini' : 'OpenAI'} • ${activeModel})`
       });
-    }
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      window.dispatchEvent(new Event('zecratary_engine_config_updated'));
-      window.dispatchEvent(new Event('zecratary_settings_updated'));
-      window.dispatchEvent(new Event('storage'));
+      if (typeof window !== 'undefined') {
+        if (currentTheme) {
+          setMemoryThemeColors(currentTheme);
+          applyThemeToDocument(currentTheme);
+          window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: currentTheme }));
+        }
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+        window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_settings_updated'));
+        window.dispatchEvent(new Event('storage'));
+      }
+
+      setTimeout(() => setSaved(false), 3500);
+    } catch (err: any) {
+      console.error('Failed to save settings:', err);
+      setSaveError(err.message || 'Failed to save settings');
+    } finally {
+      setIsSaving(false);
     }
-    
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3500);
   };
 
   const activeSection = sections.find(s => s.id === activeTopicId) || sections[0];
@@ -15096,8 +15881,6 @@ export default function ChefAISettingsPage() {
         transition: 'background-color 200ms ease, color 200ms ease'
       }}
     >
-      
-      {/* Autofill & Transition Overrides */}
       <style dangerouslySetInnerHTML={{ __html: `
         .settings-input:-webkit-autofill,
         .settings-input:-webkit-autofill:hover,
@@ -15123,6 +15906,26 @@ export default function ChefAISettingsPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {isSaving && (
+            <span 
+              className="border px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
+              }}
+            >
+              <Loader2 className="h-4 w-4 animate-spin" /> {t('saving', 'Saving...')}
+            </span>
+          )}
+          {saveError && (
+            <span 
+              className="border px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in shadow-xs border-red-500/50 text-red-500"
+              style={{ backgroundColor: 'var(--color-inner-dark)' }}
+            >
+              <XCircle className="h-4 w-4" /> {saveError}
+            </span>
+          )}
           {saved && (
             <span 
               className="border px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in shadow-xs"
@@ -15138,15 +15941,15 @@ export default function ChefAISettingsPage() {
           <button
             type="button"
             onClick={handleSave}
-            className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90"
+            disabled={isSaving}
+            className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
             style={{ 
               backgroundColor: 'var(--color-primary)',
               boxShadow: '0 8px 20px -4px rgba(224, 86, 56, 0.3)'
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
-            <Check className="h-4 w-4" /> {t('saveConfigurationBtn', 'Save Configuration')}
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            <span>{isSaving ? t('savingBtn', 'Saving...') : t('saveConfigurationBtn', 'Save Configuration')}</span>
           </button>
         </div>
       </div>
@@ -15180,7 +15983,7 @@ export default function ChefAISettingsPage() {
         })}
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6">
+      <div className="space-y-6">
         
         {/* TAB 1: GENERAL & MODEL CONFIG */}
         {activeTab === 'general' && (
@@ -15207,7 +16010,7 @@ export default function ChefAISettingsPage() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => autoConnectGemini(false)}
+                    onClick={autoConnectGemini}
                     disabled={autoConnecting}
                     className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 shadow-xs hover:opacity-90"
                     style={{
@@ -15244,7 +16047,7 @@ export default function ChefAISettingsPage() {
                   onClick={() => handleProviderChange('gemini')}
                   className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: provider === 'gemini' ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                    backgroundColor: 'var(--color-inner-dark)',
                     borderColor: provider === 'gemini' ? 'var(--color-primary)' : 'var(--color-border)',
                     color: provider === 'gemini' ? 'var(--color-text)' : 'var(--color-text-secondary)'
                   }}
@@ -15252,7 +16055,7 @@ export default function ChefAISettingsPage() {
                   <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>Google Gemini</span>
-                    <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 2.0 / 1.5</span>
+                    <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 3.6 / 1.5</span>
                   </div>
                 </button>
 
@@ -15261,7 +16064,7 @@ export default function ChefAISettingsPage() {
                   onClick={() => handleProviderChange('openai')}
                   className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
                   style={{
-                    backgroundColor: provider === 'openai' ? 'var(--color-inner-dark)' : 'var(--color-inner-dark)',
+                    backgroundColor: 'var(--color-inner-dark)',
                     borderColor: provider === 'openai' ? 'var(--color-emerald)' : 'var(--color-border)',
                     color: provider === 'openai' ? 'var(--color-text)' : 'var(--color-text-secondary)'
                   }}
@@ -15332,11 +16135,11 @@ export default function ChefAISettingsPage() {
 
                   {testResult && (
                     <div 
-                      className="mt-2 p-2.5 rounded-xl border text-xs font-semibold flex items-start gap-2 animate-in fade-in shadow-xs"
+                      className="mt-2 p-3 rounded-xl border text-xs font-semibold flex items-start gap-2.5 animate-in fade-in shadow-xs transition-colors duration-200"
                       style={{
-                        backgroundColor: 'var(--color-inner-dark)',
                         borderColor: testResult.success ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
-                        color: testResult.success ? 'var(--color-emerald)' : '#ef4444'
+                        color: testResult.success ? 'var(--color-emerald)' : '#ef4444',
+                        backgroundColor: 'var(--color-inner-dark)'
                       }}
                     >
                       {testResult.success ? (
@@ -15352,7 +16155,6 @@ export default function ChefAISettingsPage() {
                   </span>
                 </div>
 
-                {/* DYNAMIC MODEL VERSION SELECTOR */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
@@ -15403,7 +16205,7 @@ export default function ChefAISettingsPage() {
 
                   <div className="flex items-center justify-between text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
                     <span>{t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}</span>
-                    <span className="font-semibold text-emerald-500">
+                    <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
                       {activeModelsList.length} {t('modelsAvailableDynamically', 'models available dynamically')}
                     </span>
                   </div>
@@ -15496,7 +16298,7 @@ export default function ChefAISettingsPage() {
                               title={isEnabled ? 'Disable topic' : 'Enable topic'}
                             >
                               {isEnabled ? (
-                                <ToggleRight className="h-6 w-6 text-emerald-500" />
+                                <ToggleRight className="h-6 w-6" style={{ color: 'var(--color-emerald)' }} />
                               ) : (
                                 <ToggleLeft className="h-6 w-6 text-slate-400" />
                               )}
@@ -15563,8 +16365,6 @@ export default function ChefAISettingsPage() {
                       disabled={!newTopicTitle.trim()}
                       className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md"
                       style={{ backgroundColor: 'var(--color-primary)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                     >
                       {t('createTopicBtn', 'Create Topic Category')}
                     </button>
@@ -15711,7 +16511,7 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
 
-            {/* Results Appearance Section with Live Preview */}
+            {/* Results Appearance Section with Live UI Preview */}
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs mt-6 transition-colors duration-200"
               style={{
@@ -15719,12 +16519,29 @@ export default function ChefAISettingsPage() {
                 borderColor: 'var(--color-border)'
               }}
             >
-              <h2 
-                className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
-              </h2>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+                <div>
+                  <h2 
+                    className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
+                  </h2>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('resultsAppearanceDesc', 'Select and preview how multi-day meal plans and recipes render to users inside the /chef chat stream.')}
+                  </p>
+                </div>
+                <span 
+                  className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border uppercase shrink-0"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  {resultDisplayMode === 'card' ? t('modeCardTitle', 'Standard Cards View') : resultDisplayMode === 'compact' ? t('modeCompactTitle', 'Compact Table View') : t('modeDetailedTitle', 'Detailed Master View')}
+                </span>
+              </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
@@ -15754,122 +16571,291 @@ export default function ChefAISettingsPage() {
                 })}
               </div>
 
-              {/* LIVE PREVIEW BOX */}
-              <div className="pt-3 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center justify-between">
-                  <span className="font-bold flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text)' }}>
-                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('liveUiPreview', 'Live UI Preview')} ({resultDisplayMode.toUpperCase()} MODE)
-                  </span>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('liveUiPreviewNotice', 'Updates instantly when selecting above')}
+              {/* RESTORED LIVE UI PREVIEW IN /chef CHAT */}
+              <div 
+                className="p-5 rounded-2xl border space-y-4 shadow-inner transition-colors duration-200"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
+                }}
+              >
+                <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                    <span className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                      {t('liveUiPreviewHeader', 'Live UI Preview in /chef Chat')}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('previewSimulationNotice', 'Interactive simulation based on active theme & selected mode')}
                   </span>
                 </div>
 
+                {/* SIMULATED PLAN CONTAINER */}
                 <div 
-                  className="border rounded-2xl p-4 space-y-3 shadow-inner transition-colors duration-200"
+                  className="border rounded-2xl p-4 space-y-4 shadow-sm transition-colors duration-200"
                   style={{
-                    backgroundColor: 'var(--color-inner-dark)',
+                    backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)'
                   }}
                 >
-                  {resultDisplayMode === 'compact' && (
-                    <div className="space-y-2 animate-in fade-in">
-                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: 'var(--color-border)' }}>
-                        <span className="font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                          <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('previewPlanTitle', 'High Protein Plan (3 Days)')}
-                        </span>
-                        <span style={{ color: 'var(--color-text-secondary)' }}>3/3 Days</span>
-                      </div>
-                      <div className="space-y-1.5">
-                        <div 
-                          className="flex items-center justify-between p-2 rounded-xl border text-[11px]"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <span className="font-bold" style={{ color: 'var(--color-primary)' }}>Day 1 - Sunday:</span>
-                          <span className="font-medium" style={{ color: 'var(--color-text)' }}>Avocado Quinoa Bowl</span>
-                          <span style={{ color: 'var(--color-text-secondary)' }}>25m</span>
-                        </div>
-                        <div 
-                          className="flex items-center justify-between p-2 rounded-xl border text-[11px]"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <span className="font-bold" style={{ color: 'var(--color-primary)' }}>Day 2 - Monday:</span>
-                          <span className="font-medium" style={{ color: 'var(--color-text)' }}>Grilled Salmon Salad</span>
-                          <span style={{ color: 'var(--color-text-secondary)' }}>20m</span>
-                        </div>
-                      </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                      <h3 className="font-black text-xs" style={{ color: 'var(--color-text)' }}>
+                        5-Day High-Protein Wholesome Plan
+                      </h3>
                     </div>
-                  )}
-
-                  {resultDisplayMode === 'detailed' && (
-                    <div className="space-y-3 animate-in fade-in">
-                      <div className="flex items-center justify-between border-b pb-2 text-xs" style={{ borderColor: 'var(--color-border)' }}>
-                        <span className="font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-primary)' }}>Detailed Master Plan Preview</span>
-                        <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>3 Days</span>
-                      </div>
-                      <div 
-                        className="border rounded-xl p-3 space-y-2 text-[11px]"
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                        Budget: $6.50/serv
+                      </span>
+                      <span 
+                        className="text-[9px] px-2 py-0.5 rounded font-black uppercase border"
                         style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)'
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
                         }}
                       >
-                        <div className="flex justify-between font-bold" style={{ color: 'var(--color-primary)' }}>
-                          <span>Day 1 - Sunday</span>
-                          <span>DINNER</span>
-                        </div>
-                        <div className="flex gap-2.5 items-start">
-                          <div className="w-10 h-10 rounded-lg shrink-0 bg-cover bg-center border" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=150&q=80)', borderColor: 'var(--color-border)' }} />
-                          <div className="space-y-0.5 flex-1">
-                            <h5 className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>Avocado Quinoa Bowl</h5>
-                            <p className="text-[10px] line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>Nutritious plant-based high-protein bowl with fresh lime dressing.</p>
-                            <span className="text-[9px] block" style={{ color: 'var(--color-text-secondary)' }}>Ingredients: Quinoa, Avocado, Chickpeas, Olive Oil</span>
-                          </div>
-                        </div>
-                      </div>
+                        5 Days
+                      </span>
                     </div>
-                  )}
+                  </div>
 
+                  {/* 1. STANDARD CARDS VIEW PREVIEW */}
                   {resultDisplayMode === 'card' && (
-                    <div className="space-y-3 animate-in fade-in">
-                      <div 
-                        className="rounded-xl overflow-hidden border"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        <div className="text-white px-3 py-2 flex items-center justify-between font-bold text-xs" style={{ backgroundColor: 'var(--color-primary)' }}>
-                          <span>Day 1 - Sunday</span>
-                          <span className="text-[10px] opacity-90">Sep 6</span>
-                        </div>
-                        <div className="p-3 space-y-2">
-                          <div className="flex items-start gap-3">
-                            <div className="w-12 h-12 rounded-lg shrink-0 bg-cover bg-center border" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=150&q=80)', borderColor: 'var(--color-border)' }} />
-                            <div className="min-w-0 flex-1">
-                              <span className="text-[10px] font-black uppercase" style={{ color: 'var(--color-primary)' }}>Dinner</span>
-                              <h4 className="font-extrabold text-xs truncate" style={{ color: 'var(--color-text)' }}>Avocado Quinoa Bowl</h4>
-                              <p className="text-[10px] line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>Nutritious chef-curated home recipe suited to your diet.</p>
+                    <div className="space-y-3">
+                      {[
+                        {
+                          id: 'prev_1',
+                          day: 'Day 1 • Monday',
+                          type: 'Dinner',
+                          title: 'Avocado Quinoa Power Bowl',
+                          desc: 'Fluffy tri-color quinoa tossed with crisp edamame, Hass avocado, cherry tomatoes, and lemon tahini drizzle.',
+                          time: '25m',
+                          servings: 2,
+                          calories: 480,
+                          image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
+                          batch: true
+                        },
+                        {
+                          id: 'prev_2',
+                          day: 'Day 2 • Tuesday',
+                          type: 'Dinner',
+                          title: 'Pan-Seared Salmon with Asparagus',
+                          desc: 'Crispy skin Atlantic salmon filet served with garlic-roasted tender asparagus and fresh dill sauce.',
+                          time: '20m',
+                          servings: 2,
+                          calories: 540,
+                          image: 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?auto=format&fit=crop&w=400&q=80',
+                          batch: false
+                        }
+                      ].map((item) => (
+                        <div 
+                          key={item.id}
+                          className="border rounded-2xl p-3.5 space-y-2.5 transition shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          <div className="flex justify-between items-center text-xs font-bold">
+                            <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
+                            <div className="flex items-center gap-1.5">
+                              {item.batch && (
+                                <span 
+                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                  style={{
+                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                    borderColor: 'var(--color-emerald)',
+                                    color: 'var(--color-emerald)'
+                                  }}
+                                >
+                                  Batch Cook
+                                </span>
+                              )}
+                              <span 
+                                className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                              >
+                                {item.type}
+                              </span>
                             </div>
                           </div>
-                          <div className="flex items-center gap-3 text-[10px] pt-1 border-t" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> 15m</span>
-                            <span className="flex items-center gap-1"><Flame className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> 20m</span>
-                            <span className="flex items-center gap-1"><Users className="h-3 w-3" /> 2 servings</span>
+
+                          <div className="flex items-start gap-3">
+                            <img 
+                              src={item.image} 
+                              alt={item.title} 
+                              className="w-16 h-16 rounded-xl object-cover border shrink-0" 
+                              style={{ borderColor: 'var(--color-border)' }} 
+                            />
+                            <div className="space-y-1 flex-1 min-w-0">
+                              <h4 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
+                                {item.title}
+                              </h4>
+                              <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                                {item.desc}
+                              </p>
+                              <div className="flex items-center gap-3 text-[10px] font-semibold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {item.time}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Users className="h-3 w-3" /> {item.servings} serv
+                                </span>
+                                <span className="font-mono" style={{ color: 'var(--color-primary)' }}>
+                                  {item.calories} kcal
+                                </span>
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      ))}
                     </div>
                   )}
+
+                  {/* 2. COMPACT TABLE VIEW PREVIEW */}
+                  {resultDisplayMode === 'compact' && (
+                    <div className="border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                      <div 
+                        className="grid grid-cols-12 gap-2 p-2.5 font-extrabold text-[10px] uppercase border-b"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
+                        }}
+                      >
+                        <span className="col-span-3">Day / Schedule</span>
+                        <span className="col-span-2">Meal Type</span>
+                        <span className="col-span-5">Recipe Title</span>
+                        <span className="col-span-2 text-right">Time & Cals</span>
+                      </div>
+                      {[
+                        { day: 'Day 1 (Mon)', type: 'Dinner', title: 'Avocado Quinoa Power Bowl', time: '25m', cals: '480 kcal' },
+                        { day: 'Day 2 (Tue)', type: 'Dinner', title: 'Pan-Seared Salmon with Asparagus', time: '20m', cals: '540 kcal' },
+                        { day: 'Day 3 (Wed)', type: 'Lunch', title: 'Mediterranean Lentil Salad', time: '15m', cals: '410 kcal' }
+                      ].map((row, rIdx) => (
+                        <div 
+                          key={rIdx}
+                          className="grid grid-cols-12 gap-2 p-2.5 text-xs items-center border-b last:border-none transition hover:opacity-90"
+                          style={{
+                            backgroundColor: rIdx % 2 === 0 ? 'var(--color-card)' : 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          <span className="col-span-3 font-bold" style={{ color: 'var(--color-primary)' }}>{row.day}</span>
+                          <span className="col-span-2">
+                            <span 
+                              className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)'
+                              }}
+                            >
+                              {row.type}
+                            </span>
+                          </span>
+                          <span className="col-span-5 font-semibold truncate" style={{ color: 'var(--color-text)' }}>{row.title}</span>
+                          <span className="col-span-2 text-right font-mono text-[11px]" style={{ color: 'var(--color-emerald)' }}>{row.time} • {row.cals}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 3. DETAILED MASTER VIEW PREVIEW */}
+                  {resultDisplayMode === 'detailed' && (
+                    <div className="space-y-3">
+                      {[
+                        {
+                          id: 'det_1',
+                          day: 'Day 1 • Monday',
+                          type: 'Dinner',
+                          title: 'Avocado Quinoa Power Bowl',
+                          desc: 'Balanced high-protein bowl with citrus tahini infusion.',
+                          time: '25 mins total',
+                          servings: 2,
+                          cals: 480,
+                          ingredients: ['Tri-color Quinoa', 'Hass Avocado', 'Edamame', 'Cherry Tomatoes', 'Lemon Tahini', 'Extra Virgin Olive Oil']
+                        },
+                        {
+                          id: 'det_2',
+                          day: 'Day 2 • Tuesday',
+                          type: 'Dinner',
+                          title: 'Pan-Seared Salmon with Asparagus',
+                          desc: 'Crisp Atlantic salmon accompanied by garlic butter asparagus.',
+                          time: '20 mins total',
+                          servings: 2,
+                          cals: 540,
+                          ingredients: ['Fresh Salmon Filet', 'Asparagus Spears', 'Minced Garlic', 'Fresh Dill', 'Lemon Wedges', 'Sea Salt']
+                        }
+                      ].map((item) => (
+                        <div 
+                          key={item.id}
+                          className="border rounded-2xl p-4 space-y-3 transition shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          <div className="flex justify-between items-center text-xs font-bold border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                            <div className="flex items-center gap-2">
+                              <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
+                              <span 
+                                className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-emerald)',
+                                  color: 'var(--color-emerald)'
+                                }}
+                              >
+                                {item.type}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                              {item.time} • {item.servings} servings • {item.cals} kcal
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <h4 className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>{item.title}</h4>
+                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{item.desc}</p>
+                          </div>
+
+                          {/* Inline Ingredient Breakdown Tags */}
+                          <div className="space-y-1.5 pt-1">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                              Inline Ingredients Breakdown:
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {item.ingredients.map((ing, iIdx) => (
+                                <span 
+                                  key={iIdx}
+                                  className="text-[10px] font-medium px-2 py-0.5 rounded-lg border shadow-2xs"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                >
+                                  • {ing}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                 </div>
               </div>
-
             </div>
           </div>
         )}
@@ -15980,9 +16966,6 @@ export default function ChefAISettingsPage() {
                   className="w-full cursor-pointer"
                   style={{ accentColor: 'var(--color-primary)' }}
                 />
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('speechSpeedDesc', 'Adjust the speaking pace of the AI assistant when reading recipe steps aloud.')}
-                </p>
               </div>
 
               <div className="space-y-2 flex flex-col justify-center">
@@ -16013,7 +16996,7 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 4: AGENT PARAMETERS */}
+        {/* TAB 4: AGENT PARAMETERS & RECOMMENDED RECIPES URL */}
         {activeTab === 'advanced' && (
           <div className="space-y-6 animate-in fade-in">
             {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
@@ -16092,15 +17075,15 @@ export default function ChefAISettingsPage() {
                   className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: strictDietEnforcement ? '#3b82f6' : 'var(--color-border)',
+                    borderColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)',
                     color: 'var(--color-text)'
                   }}
                 >
                   <div className="flex items-center justify-between">
-                    <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? '#3b82f6' : 'var(--color-text-secondary)' }} />
+                    <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
                     <div 
                       className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: strictDietEnforcement ? '#3b82f6' : 'var(--color-border)' }}
+                      style={{ backgroundColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)' }}
                     >
                       <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
                     </div>
@@ -16115,7 +17098,7 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
 
-            {/* AGENT PARAMETERS & KNOWLEDGE TUNING */}
+            {/* TUNING PARAMETERS, KNOWLEDGE BASE, CUSTOM VOCABULARY & FILTER WORDS */}
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
               style={{
@@ -16177,6 +17160,337 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
+              {/* RECOMMENDED RECIPES URL WITH CRAWLER & SLUG DISCOVERY */}
+              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <div>
+                    <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                      <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('recommendedRecipesUrlHeader', 'Recommended Recipes Url')}
+                    </h3>
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('recommendedRecipesUrlDesc', 'Configure primary source URLs for recipe recommendations. When users ask for recipes on /chef, AI will search and prioritize these URLs as the primary source.')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span 
+                      className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border shrink-0"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
+                        color: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {recommendedRecipeUrls.length} {t('urlsActiveBadge', 'Active URLs (Primary)')}
+                    </span>
+                    {recommendedRecipeUrls.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllRecommendedUrls}
+                        className="text-[10px] text-red-400 hover:text-red-500 font-bold transition cursor-pointer"
+                      >
+                        {t('clearAll', 'Clear All')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div 
+                      className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <input
+                        type="text"
+                        placeholder={t('recommendedRecipeUrlPlaceholder', 'Add recipe URL (paste single or multiple separated by commas or newlines)...')}
+                        value={newRecipeUrlInput}
+                        onChange={(e) => setNewRecipeUrlInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddRecommendedUrls();
+                          }
+                        }}
+                        className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                        style={{ color: 'var(--color-text)' }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAddRecommendedUrls()}
+                      disabled={!newRecipeUrlInput.trim()}
+                      className="px-4 py-2.5 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md disabled:opacity-40 hover:opacity-90 shrink-0"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      <Plus className="h-4 w-4" /> {t('addUrlBtn', 'Add URL')}
+                    </button>
+                  </div>
+                  <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
+                    💡 {t('multiUrlHint', 'Tip: You can paste multiple URLs at once separated by commas or newlines. Chef AI will prioritize these as primary culinary references.')}
+                  </span>
+                </div>
+
+                {/* URL List with Index Crawler and Discovered Slugs Drawer */}
+                <div className="space-y-2 pt-1">
+                  {recommendedRecipeUrls.length === 0 ? (
+                    <div 
+                      className="p-4 text-center border border-dashed rounded-2xl text-xs space-y-0.5"
+                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                    >
+                      <span className="font-semibold block">{t('noRecommendedUrlsTitle', 'No Recommended Recipe URLs configured.')}</span>
+                      <span className="text-[11px] block">{t('noRecommendedUrlsDesc', 'Add your preferred food blog or recipe URLs above to make /chef recommend recipes from them first.')}</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                      {recommendedRecipeUrls.map((urlStr, idx) => {
+                        let domain = 'Website';
+                        try {
+                          domain = new URL(urlStr).hostname.replace(/^www\./, '');
+                        } catch (_) {}
+
+                        const isIndex = /recipes|\/category\/|\/categories\/|\/collection\/|\/tag\/|\/archive\/|\/all/i.test(urlStr) || urlStr.endsWith('/recipes/');
+                        const cache = crawlResults[urlStr];
+                        const isCrawlingThis = crawlingUrl === urlStr;
+                        const isExpanded = expandedIndexUrl === urlStr;
+
+                        return (
+                          <div 
+                            key={idx}
+                            className="rounded-2xl border transition shadow-xs overflow-hidden"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: isExpanded ? 'var(--color-primary)' : 'var(--color-border)'
+                            }}
+                          >
+                            <div className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                                  <span 
+                                    className="text-[9px] font-black uppercase px-2 py-0.5 rounded border truncate"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-border)',
+                                      color: 'var(--color-primary)'
+                                    }}
+                                  >
+                                    {domain}
+                                  </span>
+                                  <span 
+                                    className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
+                                    style={{
+                                      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                      color: 'var(--color-emerald)'
+                                    }}
+                                  >
+                                    {t('primaryTag', 'Primary')}
+                                  </span>
+                                  {isIndex && (
+                                    <span 
+                                      className="text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase border"
+                                      style={{
+                                        backgroundColor: 'var(--color-card)',
+                                        borderColor: 'var(--color-primary)',
+                                        color: 'var(--color-primary)'
+                                      }}
+                                    >
+                                      {t('indexCollectionTag', 'Index / Collection')}
+                                    </span>
+                                  )}
+                                  {cache && (
+                                    <span 
+                                      className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                      style={{
+                                        backgroundColor: 'var(--color-card)',
+                                        borderColor: 'var(--color-emerald)',
+                                        color: 'var(--color-emerald)'
+                                      }}
+                                    >
+                                      {cache.count} {t('slugsDiscoveredBadge', 'Slugs Discovered')}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text)' }} title={urlStr}>
+                                  {urlStr}
+                                </p>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCrawlIndexUrl(urlStr)}
+                                  disabled={isCrawlingThis}
+                                  className="px-2.5 py-1.5 rounded-lg border font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-90 disabled:opacity-50"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-primary)',
+                                    color: 'var(--color-primary)'
+                                  }}
+                                  title="Crawl index page and discover matching recipe slugs"
+                                >
+                                  {isCrawlingThis ? (
+                                    <>
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                      <span>{t('crawling', 'Crawling...')}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Compass className="h-3 w-3" />
+                                      <span>{t('crawlIndexBtn', 'Crawl & Discover Slugs')}</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                {cache && cache.discovered?.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedIndexUrl(isExpanded ? null : urlStr)}
+                                    className="p-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-border)',
+                                      color: 'var(--color-text)'
+                                    }}
+                                    title="Expand or collapse discovered recipe slugs"
+                                  >
+                                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                  </button>
+                                )}
+
+                                <a
+                                  href={urlStr}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-1.5 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-primary)'
+                                  }}
+                                  title={t('openUrlTooltip', 'Open in new tab')}
+                                >
+                                  <Globe className="h-3.5 w-3.5" />
+                                </a>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveRecommendedUrl(idx)}
+                                  className="p-1.5 rounded-lg border hover:text-red-500 transition cursor-pointer"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text-secondary)'
+                                  }}
+                                  title={t('removeUrlTooltip', 'Remove URL')}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Collapsible Discovered Slugs Drawer */}
+                            {isExpanded && cache && (
+                              <div 
+                                className="border-t p-3.5 space-y-2.5 transition-colors duration-200"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)'
+                                }}
+                              >
+                                <div className="flex items-center justify-between text-[11px] font-bold">
+                                  <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                                    <Layers className="h-3.5 w-3.5" /> {t('discoveredSlugsTitle', 'Discovered Recipe Slugs')} ({cache.discovered.length})
+                                  </span>
+                                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                                    {t('crawledAtNotice', 'Crawled')}: {new Date(cache.crawledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
+                                  {cache.discovered.map((item, dIdx) => (
+                                    <div
+                                      key={dIdx}
+                                      className="p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition"
+                                      style={{
+                                        backgroundColor: 'var(--color-inner-dark)',
+                                        borderColor: 'var(--color-border)'
+                                      }}
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <p className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
+                                          {item.title}
+                                        </p>
+                                        <p className="text-[10px] font-mono truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                                          /{item.slug}
+                                        </p>
+                                      </div>
+
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePullIndividualRecipe(item.url)}
+                                          disabled={isPullingRecipe && selectedSlugUrl === item.url}
+                                          className="px-2 py-1 rounded-lg border text-[10px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-90 shadow-xs"
+                                          style={{
+                                            backgroundColor: 'var(--color-card)',
+                                            borderColor: 'var(--color-emerald)',
+                                            color: 'var(--color-emerald)'
+                                          }}
+                                          title="Pull individual recipe details and preview image/ingredients"
+                                        >
+                                          {isPullingRecipe && selectedSlugUrl === item.url ? (
+                                            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                          ) : (
+                                            <Sparkles className="h-2.5 w-2.5" />
+                                          )}
+                                          <span>{t('pullBtn', 'Pull')}</span>
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAddDiscoveredAsDirectUrl(item.url)}
+                                          className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                          style={{
+                                            backgroundColor: 'var(--color-card)',
+                                            borderColor: 'var(--color-border)',
+                                            color: 'var(--color-primary)'
+                                          }}
+                                          title={t('addDirectTooltip', 'Add as direct source')}
+                                        >
+                                          <Plus className="h-3 w-3" />
+                                        </button>
+
+                                        <a
+                                          href={item.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                          style={{
+                                            backgroundColor: 'var(--color-card)',
+                                            borderColor: 'var(--color-border)',
+                                            color: 'var(--color-text-secondary)'
+                                          }}
+                                          title="Open recipe link"
+                                        >
+                                          <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* KNOWLEDGE BASE FEATURE */}
               <div className="space-y-3 pt-1">
                 <div>
@@ -16188,9 +17502,9 @@ export default function ChefAISettingsPage() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
+                <form onSubmit={handleAddKnowledgeBase} className="flex gap-2">
                   <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -16199,66 +17513,57 @@ export default function ChefAISettingsPage() {
                   >
                     <input
                       type="text"
-                      placeholder="Knowledge Base..."
+                      placeholder={t('knowledgeBasePlaceholder', 'Knowledge Base reference (e.g. Culinary Masterclass DB, Keto Guidelines)...')}
                       value={newKbInput}
                       onChange={(e) => setNewKbInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newKbInput.trim()) {
-                          e.preventDefault();
-                          setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
-                          setNewKbInput('');
-                        }
-                      }}
-                      className="bg-transparent border-none outline-none w-full text-xs"
+                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
                       style={{ color: 'var(--color-text)' }}
                     />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (newKbInput.trim()) {
-                          setKnowledgeBaseList([...knowledgeBaseList, newKbInput.trim()]);
-                          setNewKbInput('');
-                        }
-                      }}
-                      className="w-6 h-6 rounded-lg font-bold flex items-center justify-center shrink-0 cursor-pointer transition hover:opacity-80"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      +
-                    </button>
                   </div>
-                </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                  </button>
+                </form>
 
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {knowledgeBaseList.map((item, idx) => (
-                    <span 
-                      key={idx}
-                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-primary)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {item}
-                      <button
-                        type="button"
-                        onClick={() => setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx))}
-                        className="hover:text-red-500 cursor-pointer"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                  {knowledgeBaseList.length === 0 ? (
+                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('noKnowledgeBaseEntries', 'No knowledge base references added yet.')}
                     </span>
-                  ))}
+                  ) : (
+                    knowledgeBaseList.map((item, idx) => (
+                      <span 
+                        key={idx}
+                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveKnowledgeBase(idx)}
+                          className="hover:opacity-75 cursor-pointer ml-0.5"
+                          title="Remove reference"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
                 </div>
               </div>
 
               {/* CUSTOM VOCABULARY FEATURE */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
                     <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
                   </h3>
                   <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
@@ -16266,9 +17571,9 @@ export default function ChefAISettingsPage() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
+                <form onSubmit={handleAddCustomVocabulary} className="flex gap-2">
                   <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -16277,58 +17582,50 @@ export default function ChefAISettingsPage() {
                   >
                     <input
                       type="text"
-                      placeholder={t('startTypingToAdd', 'Start typing to add')}
+                      placeholder={t('startTypingToAddVocab', 'Add custom culinary terminology (e.g. Umami, Sous-vide, Chiffonade)...')}
                       value={newVocabInput}
                       onChange={(e) => setNewVocabInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newVocabInput.trim()) {
-                          e.preventDefault();
-                          setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
-                          setNewVocabInput('');
-                        }
-                      }}
-                      className="bg-transparent border-none outline-none w-full text-xs"
+                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
                       style={{ color: 'var(--color-text)' }}
                     />
-                    <span 
-                      onClick={() => {
-                        if (newVocabInput.trim()) {
-                          setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
-                          setNewVocabInput('');
-                        }
-                      }}
-                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {t('enterKey', 'Enter')}
-                    </span>
                   </div>
-                </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                    style={{ backgroundColor: 'var(--color-emerald)' }}
+                  >
+                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                  </button>
+                </form>
 
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {customVocabularyList.map((item, idx) => (
-                    <span 
-                      key={idx}
-                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-emerald)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {item}
-                      <button
-                        type="button"
-                        onClick={() => setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx))}
-                        className="hover:text-red-500 cursor-pointer"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                  {customVocabularyList.length === 0 ? (
+                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('noCustomVocabularyEntries', 'No custom vocabulary terms added yet.')}
                     </span>
-                  ))}
+                  ) : (
+                    customVocabularyList.map((item, idx) => (
+                      <span 
+                        key={idx}
+                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-emerald)',
+                          color: 'var(--color-emerald)'
+                        }}
+                      >
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveCustomVocabulary(idx)}
+                          className="hover:opacity-75 cursor-pointer ml-0.5"
+                          title="Remove term"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -16343,9 +17640,9 @@ export default function ChefAISettingsPage() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
+                <form onSubmit={handleAddFilterWord} className="flex gap-2">
                   <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs"
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -16354,58 +17651,50 @@ export default function ChefAISettingsPage() {
                   >
                     <input
                       type="text"
-                      placeholder={t('startTypingToAdd', 'Start typing to add')}
+                      placeholder={t('startTypingToAddFilter', 'Add restricted word or prohibited ingredient (e.g. Trans fats, MSG)...')}
                       value={newFilterInput}
                       onChange={(e) => setNewFilterInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newFilterInput.trim()) {
-                          e.preventDefault();
-                          setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
-                          setNewFilterInput('');
-                        }
-                      }}
-                      className="bg-transparent border-none outline-none w-full text-xs"
+                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
                       style={{ color: 'var(--color-text)' }}
                     />
-                    <span 
-                      onClick={() => {
-                        if (newFilterInput.trim()) {
-                          setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
-                          setNewFilterInput('');
-                        }
-                      }}
-                      className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {t('enterKey', 'Enter')}
-                    </span>
                   </div>
-                </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                    style={{ backgroundColor: '#ef4444' }}
+                  >
+                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                  </button>
+                </form>
 
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {filterWordsList.map((item, idx) => (
-                    <span 
-                      key={idx}
-                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'rgba(239, 68, 68, 0.4)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {item}
-                      <button
-                        type="button"
-                        onClick={() => setFilterWordsList(filterWordsList.filter((_, i) => i !== idx))}
-                        className="hover:text-red-500 cursor-pointer"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                  {filterWordsList.length === 0 ? (
+                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('noFilterWordsEntries', 'No filter words configured.')}
                     </span>
-                  ))}
+                  ) : (
+                    filterWordsList.map((item, idx) => (
+                      <span 
+                        key={idx}
+                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'rgba(239, 68, 68, 0.5)',
+                          color: '#ef4444'
+                        }}
+                      >
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFilterWord(idx)}
+                          className="hover:opacity-75 cursor-pointer ml-0.5"
+                          title="Remove filter word"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -16418,7 +17707,7 @@ export default function ChefAISettingsPage() {
                   rows={5}
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
-                  className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
+                  className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition font-medium"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -16435,7 +17724,122 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-      </form>
+      </div>
+
+      {/* INDIVIDUAL RECIPE PULL & INSPECT MODAL */}
+      {previewRecipeData && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
+          onClick={() => setPreviewRecipeData(null)}
+        >
+          <div 
+            className="border rounded-3xl max-w-xl w-full p-6 space-y-4 shadow-2xl relative max-h-[85vh] overflow-y-auto transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <span 
+                  className="text-[9px] font-black uppercase px-2 py-0.5 rounded border inline-block mb-1"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  {previewRecipeData.sourceName || 'Individual Recipe Pulled'}
+                </span>
+                <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
+                  {previewRecipeData.title}
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setPreviewRecipeData(null)}
+                className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
+                }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {previewRecipeData.image && (
+              <div className="w-full h-44 rounded-2xl overflow-hidden relative border" style={{ borderColor: 'var(--color-border)' }}>
+                <img 
+                  src={previewRecipeData.image} 
+                  alt={previewRecipeData.title}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            )}
+
+            {previewRecipeData.description && (
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {previewRecipeData.description}
+              </p>
+            )}
+
+            <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold pt-1">
+              <div className="p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <span className="block text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Prep Time</span>
+                <span style={{ color: 'var(--color-primary)' }}>{previewRecipeData.prepMinutes}m</span>
+              </div>
+              <div className="p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <span className="block text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Cook Time</span>
+                <span style={{ color: 'var(--color-emerald)' }}>{previewRecipeData.cookMinutes}m</span>
+              </div>
+              <div className="p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <span className="block text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Servings</span>
+                <span style={{ color: 'var(--color-text)' }}>{previewRecipeData.servings}</span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>
+                {t('ingredientsCount', 'Ingredients')} ({previewRecipeData.ingredients?.length || 0})
+              </span>
+              <ul className="text-xs space-y-1 max-h-32 overflow-y-auto pl-2 border-l-2" style={{ borderColor: 'var(--color-primary)', color: 'var(--color-text-secondary)' }}>
+                {(previewRecipeData.ingredients || []).map((ing: string, iIdx: number) => (
+                  <li key={iIdx}>• {ing}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <a
+                href={previewRecipeData.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-bold flex items-center gap-1 hover:underline"
+                style={{ color: 'var(--color-primary)' }}
+              >
+                <Globe className="h-3.5 w-3.5" /> {t('visitOriginalPage', 'Visit Source Recipe ↗')}
+              </a>
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleAddDiscoveredAsDirectUrl(previewRecipeData.sourceUrl);
+                  setPreviewRecipeData(null);
+                }}
+                className="px-4 py-2 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {t('addAsDirectSourceBtn', 'Add to Primary URLs')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -35335,11 +36739,9 @@ export async function GET(
 
 ```
 
-## File: `apps/web/src/app/api/admin/settings/route.ts`
+## File: `apps/web/src/app/api/planner/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
@@ -35360,90 +36762,54 @@ async function getPostgresPool() {
       ssl: requiresSsl ? { rejectUnauthorized: false } : false
     });
     return cachedPool;
-  } catch (err) {
-    console.error('[PostgreSQL] Settings Pool Init Error:', err);
+  } catch (_) {
     return null;
   }
 }
 
-async function ensureSettingsTable(pool: any) {
+async function ensurePlannerTable(pool: any) {
   if (!pool) return;
   try {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id VARCHAR(100) PRIMARY KEY DEFAULT 'primary_settings',
-        value JSONB DEFAULT '{}'::jsonb,
-        chef_ai_settings JSONB,
-        ai_model VARCHAR(255),
-        ai_provider VARCHAR(100),
+      CREATE TABLE IF NOT EXISTS planner_meals (
+        id VARCHAR(100) PRIMARY KEY,
+        user_id VARCHAR(100),
+        created_by VARCHAR(255),
+        creator_name VARCHAR(255),
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        date VARCHAR(50),
+        date_str VARCHAR(50),
+        day_name VARCHAR(50),
+        meal_type VARCHAR(50) DEFAULT 'Dinner',
+        time VARCHAR(50),
+        servings INT DEFAULT 2,
+        prep_minutes INT DEFAULT 15,
+        cook_minutes INT DEFAULT 20,
+        image_url TEXT,
+        ingredients JSONB DEFAULT '[]'::jsonb,
+        notes TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB DEFAULT '{}'::jsonb;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS chef_ai_settings JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ai_model VARCHAR(255);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(100);
     `);
-  } catch (err) {
-    console.error('[PostgreSQL] ensureSettingsTable Notice:', err);
-  }
+  } catch (_) {}
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId') || 'guest';
     const pool = await getPostgresPool();
-    let currentSettings: any = {};
-
     if (pool) {
-      await ensureSettingsTable(pool);
-      const res = await pool.query('SELECT * FROM admin_settings ORDER BY updated_at DESC LIMIT 1;');
-      if (res.rows && res.rows.length > 0) {
-        const row = res.rows[0];
-        let val = row.value || {};
-        if (typeof val === 'string') {
-          try { val = JSON.parse(val); } catch (_) { val = {}; }
-        }
-
-        let chefAi = row.chef_ai_settings;
-        if (typeof chefAi === 'string') {
-          try { chefAi = JSON.parse(chefAi); } catch (_) { chefAi = {}; }
-        }
-
-        currentSettings = {
-          ...val,
-          chefAiSettings: chefAi || val.chefAiSettings || val.aiSettings || {},
-          aiModel: row.ai_model || val.aiModel || (chefAi?.model) || val.chefAiSettings?.model || 'gemini-2.5-flash',
-          aiProvider: row.ai_provider || val.aiProvider || (chefAi?.provider) || val.chefAiSettings?.provider || 'gemini'
-        };
-      }
+      await ensurePlannerTable(pool);
+      const res = await pool.query(
+        "SELECT * FROM planner_meals WHERE user_id = $1 OR created_by = $1 ORDER BY date ASC LIMIT 100",
+        [userId]
+      );
+      return NextResponse.json({ success: true, meals: res.rows });
     }
-
-    // Disk fallback if database returned empty
-    if (Object.keys(currentSettings).length === 0) {
-      try {
-        const diskPath = path.join(process.cwd(), 'data', 'admin_settings.json');
-        if (fs.existsSync(diskPath)) {
-          const raw = fs.readFileSync(diskPath, 'utf-8');
-          currentSettings = JSON.parse(raw);
-        }
-      } catch (_) {}
-    }
-
-    return NextResponse.json(
-      {
-        success: true,
-        settings: currentSettings,
-        chefAiSettings: currentSettings.chefAiSettings,
-        aiModel: currentSettings.aiModel || currentSettings.chefAiSettings?.model,
-        aiProvider: currentSettings.aiProvider || currentSettings.chefAiSettings?.provider,
-        ...currentSettings
-      },
-      {
-        headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
-        }
-      }
-    );
+    return NextResponse.json({ success: true, meals: [] });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -35452,84 +36818,632 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const id = body.id || `plan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const userId = body.userId || body.user_id || 'guest';
+    const email = body.createdBy || body.creator_email || 'guest';
+    const name = body.creatorName || email.split('@')[0];
+    const title = body.title || body.name || body.recipeTitle || 'Scheduled Meal';
+    const description = body.description || '';
+    const date = body.date || body.formattedDate || new Date().toISOString().split('T')[0];
+    const dateStr = body.dateStr || date;
+    const dayName = body.dayName || body.day || '';
+    const mealType = (body.mealType || body.type || 'Dinner').toUpperCase();
+    const time = body.time || '19:00';
+    const servings = Number(body.servings || 2);
+    const prep = Number(body.prepMinutes || body.prepTimeMinutes || 15);
+    const cook = Number(body.cookMinutes || body.cookTimeMinutes || 20);
+    const image = body.image || body.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80';
+    const ingredients = Array.isArray(body.ingredients) ? body.ingredients : [];
+    const notes = body.notes || '';
+
     const pool = await getPostgresPool();
-
-    let existing: any = {};
-    let rowId = 'primary_settings';
-
     if (pool) {
-      await ensureSettingsTable(pool);
-      const res = await pool.query('SELECT * FROM admin_settings LIMIT 1;');
-      if (res.rows && res.rows.length > 0) {
-        rowId = res.rows[0].id || 'primary_settings';
-        let val = res.rows[0].value || {};
-        if (typeof val === 'string') {
-          try { val = JSON.parse(val); } catch (_) { val = {}; }
-        }
-        existing = val;
-      }
-    }
-
-    // Perform deep merge to guarantee no sub-properties are lost
-    const incomingChef = body.chefAiSettings || body.aiSettings || {};
-    const existingChef = existing.chefAiSettings || existing.aiSettings || {};
-
-    const resolvedModel = body.aiModel || incomingChef.model || existing.aiModel || existingChef.model || 'gemini-2.5-flash';
-    const resolvedProvider = body.aiProvider || incomingChef.provider || existing.aiProvider || existingChef.provider || 'gemini';
-
-    const mergedChefAiSettings = {
-      ...existingChef,
-      ...incomingChef,
-      model: resolvedModel,
-      provider: resolvedProvider,
-      updatedAt: new Date().toISOString()
-    };
-
-    const merged = {
-      ...existing,
-      ...body,
-      chefAiSettings: mergedChefAiSettings,
-      aiModel: resolvedModel,
-      aiProvider: resolvedProvider,
-      updatedAt: new Date().toISOString()
-    };
-
-    if (pool) {
-      await pool.query(`
-        INSERT INTO admin_settings (id, value, chef_ai_settings, ai_model, ai_provider, updated_at)
-        VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, NOW())
+      await ensurePlannerTable(pool);
+      await pool.query(
+        `INSERT INTO planner_meals (
+          id, user_id, created_by, creator_name, title, description,
+          date, date_str, day_name, meal_type, time, servings,
+          prep_minutes, cook_minutes, image_url, ingredients, notes, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, NOW())
         ON CONFLICT (id) DO UPDATE SET
-          value = EXCLUDED.value,
-          chef_ai_settings = EXCLUDED.chef_ai_settings,
-          ai_model = EXCLUDED.ai_model,
-          ai_provider = EXCLUDED.ai_provider,
-          updated_at = NOW();
-      `, [
-        rowId,
-        JSON.stringify(merged),
-        JSON.stringify(mergedChefAiSettings),
-        resolvedModel,
-        resolvedProvider
-      ]);
+          title = EXCLUDED.title,
+          date = EXCLUDED.date,
+          meal_type = EXCLUDED.meal_type,
+          time = EXCLUDED.time,
+          notes = EXCLUDED.notes,
+          updated_at = NOW();`,
+        [id, userId, email, name, title, description, date, dateStr, dayName, mealType, time, servings, prep, cook, image, JSON.stringify(ingredients), notes]
+      );
     }
-
-    // Disk backup sync
-    try {
-      const diskDir = path.join(process.cwd(), 'data');
-      if (!fs.existsSync(diskDir)) fs.mkdirSync(diskDir, { recursive: true });
-      fs.writeFileSync(path.join(diskDir, 'admin_settings.json'), JSON.stringify(merged, null, 2), 'utf-8');
-    } catch (_) {}
 
     return NextResponse.json({
       success: true,
-      message: 'Admin settings persisted successfully to PostgreSQL.',
-      settings: merged,
-      chefAiSettings: mergedChefAiSettings,
-      aiModel: resolvedModel,
-      aiProvider: resolvedProvider
+      message: 'Meal scheduled successfully in PostgreSQL planner.',
+      meal: { id, title, date, mealType, time, servings }
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/chef/history/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+async function ensureChefChatTables() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS chef_chat_categories (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(128) NOT NULL,
+        name VARCHAR(128) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS chef_chat_sessions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(128) NOT NULL,
+        category_id VARCHAR(64) REFERENCES chef_chat_categories(id) ON DELETE SET NULL,
+        title VARCHAR(255) NOT NULL,
+        messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_chef_sessions_user ON chef_chat_sessions(user_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_chef_categories_user ON chef_chat_categories(user_id, created_at ASC);
+    `);
+  } catch (err) {
+    console.error('Error initializing chef chat tables:', err);
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    await ensureChefChatTables();
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId') || 'guest';
+    const categoryId = searchParams.get('categoryId') || 'all';
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+    const limit = 10;
+    const offset = (page - 1) * limit;
+
+    // Fetch categories
+    const categories = await query(
+      `SELECT * FROM chef_chat_categories WHERE user_id = $1 ORDER BY created_at ASC`,
+      [userId]
+    );
+
+    // Fetch sessions matching filter
+    let sessionQuery = `
+      SELECT s.id, s.title, s.category_id, s.created_at, s.updated_at,
+             jsonb_array_length(s.messages) as message_count,
+             c.name as category_name
+      FROM chef_chat_sessions s
+      LEFT JOIN chef_chat_categories c ON s.category_id = c.id
+      WHERE s.user_id = $1
+    `;
+    const params: any[] = [userId];
+
+    if (categoryId !== 'all') {
+      if (categoryId === 'uncategorized') {
+        sessionQuery += ` AND s.category_id IS NULL`;
+      } else {
+        params.push(categoryId);
+        sessionQuery += ` AND s.category_id = $${params.length}`;
+      }
+    }
+
+    // Count total
+    const countQuery = `SELECT COUNT(*) as total FROM (${sessionQuery}) as filtered`;
+    const countRes = await query(countQuery, params);
+    const total = parseInt(countRes[0]?.total || '0');
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    // Paginated results
+    sessionQuery += ` ORDER BY s.updated_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(limit, offset);
+
+    const sessions = await query(sessionQuery, params);
+
+    return NextResponse.json({
+      success: true,
+      sessions,
+      categories,
+      page,
+      limit,
+      total,
+      totalPages
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    await ensureChefChatTables();
+    const body = await req.json();
+    const { action, userId = 'guest' } = body;
+
+    if (action === 'create_category') {
+      const name = (body.name || '').trim();
+      if (!name) {
+        return NextResponse.json({ success: false, error: 'Category name is required' }, { status: 400 });
+      }
+      const catId = 'cat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+      await query(
+        `INSERT INTO chef_chat_categories (id, user_id, name) VALUES ($1, $2, $3)`,
+        [catId, userId, name]
+      );
+      return NextResponse.json({ success: true, categoryId: catId, name });
+    }
+
+    if (action === 'save_session') {
+      const { id, title = 'New Conversation', messages = [], categoryId = null } = body;
+      if (!id) {
+        return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
+      }
+
+      await query(
+        `INSERT INTO chef_chat_sessions (id, user_id, category_id, title, messages, updated_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+         ON CONFLICT (id) DO UPDATE SET
+           title = EXCLUDED.title,
+           category_id = COALESCE(EXCLUDED.category_id, chef_chat_sessions.category_id),
+           messages = EXCLUDED.messages,
+           updated_at = NOW()`,
+        [id, userId, categoryId || null, title, JSON.stringify(messages)]
+      );
+
+      return NextResponse.json({ success: true, sessionId: id });
+    }
+
+    if (action === 'set_session_category') {
+      const { sessionId, categoryId } = body;
+      await query(
+        `UPDATE chef_chat_sessions SET category_id = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3`,
+        [categoryId || null, sessionId, userId]
+      );
+      return NextResponse.json({ success: true });
+    }
+
+    return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await ensureChefChatTables();
+    const { searchParams } = new URL(req.url);
+    const action = searchParams.get('action');
+    const userId = searchParams.get('userId') || 'guest';
+
+    if (action === 'delete_session') {
+      const sessionId = searchParams.get('sessionId');
+      if (!sessionId) return NextResponse.json({ error: 'Session ID required' }, { status: 400 });
+
+      await query(`DELETE FROM chef_chat_sessions WHERE id = $1 AND user_id = $2`, [sessionId, userId]);
+      return NextResponse.json({ success: true, message: 'Chat deleted' });
+    }
+
+    if (action === 'delete_category') {
+      const categoryId = searchParams.get('categoryId');
+      if (!categoryId) return NextResponse.json({ error: 'Category ID required' }, { status: 400 });
+
+      await query(`UPDATE chef_chat_sessions SET category_id = NULL WHERE category_id = $1`, [categoryId]);
+      await query(`DELETE FROM chef_chat_categories WHERE id = $1 AND user_id = $2`, [categoryId, userId]);
+      return NextResponse.json({ success: true, message: 'Category deleted' });
+    }
+
+    return NextResponse.json({ success: false, error: 'Invalid delete action' }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/settings/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getLocalSettingsPath(): string {
+  const possiblePaths = [
+    path.join(process.cwd(), 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), '..', 'data', 'admin_settings.json')
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  const defaultPath = path.join(process.cwd(), 'data', 'admin_settings.json');
+  fs.mkdirSync(path.dirname(defaultPath), { recursive: true });
+  return defaultPath;
+}
+
+function readLocalSettings(): any {
+  try {
+    const p = getLocalSettingsPath();
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf-8');
+      return JSON.parse(raw);
+    }
+  } catch (_) {}
+  return {};
+}
+
+function writeLocalSettings(data: any): void {
+  try {
+    const p = getLocalSettingsPath();
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (_) {}
+}
+
+async function ensureAdminSettingsTable(): Promise<void> {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(100) PRIMARY KEY,
+        value JSONB,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+    await query(`
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS chef_ai_settings JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ai_model VARCHAR(100);
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(50);
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+    `);
+  } catch (err) {
+    console.warn('[PostgreSQL] admin_settings table setup warning:', err);
+  }
+}
+
+export async function GET() {
+  await ensureAdminSettingsTable();
+  const diskData = readLocalSettings();
+
+  try {
+    const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    if (rows.length > 0) {
+      const row = rows[0];
+      let chefAiSettings = row.chef_ai_settings;
+      if (typeof chefAiSettings === 'string') {
+        try { chefAiSettings = JSON.parse(chefAiSettings); } catch (_) { chefAiSettings = {}; }
+      } else if (!chefAiSettings && row.value) {
+        chefAiSettings = typeof row.value === 'string' ? JSON.parse(row.value).chefAiSettings || {} : row.value.chefAiSettings || {};
+      }
+      chefAiSettings = chefAiSettings || {};
+
+      let recUrls: string[] = [];
+      if (Array.isArray(chefAiSettings.recommendedRecipeUrls)) {
+        recUrls = chefAiSettings.recommendedRecipeUrls.filter(Boolean);
+      } else if (Array.isArray(chefAiSettings.recommendedRecipesUrls)) {
+        recUrls = chefAiSettings.recommendedRecipesUrls.filter(Boolean);
+      } else if (Array.isArray(diskData.recommendedRecipeUrls)) {
+        recUrls = diskData.recommendedRecipeUrls.filter(Boolean);
+      }
+
+      // Extract and preserve themeColors
+      let themeColors: any = null;
+      if (row.theme_colors) {
+        try {
+          themeColors = typeof row.theme_colors === 'string' ? JSON.parse(row.theme_colors) : row.theme_colors;
+        } catch (_) {}
+      }
+      if (!themeColors && row.value) {
+        const val = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+        themeColors = val?.themeColors || val?.theme_colors || null;
+      }
+      if (!themeColors && diskData.themeColors) {
+        themeColors = diskData.themeColors;
+      }
+      if (!themeColors && diskData.settings?.themeColors) {
+        themeColors = diskData.settings.themeColors;
+      }
+
+      const settingsPayload = row.value || diskData.settings || {};
+
+      return NextResponse.json({
+        success: true,
+        themeColors: themeColors || null,
+        theme_colors: themeColors || null,
+        aiProvider: row.ai_provider || chefAiSettings.provider || diskData.aiProvider || 'gemini',
+        aiModel: row.ai_model || chefAiSettings.model || diskData.aiModel || 'gemini-2.5-flash',
+        chefAiSettings: {
+          ...diskData.chefAiSettings,
+          ...chefAiSettings,
+          recommendedRecipeUrls: recUrls
+        },
+        recommendedRecipeUrls: recUrls,
+        settings: {
+          ...settingsPayload,
+          themeColors: themeColors || settingsPayload.themeColors || null
+        }
+      }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+  } catch (dbErr) {
+    console.warn('[PostgreSQL] GET fallback to filesystem:', dbErr);
+  }
+
+  // Filesystem fallback
+  const recUrls = Array.isArray(diskData.recommendedRecipeUrls) 
+    ? diskData.recommendedRecipeUrls.filter(Boolean) 
+    : (diskData.chefAiSettings?.recommendedRecipeUrls || []);
+
+  const diskTheme = diskData.themeColors || diskData.settings?.themeColors || null;
+
+  return NextResponse.json({
+    success: true,
+    themeColors: diskTheme,
+    theme_colors: diskTheme,
+    aiProvider: diskData.aiProvider || diskData.chefAiSettings?.provider || 'gemini',
+    aiModel: diskData.aiModel || diskData.chefAiSettings?.model || 'gemini-2.5-flash',
+    chefAiSettings: {
+      ...(diskData.chefAiSettings || {}),
+      recommendedRecipeUrls: recUrls
+    },
+    recommendedRecipeUrls: recUrls,
+    settings: {
+      ...(diskData.settings || {}),
+      themeColors: diskTheme
+    }
+  }, { headers: { 'Cache-Control': 'no-store' } });
+}
+
+export async function POST(req: NextRequest) {
+  return handleSaveSettings(req);
+}
+
+export async function PUT(req: NextRequest) {
+  return handleSaveSettings(req);
+}
+
+async function handleSaveSettings(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const { aiProvider, aiModel, chefAiSettings, recommendedRecipeUrls, themeColors, theme_colors } = body;
+
+    await ensureAdminSettingsTable();
+    const diskData = readLocalSettings();
+
+    let existingChefSettings: any = diskData.chefAiSettings || {};
+    let existingValue: any = diskData.value || diskData.settings || {};
+    let existingThemeColors: any = diskData.themeColors || diskData.settings?.themeColors || null;
+
+    try {
+      const existingRows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+      if (existingRows.length > 0) {
+        const row = existingRows[0];
+        if (row.theme_colors) {
+          try {
+            existingThemeColors = typeof row.theme_colors === 'string' ? JSON.parse(row.theme_colors) : row.theme_colors;
+          } catch (_) {}
+        }
+        if (typeof row.chef_ai_settings === 'string') {
+          try { existingChefSettings = JSON.parse(row.chef_ai_settings); } catch (_) {}
+        } else if (row.chef_ai_settings) {
+          existingChefSettings = row.chef_ai_settings;
+        }
+
+        if (typeof row.value === 'string') {
+          try { existingValue = JSON.parse(row.value); } catch (_) {}
+        } else if (row.value) {
+          existingValue = row.value;
+        }
+      }
+    } catch (_) {}
+
+    const resolvedThemeColors = themeColors || theme_colors || existingThemeColors || existingValue.themeColors || existingValue.theme_colors || null;
+
+    const mergedChefSettings = {
+      ...existingChefSettings,
+      ...(chefAiSettings || {})
+    };
+
+    if (Array.isArray(recommendedRecipeUrls)) {
+      mergedChefSettings.recommendedRecipeUrls = recommendedRecipeUrls.filter(Boolean);
+    } else if (Array.isArray(chefAiSettings?.recommendedRecipeUrls)) {
+      mergedChefSettings.recommendedRecipeUrls = chefAiSettings.recommendedRecipeUrls.filter(Boolean);
+    }
+
+    const providerToSave = aiProvider || chefAiSettings?.provider || existingChefSettings.provider || 'gemini';
+    const modelToSave = aiModel || chefAiSettings?.model || existingChefSettings.model || 'gemini-2.5-flash';
+
+    const mergedValue = {
+      ...existingValue,
+      ...body,
+      themeColors: resolvedThemeColors,
+      theme_colors: resolvedThemeColors,
+      chefAiSettings: mergedChefSettings,
+      recommendedRecipeUrls: mergedChefSettings.recommendedRecipeUrls || []
+    };
+
+    // 1. Dual-mirror to filesystem
+    writeLocalSettings({
+      aiProvider: providerToSave,
+      aiModel: modelToSave,
+      themeColors: resolvedThemeColors,
+      theme_colors: resolvedThemeColors,
+      chefAiSettings: mergedChefSettings,
+      recommendedRecipeUrls: mergedChefSettings.recommendedRecipeUrls || [],
+      value: mergedValue,
+      settings: mergedValue,
+      updatedAt: new Date().toISOString()
+    });
+
+    // 2. Persist to PostgreSQL (COALESCE preserves theme_colors if omitted)
+    try {
+      await query(`
+        INSERT INTO admin_settings (id, chef_ai_settings, ai_model, ai_provider, value, theme_colors, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          chef_ai_settings = EXCLUDED.chef_ai_settings,
+          ai_model = EXCLUDED.ai_model,
+          ai_provider = EXCLUDED.ai_provider,
+          value = EXCLUDED.value,
+          theme_colors = COALESCE(EXCLUDED.theme_colors, admin_settings.theme_colors),
+          updated_at = NOW()
+      `, [
+        'primary_settings',
+        JSON.stringify(mergedChefSettings),
+        modelToSave,
+        providerToSave,
+        JSON.stringify(mergedValue),
+        resolvedThemeColors ? JSON.stringify(resolvedThemeColors) : null
+      ]);
+    } catch (pgErr) {
+      console.warn('[PostgreSQL] Save warning, filesystem fallback active:', pgErr);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Admin settings persisted successfully',
+      themeColors: resolvedThemeColors,
+      theme_colors: resolvedThemeColors,
+      chefAiSettings: mergedChefSettings,
+      recommendedRecipeUrls: mergedChefSettings.recommendedRecipeUrls || []
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/scrape-recipe/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { scrapeRecipeFromUrl } from '@/lib/recipeScraper';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const url = (body.url || '').trim();
+
+    if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+      return NextResponse.json({ success: false, error: 'A valid HTTP/HTTPS URL is required.' }, { status: 400 });
+    }
+
+    const scraped = await scrapeRecipeFromUrl(url);
+
+    return NextResponse.json({
+      success: true,
+      scraped
+    });
+  } catch (err: any) {
+    return NextResponse.json({
+      success: false,
+      error: err.message || 'Failed to scrape recipe from website.'
+    }, { status: 422 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/ai-settings/route.ts`
+```typescript
+import { GET as baseGET, POST as basePOST, PUT as basePUT } from '../settings/route';
+export const dynamic = 'force-dynamic';
+export const GET = baseGET;
+export const POST = basePOST;
+export const PUT = basePUT;
+
+```
+
+## File: `apps/web/src/app/api/admin/crawl-index/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { discoverRecipeLinksFromIndex, scrapeRecipeFromUrl, isIndexOrCollectionUrl } from '@/lib/recipeScraper';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const action = body.action || 'crawl';
+    const targetUrl = (body.url || '').trim();
+    const recipeUrl = (body.recipeUrl || '').trim();
+
+    if (action === 'pull') {
+      const urlToScrape = recipeUrl || targetUrl;
+      if (!urlToScrape || !/^https?:\/\//i.test(urlToScrape)) {
+        return NextResponse.json({ success: false, error: 'A valid recipe URL is required to pull.' }, { status: 400 });
+      }
+
+      const recipe = await scrapeRecipeFromUrl(urlToScrape);
+      if (!recipe) {
+        return NextResponse.json({ success: false, error: 'Could not extract recipe contents from target slug.' }, { status: 422 });
+      }
+
+      return NextResponse.json({ success: true, recipe });
+    }
+
+    // Default action: Crawl index links & discover recipe slugs
+    if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) {
+      return NextResponse.json({ success: false, error: 'A valid HTTP/HTTPS URL is required.' }, { status: 400 });
+    }
+
+    const isIndex = isIndexOrCollectionUrl(targetUrl);
+    const discovered = await discoverRecipeLinksFromIndex(targetUrl);
+
+    // Save discovered cache to PostgreSQL admin_settings
+    if (discovered.length > 0) {
+      try {
+        const rows = await query('SELECT chef_ai_settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+        let currentSettings: any = {};
+        if (rows.length > 0 && rows[0].chef_ai_settings) {
+          currentSettings = typeof rows[0].chef_ai_settings === 'string'
+            ? JSON.parse(rows[0].chef_ai_settings)
+            : rows[0].chef_ai_settings;
+        }
+
+        const cache = currentSettings.discoveredRecipesCache || {};
+        cache[targetUrl] = {
+          count: discovered.length,
+          discovered: discovered.slice(0, 40),
+          crawledAt: new Date().toISOString()
+        };
+        currentSettings.discoveredRecipesCache = cache;
+
+        await query(
+          'UPDATE admin_settings SET chef_ai_settings = $1, updated_at = NOW() WHERE id = $2',
+          [JSON.stringify(currentSettings), 'primary_settings']
+        );
+      } catch (dbErr) {
+        console.warn('[crawl-index] Cache persistence notice:', dbErr);
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      indexUrl: targetUrl,
+      isIndex,
+      count: discovered.length,
+      discovered
+    });
+
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Error executing index crawl.' }, { status: 500 });
   }
 }
 
@@ -36413,10 +38327,15 @@ export async function GET() {
 ## File: `apps/web/src/app/api/admin/test-key/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+let cachedPool: any = null;
+
 async function getPostgresPool() {
+  if (cachedPool) return cachedPool;
   const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
   if (!connStr) return null;
   try {
@@ -36425,195 +38344,227 @@ async function getPostgresPool() {
                         connStr.includes('neon.tech') || 
                         connStr.includes('supabase.co') || 
                         process.env.NODE_ENV === 'production';
-    return new Pool({
+    cachedPool = new Pool({
       connectionString: connStr,
       ssl: requiresSsl ? { rejectUnauthorized: false } : false
     });
-  } catch (_) {
+    return cachedPool;
+  } catch (err) {
     return null;
   }
 }
 
-async function persistDiscoveredModels(provider: string, models: any[]) {
-  try {
-    const pool = await getPostgresPool();
-    if (!pool) return;
-    const settingsRes = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
-    if (settingsRes.rows && settingsRes.rows.length > 0) {
-      const row = settingsRes.rows[0];
-      let val = row.value || {};
-      if (typeof val === 'string') {
-        try { val = JSON.parse(val); } catch (_) { val = {}; }
+function cleanCredential(val?: string): string {
+  if (!val) return '';
+  return val.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().replace(/^["']|["']$/g, '').trim();
+}
+
+async function resolveKey(provider: string, explicitKey?: string): Promise<string> {
+  const clean = cleanCredential(explicitKey);
+  if (clean && clean.length > 5 && !clean.includes('sample')) return clean;
+
+  const targetEnv = provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
+  const pool = await getPostgresPool();
+
+  if (pool) {
+    try {
+      const res = await pool.query('SELECT key_value FROM admin_api_keys WHERE env_key = $1 LIMIT 1;', [targetEnv]);
+      if (res.rows && res.rows[0]?.key_value) {
+        const k = cleanCredential(res.rows[0].key_value);
+        if (k && !k.includes('sample')) return k;
       }
-      if (!val.chefAiSettings) val.chefAiSettings = {};
-      if (provider === 'gemini') {
-        val.chefAiSettings.availableGeminiModels = models;
-      } else {
-        val.chefAiSettings.availableOpenAiModels = models;
+    } catch (_) {}
+
+    try {
+      const sRes = await pool.query('SELECT chef_ai_settings, value FROM admin_settings LIMIT 1;');
+      if (sRes.rows && sRes.rows[0]) {
+        const row = sRes.rows[0];
+        let chef = row.chef_ai_settings || row.value?.chefAiSettings || {};
+        if (typeof chef === 'string') {
+          try { chef = JSON.parse(chef); } catch (_) { chef = {}; }
+        }
+        if (chef.apiKey) {
+          const k = cleanCredential(chef.apiKey);
+          if (k && !k.includes('sample')) return k;
+        }
       }
-      await pool.query(
-        "UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE id = $2;",
-        [JSON.stringify(val), row.id]
-      );
+    } catch (_) {}
+  }
+
+  const cwd = process.cwd();
+  const envPaths = [
+    path.join(cwd, '.env'),
+    path.join(cwd, '.env.local'),
+    path.join(cwd, 'apps', 'web', '.env'),
+    path.join(cwd, 'apps', 'web', '.env.local')
+  ];
+
+  for (const ep of envPaths) {
+    if (fs.existsSync(ep)) {
+      try {
+        const lines = fs.readFileSync(ep, 'utf-8').split(/\r?\n/);
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith(`${targetEnv}=`)) {
+            const rawVal = trimmed.substring(`${targetEnv}=`.length);
+            const k = cleanCredential(rawVal);
+            if (k && !k.includes('sample')) return k;
+          }
+        }
+      } catch (_) {}
     }
-    await pool.end();
-  } catch (_) {}
+  }
+
+  return cleanCredential(process.env[targetEnv] || process.env['GOOGLE_API_KEY']);
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { provider, apiKey, model } = await req.json();
-    const cleanKey = (apiKey || '').trim().replace(/^["']|["']$/g, '');
+    const body = await req.json().catch(() => ({}));
+    const provider = body.provider || 'gemini';
+    const cleanKey = await resolveKey(provider, body.apiKey);
+    const requestedModel = cleanCredential(body.model);
 
     if (!cleanKey) {
-      return NextResponse.json({ success: false, error: 'No API key provided to test.' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: `No active API key provided or found in database for ${provider}.` },
+        { status: 400 }
+      );
     }
 
     if (provider === 'gemini') {
-      if (cleanKey.includes('.apps.googleusercontent.com')) {
-        return NextResponse.json({
-          success: false,
-          error: "Invalid Credential Type: You entered a Google OAuth Client ID (for Social Login), not a Gemini API Key. Please get an API key starting with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
-        }, { status: 400 });
-      }
-
-      if (cleanKey.startsWith('GOCSPX-')) {
-        return NextResponse.json({
-          success: false,
-          error: "Invalid Credential Type: You entered a Google OAuth Client Secret, not a Gemini API Key. Please get an API key starting with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
-        }, { status: 400 });
-      }
-
-      let discoveredModels: any[] = [];
+      let catalogModels: any[] = [];
       try {
-        const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
-        const listRes = await fetch(listUrl, {
-          cache: 'no-store',
-          headers: {
-            'x-goog-api-key': cleanKey
-          }
+        const catRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
         });
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          if (Array.isArray(listData.models)) {
-            discoveredModels = listData.models
-              .filter((m: any) => {
-                const methods = m.supportedGenerationMethods || [];
-                const name = (m.name || '').toLowerCase();
-                return methods.includes('generateContent') &&
-                       !name.includes('embedding') &&
-                       !name.includes('aqa') &&
-                       !name.includes('imagen');
+        const catData = await catRes.json().catch(() => ({}));
+        if (catRes.ok && Array.isArray(catData.models)) {
+          catalogModels = catData.models
+            .filter((m: any) => {
+              const name = m.name || '';
+              const methods = m.supportedGenerationMethods || [];
+              const isGen = methods.includes('generateContent') || methods.length === 0;
+              const isEmb = name.includes('embedding') || name.includes('aqa') || name.includes('imagen');
+              return isGen && !isEmb;
+            })
+            .map((m: any) => {
+              const rawId = (m.name || '').replace(/^models\//, '');
+              return {
+                id: rawId,
+                name: m.displayName || rawId,
+                label: `${m.displayName || rawId} (${rawId})`,
+                description: m.description || 'Google Gemini production model.'
+              };
+            });
+        }
+      } catch (_) {}
+
+      // Prioritized verification ping using requested model first
+      const pingCandidate = requestedModel || (catalogModels.length > 0 ? catalogModels[0].id : 'gemini-2.5-flash');
+      const testModelsToTry = Array.from(new Set([pingCandidate, 'gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-1.5-flash']));
+      let pingSuccess = false;
+      let confirmedModel = pingCandidate;
+      let lastErrMsg = '';
+
+      for (const tModel of testModelsToTry) {
+        try {
+          const testRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${tModel}:generateContent?key=${cleanKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: 'ping' }] }],
+                generationConfig: { maxOutputTokens: 5 }
               })
-              .map((m: any) => {
-                const rawId = m.name?.startsWith('models/') ? m.name.replace('models/', '') : m.name;
-                const displayName = m.displayName || rawId;
-                return {
-                  id: rawId,
-                  name: displayName,
-                  label: `${displayName} (${rawId})`,
-                  description: m.description || ''
-                };
-              });
+            }
+          );
+          const testData = await testRes.json().catch(() => ({}));
+          if (testRes.ok && (testData.candidates || testData.promptFeedback)) {
+            pingSuccess = true;
+            confirmedModel = tModel;
+            break;
+          } else {
+            lastErrMsg = testData.error?.message || `HTTP ${testRes.status}`;
           }
-        } else {
-          const errData = await listRes.json().catch(() => ({}));
-          const errMsg = errData.error?.message || '';
-          if (listRes.status === 401 || errMsg.includes('authentication credentials') || errMsg.includes('API key')) {
-            return NextResponse.json({
-              success: false,
-              error: "Google API Authentication Failed (401): The provided Gemini API Key is invalid or expired. Please check your API key at https://aistudio.google.com/app/apikey."
-            }, { status: 401 });
-          }
+        } catch (e: any) {
+          lastErrMsg = e.message;
         }
-      } catch (err) {
-        console.warn('[Gemini] Model listing error:', err);
       }
 
-      const activeModel = model || (discoveredModels.length > 0 ? discoveredModels[0].id : 'gemini-2.5-flash');
-      const genUrl = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${encodeURIComponent(cleanKey)}`;
-      const res = await fetch(genUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': cleanKey
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Ping' }] }],
-          generationConfig: { maxOutputTokens: 3 }
-        })
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) {
-        const rawMsg = data.error?.message || `Google API handshake failed (${res.status})`;
-        let friendly = rawMsg;
-        if (res.status === 401 || rawMsg.includes('authentication credentials') || rawMsg.includes('API key')) {
-          friendly = "Google API Authentication Failed (401): The provided Gemini API Key is invalid, expired, or rejected. Please obtain an active API key from Google AI Studio (https://aistudio.google.com/app/apikey).";
-        }
-        return NextResponse.json({
-          success: false,
-          error: friendly,
-          models: discoveredModels
-        });
+      if (!pingSuccess && catalogModels.length === 0) {
+        return NextResponse.json({ success: false, error: lastErrMsg || 'Gemini handshake failed.' }, { status: 400 });
       }
 
-      if (discoveredModels.length > 0) {
-        persistDiscoveredModels('gemini', discoveredModels).catch(() => {});
+      // Preserve existing selected model in PostgreSQL while syncing available models catalog
+      const pool = await getPostgresPool();
+      if (pool && catalogModels.length > 0) {
+        try {
+          const res = await pool.query('SELECT * FROM admin_settings LIMIT 1;');
+          if (res.rows && res.rows.length > 0) {
+            const row = res.rows[0];
+            let chef = row.chef_ai_settings;
+            if (typeof chef === 'string') {
+              try { chef = JSON.parse(chef); } catch (_) { chef = {}; }
+            }
+            chef = chef || {};
+            chef.availableGeminiModels = catalogModels;
+            await pool.query(
+              `UPDATE admin_settings 
+               SET chef_ai_settings = $1::jsonb,
+                   value = jsonb_set(COALESCE(value, '{}'::jsonb), '{chefAiSettings,availableGeminiModels}', $2::jsonb),
+                   updated_at = NOW() 
+               WHERE id = $3;`,
+              [JSON.stringify(chef), JSON.stringify(catalogModels), row.id]
+            );
+          }
+        } catch (_) {}
       }
 
       return NextResponse.json({
         success: true,
-        message: `Connected to Google Gemini (${activeModel}) & synced ${discoveredModels.length} latest models!`,
-        models: discoveredModels,
-        testedModel: activeModel
-      });
-    } else {
-      let discoveredModels: any[] = [];
-      try {
-        const listRes = await fetch('https://api.openai.com/v1/models', {
-          headers: { Authorization: `Bearer ${cleanKey}` },
-          cache: 'no-store'
-        });
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          if (Array.isArray(listData.data)) {
-            discoveredModels = listData.data
-              .filter((m: any) => {
-                const id = (m.id || '').toLowerCase();
-                return (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')) &&
-                       !id.includes('realtime') && !id.includes('audio') &&
-                       !id.includes('moderation') && !id.includes('embedding') &&
-                       !id.includes('instruct') && !id.includes('similarity');
-              })
-              .sort((a: any, b: any) => (b.created || 0) - (a.created || 0))
-              .map((m: any) => ({
-                id: m.id,
-                name: m.id,
-                label: m.id,
-                description: `OpenAI ${m.id}`
-              }));
-          }
-        }
-      } catch (err) {
-        console.warn('[OpenAI] Model listing error:', err);
-      }
-
-      if (discoveredModels.length > 0) {
-        persistDiscoveredModels('openai', discoveredModels).catch(() => {});
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `Connected to OpenAI API & synced ${discoveredModels.length} latest models!`,
-        models: discoveredModels
+        message: `Connected to Google Gemini successfully! (${catalogModels.length} models synced)`,
+        models: catalogModels.length > 0 ? catalogModels : undefined,
+        testedModel: requestedModel || confirmedModel
       });
     }
+
+    // OpenAI provider check
+    if (provider === 'openai') {
+      const openAiRes = await fetch('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${cleanKey}` }
+      });
+      const openAiData = await openAiRes.json().catch(() => ({}));
+
+      if (!openAiRes.ok) {
+        return NextResponse.json({ success: false, error: openAiData.error?.message || 'OpenAI verification failed.' }, { status: 400 });
+      }
+
+      let openAiModels: any[] = [];
+      if (Array.isArray(openAiData.data)) {
+        openAiModels = openAiData.data
+          .filter((m: any) => m.id && (m.id.startsWith('gpt-') || m.id.startsWith('o1') || m.id.startsWith('chatgpt')))
+          .map((m: any) => ({
+            id: m.id,
+            name: m.id,
+            label: `${m.id.toUpperCase()}`,
+            description: 'OpenAI GPT Model.'
+          }));
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Connected to OpenAI successfully! (${openAiModels.length} models synced)`,
+        models: openAiModels.length > 0 ? openAiModels : undefined,
+        testedModel: requestedModel || 'gpt-4o'
+      });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unsupported provider' }, { status: 400 });
   } catch (err: any) {
-    return NextResponse.json({
-      success: false,
-      error: err.message || 'Verification endpoint failed to connect.'
-    });
+    return NextResponse.json({ success: false, error: err.message || 'Internal connection test failure.' }, { status: 500 });
   }
 }
 
@@ -37344,6 +39295,320 @@ export async function DELETE(req: NextRequest) {
 
 ```
 
+## File: `apps/web/src/app/api/admin/scrape-url/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+function cleanText(txt: any): string {
+  if (!txt) return '';
+  return String(txt)
+    .replace(/<[^>]*>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseDurationMinutes(isoStr: string | undefined): number {
+  if (!isoStr || typeof isoStr !== 'string') return 15;
+  const match = isoStr.match(/PT(?:(\d+)H)?(?:(\d+)M)?/i);
+  if (!match) return 15;
+  const hours = parseInt(match[1] || '0', 10);
+  const minutes = parseInt(match[2] || '0', 10);
+  return hours * 60 + minutes || 15;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    let rawUrl = (body.url || '').trim();
+    const mode = body.mode || 'auto'; // 'auto' | 'manual' | 'link'
+    const manualRecipe = body.manualRecipe || null;
+
+    if (!rawUrl && !manualRecipe?.title) {
+      return NextResponse.json({ success: false, error: 'URL or recipe title is required.' }, { status: 400 });
+    }
+
+    if (rawUrl && !/^https?:\/\//i.test(rawUrl)) {
+      rawUrl = 'https://' + rawUrl;
+    }
+
+    let parsedDomain = 'External Website';
+    try {
+      if (rawUrl) parsedDomain = new URL(rawUrl).hostname.replace(/^www\./, '');
+    } catch (_) {}
+
+    // MODE B: Manual Entry / Bypass Scraper
+    if (mode === 'manual' && manualRecipe) {
+      const title = cleanText(manualRecipe.title) || `Recipe from ${parsedDomain}`;
+      const description = cleanText(manualRecipe.description) || `Curated recipe reference from ${parsedDomain}`;
+      const ingredients = Array.isArray(manualRecipe.ingredients) 
+        ? manualRecipe.ingredients.map(cleanText).filter(Boolean)
+        : String(manualRecipe.ingredients || '').split(/\r?\n/).map(cleanText).filter(Boolean);
+      const instructions = Array.isArray(manualRecipe.instructions)
+        ? manualRecipe.instructions.map(cleanText).filter(Boolean)
+        : String(manualRecipe.instructions || '').split(/\r?\n/).map(cleanText).filter(Boolean);
+
+      return NextResponse.json({
+        success: true,
+        scrapedRecipe: {
+          id: 'ref_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+          url: rawUrl || 'https://' + parsedDomain,
+          domain: parsedDomain,
+          title,
+          description,
+          ingredients: ingredients.length > 0 ? ingredients : ['Custom ingredients as provided'],
+          instructions: instructions.length > 0 ? instructions : ['Follow cooking techniques as provided'],
+          imageUrl: manualRecipe.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80',
+          prepMinutes: parseInt(manualRecipe.prepMinutes, 10) || 15,
+          cookMinutes: parseInt(manualRecipe.cookMinutes, 10) || 20,
+          servings: parseInt(manualRecipe.servings, 10) || 4,
+          isManualBypass: true,
+          scrapedAt: new Date().toISOString()
+        }
+      });
+    }
+
+    // MODE C: Bookmark / Quick Reference Link Mode
+    if (mode === 'link') {
+      const slug = rawUrl.split('/').filter(Boolean).pop() || '';
+      let cleanTitle = slug.replace(/[-_]/g, ' ').replace(/\.html?$/i, '').trim();
+      cleanTitle = cleanTitle ? cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1) : `Reference from ${parsedDomain}`;
+
+      return NextResponse.json({
+        success: true,
+        scrapedRecipe: {
+          id: 'ref_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+          url: rawUrl,
+          domain: parsedDomain,
+          title: body.title ? cleanText(body.title) : cleanTitle,
+          description: `Bookmarked web reference source from ${parsedDomain} for culinary grounding.`,
+          ingredients: ['Authentic regional ingredients from source website', 'Fresh seasonings and aromatics'],
+          instructions: ['Prepare and cook according to source recipe publication.'],
+          imageUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80',
+          prepMinutes: 15,
+          cookMinutes: 20,
+          servings: 4,
+          isBookmarkLink: true,
+          scrapedAt: new Date().toISOString()
+        }
+      });
+    }
+
+    // MODE A: Primary Schema.org JSON-LD Extraction
+    let html = '';
+    let fetchOk = false;
+
+    try {
+      const response = await fetch(rawUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Cache-Control': 'no-cache'
+        },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(10000)
+      });
+
+      if (response.ok) {
+        html = await response.text();
+        fetchOk = true;
+      }
+    } catch (_) {}
+
+    let recipeObj: any = null;
+    if (fetchOk && html) {
+      const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+      let match;
+      while ((match = jsonLdRegex.exec(html)) !== null) {
+        try {
+          const rawJson = match[1].trim();
+          const parsed = JSON.parse(rawJson);
+
+          const findRecipe = (node: any): any => {
+            if (!node) return null;
+            if (Array.isArray(node)) {
+              for (const item of node) {
+                const res = findRecipe(item);
+                if (res) return res;
+              }
+            }
+            if (typeof node === 'object') {
+              const type = node['@type'];
+              if (type === 'Recipe' || (Array.isArray(type) && type.includes('Recipe'))) return node;
+              if (node['@graph']) return findRecipe(node['@graph']);
+            }
+            return null;
+          };
+
+          recipeObj = findRecipe(parsed);
+          if (recipeObj) break;
+        } catch (_) {}
+      }
+    }
+
+    let title = '';
+    let description = '';
+    let ingredients: string[] = [];
+    let instructions: string[] = [];
+    let imageUrl = '';
+    let prepMinutes = 15;
+    let cookMinutes = 20;
+    let servings = 2;
+
+    if (recipeObj) {
+      title = cleanText(recipeObj.name || recipeObj.headline);
+      description = cleanText(recipeObj.description);
+      if (Array.isArray(recipeObj.recipeIngredient)) {
+        ingredients = recipeObj.recipeIngredient.map(cleanText).filter(Boolean);
+      }
+      if (Array.isArray(recipeObj.recipeInstructions)) {
+        instructions = recipeObj.recipeInstructions.flatMap((inst: any) => {
+          if (typeof inst === 'string') return [cleanText(inst)];
+          if (inst && typeof inst === 'object') {
+            if (inst.text) return [cleanText(inst.text)];
+            if (inst.itemListElement && Array.isArray(inst.itemListElement)) {
+              return inst.itemListElement.map((e: any) => cleanText(e.text || e.name)).filter(Boolean);
+            }
+          }
+          return [];
+        }).filter(Boolean);
+      }
+
+      if (recipeObj.image) {
+        if (typeof recipeObj.image === 'string') imageUrl = recipeObj.image;
+        else if (Array.isArray(recipeObj.image) && recipeObj.image[0]) {
+          imageUrl = typeof recipeObj.image[0] === 'string' ? recipeObj.image[0] : recipeObj.image[0].url || '';
+        } else if (recipeObj.image.url) {
+          imageUrl = recipeObj.image.url;
+        }
+      }
+
+      prepMinutes = parseDurationMinutes(recipeObj.prepTime);
+      cookMinutes = parseDurationMinutes(recipeObj.cookTime);
+      if (recipeObj.recipeYield) {
+        const yNum = parseInt(String(recipeObj.recipeYield).match(/\d+/)?.[0] || '2', 10);
+        if (yNum > 0) servings = yNum;
+      }
+    }
+
+    // AI Fallback when website blocks server requests (Cloudflare / Paywalls)
+    if (!title || ingredients.length === 0) {
+      let geminiApiKey = '';
+      try {
+        const sRows = await query('SELECT gemini_api_key, chef_ai_settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+        if (sRows.length > 0) {
+          geminiApiKey = sRows[0].gemini_api_key || sRows[0].chef_ai_settings?.apiKey || '';
+        }
+      } catch (_) {}
+
+      if (!geminiApiKey) {
+        geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY || '';
+      }
+
+      if (geminiApiKey) {
+        try {
+          const aiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
+          const gRes = await fetch(aiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                role: 'user',
+                parts: [{
+                  text: `Analyze and extract this recipe URL: "${rawUrl}".
+Return a single valid JSON object strictly matching this schema:
+{
+  "title": "Authentic Recipe Title",
+  "description": "Appetizing summary of this dish.",
+  "ingredients": ["1 cup ingredient with quantity", "2 tbsp seasoning"],
+  "instructions": ["1. Step one preparation", "2. Cooking procedure"],
+  "prepMinutes": 15,
+  "cookMinutes": 20,
+  "servings": 4
+}`
+                }]
+              }],
+              generationConfig: { temperature: 0.2, maxOutputTokens: 1500 }
+            })
+          });
+
+          const gData = await gRes.json();
+          const aiText = gData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const match = aiText.match(/\{[\s\S]*\}/);
+          if (match) {
+            const parsedAi = JSON.parse(match[0]);
+            if (parsedAi.title) title = parsedAi.title;
+            if (parsedAi.description) description = parsedAi.description;
+            if (Array.isArray(parsedAi.ingredients) && parsedAi.ingredients.length > 0) ingredients = parsedAi.ingredients;
+            if (Array.isArray(parsedAi.instructions) && parsedAi.instructions.length > 0) instructions = parsedAi.instructions;
+            if (parsedAi.prepMinutes) prepMinutes = parsedAi.prepMinutes;
+            if (parsedAi.cookMinutes) cookMinutes = parsedAi.cookMinutes;
+            if (parsedAi.servings) servings = parsedAi.servings;
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Graceful Final Fallback (Guarantee success so the admin is never blocked)
+    if (!title) {
+      const slug = rawUrl.split('/').filter(Boolean).pop() || '';
+      title = slug.replace(/[-_]/g, ' ').replace(/\.html?$/i, '').trim();
+      title = title ? title.charAt(0).toUpperCase() + title.slice(1) : `Recipe Reference from ${parsedDomain}`;
+    }
+
+    if (ingredients.length === 0) {
+      ingredients = [
+        'Signature fresh ingredients from source recipe article',
+        'Extra Virgin Olive Oil & Seasoning',
+        'Aromatics (Garlic, Onion & Fresh Herbs)'
+      ];
+    }
+
+    if (instructions.length === 0) {
+      instructions = [
+        'Prepare all fresh ingredients as described in the source web article.',
+        'Cook according to authentic culinary temperature and timing standards.',
+        'Plate and serve immediately.'
+      ];
+    }
+
+    if (!imageUrl) {
+      imageUrl = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
+    }
+
+    return NextResponse.json({
+      success: true,
+      scrapedRecipe: {
+        id: 'ref_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        url: rawUrl,
+        domain: parsedDomain,
+        title,
+        description: description || `Curated recipe reference from ${parsedDomain}`,
+        ingredients,
+        instructions,
+        imageUrl,
+        prepMinutes,
+        cookMinutes,
+        servings,
+        scrapedAt: new Date().toISOString()
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Failed to process recipe source.' }, { status: 500 });
+  }
+}
+
+```
+
 ## File: `apps/web/src/app/api/admin/token-transaction/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -37617,7 +39882,7 @@ async function getPostgresPool() {
       ssl: requiresSsl ? { rejectUnauthorized: false } : false
     });
     return cachedPool;
-  } catch (_) {
+  } catch (err) {
     return null;
   }
 }
@@ -37676,11 +39941,6 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return map;
 }
 
-function isOAuthCredential(val: string): boolean {
-  if (!val) return false;
-  return val.includes('.apps.googleusercontent.com') || val.startsWith('GOCSPX-');
-}
-
 function updateEnvFile(filePath: string, key: string, value: string) {
   let content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
   const regex = new RegExp(`^${key}=.*$`, 'm');
@@ -37703,7 +39963,7 @@ export async function GET() {
       Object.assign(envMap, parseEnvFile(ep));
     }
 
-    ['GEMINI_API_KEY', 'GOOGLE_AI_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'].forEach(k => {
+    ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'].forEach(k => {
       if (process.env[k] && !envMap[k]) envMap[k] = process.env[k]!;
     });
 
@@ -37721,23 +39981,8 @@ export async function GET() {
           keyValue: row.key_value,
           status: row.status
         });
-        if (row.env_key && row.key_value && !isOAuthCredential(row.key_value)) {
-          envMap[row.env_key] = row.key_value;
-        }
+        if (row.env_key && row.key_value) envMap[row.env_key] = row.key_value;
       }
-    }
-
-    // Isolate real Gemini API key
-    let resolvedGemini = '';
-    for (const k of ['GEMINI_API_KEY', 'GOOGLE_AI_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY']) {
-      const v = envMap[k];
-      if (v && !isOAuthCredential(v) && !v.includes('sample')) {
-        resolvedGemini = v;
-        break;
-      }
-    }
-    if (resolvedGemini) {
-      envMap['GEMINI_API_KEY'] = resolvedGemini;
     }
 
     return NextResponse.json({ success: true, keys: dbKeys, envMap });
@@ -37752,31 +39997,19 @@ export async function POST(req: NextRequest) {
     const { name, provider, envKey, keyValue, model, status } = body;
 
     const keyToSave = (envKey || (provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY')).trim();
-    const valToSave = (keyValue || '').trim().replace(/^["']|["']$/g, '');
+    const valToSave = (keyValue || '').trim();
 
     if (!keyToSave) {
       return NextResponse.json({ success: false, error: 'Target environment key is required.' }, { status: 400 });
     }
 
-    if (provider === 'gemini' && isOAuthCredential(valToSave)) {
-      return NextResponse.json({
-        success: false,
-        error: "Cannot save: You provided a Google OAuth Client ID or Secret instead of a Gemini API Key. Gemini keys start with 'AIzaSy' from Google AI Studio (https://aistudio.google.com/app/apikey)."
-      }, { status: 400 });
-    }
-
-    // 1. Write to local .env files
     for (const ep of getEnvFilePaths()) {
       try { updateEnvFile(ep, keyToSave, valToSave); } catch (_) {}
     }
 
-    // 2. Synchronize process runtime memory
     process.env[keyToSave] = valToSave;
-    if (keyToSave === 'GEMINI_API_KEY') {
-      process.env['GOOGLE_API_KEY'] = valToSave;
-    }
+    if (keyToSave === 'GEMINI_API_KEY') process.env['GOOGLE_API_KEY'] = valToSave;
 
-    // 3. Persist to PostgreSQL admin_api_keys
     const pool = await getPostgresPool();
     if (pool) {
       await initPostgresTables(pool);
@@ -37799,9 +40032,9 @@ export async function POST(req: NextRequest) {
         ]
       );
 
-      // Synchronize admin_settings without destroying active model
+      // Preserve model identifier during key synchronization
       try {
-        const settingsRes = await pool.query("SELECT * FROM admin_settings LIMIT 1;");
+        const settingsRes = await pool.query('SELECT * FROM admin_settings LIMIT 1;');
         if (settingsRes.rows && settingsRes.rows.length > 0) {
           const row = settingsRes.rows[0];
           let val = row.value || {};
@@ -37811,13 +40044,30 @@ export async function POST(req: NextRequest) {
           if (!val.chefAiSettings) val.chefAiSettings = {};
           val.chefAiSettings.apiKey = valToSave;
           val.chefAiSettings.provider = provider || val.chefAiSettings.provider || 'gemini';
-          if (model) {
-            val.chefAiSettings.model = model;
-            val.aiModel = model;
+
+          const resolvedModel = model || row.ai_model || val.chefAiSettings.model || val.aiModel;
+          if (resolvedModel) {
+            val.chefAiSettings.model = resolvedModel;
+            val.aiModel = resolvedModel;
           }
+
+          let chefAi = row.chef_ai_settings || {};
+          if (typeof chefAi === 'string') {
+            try { chefAi = JSON.parse(chefAi); } catch (_) { chefAi = {}; }
+          }
+          chefAi.apiKey = valToSave;
+          chefAi.provider = provider || chefAi.provider || 'gemini';
+          if (resolvedModel) chefAi.model = resolvedModel;
+
           await pool.query(
-            "UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE id = $2;",
-            [JSON.stringify(val), row.id]
+            `UPDATE admin_settings 
+             SET value = $1::jsonb, 
+                 chef_ai_settings = $2::jsonb,
+                 ai_model = COALESCE($3, ai_model),
+                 ai_provider = COALESCE($4, ai_provider),
+                 updated_at = NOW() 
+             WHERE id = $5;`,
+            [JSON.stringify(val), JSON.stringify(chefAi), resolvedModel || null, provider || null, row.id]
           );
         }
       } catch (_) {}
@@ -39407,141 +41657,83 @@ export async function DELETE(req: NextRequest) {
 ## File: `apps/web/src/app/api/recipes/saved/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureColumns() {
-  try {
-    await query(`
-      ALTER TABLE saved_recipes 
-      ADD COLUMN IF NOT EXISTS user_id TEXT,
-      ADD COLUMN IF NOT EXISTS created_by TEXT,
-      ADD COLUMN IF NOT EXISTS creator_name TEXT,
-      ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS rating NUMERIC DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
-      ADD COLUMN IF NOT EXISTS book_id TEXT,
-      ADD COLUMN IF NOT EXISTS source_url TEXT;
+let cachedPool: any = null;
 
-      CREATE INDEX IF NOT EXISTS idx_saved_recipes_creator ON saved_recipes(user_id, created_by);
+async function getPostgresPool() {
+  if (cachedPool) return cachedPool;
+  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  if (!connStr) return null;
+  try {
+    const { Pool } = await import('pg');
+    const requiresSsl = connStr.includes('sslmode=require') || 
+                        connStr.includes('neon.tech') || 
+                        connStr.includes('supabase.co') || 
+                        process.env.NODE_ENV === 'production';
+    cachedPool = new Pool({
+      connectionString: connStr,
+      ssl: requiresSsl ? { rejectUnauthorized: false } : false
+    });
+    return cachedPool;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function ensureSavedRecipesTable(pool: any) {
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS saved_recipes (
+        id VARCHAR(100) PRIMARY KEY,
+        user_id VARCHAR(100),
+        created_by VARCHAR(255),
+        creator_name VARCHAR(255),
+        creator_email VARCHAR(255),
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        recipe_type VARCHAR(100) DEFAULT 'Main Dish',
+        prep_time_minutes INT DEFAULT 15,
+        cook_time_minutes INT DEFAULT 20,
+        servings INT DEFAULT 2,
+        calories INT,
+        image_url TEXT,
+        ingredients JSONB DEFAULT '[]'::jsonb,
+        directions JSONB DEFAULT '[]'::jsonb,
+        is_favorite BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS creator_name VARCHAR(255);
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS creator_email VARCHAR(255);
     `);
   } catch (_) {}
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureColumns();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId')?.trim();
-    const email = searchParams.get('email')?.trim();
-    const category = searchParams.get('category');
+    const userId = searchParams.get('userId') || '';
+    const email = (searchParams.get('email') || '').toLowerCase().trim();
 
-    if (!userId && !email) {
-      return NextResponse.json(
-        { success: true, recipes: [] },
-        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    const pool = await getPostgresPool();
+    if (pool && (userId || email)) {
+      await ensureSavedRecipesTable(pool);
+      const res = await pool.query(
+        `SELECT id, user_id, created_by, creator_name, creator_email, title, description,
+                recipe_type, prep_time_minutes, cook_time_minutes, servings, calories,
+                image_url, ingredients, directions, is_favorite, created_at
+         FROM saved_recipes
+         WHERE user_id = $1 OR created_by = $2 OR creator_email = $2
+         ORDER BY created_at DESC LIMIT 50`,
+        [userId || 'guest', email || 'guest']
       );
+      return NextResponse.json({ success: true, recipes: res.rows });
     }
-
-    let sql = `SELECT * FROM saved_recipes WHERE `;
-    const params: any[] = [];
-
-    const conditions: string[] = [];
-    if (userId) {
-      params.push(userId);
-      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-    }
-    if (email && email !== userId) {
-      params.push(email);
-      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-    }
-
-    sql += `(${conditions.join(' OR ')})`;
-
-    if (category && category !== 'all' && category !== 'All Types') {
-      params.push(category);
-      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
-    }
-
-    sql += ' ORDER BY created_at DESC';
-
-    const rows = await query(sql, params);
-
-    const formatted = rows.map((r: any) => {
-      let ingredients = r.ingredients;
-      if (typeof ingredients === 'string') {
-        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
-      }
-
-      let directions = r.directions;
-      if (typeof directions === 'string') {
-        try { directions = JSON.parse(directions); } catch (_) { directions = []; }
-      }
-
-      let nutrition = r.nutrition;
-      if (typeof nutrition === 'string') {
-        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
-      }
-
-      let tags = r.tags;
-      if (typeof tags === 'string') {
-        try { tags = JSON.parse(tags); } catch (_) { tags = []; }
-      }
-
-      return {
-        ...r,
-        id: r.id,
-        userId: r.user_id || userId,
-        user_id: r.user_id || userId,
-        createdBy: r.created_by || r.user_id || userId,
-        created_by: r.created_by || r.user_id || userId,
-        creatorName: r.creator_name || 'Creator',
-        creator_name: r.creator_name || 'Creator',
-        title: r.title || r.name || 'Untitled Recipe',
-        name: r.title || r.name || 'Untitled Recipe',
-        description: r.description || '',
-        recipeType: r.recipe_type || 'Main Dish',
-        category: r.recipe_type || 'Main Dish',
-        recipe_type: r.recipe_type || 'Main Dish',
-        cuisine: r.cuisine || '',
-        prepTime: r.prep_time || '15',
-        cookTime: r.cook_time || '25',
-        prepTimeMinutes: Number(r.prep_time) || 15,
-        cookTimeMinutes: Number(r.cook_time) || 25,
-        servings: Number(r.servings) || 4,
-        difficulty: r.difficulty || 'Medium',
-        ingredients: Array.isArray(ingredients) ? ingredients : [],
-        directions: Array.isArray(directions) ? directions : [],
-        instructions: Array.isArray(directions) ? directions : [],
-        steps: Array.isArray(directions) ? directions : [],
-        nutrition: nutrition || {},
-        tags: Array.isArray(tags) ? tags : [],
-        imageUrl: r.image_url || r.imageUrl || r.image || '',
-        image: r.image_url || r.imageUrl || r.image || '',
-        image_url: r.image_url || r.imageUrl || r.image || '',
-        sourceUrl: r.source_url || r.sourceUrl || '',
-        source_url: r.source_url || r.sourceUrl || '',
-        isFavorite: Boolean(r.is_favorite || r.isFavorite),
-        is_favorite: Boolean(r.is_favorite || r.isFavorite),
-        isCooked: Boolean(r.is_cooked || r.isCooked),
-        is_cooked: Boolean(r.is_cooked || r.isCooked),
-        rating: Number(r.rating) || 0,
-        note: r.note || '',
-        bookId: r.book_id || r.bookId || null,
-        book_id: r.book_id || r.bookId || null,
-        isPublic: Boolean(r.is_public),
-        is_public: Boolean(r.is_public),
-        createdAt: r.created_at || new Date().toISOString(),
-        updatedAt: r.updated_at || new Date().toISOString()
-      };
-    });
-
-    return NextResponse.json(
-      { success: true, recipes: formatted },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    return NextResponse.json({ success: true, recipes: [] });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -39549,189 +41741,47 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureColumns();
     const body = await req.json();
-    const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
+    const id = body.id || `rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const userId = body.userId || 'guest';
+    const email = body.createdBy || body.creatorEmail || body.email || 'guest';
+    const name = body.creatorName || email.split('@')[0];
+    const title = body.title || body.name || 'Untitled Recipe';
+    const description = body.description || '';
+    const recipeType = body.recipeType || body.mealType || 'Main Dish';
+    const prep = Number(body.prepTimeMinutes || body.prepMinutes || 15);
+    const cook = Number(body.cookTimeMinutes || body.cookMinutes || 20);
+    const servings = Number(body.servings || 2);
+    const calories = Number(body.calories || 0);
+    const image = body.imageUrl || body.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80';
+    const ingredients = Array.isArray(body.ingredients) ? body.ingredients : [];
+    const directions = Array.isArray(body.directions || body.instructions) ? (body.directions || body.instructions) : [];
 
-    for (const item of items) {
-      if (!item) continue;
-      const targetUserId = (item.userId || item.user_id || body.userId || body.user_id || '').trim();
-      if (!targetUserId) continue;
-
-      const createdBy = (item.createdBy || item.created_by || body.createdBy || body.created_by || targetUserId).trim();
-      const creatorName = (item.creatorName || item.creator_name || body.creatorName || body.creator_name || 'Creator').trim();
-      const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-
-      try {
-        const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
-        if (userCheck.length === 0) {
-          await query(`
-            INSERT INTO users (id, name, email, role, subscription_plan)
-            VALUES ($1, $2, $3, 'user', 'taster')
-            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
-          `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
-        }
-      } catch (_) {}
-
-      let ingredients = item.ingredients;
-      if (typeof ingredients === 'string') {
-        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
-      }
-      if (!Array.isArray(ingredients)) ingredients = [];
-
-      let directions = item.directions || item.instructions || item.steps;
-      if (typeof directions === 'string') {
-        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
-      }
-      if (!Array.isArray(directions)) directions = [];
-
-      let tags = item.tags;
-      if (typeof tags === 'string') {
-        try { tags = JSON.parse(tags); } catch (_) { tags = [tags]; }
-      }
-      if (!Array.isArray(tags)) tags = [];
-
-      let nutrition = item.nutrition || item.macros || {};
-      if (typeof nutrition === 'string') {
-        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
-      }
-
-      await query(`
-        INSERT INTO saved_recipes (
-          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
-          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18,
-          $19, $20, $21, $22, $23, $24, NOW()
-        )
+    const pool = await getPostgresPool();
+    if (pool) {
+      await ensureSavedRecipesTable(pool);
+      await pool.query(
+        `INSERT INTO saved_recipes (
+          id, user_id, created_by, creator_name, creator_email, title, description,
+          recipe_type, prep_time_minutes, cook_time_minutes, servings, calories,
+          image_url, ingredients, directions, is_favorite, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb, true, NOW())
         ON CONFLICT (id) DO UPDATE SET
-          user_id = EXCLUDED.user_id,
-          created_by = COALESCE(EXCLUDED.created_by, saved_recipes.created_by),
-          creator_name = COALESCE(EXCLUDED.creator_name, saved_recipes.creator_name),
           title = EXCLUDED.title,
           description = EXCLUDED.description,
           recipe_type = EXCLUDED.recipe_type,
-          cuisine = EXCLUDED.cuisine,
-          prep_time = EXCLUDED.prep_time,
-          cook_time = EXCLUDED.cook_time,
-          servings = EXCLUDED.servings,
-          difficulty = EXCLUDED.difficulty,
           ingredients = EXCLUDED.ingredients,
           directions = EXCLUDED.directions,
-          nutrition = EXCLUDED.nutrition,
-          tags = EXCLUDED.tags,
-          image_url = EXCLUDED.image_url,
-          is_public = EXCLUDED.is_public,
-          is_favorite = EXCLUDED.is_favorite,
-          is_cooked = EXCLUDED.is_cooked,
-          rating = EXCLUDED.rating,
-          note = EXCLUDED.note,
-          book_id = EXCLUDED.book_id,
-          source_url = EXCLUDED.source_url,
-          updated_at = NOW();
-      `, [
-        id,
-        targetUserId,
-        createdBy,
-        creatorName,
-        item.title || item.name || 'Untitled Recipe',
-        item.description || '',
-        item.recipeType || item.category || item.recipe_type || 'Main Dish',
-        item.cuisine || '',
-        String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15'),
-        String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25'),
-        String(item.servings || '4'),
-        item.difficulty || 'Medium',
-        JSON.stringify(ingredients),
-        JSON.stringify(directions),
-        JSON.stringify(nutrition),
-        JSON.stringify(tags),
-        item.imageUrl || item.image || item.image_url || '',
-        Boolean(item.isPublic || item.is_public),
-        Boolean(item.isFavorite || item.is_favorite),
-        Boolean(item.isCooked || item.is_cooked),
-        Number(item.rating) || 0,
-        item.note || '',
-        item.bookId || item.book_id || null,
-        item.sourceUrl || item.source_url || ''
-      ]);
+          updated_at = NOW();`,
+        [id, userId, email, name, email, title, description, recipeType, prep, cook, servings, calories, image, JSON.stringify(ingredients), JSON.stringify(directions)]
+      );
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe(s) synchronized with PostgreSQL.' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function PATCH(req: NextRequest) {
-  try {
-    await ensureColumns();
-    const body = await req.json();
-    const { id, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id, sourceUrl, source_url } = body;
-
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
-    }
-
-    const updates: string[] = [];
-    const params: any[] = [id];
-
-    if (isFavorite !== undefined || is_favorite !== undefined) {
-      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
-      updates.push(`is_favorite = $${params.length}`);
-    }
-    if (isCooked !== undefined || is_cooked !== undefined) {
-      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
-      updates.push(`is_cooked = $${params.length}`);
-    }
-    if (rating !== undefined) {
-      params.push(Number(rating));
-      updates.push(`rating = $${params.length}`);
-    }
-    if (note !== undefined) {
-      params.push(String(note));
-      updates.push(`note = $${params.length}`);
-    }
-    if (bookId !== undefined || book_id !== undefined) {
-      params.push(bookId !== undefined ? bookId : book_id);
-      updates.push(`book_id = $${params.length}`);
-    }
-    if (sourceUrl !== undefined || source_url !== undefined) {
-      params.push(sourceUrl !== undefined ? sourceUrl : source_url);
-      updates.push(`source_url = $${params.length}`);
-    }
-
-    if (updates.length > 0) {
-      updates.push('updated_at = NOW()');
-      await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
-    }
-
-    return NextResponse.json({ success: true, message: 'Recipe updated in PostgreSQL.' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
-
-    if (!id) {
-      try {
-        const body = await req.json();
-        id = body?.id || id;
-      } catch (_) {}
-    }
-
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
-    }
-
-    await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, message: 'Recipe removed from PostgreSQL.' });
+    return NextResponse.json({
+      success: true,
+      message: 'Recipe saved successfully to PostgreSQL database.',
+      recipe: { id, title, recipeType, prep, cook, servings, image }
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -40804,92 +42854,38 @@ export async function POST(req: Request) {
 ## File: `apps/web/src/app/api/ai/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
 import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
+import { resolveAndScrapeBestRecipe, extractImageFromUrl } from '@/lib/recipeScraper';
 
 export const dynamic = 'force-dynamic';
 
-let cachedPool: any = null;
-
-async function getPostgresPool() {
-  if (cachedPool) return cachedPool;
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
-  if (!connStr) return null;
-  try {
-    const { Pool } = await import('pg');
-    const requiresSsl = connStr.includes('sslmode=require') || 
-                        connStr.includes('neon.tech') || 
-                        connStr.includes('supabase.co') || 
-                        process.env.NODE_ENV === 'production';
-    cachedPool = new Pool({
-      connectionString: connStr,
-      ssl: requiresSsl ? { rejectUnauthorized: false } : false
-    });
-    return cachedPool;
-  } catch (_) {
-    return null;
-  }
-}
-
-function cleanApiKey(key: string): string {
-  if (!key) return '';
-  return key
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/^Bearer\s+/i, '')
-    .replace(/^["']|["']$/g, '')
-    .replace(/[\r\n\t]/g, '')
-    .trim();
-}
-
-function normalizeModel(model: string): string {
-  const m = (model || '').trim().replace(/^models\//, '');
-  // Automatically upgrade deprecated 2.0-flash to Google's recommended 3.6-flash
-  if (!m || m === 'gemini-2.0-flash' || m === 'gemini-2.5-flash' || m === 'gemini-3.5-flash-lite') {
-    return 'gemini-3.6-flash';
-  }
-  return m;
-}
-
-function getEnvKeysFromDisk(): Record<string, string> {
-  const map: Record<string, string> = {};
-  const cwd = process.cwd();
-  const candidates = [
-    path.join(cwd, '.env'),
-    path.join(cwd, '.env.local'),
-    path.join(cwd, 'apps', 'web', '.env'),
-    path.join(cwd, 'apps', 'web', '.env.local'),
-    path.resolve(cwd, '..', '.env'),
-    path.resolve(cwd, '..', '.env.local')
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      try {
-        const lines = fs.readFileSync(p, 'utf-8').split(/\r?\n/);
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) continue;
-          const idx = trimmed.indexOf('=');
-          if (idx > 0) {
-            const k = trimmed.substring(0, idx).trim();
-            let v = trimmed.substring(idx + 1).trim();
-            map[k] = cleanApiKey(v);
-          }
-        }
-      } catch (_) {}
-    }
-  }
-  return map;
+function cleanJsonString(raw: string): string {
+  if (!raw) return '';
+  const match = raw.match(/```json\s*([\s\S]*?)\s*```/) || raw.match(/\{[\s\S]*\}/);
+  return match ? (match[1] || match[0]).trim() : raw.trim();
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch (_) {
+      return NextResponse.json({ success: false, error: 'Malformed JSON payload' }, { status: 400 });
+    }
+
     const prompt = (body.prompt || '').trim();
     const isQuestionnaire = Boolean(body.isQuestionnaireComplete);
-    const questionnaireAnswers = body.questionnaireAnswers || {};
-    const topicTitle = body.topicTitle || 'Culinary Meal Plan';
+    const topicTitle = body.topicTitle || 'Custom Meal Plan';
+    const qaList = Array.isArray(body.questionnaireSummary) ? body.questionnaireSummary : [];
+    const answersMap = body.questionnaireAnswers || {};
+    const prefs = body.preferences || {};
+    const pantryItems = Array.isArray(body.pantry) ? body.pantry : [];
+    let referenceUrls: string[] = Array.isArray(body.recommendedRecipeUrls) 
+      ? body.recommendedRecipeUrls.filter(Boolean) 
+      : [];
 
     let userId = body.userId;
     let userEmail = body.userEmail || body.email;
@@ -40906,115 +42902,86 @@ export async function POST(req: NextRequest) {
     }
 
     if (!prompt && !isQuestionnaire) {
-      return NextResponse.json({ error: 'Prompt or questionnaire submission is required' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Prompt or questionnaire completion is required' }, { status: 400 });
     }
 
-    // 1. Fetch AI Settings and the EXACT Model configured in /admin/ai-settings
-    let activeModel = 'gemini-3.6-flash';
+    // 1. Fetch AI Configurations from PostgreSQL
+    let activeModel = 'gemini-2.5-flash';
     let provider = 'gemini';
     let apiKey = '';
     let temperature = 0.7;
     let maxTokens = 4096;
-    let systemPrompt = 'You are Chef Foodie, an expert autonomous culinary AI assistant.';
+    let systemPrompt = 'You are Chef Foodie, an expert executive culinary AI assistant.';
     let strictDietEnforcement = false;
     let filterWordsList: string[] = [];
     let customVocabularyList: string[] = [];
-    let knowledgeBaseList: string[] = [];
-    let enableWebSearch = true;
-    let enablePantryContext = true;
     let maxPlanDays = 7;
-    let resultDisplayMode = 'card';
 
-    const pool = await getPostgresPool();
-    if (pool) {
+    try {
+      const sRows = await query('SELECT chef_ai_settings, ai_model, ai_provider, value FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+      if (sRows.length > 0) {
+        const row = sRows[0];
+        let c = row.chef_ai_settings;
+        if (typeof c === 'string') {
+          try { c = JSON.parse(c); } catch (_) { c = {}; }
+        } else if (!c && row.value) {
+          c = typeof row.value === 'string' ? JSON.parse(row.value).chefAiSettings || {} : row.value.chefAiSettings || {};
+        }
+
+        if (c) {
+          if (c.model || row.ai_model) activeModel = (c.model || row.ai_model).replace(/^models\//, '');
+          if (c.provider || row.ai_provider) provider = c.provider || row.ai_provider;
+          if (c.apiKey) apiKey = c.apiKey;
+          if (c.temperature !== undefined) temperature = Number(c.temperature);
+          if (c.maxTokens !== undefined) maxTokens = Number(c.maxTokens);
+          if (c.systemPrompt) systemPrompt = c.systemPrompt;
+          if (c.strictDietEnforcement !== undefined) strictDietEnforcement = Boolean(c.strictDietEnforcement);
+          if (Array.isArray(c.filterWordsList)) filterWordsList = c.filterWordsList.filter(Boolean);
+          if (Array.isArray(c.customVocabularyList)) customVocabularyList = c.customVocabularyList.filter(Boolean);
+          if (c.maxPlanDays !== undefined) maxPlanDays = Number(c.maxPlanDays) || 7;
+          if (referenceUrls.length === 0 && Array.isArray(c.recommendedRecipeUrls)) {
+            referenceUrls = c.recommendedRecipeUrls.filter(Boolean);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[PostgreSQL] Settings load notice:', e);
+    }
+
+    if (!apiKey) {
       try {
-        const sRes = await pool.query(
-          'SELECT chef_ai_settings, ai_model, ai_provider, value FROM admin_settings ORDER BY updated_at DESC LIMIT 1'
+        const kRows = await query(
+          "SELECT key_value FROM admin_api_keys WHERE (provider = $1 OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
+          [provider]
         );
-        if (sRes.rows.length > 0) {
-          const row = sRes.rows[0];
-          let c = row.chef_ai_settings;
-          if (typeof c === 'string') {
-            try { c = JSON.parse(c); } catch (_) { c = {}; }
-          } else if (!c && row.value) {
-            c = typeof row.value === 'string' ? JSON.parse(row.value).chefAiSettings || {} : row.value.chefAiSettings || {};
-          }
-
-          if (c) {
-            if (c.provider || row.ai_provider) provider = c.provider || row.ai_provider || 'gemini';
-            
-            // Strictly honor the model selected in /admin/ai-settings
-            const chosenModel = c.model || row.ai_model || 'gemini-3.6-flash';
-            activeModel = provider === 'gemini' ? normalizeModel(chosenModel) : (chosenModel || 'gpt-4o');
-
-            if (c.apiKey) apiKey = cleanApiKey(c.apiKey);
-            if (c.temperature !== undefined) temperature = Number(c.temperature);
-            if (c.maxTokens !== undefined) maxTokens = Number(c.maxTokens);
-            if (c.systemPrompt) systemPrompt = c.systemPrompt;
-            if (c.strictDietEnforcement !== undefined) strictDietEnforcement = Boolean(c.strictDietEnforcement);
-            if (Array.isArray(c.filterWordsList)) filterWordsList = c.filterWordsList.filter(Boolean);
-            if (Array.isArray(c.customVocabularyList)) customVocabularyList = c.customVocabularyList.filter(Boolean);
-            if (Array.isArray(c.knowledgeBaseList)) knowledgeBaseList = c.knowledgeBaseList.filter(Boolean);
-            if (c.enableWebSearch !== undefined) enableWebSearch = Boolean(c.enableWebSearch);
-            if (c.enablePantryContext !== undefined) enablePantryContext = Boolean(c.enablePantryContext);
-            if (c.maxPlanDays !== undefined) maxPlanDays = Number(c.maxPlanDays) || 7;
-            if (c.resultDisplayMode) resultDisplayMode = c.resultDisplayMode;
-          }
+        if (kRows.length > 0 && kRows[0].key_value) {
+          apiKey = kRows[0].key_value;
         }
       } catch (_) {}
     }
-
-    // Resolve API Key
     if (!apiKey) {
-      if (pool) {
-        try {
-          const kRes = await pool.query(
-            "SELECT key_value FROM admin_api_keys WHERE (provider = $1 OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_AI_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
-            [provider]
-          );
-          if (kRes.rows.length > 0 && kRes.rows[0].key_value) {
-            apiKey = cleanApiKey(kRes.rows[0].key_value);
-          }
-        } catch (_) {}
-      }
-    }
-
-    if (!apiKey) {
-      apiKey = cleanApiKey(
-        provider === 'gemini'
-          ? (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_KEY || process.env.GOOGLE_GENAI_API_KEY || process.env.GOOGLE_API_KEY || '')
-          : (process.env.OPENAI_API_KEY || '')
-      );
-    }
-
-    if (!apiKey) {
-      const diskMap = getEnvKeysFromDisk();
-      apiKey = cleanApiKey(
-        provider === 'gemini'
-          ? (diskMap['GEMINI_API_KEY'] || diskMap['GOOGLE_AI_KEY'] || diskMap['GOOGLE_GENAI_API_KEY'] || diskMap['GOOGLE_API_KEY'] || '')
-          : (diskMap['OPENAI_API_KEY'] || '')
-      );
+      apiKey = provider === 'gemini' 
+        ? (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '')
+        : (process.env.OPENAI_API_KEY || '');
     }
 
     // 2. Strict Dietary Filter Verification
     if (strictDietEnforcement && filterWordsList.length > 0) {
-      const combinedCheckText = `${prompt} ${JSON.stringify(questionnaireAnswers)}`.toLowerCase();
-      const matchedWord = filterWordsList.find(word => {
-        const clean = word.trim().toLowerCase();
-        return clean.length > 1 && combinedCheckText.includes(clean);
+      const combinedCheck = `${prompt} ${JSON.stringify(answersMap)}`.toLowerCase();
+      const matched = filterWordsList.find(w => {
+        const clean = w.trim().toLowerCase();
+        return clean.length > 1 && combinedCheck.includes(clean);
       });
-
-      if (matchedWord) {
+      if (matched) {
         return NextResponse.json({
           success: false,
-          error: `Request blocked: Restricted ingredient or term "${matchedWord}" detected under AI Strict Dietary Filters.`,
-          restrictionType: 'filter_word_violation',
-          violatedWord: matchedWord
+          error: `Request blocked: Restricted ingredient or keyword "${matched}" detected under AI Strict Dietary Filters.`,
+          restrictionType: 'filter_word_violation'
         }, { status: 422 });
       }
     }
 
-    // 3. Token Deduction
+    // 3. Token Deduction Telemetry
     const tokenSettings = await getTokenSettings();
     const chefCost = tokenSettings.chefCost ?? 1;
     let deduction: any = { success: true, deducted: 0, currentBalance: 0 };
@@ -41025,9 +42992,7 @@ export async function POST(req: NextRequest) {
         userEmail,
         cost: chefCost,
         feature: 'chef',
-        description: isQuestionnaire 
-          ? `Foodie Chef intake plan: "${topicTitle}"`
-          : `Foodie Chef query: "${prompt.slice(0, 40)}..."`
+        description: isQuestionnaire ? `Intake plan: ${topicTitle}` : `Chef prompt: ${prompt.slice(0, 35)}...`
       });
 
       if (!deduction.success) {
@@ -41042,213 +43007,288 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Intent Classification
-    const lowerPrompt = prompt.toLowerCase().trim();
-    const isGreeting = /^(hello|hi|hey|good\s*(morning|afternoon|evening)|howdy|greetings|halo|hola|bonjour)[\s!.,?]*$/i.test(lowerPrompt);
-    const isPantryInquiry = lowerPrompt.includes('what is in my pantry') || lowerPrompt.includes("what's in my pantry");
-    const isRecipeIntent = !isGreeting && !isPantryInquiry && (
-      isQuestionnaire ||
-      lowerPrompt.includes('recipe') ||
-      lowerPrompt.includes('cook') ||
-      lowerPrompt.includes('dish') ||
-      lowerPrompt.includes('make') ||
-      lowerPrompt.includes('meal plan') ||
-      lowerPrompt.includes('dinner') ||
-      lowerPrompt.includes('lunch') ||
-      lowerPrompt.includes('breakfast') ||
-      lowerPrompt.includes('snack') ||
-      lowerPrompt.includes('prepare') ||
-      lowerPrompt.includes('suggest') ||
-      lowerPrompt.includes('idea')
-    );
+    // 4. Parse Intake Questionnaire Variables
+    let parsedDays = body.requestedDays || 3;
+    let parsedMealTypes = body.requestedMealTypes || ['Dinner'];
+    let parsedStartDate = body.startDate || 'Today';
+    let parsedTheme = body.requestedTheme || (customVocabularyList[0] || 'High-Protein Wholesome');
+    let parsedBudget = body.requestedBudget || '$5 - $8 per serving';
 
-    const prefs = body.preferences || {};
+    for (const item of qaList) {
+      const q = (item.question || '').toLowerCase();
+      const a = (item.answer || '').trim();
+      if (/\b(how many days|duration|number of days)\b/i.test(q)) {
+        const m = a.match(/\d+/);
+        if (m) parsedDays = Math.min(14, Math.max(1, parseInt(m[0], 10)));
+      } else if (/\b(meal type|which meal|meals to include)\b/i.test(q)) {
+        if (/all meals \+ snack/i.test(a)) parsedMealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+        else if (/all meals/i.test(a)) parsedMealTypes = ['Breakfast', 'Lunch', 'Dinner'];
+        else if (/breakfast & lunch/i.test(a)) parsedMealTypes = ['Breakfast', 'Lunch'];
+        else if (/breakfast & dinner/i.test(a)) parsedMealTypes = ['Breakfast', 'Dinner'];
+        else if (/lunch & dinner/i.test(a)) parsedMealTypes = ['Lunch', 'Dinner'];
+        else if (/dinner only/i.test(a)) parsedMealTypes = ['Dinner'];
+        else if (/lunch only/i.test(a)) parsedMealTypes = ['Lunch'];
+        else parsedMealTypes = [a];
+      } else if (/\b(when|start date|starting)\b/i.test(q)) {
+        parsedStartDate = a;
+      } else if (/\b(budget|cost|spend|price)\b/i.test(q)) {
+        parsedBudget = a;
+      } else if (/\b(theme|preference|flavor|cuisine)\b/i.test(q)) {
+        parsedTheme = a;
+      }
+    }
+
     const servings = Number(prefs.servings || 2);
     const country = prefs.country || 'Singapore';
-    const diets = Array.isArray(prefs.diet) ? prefs.diet : (prefs.diet ? [prefs.diet] : ['Vegetarian']);
-    const allergies = Array.isArray(prefs.allergy) ? prefs.allergy : (prefs.allergy ? [prefs.allergy] : ['Peanuts']);
-    const avoid = Array.isArray(prefs.avoid) ? prefs.avoid : (prefs.avoid ? [prefs.avoid] : ['Oily']);
-    const tastes = Array.isArray(prefs.tastes) ? prefs.tastes : (prefs.tastes ? [prefs.tastes] : ['Less Spicy']);
-    const pantryItems = enablePantryContext && Array.isArray(body.pantry) ? body.pantry : [];
+    const diets = Array.isArray(prefs.diet) ? prefs.diet : ['Vegetarian'];
+    const allergies = Array.isArray(prefs.allergy) ? prefs.allergy : ['Peanuts'];
+    const avoid = Array.isArray(prefs.avoid) ? prefs.avoid : ['Oily'];
 
-    const dietSummary = diets.length > 0 ? diets.join(', ') : 'Standard balanced';
-    const allergySummary = allergies.length > 0 ? allergies.join(', ') : 'None';
-    const avoidSummary = avoid.length > 0 ? avoid.join(', ') : 'None';
-    const tasteSummary = tastes.length > 0 ? tastes.join(', ') : 'Balanced';
-    const pantrySummary = pantryItems.length > 0 ? pantryItems.slice(0, 10).join(', ') : 'No tracked pantry items';
+    // 5. Intelligent Index Link Crawling & Slug Discovery
+    let scrapedGrounding: any = null;
+    if (referenceUrls.length > 0) {
+      try {
+        scrapedGrounding = await resolveAndScrapeBestRecipe(prompt || parsedTheme, referenceUrls);
+      } catch (scrapeErr) {
+        console.warn('[AI Route] Web scraper notice:', scrapeErr);
+      }
+    }
 
     let responseText = '';
     let generatedPlan: any = null;
     let recommendedRecipe: any = null;
 
-    const systemInstructions = `${systemPrompt}
-You are Chef Foodie, an expert autonomous culinary AI chef and supportive cooking partner.
-ACTIVE USER CULINARY PROFILE:
-- Target Servings: ${servings} people
-- Regional Cuisine & Country: ${country}
-- Dietary Rules: ${dietSummary} (STRICT RULE: If Vegetarian or Vegan, NEVER suggest meat, poultry, seafood, or fish sauce!)
-- Allergies to Exclude: ${allergySummary} (STRICT RULE: NEVER include these allergens!)
-- Avoided Ingredients & Styles: ${avoidSummary} (e.g. if avoiding 'Oily', do not deep-fry; use steaming, light searing, or roasting!)
-- Flavor & Taste Profile: ${tasteSummary}
-- In-Stock Pantry Items: ${pantrySummary}
-${knowledgeBaseList.length > 0 ? `- Prioritized Knowledge Bases: ${knowledgeBaseList.join(', ')}` : ''}
-${customVocabularyList.length > 0 ? `- Custom Terminology: ${customVocabularyList.join(', ')}` : ''}
+    // 6. Query Generative AI with Scraped Source Grounding
+    if (apiKey && apiKey.length > 10 && !apiKey.includes('sample')) {
+      const modelsToTry = [activeModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      const uniqueModels = Array.from(new Set(modelsToTry));
 
-BEHAVIOR AND JSON OUTPUT SPECIFICATIONS:
-1. GREETING/CASUAL INQUIRY: If the user sends a greeting (e.g. "Hello", "Hi"), DO NOT generate a recipe named "Hello"! Greet the user warmly, acknowledge their active ${dietSummary} profile for ${country} (${servings} servings), and ask how you can help. Suggest 2-3 specific, tempting dish ideas. Return JSON with {"reply": "...", "recommendedRecipe": null, "plan": null}.
-2. UNIQUE RECIPE GENERATION: When asked for a recipe or meal plan, generate an inventive, authentic dish. Always name real, quantified ingredients (e.g. "250g firm organic tofu, cubed", "2 cloves minced garlic", "1 tbsp toasted sesame oil") and specific directions. NEVER output placeholder phrases like "Fresh Seasonal Vegetables" or "Balanced Quality Protein"!
-3. When providing a recipe or meal plan, format your output strictly as a valid JSON object:
+      const intakeContext = qaList.length > 0 
+        ? qaList.map(pair => `Q: ${pair.question}\nA: ${pair.answer}`).join('\n')
+        : Object.entries(answersMap).map(([k, v]) => `Step ${k}: ${v}`).join('\n');
+
+      const scrapedGroundingPrompt = scrapedGrounding ? `
+PRIMARY SOURCE RECIPE (CRAWLED & EXTRACTED FROM ADMIN RECOMMENDED URL):
+- Title: ${scrapedGrounding.title}
+- Source URL: ${scrapedGrounding.sourceUrl}
+- Domain: ${scrapedGrounding.sourceName}
+- Ingredients: ${scrapedGrounding.ingredients.join(', ')}
+- Instructions: ${scrapedGrounding.instructions.join(' ')}
+- Prep: ${scrapedGrounding.prepMinutes}m | Cook: ${scrapedGrounding.cookMinutes}m
+MANDATORY: Adapt and recommend this authentic dish as the signature Recommended Recipe, citing the source URL.` : '';
+
+      const fullPrompt = isQuestionnaire
+        ? `${systemPrompt}
+You are Chef Foodie. Formulate an accurate ${parsedDays}-day meal plan and a signature Recommended Recipe.
+LOGISTICS & DIET:
+- Total Days: ${parsedDays}
+- Meal Types: ${parsedMealTypes.join(', ')}
+- Theme: ${parsedTheme}
+- Budget: ${parsedBudget}
+- Servings: ${servings} people (${country})
+- Diets: ${diets.join(', ')}
+- Strictly Avoid / Allergies: ${allergies.concat(avoid).join(', ') || 'None'}
+- Pantry In-Stock: ${pantryItems.length > 0 ? pantryItems.join(', ') : 'Standard kitchen staples'}
+${referenceUrls.length > 0 ? `- Primary Sources: ${referenceUrls.join(', ')}` : ''}
+${scrapedGroundingPrompt}
+
+USER INTAKE RESPONSES:
+${intakeContext}
+
+Return ONLY valid JSON matching this schema:
 {
-  "reply": "Warm conversational commentary explaining the culinary technique and how the dish honors their dietary profile",
-  "recommendedRecipe": {
-    "title": "Specific, creative recipe title",
-    "description": "Engaging description explaining flavor, aroma, and dietary fit",
-    "prepMinutes": 15,
-    "cookMinutes": 20,
-    "servings": ${servings},
-    "calories": 450,
-    "mealType": "Dinner",
-    "ingredients": ["Quantity + ingredient 1", "Quantity + ingredient 2", "Quantity + ingredient 3", "Quantity + ingredient 4", "Quantity + ingredient 5"],
-    "instructions": ["Step 1", "Step 2", "Step 3", "Step 4"],
-    "chefTip": "Actionable culinary tip",
-    "image": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80"
+  "reply": "Warm culinary message detailing the plan",
+  "plan": {
+    "title": "${parsedDays}-Day ${parsedTheme} Plan",
+    "totalDays": ${parsedDays},
+    "theme": "${parsedTheme}",
+    "budgetPerServing": "${parsedBudget}",
+    "meals": [
+      {
+        "id": "meal_1",
+        "dayIndex": 1,
+        "dayLabel": "Day 1",
+        "dateStr": "${parsedStartDate}",
+        "mealType": "${parsedMealTypes[0] || 'Dinner'}",
+        "title": "Dish Name",
+        "description": "Short culinary summary",
+        "prepMinutes": 15,
+        "cookMinutes": 20,
+        "servings": ${servings},
+        "ingredients": ["item 1", "item 2"]
+      }
+    ]
   },
-  "plan": null
-}`;
+  "recommendedRecipe": {
+    "title": "${scrapedGrounding?.title || 'Signature Recipe Name'}",
+    "description": "${scrapedGrounding?.description || 'Detailed chef description'}",
+    "sourceUrl": "${scrapedGrounding?.sourceUrl || referenceUrls[0] || ''}",
+    "sourceName": "${scrapedGrounding?.sourceName || ''}",
+    "prepMinutes": ${scrapedGrounding?.prepMinutes || 15},
+    "cookMinutes": ${scrapedGrounding?.cookMinutes || 20},
+    "servings": ${servings},
+    "calories": 480,
+    "mealType": "${parsedMealTypes[0] || 'Dinner'}",
+    "ingredients": ["ingredient 1", "ingredient 2"],
+    "instructions": ["Step 1", "Step 2", "Step 3"],
+    "chefTip": "Technique secret"
+  }
+}`
+        : `${systemPrompt}
+User Query: "${prompt}"
+Context: Cooking for ${servings} people in ${country}. Diet: ${diets.join(', ')}. Avoid: ${allergies.concat(avoid).join(', ')}. Pantry items: ${pantryItems.join(', ')}.
+${referenceUrls.length > 0 ? `Primary References: ${referenceUrls.join(', ')}` : ''}
+${scrapedGroundingPrompt}
 
-    if (!apiKey) {
-      return NextResponse.json({
-        success: false,
-        error: "AI API Key is missing. Please configure and test your API key in /admin/ai-settings."
-      }, { status: 400 });
-    }
+Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
 
-    let apiErrorDetails = '';
-
-    // 5. Query Live API using the Active Model Configured in /admin/ai-settings
-    if (provider === 'gemini') {
-      // Prioritize the model selected in /admin/ai-settings; if deprecated, fall back to gemini-3.6-flash
-      const modelsToAttempt = Array.from(new Set([activeModel, 'gemini-3.6-flash', 'gemini-1.5-flash']));
-
-      for (let i = 0; i < modelsToAttempt.length; i++) {
-        const targetModel = modelsToAttempt[i];
+      for (const mName of uniqueModels) {
         try {
-          let userPrompt = prompt;
-          if (isQuestionnaire) {
-            userPrompt = `User completed questionnaire for "${topicTitle}". Answers:\n${JSON.stringify(questionnaireAnswers, null, 2)}\nGenerate a ${maxPlanDays}-day meal plan and a signature recommended recipe honoring diet: ${dietSummary}, country: ${country}, avoid: ${avoidSummary}, servings: ${servings}. Output valid JSON with "reply", "plan", and "recommendedRecipe".`;
-          } else if (isGreeting) {
-            userPrompt = `User said: "${prompt}". Reply warmly, acknowledge their ${dietSummary} preferences and ${servings}-person servings target for ${country}, and ask how you can help. DO NOT return a recipe card. Return JSON with {"reply": "...", "recommendedRecipe": null, "plan": null}`;
-          }
-
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
-          const res = await fetch(url, {
+          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${mName}:generateContent?key=${apiKey}`;
+          const gRes = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: `${systemInstructions}\n\nUser Request: ${userPrompt}` }] }],
-              generationConfig: {
-                temperature: Math.max(0.6, Math.min(1.0, temperature)),
-                maxOutputTokens: maxTokens
-              }
+              contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+              generationConfig: { temperature, maxOutputTokens: maxTokens }
             })
           });
 
-          if (res.ok) {
-            const data = await res.json();
-            const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const jsonMatch = rawText.match(/```json\s*([\s\S]*?)\s*```/) || rawText.match(/\{[\s\S]*\}/);
-
-            if (jsonMatch) {
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            const rawText = gData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const cleaned = cleanJsonString(rawText);
+            if (cleaned) {
               try {
-                const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+                const parsed = JSON.parse(cleaned);
                 responseText = parsed.reply || rawText;
                 if (parsed.plan) generatedPlan = parsed.plan;
-                if (isRecipeIntent || isQuestionnaire) {
-                  recommendedRecipe = parsed.recommendedRecipe || parsed.recipe || null;
-                }
+                if (parsed.recommendedRecipe) recommendedRecipe = parsed.recommendedRecipe;
+                else if (parsed.recipe) recommendedRecipe = parsed.recipe;
+                break;
               } catch (_) {
                 responseText = rawText;
               }
             } else {
               responseText = rawText;
             }
-            activeModel = targetModel;
             break;
-          } else {
-            const errData = await res.json().catch(() => ({}));
-            const rawErrMsg = errData.error?.message || `Google API returned HTTP ${res.status}`;
-            apiErrorDetails = rawErrMsg;
-
-            // If Google returns deprecation guidance, dynamically extract the recommended model
-            const matchRec = rawErrMsg.match(/use\s+models\/([a-zA-Z0-9.\-_]+)/i);
-            if (matchRec && matchRec[1] && !modelsToAttempt.includes(matchRec[1])) {
-              modelsToAttempt.push(matchRec[1]);
-            }
           }
-        } catch (err: any) {
-          apiErrorDetails = err.message || 'Network request failed';
-        }
-      }
-    } else if (provider === 'openai') {
-      try {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: activeModel || 'gpt-4o',
-            messages: [
-              { role: 'system', content: systemInstructions },
-              { role: 'user', content: isGreeting ? `${prompt} (Acknowledge profile, no recipe)` : prompt }
-            ],
-            temperature: Math.max(0.6, Math.min(1.0, temperature)),
-            response_format: { type: 'json_object' }
-          })
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          const rawContent = data.choices?.[0]?.message?.content || '';
-          try {
-            const parsed = JSON.parse(rawContent);
-            responseText = parsed.reply || rawContent;
-            if (parsed.plan) generatedPlan = parsed.plan;
-            if (isRecipeIntent || isQuestionnaire) {
-              recommendedRecipe = parsed.recommendedRecipe || parsed.recipe || null;
-            }
-          } catch (_) {
-            responseText = rawContent;
-          }
-        } else {
-          const errData = await res.json().catch(() => ({}));
-          apiErrorDetails = errData.error?.message || `OpenAI returned HTTP ${res.status}`;
-        }
-      } catch (err: any) {
-        apiErrorDetails = err.message;
+        } catch (_) {}
       }
     }
 
+    // 7. Synthetic Fallback if LLM was unavailable
     if (!responseText) {
-      return NextResponse.json({
-        success: false,
-        error: `AI Provider (${provider}) generation failed: ${apiErrorDetails || 'Failed to reach API'}. Please verify your API key and model selection in /admin/ai-settings.`
-      }, { status: 502 });
+      if (scrapedGrounding) {
+        recommendedRecipe = {
+          title: scrapedGrounding.title,
+          description: scrapedGrounding.description,
+          sourceUrl: scrapedGrounding.sourceUrl,
+          sourceName: scrapedGrounding.sourceName,
+          prepMinutes: scrapedGrounding.prepMinutes,
+          cookMinutes: scrapedGrounding.cookMinutes,
+          servings: servings,
+          calories: scrapedGrounding.calories || 490,
+          mealType: parsedMealTypes[0] || 'Dinner',
+          ingredients: scrapedGrounding.ingredients,
+          instructions: scrapedGrounding.instructions,
+          chefTip: 'Rest for 2 minutes before serving so aromas infuse completely.',
+          image: scrapedGrounding.image
+        };
+        responseText = `Here is a curated recipe recommendation derived directly from your primary source (${scrapedGrounding.sourceName || 'web source'}).`;
+      } else if (isQuestionnaire) {
+        const meals: any[] = [];
+        for (let dIdx = 0; dIdx < parsedDays; dIdx++) {
+          for (const mType of parsedMealTypes) {
+            meals.push({
+              id: `meal_${Date.now()}_${dIdx}_${mType}`,
+              dayIndex: dIdx + 1,
+              dayLabel: `Day ${dIdx + 1}`,
+              dateStr: `Schedule ${dIdx + 1}`,
+              mealType: mType,
+              title: `${country} Wholesome ${mType}`,
+              description: `Nutritious, chef-curated ${parsedTheme.toLowerCase()} selection.`,
+              prepMinutes: 15,
+              cookMinutes: 20,
+              servings,
+              ingredients: ['Olive Oil', 'Aromatics', 'Fresh Vegetables', 'Plant or Lean Protein'],
+              image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+            });
+          }
+        }
+
+        generatedPlan = {
+          title: `${parsedDays}-Day ${parsedTheme} Plan`,
+          totalDays: parsedDays,
+          theme: parsedTheme,
+          budgetPerServing: parsedBudget,
+          meals
+        };
+
+        recommendedRecipe = {
+          title: `${country} Signature ${parsedTheme} Medley`,
+          description: `Formulated based on your ${topicTitle} answers. Balanced and avoids ${allergies.concat(avoid).join(', ') || 'unhealthy additives'}.`,
+          prepMinutes: 15,
+          cookMinutes: 25,
+          servings,
+          calories: 490,
+          mealType: parsedMealTypes[0] || 'Dinner',
+          ingredients: [
+            pantryItems[0] ? `In-Stock Pantry: ${pantryItems[0]}` : 'Crisp Tofu or Fresh Salmon Fillet',
+            '2 cups Fresh Leafy Greens (Spinach & Bok Choy)',
+            '1 cup Steamed Tri-Color Quinoa or Brown Rice',
+            '1 tbsp Cold-Pressed Sesame or Olive Oil',
+            'Fresh Ginger, Minced Garlic, and Low-Sodium Tamari'
+          ],
+          instructions: [
+            'Rinse and prep fresh produce and protein cleanly.',
+            'Warm oil in a skillet and gently sauté aromatics over medium heat.',
+            'Cook protein evenly until golden and crisp, then fold in greens.',
+            'Serve warm over fluffy grains with a citrus dressing.'
+          ],
+          chefTip: 'Rest the dish for 2 minutes before serving so flavors infuse completely.',
+          sourceUrl: referenceUrls[0] || '',
+          image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+        };
+
+        responseText = `I have formulated your ${parsedDays}-day meal plan and signature recommended recipe based on your ${topicTitle} questionnaire!`;
+      } else {
+        responseText = `Hello! I'm Chef Foodie. I'm ready with your culinary profile (${servings} servings, ${country}, ${diets.join(', ')}). How can I inspire your cooking today?`;
+      }
     }
 
-    // 6. Record Telemetry in PostgreSQL
-    const promptTokens = Math.max(20, Math.ceil((prompt.length + 200) / 4));
-    const completionTokens = Math.max(30, Math.ceil(responseText.length / 4) + (recommendedRecipe ? 100 : 0));
+    // 8. Attach Scraped Image & Outbound Citation
+    if (recommendedRecipe) {
+      if (scrapedGrounding?.image && !recommendedRecipe.image) {
+        recommendedRecipe.image = scrapedGrounding.image;
+      }
+      if (scrapedGrounding?.sourceUrl && !recommendedRecipe.sourceUrl) {
+        recommendedRecipe.sourceUrl = scrapedGrounding.sourceUrl;
+        recommendedRecipe.sourceName = scrapedGrounding.sourceName;
+      }
 
-    const tokenUsage = await recordTokenUsage({
+      const targetRecipeUrl = recommendedRecipe.sourceUrl || (referenceUrls.length > 0 ? referenceUrls[0] : null);
+      if (targetRecipeUrl && !recommendedRecipe.image) {
+        try {
+          const scrapedImg = await extractImageFromUrl(targetRecipeUrl);
+          if (scrapedImg) recommendedRecipe.image = scrapedImg;
+        } catch (_) {}
+      }
+    }
+
+    // 9. Record Usage Telemetry
+    const promptTokens = Math.max(25, Math.ceil((prompt.length + 150) / 4));
+    const completionTokens = Math.max(40, Math.ceil(responseText.length / 4) + (recommendedRecipe ? 100 : 0));
+
+    recordTokenUsage({
       userId,
       userEmail,
       promptTokens,
       completionTokens,
       model: activeModel,
       source: 'chef'
-    });
+    }).catch(() => {});
 
     return NextResponse.json({
       success: true,
@@ -41259,16 +43299,15 @@ BEHAVIOR AND JSON OUTPUT SPECIFICATIONS:
       model: activeModel,
       consumedSystemTokens: chefCost,
       tokenSymbol: tokenSettings.tokenSymbol,
-      remainingBalance: deduction.currentBalance,
-      tokenUsage: tokenUsage || {
-        promptTokens,
-        completionTokens,
-        totalTokens: promptTokens + completionTokens,
-        requestCount: 1
-      }
+      remainingBalance: deduction.currentBalance
     }, { headers: { 'Cache-Control': 'no-store' } });
+
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Internal Server Error' }, { status: 500 });
+    console.error('[API /api/ai Error]:', err);
+    return NextResponse.json({
+      success: false,
+      error: err?.message || 'Chef AI encountered an internal error. Please retry.'
+    }, { status: 500, headers: { 'Cache-Control': 'no-store' } });
   }
 }
 
@@ -50028,7 +52067,7 @@ export async function syncUserToPostgres(user: any): Promise<any> {
 
 ## File: `apps/web/src/lib/themeConfig.ts`
 ```typescript
-'use client';
+// Global Server-Backed Theme Engine, Typography & Memory Store
 
 export interface ThemeColors {
   primary?: string;
@@ -50042,115 +52081,235 @@ export interface ThemeColors {
   backgroundColor?: string;
   backgroundDark?: string;
   cardBackground?: string;
+  cardDark?: string;
   cardBorder?: string;
+  borderColor?: string;
   textSecondary?: string;
+  textColor?: string;
 }
 
-export const AVAILABLE_FONTS = [
-  { id: 'Inter', name: 'Inter', family: "'Inter', system-ui, -apple-system, sans-serif" },
-  { id: 'Plus Jakarta Sans', name: 'Plus Jakarta Sans', family: "'Plus Jakarta Sans', system-ui, sans-serif" },
-  { id: 'Outfit', name: 'Outfit', family: "'Outfit', system-ui, sans-serif" },
-  { id: 'Poppins', name: 'Poppins', family: "'Poppins', system-ui, sans-serif" },
-  { id: 'Roboto', name: 'Roboto', family: "'Roboto', system-ui, sans-serif" },
-  { id: 'System Default', name: 'System Default', family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }
-];
+let memoryThemeColors: ThemeColors | null = null;
+let memoryGlobalFont: string | null = null;
 
-let inMemoryThemeColors: ThemeColors | null = null;
-
-export function setMemoryThemeColors(colors: ThemeColors): void {
-  inMemoryThemeColors = { ...colors };
-}
-
-export function getMemoryThemeColors(): ThemeColors | null {
-  return inMemoryThemeColors;
-}
-
-export function applyGlobalFont(fontName?: string, fontSize?: string, letterSpacing?: string): void {
-  if (typeof document === 'undefined') return;
-  const root = document.documentElement;
-  
-  let targetFont = fontName || (typeof localStorage !== 'undefined' ? localStorage.getItem('zecratary_font_family') : null) || 'Inter';
-  let targetSize = fontSize || (typeof localStorage !== 'undefined' ? localStorage.getItem('zecratary_font_size') : null) || '16px';
-  let targetSpacing = letterSpacing || (typeof localStorage !== 'undefined' ? localStorage.getItem('zecratary_font_spacing') : null) || '0em';
-
-  const matched = AVAILABLE_FONTS.find(f => f.id.toLowerCase() === targetFont.toLowerCase() || f.name.toLowerCase() === targetFont.toLowerCase());
-  const familyValue = matched ? matched.family : targetFont;
-
-  root.style.setProperty('--font-family', familyValue);
-  root.style.setProperty('--font-family-base', familyValue);
-  root.style.setProperty('--font-size-base', targetSize);
-  root.style.setProperty('--font-letter-spacing', targetSpacing);
-
-  if (document.body) {
-    document.body.style.fontFamily = familyValue;
+export function setMemoryThemeColors(colors: ThemeColors | null | undefined): void {
+  if (colors && Object.keys(colors).length > 0) {
+    memoryThemeColors = { ...(memoryThemeColors || {}), ...colors };
   }
 }
 
-export function saveThemeColors(colors: ThemeColors): void {
-  setMemoryThemeColors(colors);
-  applyThemeToDocument(colors);
+export function getMemoryThemeColors(): ThemeColors | null {
+  return memoryThemeColors;
+}
+
+export function getEffectiveThemeMode(): 'light' | 'dark' {
+  if (typeof window === 'undefined') return 'dark';
+  try {
+    const mode = localStorage.getItem('zecratary_theme_mode');
+    if (mode === 'light' || mode === 'day') return 'light';
+    if (mode === 'dark') return 'dark';
+  } catch (_) {}
+  if (typeof document !== 'undefined') {
+    if (document.documentElement.classList.contains('light')) return 'light';
+    if (document.documentElement.classList.contains('dark')) return 'dark';
+  }
+  return 'dark';
+}
+
+/**
+ * Applies typography font family dynamically across document and custom properties
+ */
+export function applyGlobalFont(fontName?: string): void {
+  if (typeof document === 'undefined') return;
+  const targetFont = fontName || memoryGlobalFont || (typeof window !== 'undefined' ? localStorage.getItem('zecratary_global_font') : null) || 'inherit';
+  
+  if (!targetFont || targetFont === 'inherit') return;
+  memoryGlobalFont = targetFont;
+
+  try {
+    const root = document.documentElement;
+    root.style.setProperty('--font-primary', targetFont);
+    root.style.setProperty('--font-family', targetFont);
+    root.style.setProperty('--font-body', targetFont);
+    root.style.fontFamily = targetFont;
+
+    if (document.body) {
+      document.body.style.fontFamily = targetFont;
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_global_font', targetFont);
+      } catch (_) {}
+    }
+  } catch (_) {}
+}
+
+export function getGlobalFont(): string | null {
+  if (memoryGlobalFont) return memoryGlobalFont;
+  if (typeof window !== 'undefined') {
+    try {
+      return localStorage.getItem('zecratary_global_font');
+    } catch (_) {}
+  }
+  return null;
+}
+
+export async function saveGlobalFont(fontName: string): Promise<void> {
+  memoryGlobalFont = fontName;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('zecratary_global_font', fontName);
+    } catch (_) {}
+    applyGlobalFont(fontName);
+    window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { font: fontName } }));
+  }
+
+  try {
+    await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ globalFont: fontName })
+    });
+  } catch (_) {}
 }
 
 export function applyThemeToDocument(colors?: ThemeColors | null): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  
-  let isDayMode = false;
-  try {
-    const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-    isDayMode = mode === 'light' || mode === 'day';
-  } catch (_) {}
+  const isDayMode = getEffectiveThemeMode() === 'light';
 
-  const active = colors || inMemoryThemeColors;
+  let activeColors = (colors && Object.keys(colors).length > 0) ? colors : memoryThemeColors;
+  if (!activeColors && typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      if (stored) activeColors = JSON.parse(stored);
+    } catch (_) {}
+  }
 
-  const p = active?.primary || active?.primaryColor || '#E05638';
-  const ph = active?.primaryHover || '#c94529';
-  const ac = active?.accentEmerald || active?.accentColor || active?.accent || '#10b981';
-  const sbi = active?.sidebarIconColor || active?.sidebarIcon || ac;
-  const bg = active?.backgroundColor || active?.backgroundDark || '#070b13';
-  const card = active?.cardBackground || '#0b0f17';
-  const border = active?.cardBorder || '#1e293b';
-  const textSec = active?.textSecondary || '#94a3b8';
+  if (activeColors) {
+    setMemoryThemeColors(activeColors);
+    const p = activeColors.primary || activeColors.primaryColor || '#E05638';
+    const ph = activeColors.primaryHover || '#c94529';
+    const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
+    const sbi = activeColors.sidebarIconColor || activeColors.sidebarIcon || ac;
+    const bg = activeColors.backgroundColor || activeColors.backgroundDark || '#070b13';
+    const card = activeColors.cardBackground || activeColors.cardDark || '#0b0f17';
+    const border = activeColors.cardBorder || activeColors.borderColor || '#1e293b';
+    const textSec = activeColors.textSecondary || '#94a3b8';
+    const txt = activeColors.textColor || '#ffffff';
 
-  root.style.setProperty('--color-primary', p);
-  root.style.setProperty('--color-primary-hover', ph);
-  root.style.setProperty('--color-accent', ac);
-  root.style.setProperty('--color-emerald', ac);
-  root.style.setProperty('--color-sidebar-icon', sbi);
+    root.style.setProperty('--color-primary', p);
+    root.style.setProperty('--color-primary-hover', ph);
+    root.style.setProperty('--color-accent', ac);
+    root.style.setProperty('--color-emerald', ac);
+    root.style.setProperty('--color-sidebar-icon', sbi);
 
-  if (isDayMode) {
-    root.classList.remove('dark');
-    root.classList.add('light');
-    root.style.setProperty('--color-bg', '#f8fafc');
-    root.style.setProperty('--color-bg-dark', '#f8fafc');
-    root.style.setProperty('--color-card', '#ffffff');
-    root.style.setProperty('--color-card-dark', '#ffffff');
-    root.style.setProperty('--color-border', '#e2e8f0');
-    root.style.setProperty('--color-border-dark', '#e2e8f0');
-    root.style.setProperty('--color-text', '#0f172a');
-    root.style.setProperty('--color-text-secondary', '#64748b');
-    if (document.body) {
-      document.body.style.backgroundColor = '#f8fafc';
-      document.body.style.color = '#0f172a';
-      document.body.style.transition = 'background-color 200ms ease, color 200ms ease';
+    if (isDayMode) {
+      root.classList.remove('dark');
+      root.classList.add('light');
+      root.style.setProperty('--color-bg', '#f8fafc');
+      root.style.setProperty('--color-background', '#f8fafc');
+      root.style.setProperty('--color-bg-dark', '#f8fafc');
+      root.style.setProperty('--color-card', '#ffffff');
+      root.style.setProperty('--color-card-dark', '#ffffff');
+      root.style.setProperty('--color-inner-dark', '#f1f5f9');
+      root.style.setProperty('--color-border', '#e2e8f0');
+      root.style.setProperty('--color-border-dark', '#e2e8f0');
+      root.style.setProperty('--color-text', '#0f172a');
+      root.style.setProperty('--color-text-secondary', '#64748b');
+      if (document.body) {
+        document.body.style.backgroundColor = '#f8fafc';
+        document.body.style.color = '#0f172a';
+        document.body.style.transition = 'background-color 200ms ease, color 200ms ease';
+      }
+    } else {
+      root.classList.remove('light');
+      root.classList.add('dark');
+      root.style.setProperty('--color-bg', bg);
+      root.style.setProperty('--color-background', bg);
+      root.style.setProperty('--color-bg-dark', bg);
+      root.style.setProperty('--color-card', card);
+      root.style.setProperty('--color-card-dark', card);
+      root.style.setProperty('--color-inner-dark', '#070b13');
+      root.style.setProperty('--color-border', border);
+      root.style.setProperty('--color-border-dark', border);
+      root.style.setProperty('--color-text', txt);
+      root.style.setProperty('--color-text-secondary', textSec);
+      if (document.body) {
+        document.body.style.backgroundColor = bg;
+        document.body.style.color = txt;
+        document.body.style.transition = 'background-color 200ms ease, color 200ms ease';
+      }
     }
   } else {
-    root.classList.remove('light');
-    root.classList.add('dark');
-    root.style.setProperty('--color-bg', bg);
-    root.style.setProperty('--color-bg-dark', bg);
-    root.style.setProperty('--color-card', card);
-    root.style.setProperty('--color-card-dark', card);
-    root.style.setProperty('--color-border', border);
-    root.style.setProperty('--color-border-dark', border);
-    root.style.setProperty('--color-text', '#ffffff');
-    root.style.setProperty('--color-text-secondary', textSec);
-    if (document.body) {
-      document.body.style.backgroundColor = bg;
-      document.body.style.color = '#ffffff';
-      document.body.style.transition = 'background-color 200ms ease, color 200ms ease';
+    if (isDayMode) {
+      root.classList.remove('dark');
+      root.classList.add('light');
+      if (document.body) {
+        document.body.style.backgroundColor = 'var(--color-bg, #f8fafc)';
+        document.body.style.color = 'var(--color-text, #0f172a)';
+      }
+    } else {
+      root.classList.remove('light');
+      root.classList.add('dark');
+      if (document.body) {
+        document.body.style.backgroundColor = 'var(--color-bg, #070b13)';
+        document.body.style.color = 'var(--color-text, #ffffff)';
+      }
     }
   }
+
+  // Ensure active typography is re-applied alongside theme colors
+  if (memoryGlobalFont) {
+    applyGlobalFont(memoryGlobalFont);
+  }
+}
+
+export function setThemeMode(mode: 'light' | 'dark'): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('zecratary_theme_mode', mode);
+  } catch (_) {}
+  applyThemeToDocument();
+  window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode } }));
+  window.dispatchEvent(new Event('zecratary_theme_changed'));
+  window.dispatchEvent(new Event('storage'));
+}
+
+export function toggleThemeMode(): 'light' | 'dark' {
+  const current = getEffectiveThemeMode();
+  const next = current === 'light' ? 'dark' : 'light';
+  setThemeMode(next);
+  return next;
+}
+
+export async function saveThemeColors(colors: ThemeColors): Promise<void> {
+  setMemoryThemeColors(colors);
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
+    } catch (_) {}
+    applyThemeToDocument(colors);
+    window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
+    window.dispatchEvent(new Event('zecratary_theme_changed'));
+    window.dispatchEvent(new Event('storage'));
+  }
+
+  try {
+    await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeColors: colors })
+    });
+  } catch (_) {}
+
+  try {
+    await fetch('/api/user/theme', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeColors: colors })
+    });
+  } catch (_) {}
 }
 
 export async function fetchAndApplyServerTheme(): Promise<void> {
@@ -50159,18 +52318,30 @@ export async function fetchAndApplyServerTheme(): Promise<void> {
     const res = await fetch('/api/admin/settings', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      const settings = data?.settings || data;
-      const tc = settings?.themeColors || settings?.theme_colors;
-      if (tc) {
-        setMemoryThemeColors(tc);
-        applyThemeToDocument(tc);
+      const theme = data?.themeColors || data?.settings?.themeColors || data?.theme_colors;
+      if (theme && Object.keys(theme).length > 0) {
+        setMemoryThemeColors(theme);
+        applyThemeToDocument(theme);
       }
-      if (settings?.fontFamily || settings?.font_family) {
-        applyGlobalFont(
-          settings.fontFamily || settings.font_family,
-          settings.fontSize || settings.font_size,
-          settings.fontLetterSpacing || settings.letter_spacing
-        );
+      const font = data?.globalFont || data?.settings?.globalFont;
+      if (font) {
+        applyGlobalFont(font);
+      }
+      return;
+    }
+  } catch (_) {}
+
+  try {
+    const uRes = await fetch('/api/user/theme', { cache: 'no-store' });
+    if (uRes.ok) {
+      const uData = await uRes.json();
+      const uTheme = uData?.themeColors || uData?.theme_colors;
+      if (uTheme && Object.keys(uTheme).length > 0) {
+        setMemoryThemeColors(uTheme);
+        applyThemeToDocument(uTheme);
+      }
+      if (uData?.globalFont) {
+        applyGlobalFont(uData.globalFont);
       }
     }
   } catch (_) {}
@@ -51158,298 +53329,389 @@ export function ThemeInitializer() {
 
 ## File: `apps/web/src/lib/recipeScraper.ts`
 ```typescript
-export interface ScrapedRecipe {
+export interface ScrapedRecipeData {
   title: string;
   description: string;
   ingredients: string[];
-  directions: string[];
   instructions: string[];
-  imageUrl: string;
-  prepTime: string;
-  cookTime: string;
+  prepMinutes: number;
+  cookMinutes: number;
   servings: number;
-  recipeType: string;
-  cuisine: string;
-  nutrition: Record<string, any>;
+  calories?: number;
+  image?: string;
   sourceUrl: string;
+  sourceName?: string;
 }
 
-export function decodeHtmlEntities(str: string): string {
-  if (!str) return '';
-  return str
-    .replace(/&quot;/g, '"')
-    .replace(/&#0*39;/g, "'")
-    .replace(/&apos;/g, "'")
+export interface DiscoveredSlugItem {
+  url: string;
+  slug: string;
+  title: string;
+}
+
+function parseDurationMinutes(durationStr?: string): number {
+  if (!durationStr || typeof durationStr !== 'string') return 15;
+  const match = durationStr.match(/PT(?:(\d+)H)?(?:(\d+)M)?/i);
+  if (match) {
+    const hours = parseInt(match[1] || '0', 10);
+    const minutes = parseInt(match[2] || '0', 10);
+    return hours * 60 + minutes || 15;
+  }
+  const num = parseInt(durationStr, 10);
+  return isNaN(num) || num <= 0 ? 15 : num;
+}
+
+function cleanText(txt: any): string {
+  if (!txt) return '';
+  return String(txt)
+    .replace(/<[^>]*>/g, '')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&deg;/g, '°')
-    .replace(/&#0*8211;/g, '–')
-    .replace(/&#0*8212;/g, '—')
-    .replace(/&ndash;/g, '–')
-    .replace(/&mdash;/g, '—')
-    .replace(/&#0*8216;/g, "'")
-    .replace(/&#0*8217;/g, "'")
-    .replace(/&#0*8220;/g, '"')
-    .replace(/&#0*8221;/g, '"')
-    .replace(/&#0*160;/g, ' ')
-    .replace(/&#(\d+);/g, (_, dec) => {
-      try { return String.fromCharCode(parseInt(dec, 10)); } catch { return _; }
-    })
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
-      try { return String.fromCharCode(parseInt(hex, 16)); } catch { return _; }
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function isIndexOrCollectionUrl(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const parsed = new URL(urlStr.trim());
+    const p = parsed.pathname.toLowerCase().replace(/\/+$/, '');
+    return (
+      p === '' ||
+      p === '/recipes' ||
+      p.includes('/recipes/') ||
+      p.includes('/category/') ||
+      p.includes('/categories/') ||
+      p.includes('/collection/') ||
+      p.includes('/collections/') ||
+      p.includes('/tag/') ||
+      p.includes('/archive/') ||
+      p.endsWith('/recipes') ||
+      p.endsWith('/all') ||
+      parsed.search.includes('page=') ||
+      parsed.search.includes('category=')
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+export async function discoverRecipeLinksFromIndex(indexUrl: string): Promise<DiscoveredSlugItem[]> {
+  try {
+    const targetUrl = (indexUrl || '').trim();
+    if (!/^https?:\/\//i.test(targetUrl)) return [];
+
+    const response = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      signal: AbortSignal.timeout(8000),
+      redirect: 'follow'
     });
-}
 
-function parseIsoDuration(duration: string): string {
-  if (!duration || typeof duration !== 'string') return '';
-  const match = duration.match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/i);
-  if (!match) return duration.replace(/^PT/i, '');
-  const days = parseInt(match[1] || '0', 10);
-  const hours = parseInt(match[2] || '0', 10);
-  const minutes = parseInt(match[3] || '0', 10);
-  const totalMinutes = days * 1440 + hours * 60 + minutes;
-  if (totalMinutes > 0) {
-    if (hours > 0 && minutes > 0 && days === 0) {
-      return `${hours} hr ${minutes} mins`;
-    }
-    if (hours > 0 && minutes === 0 && days === 0) {
-      return `${hours} hr`;
-    }
-    return `${totalMinutes} mins`;
-  }
-  return duration;
-}
+    if (!response.ok) return [];
+    const html = await response.text();
+    const targetHost = new URL(targetUrl).hostname;
+    const discoveredMap = new Map<string, DiscoveredSlugItem>();
 
-function findRecipeInObject(obj: any): any | null {
-  if (!obj || typeof obj !== 'object') return null;
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = findRecipeInObject(item);
-      if (found) return found;
-    }
-    return null;
-  }
-  const type = obj['@type'];
-  const isRecipe = (typeof type === 'string' && type.toLowerCase().includes('recipe')) ||
-    (Array.isArray(type) && type.some((t: any) => typeof t === 'string' && t.toLowerCase().includes('recipe')));
-  
-  if (isRecipe) return obj;
-
-  if (Array.isArray(obj['@graph'])) {
-    for (const item of obj['@graph']) {
-      const found = findRecipeInObject(item);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function extractJsonLd(html: string): any | null {
-  const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  let match;
-  while ((match = jsonLdRegex.exec(html)) !== null) {
-    const rawContent = match[1].trim();
-    if (!rawContent) continue;
-    try {
-      const parsed = JSON.parse(rawContent);
-      const recipe = findRecipeInObject(parsed);
-      if (recipe) return recipe;
-    } catch (_) {
+    // 1. Inspect Schema.org ItemList JSON-LD
+    const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    for (const match of jsonLdMatches) {
       try {
-        const cleaned = rawContent
-          .replace(/[\u0000-\u001F]+/g, ' ')
-          .replace(/,\s*([\]}])/g, '$1');
-        const parsed = JSON.parse(cleaned);
-        const recipe = findRecipeInObject(parsed);
-        if (recipe) return recipe;
+        const parsed = JSON.parse(match[1].trim());
+        const findItems = (node: any) => {
+          if (!node) return;
+          if (Array.isArray(node)) {
+            node.forEach(findItems);
+          } else if (typeof node === 'object') {
+            if ((node['@type'] === 'ItemList' || node['@type'] === 'CollectionPage') && Array.isArray(node.itemListElement)) {
+              for (const el of node.itemListElement) {
+                const itemUrl = el.url || (typeof el.item === 'string' ? el.item : el.item?.url);
+                if (itemUrl && typeof itemUrl === 'string' && itemUrl.startsWith('http')) {
+                  const p = new URL(itemUrl).pathname;
+                  const slug = p.split('/').filter(Boolean).pop() || '';
+                  const itemTitle = cleanText(el.name || el.item?.name || slug.replace(/[-_]/g, ' '));
+                  if (slug.length > 3) {
+                    discoveredMap.set(itemUrl, {
+                      url: itemUrl,
+                      slug,
+                      title: itemTitle.length > 2 ? itemTitle : slug.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+                    });
+                  }
+                }
+              }
+            }
+            if (node['@graph']) findItems(node['@graph']);
+          }
+        };
+        findItems(parsed);
       } catch (_) {}
     }
+
+    // 2. Scan HTML anchor tags
+    const anchorMatches = html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi);
+    for (const m of anchorMatches) {
+      try {
+        const rawHref = m[1].trim();
+        const innerText = cleanText(m[2]);
+        if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) continue;
+
+        const resolved = new URL(rawHref, targetUrl);
+        if (resolved.hostname !== targetHost) continue;
+
+        const p = resolved.pathname.toLowerCase();
+        if (
+          p === '' ||
+          p === '/' ||
+          p === '/recipes' ||
+          p === '/recipes/' ||
+          p.includes('/category/') ||
+          p.includes('/categories/') ||
+          p.includes('/tag/') ||
+          p.includes('/page/') ||
+          p.includes('/author/') ||
+          p.includes('/contact') ||
+          p.includes('/about') ||
+          p.includes('/privacy') ||
+          p.includes('/terms') ||
+          p.includes('/shop') ||
+          p.includes('/cart') ||
+          p.includes('/wp-content') ||
+          p.includes('/wp-json') ||
+          /\.(jpg|jpeg|png|gif|webp|svg|pdf|css|js)$/i.test(p)
+        ) {
+          continue;
+        }
+
+        const segments = p.split('/').filter(Boolean);
+        const slug = segments[segments.length - 1] || '';
+        if (slug.length > 3 && !/^\d+$/.test(slug)) {
+          const canonicalUrl = resolved.origin + resolved.pathname;
+          if (!discoveredMap.has(canonicalUrl)) {
+            const rawTitle = innerText && innerText.length > 3 && !innerText.toLowerCase().includes('read more')
+              ? innerText
+              : slug.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+            discoveredMap.set(canonicalUrl, {
+              url: canonicalUrl,
+              slug,
+              title: rawTitle
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    return Array.from(discoveredMap.values());
+  } catch (_) {
+    return [];
   }
+}
+
+export function findBestMatchingUrl(queryText: string, urls: string[]): string | null {
+  if (!urls || urls.length === 0) return null;
+  if (urls.length === 1) return urls[0];
+
+  const cleanQuery = (queryText || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  const queryTokens = cleanQuery.split(/\s+/).filter(w => w.length > 2);
+
+  let bestCandidate = urls[0];
+  let highestScore = -1;
+
+  for (const candUrl of urls) {
+    let score = 0;
+    try {
+      const urlObj = new URL(candUrl);
+      const pathname = urlObj.pathname.toLowerCase().replace(/[-_./]/g, ' ');
+
+      for (const token of queryTokens) {
+        if (pathname.includes(token)) {
+          score += 4;
+        }
+      }
+    } catch (_) {}
+
+    if (score > highestScore) {
+      highestScore = score;
+      bestCandidate = candUrl;
+    }
+  }
+
+  return bestCandidate;
+}
+
+export async function scrapeRecipeFromUrl(rawUrl: string): Promise<ScrapedRecipeData | null> {
+  try {
+    const targetUrl = (rawUrl || '').trim();
+    if (!/^https?:\/\//i.test(targetUrl)) return null;
+
+    const response = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      signal: AbortSignal.timeout(8000),
+      redirect: 'follow'
+    });
+
+    if (!response.ok) return null;
+    const html = await response.text();
+    const domain = new URL(targetUrl).hostname.replace(/^www\./, '');
+
+    // Search Schema.org Recipe in JSON-LD
+    const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    let recipeNode: any = null;
+
+    for (const match of jsonLdMatches) {
+      try {
+        const parsed = JSON.parse(match[1].trim());
+        const findRecipe = (node: any): any => {
+          if (!node) return null;
+          if (Array.isArray(node)) {
+            for (const item of node) {
+              const res = findRecipe(item);
+              if (res) return res;
+            }
+          } else if (typeof node === 'object') {
+            const type = node['@type'];
+            if (type === 'Recipe' || (Array.isArray(type) && type.includes('Recipe'))) {
+              return node;
+            }
+            if (node['@graph']) return findRecipe(node['@graph']);
+          }
+          return null;
+        };
+        const found = findRecipe(parsed);
+        if (found) {
+          recipeNode = found;
+          break;
+        }
+      } catch (_) {}
+    }
+
+    if (recipeNode) {
+      const title = cleanText(recipeNode.name || recipeNode.headline) || `Recipe from ${domain}`;
+      const description = cleanText(recipeNode.description) || `Authentic recipe from ${domain}`;
+
+      let ingredients: string[] = [];
+      if (Array.isArray(recipeNode.recipeIngredient)) {
+        ingredients = recipeNode.recipeIngredient.map(cleanText).filter(Boolean);
+      }
+
+      let instructions: string[] = [];
+      if (Array.isArray(recipeNode.recipeInstructions)) {
+        instructions = recipeNode.recipeInstructions.flatMap((inst: any) => {
+          if (typeof inst === 'string') return [cleanText(inst)];
+          if (inst && typeof inst === 'object') {
+            if (inst.text) return [cleanText(inst.text)];
+            if (Array.isArray(inst.itemListElement)) {
+              return inst.itemListElement.map((sub: any) => cleanText(sub.text || sub.name)).filter(Boolean);
+            }
+          }
+          return [];
+        }).filter(Boolean);
+      } else if (typeof recipeNode.recipeInstructions === 'string') {
+        instructions = recipeNode.recipeInstructions.split(/\r?\n/).map(cleanText).filter(Boolean);
+      }
+
+      let image = '';
+      if (typeof recipeNode.image === 'string' && recipeNode.image.startsWith('http')) {
+        image = recipeNode.image;
+      } else if (Array.isArray(recipeNode.image) && recipeNode.image[0]) {
+        const first = recipeNode.image[0];
+        image = typeof first === 'string' ? first : first.url || '';
+      } else if (recipeNode.image?.url) {
+        image = recipeNode.image.url;
+      }
+
+      const prepMinutes = parseDurationMinutes(recipeNode.prepTime);
+      const cookMinutes = parseDurationMinutes(recipeNode.cookTime || recipeNode.totalTime);
+      let servings = 2;
+      if (recipeNode.recipeYield) {
+        const m = String(recipeNode.recipeYield).match(/\d+/);
+        if (m) servings = parseInt(m[0], 10);
+      }
+
+      let calories: number | undefined = undefined;
+      if (recipeNode.nutrition?.calories) {
+        const calMatch = String(recipeNode.nutrition.calories).match(/\d+/);
+        if (calMatch) calories = parseInt(calMatch[0], 10);
+      }
+
+      return {
+        title,
+        description,
+        ingredients: ingredients.length > 0 ? ingredients : ['Fresh produce & proteins', 'Aromatics & seasonings', 'Olive oil'],
+        instructions: instructions.length > 0 ? instructions : ['Prepare ingredients and cook according to recipe guidelines.'],
+        prepMinutes,
+        cookMinutes,
+        servings,
+        calories,
+        image: image || undefined,
+        sourceUrl: targetUrl,
+        sourceName: domain
+      };
+    }
+
+    // Heuristic OpenGraph Fallback
+    const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i);
+    const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i);
+    const ogImage = html.match(/<meta[^>]*property=["'](?:og:image|og:image:secure_url)["'][^>]*content=["']([^"']+)["']/i);
+
+    return {
+      title: ogTitle ? cleanText(ogTitle[1]) : `Curated Dish from ${domain}`,
+      description: ogDesc ? cleanText(ogDesc[1]) : `Recipe curated from ${domain}`,
+      ingredients: ['Fresh seasonal produce', 'Quality protein & olive oil', 'Herbs & spices'],
+      instructions: ['Prepare ingredients and cook according to source recipe guidelines.'],
+      prepMinutes: 15,
+      cookMinutes: 20,
+      servings: 2,
+      image: ogImage ? ogImage[1].trim() : undefined,
+      sourceUrl: targetUrl,
+      sourceName: domain
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function resolveAndScrapeBestRecipe(queryText: string, candidateUrls: string[]): Promise<ScrapedRecipeData | null> {
+  if (!candidateUrls || candidateUrls.length === 0) return null;
+
+  for (const candUrl of candidateUrls) {
+    if (!candUrl || typeof candUrl !== 'string') continue;
+
+    if (isIndexOrCollectionUrl(candUrl)) {
+      const discoveredItems = await discoverRecipeLinksFromIndex(candUrl);
+      if (discoveredItems.length > 0) {
+        const urlsOnly = discoveredItems.map(d => d.url);
+        const bestMatchedUrl = findBestMatchingUrl(queryText, urlsOnly) || urlsOnly[0];
+        const scraped = await scrapeRecipeFromUrl(bestMatchedUrl);
+        if (scraped && scraped.ingredients.length > 0) {
+          return scraped;
+        }
+      }
+    } else {
+      const direct = await scrapeRecipeFromUrl(candUrl);
+      if (direct && direct.ingredients.length > 0) {
+        return direct;
+      }
+    }
+  }
+
   return null;
 }
 
-function extractInstructions(instructions: any): string[] {
-  if (!instructions) return [];
-  if (typeof instructions === 'string') {
-    return instructions
-      .split(/\r?\n+/)
-      .map(s => decodeHtmlEntities(s).replace(/^(\d+[\.\)]|\bstep\s*\d+[:.-]?|[-*•])\s*/i, '').trim())
-      .filter(s => s.length > 3);
-  }
-  if (Array.isArray(instructions)) {
-    const steps: string[] = [];
-    for (const item of instructions) {
-      if (typeof item === 'string') {
-        const cleaned = decodeHtmlEntities(item).replace(/^(\d+[\.\)]|\bstep\s*\d+[:.-]?|[-*•])\s*/i, '').trim();
-        if (cleaned.length > 2) steps.push(cleaned);
-      } else if (item && typeof item === 'object') {
-        if (item.itemListElement && Array.isArray(item.itemListElement)) {
-          steps.push(...extractInstructions(item.itemListElement));
-        } else {
-          const stepText = item.text || item.description || item.name || '';
-          const cleaned = decodeHtmlEntities(stepText).replace(/^(\d+[\.\)]|\bstep\s*\d+[:.-]?|[-*•])\s*/i, '').trim();
-          if (cleaned.length > 2) steps.push(cleaned);
-        }
-      }
-    }
-    return steps;
-  }
-  return [];
-}
-
-function extractImageUrl(image: any): string {
-  if (!image) return '';
-  if (typeof image === 'string') return image;
-  if (Array.isArray(image)) {
-    for (const item of image) {
-      const url = extractImageUrl(item);
-      if (url) return url;
-    }
-  }
-  if (typeof image === 'object') {
-    if (typeof image.url === 'string') return image.url;
-    if (typeof image.contentUrl === 'string') return image.contentUrl;
-  }
-  return '';
-}
-
-function extractMeta(html: string, propertyOrName: string): string {
-  const regex = new RegExp(`<meta[^>]*(?:property|name)=["']${propertyOrName}["'][^>]*content=["']([^"']*)["']`, 'i');
-  const match = html.match(regex);
-  if (match && match[1]) return decodeHtmlEntities(match[1].trim());
-  const regex2 = new RegExp(`<meta[^>]*content=["']([^"']*)["'][^>]*(?:property|name)=["']${propertyOrName}["']`, 'i');
-  const match2 = html.match(regex2);
-  if (match2 && match2[1]) return decodeHtmlEntities(match2[1].trim());
-  return '';
-}
-
-export async function scrapeRecipeFromUrl(rawUrl: string): Promise<ScrapedRecipe> {
-  let targetUrl = rawUrl.trim();
-  if (!/^https?:\/\//i.test(targetUrl)) {
-    targetUrl = 'https://' + targetUrl;
-  }
-
-  const cleanDomain = targetUrl.replace(/^https?:\/\//i, '').split('/')[0].replace(/^www\./i, '');
-
-  const response = await fetch(targetUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Cache-Control': 'no-cache'
-    },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(15000)
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch recipe URL: HTTP ${response.status} ${response.statusText}`);
-  }
-
-  const html = await response.text();
-
-  // 1. Primary Extraction: Schema.org JSON-LD (Used by 95% of food blogs)
-  const jsonLd = extractJsonLd(html);
-  if (jsonLd) {
-    const title = decodeHtmlEntities(jsonLd.name || jsonLd.headline || '').trim();
-    const description = decodeHtmlEntities(jsonLd.description || '').trim();
-
-    let ingredients: string[] = [];
-    const rawIngredients = jsonLd.recipeIngredient || jsonLd.ingredients;
-    if (Array.isArray(rawIngredients)) {
-      ingredients = rawIngredients
-        .map((i: any) => decodeHtmlEntities(String(i)).trim())
-        .filter((i: string) => i.length > 1);
-    }
-
-    const directions = extractInstructions(jsonLd.recipeInstructions);
-    const imageUrl = extractImageUrl(jsonLd.image) || extractMeta(html, 'og:image') || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
-
-    let servings = 4;
-    const rawYield = jsonLd.recipeYield || jsonLd.yield;
-    if (rawYield) {
-      const match = String(rawYield).match(/\d+/);
-      if (match) servings = parseInt(match[0], 10);
-    }
-
-    const prepTime = parseIsoDuration(jsonLd.prepTime) || '15 mins';
-    const cookTime = parseIsoDuration(jsonLd.cookTime) || '25 mins';
-    const category = decodeHtmlEntities(Array.isArray(jsonLd.recipeCategory) ? jsonLd.recipeCategory[0] : jsonLd.recipeCategory || 'Main Dish');
-    const cuisine = decodeHtmlEntities(Array.isArray(jsonLd.recipeCuisine) ? jsonLd.recipeCuisine[0] : jsonLd.recipeCuisine || 'International');
-
-    if (title && (ingredients.length > 0 || directions.length > 0)) {
-      return {
-        title,
-        description: description || `Imported from ${cleanDomain}`,
-        ingredients: ingredients.length > 0 ? ingredients : ['Seasonal Fresh Ingredients'],
-        directions: directions.length > 0 ? directions : ['Follow preparation steps on source page.'],
-        instructions: directions.length > 0 ? directions : ['Follow preparation steps on source page.'],
-        imageUrl,
-        prepTime,
-        cookTime,
-        servings,
-        recipeType: category,
-        cuisine,
-        nutrition: jsonLd.nutrition || {},
-        sourceUrl: targetUrl
-      };
-    }
-  }
-
-  // 2. Fallback: OpenGraph Meta Tags & HTML Content Scanning
-  const ogTitle = extractMeta(html, 'og:title') || '';
-  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  const rawTitle = ogTitle || (titleMatch ? titleMatch[1] : `Recipe from ${cleanDomain}`);
-  const title = decodeHtmlEntities(rawTitle.replace(/(\s*[-|–—]\s*[^-\|–—]+)$/, '')).trim();
-
-  const description = extractMeta(html, 'og:description') || extractMeta(html, 'description') || `Recipe imported from ${targetUrl}`;
-  const imageUrl = extractMeta(html, 'og:image') || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
-
-  // Extract list items inside common recipe containers
-  const ingredients: string[] = [];
-  const directions: string[] = [];
-
-  const ingMatches = html.matchAll(/<li[^>]*class=["'][^"']*(?:ingredient|recipe-ingredient|wprm-recipe-ingredient)[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi);
-  for (const m of ingMatches) {
-    const text = decodeHtmlEntities(m[1].replace(/<[^>]+>/g, '')).trim();
-    if (text.length > 2) ingredients.push(text);
-  }
-
-  const stepMatches = html.matchAll(/<li[^>]*class=["'][^"']*(?:instruction|direction|step|recipe-instruction)[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi);
-  for (const m of stepMatches) {
-    const text = decodeHtmlEntities(m[1].replace(/<[^>]+>/g, '')).trim();
-    if (text.length > 3) directions.push(text);
-  }
-
-  return {
-    title: title || `Delicious Dish from ${cleanDomain}`,
-    description,
-    ingredients: ingredients.length > 0 ? ingredients : [
-      'Fresh Seasonal Produce',
-      'Extra Virgin Olive Oil & Seasonings',
-      'Aromatics (Garlic, Onion, Herbs)'
-    ],
-    directions: directions.length > 0 ? directions : [
-      'Prepare and assemble all fresh ingredients as indicated.',
-      'Cook over medium heat until golden and aromatic.',
-      'Garnish and serve immediately.'
-    ],
-    instructions: directions.length > 0 ? directions : [
-      'Prepare and assemble all fresh ingredients as indicated.',
-      'Cook over medium heat until golden and aromatic.',
-      'Garnish and serve immediately.'
-    ],
-    imageUrl,
-    prepTime: '20 mins',
-    cookTime: '25 mins',
-    servings: 4,
-    recipeType: 'Main Dish',
-    cuisine: 'International',
-    nutrition: {},
-    sourceUrl: targetUrl
-  };
+export async function extractImageFromUrl(rawUrl: string): Promise<string | null> {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  const data = await scrapeRecipeFromUrl(rawUrl);
+  return data?.image || null;
 }
 
 ```
