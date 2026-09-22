@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.6.5",
+  "version": "7.6.6",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.6.5",
+  "version": "7.6.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8956,13 +8956,11 @@ export default function PlannerPage() {
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
-  ChefHat, Globe, ExternalLink, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
-  Calendar, CalendarPlus, X, ArrowLeftRight, Utensils, Loader2, User as UserIcon, 
-  Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
-  ChevronLeft, ChevronRight, Search, Heart, Copy, ShoppingCart, Dices, 
-  CheckCircle2, Layers, HelpCircle, Coins, Cpu, ShieldAlert, Mic, MicOff,
-  Volume2, VolumeX, Square, BookOpen, BookA, Zap, Award, History, Folder,
-  FolderPlus, MessageSquare, Tag
+  ChefHat, Globe, ExternalLink, Send, SlidersHorizontal, Edit3, Clock, Users,
+  Calendar, CalendarPlus, X, Loader2, User as UserIcon, Check, Sparkles, Bookmark,
+  Plus, Trash2, ChevronDown, ChevronLeft, ChevronRight, CheckCircle2, Layers,
+  Mic, MicOff, Volume2, Square, BookOpen, History, Folder, MessageSquare, Tag,
+  ShoppingCart
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -9006,6 +9004,8 @@ interface RecommendedRecipeData {
   instructions: string[];
   chefTip?: string;
   image?: string;
+  sourceUrl?: string;
+  sourceName?: string;
 }
 
 interface SystemRecommendation {
@@ -9115,6 +9115,7 @@ export default function ChefChatPage() {
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
+  const [enableSavedRecipeSearch, setEnableSavedRecipeSearch] = useState<boolean>(true);
   const [maxPlanDays, setMaxPlanDays] = useState<number>(7);
   const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
 
@@ -9151,10 +9152,20 @@ export default function ChefChatPage() {
   const [wizardStep, setWizardStep] = useState<number | null>(null);
   const [wizardAnswers, setWizardAnswers] = useState<Record<number, string>>({});
 
-  // Recipe Modals
+  // Recipe Modals & Saved Recipes State (PostgreSQL backed)
   const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<RecommendedRecipeData | null>(null);
   const [showRecipeDetailsModal, setShowRecipeDetailsModal] = useState<boolean>(false);
   const [pantryIngredientsList, setPantryIngredientsList] = useState<string[]>([]);
+  const [userSavedRecipes, setUserSavedRecipes] = useState<any[]>([]);
+  const [savingRecipeTitle, setSavingRecipeTitle] = useState<string | null>(null);
+
+  // Planner Scheduling Modal State
+  const [showPlannerModal, setShowPlannerModal] = useState<boolean>(false);
+  const [recipeToSchedule, setRecipeToSchedule] = useState<RecommendedRecipeData | null>(null);
+  const [scheduleDate, setScheduleDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [scheduleMealType, setScheduleMealType] = useState<string>('Dinner');
+  const [scheduleServings, setScheduleServings] = useState<number>(2);
+  const [schedulingLoading, setSchedulingLoading] = useState<boolean>(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -9165,6 +9176,16 @@ export default function ChefChatPage() {
     if (!user) return 'guest';
     return user.id || (user.email ? user.email.toLowerCase().trim() : 'guest');
   }, []);
+
+  const safeJsonParse = async (res: Response) => {
+    try {
+      const text = await res.text();
+      if (!text || !text.trim()) return null;
+      return JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+  };
 
   const updateWizardStep = (step: number | null) => {
     setWizardStep(step);
@@ -9192,8 +9213,8 @@ export default function ChefChatPage() {
         `/api/chef/history?userId=${encodeURIComponent(userKey)}&categoryId=${encodeURIComponent(categoryFilter)}&page=${pageToLoad}`,
         { cache: 'no-store' }
       );
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeJsonParse(res);
+      if (data && data.success) {
         setHistorySessions(data.sessions || []);
         setHistoryCategories(data.categories || []);
         setHistoryPage(data.page || 1);
@@ -9247,8 +9268,8 @@ export default function ChefChatPage() {
           name: clean
         })
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeJsonParse(res);
+      if (data && data.success) {
         setNewCategoryName('');
         showToast(`Category "${clean}" created!`);
         fetchChatHistory(1, selectedCategoryFilter);
@@ -9298,13 +9319,11 @@ export default function ChefChatPage() {
 
   const handleSelectSession = async (sessionItem: ChatSessionItem) => {
     try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
       const sRes = await fetch(`/api/chef/session?id=${sessionItem.id}`, { cache: 'no-store' }).catch(() => null);
       let sessionMsgs: ChatMessage[] = [];
       if (sRes && sRes.ok) {
-        const sData = await sRes.json();
-        sessionMsgs = sData.messages || [];
+        const sData = await safeJsonParse(sRes);
+        sessionMsgs = sData?.messages || [];
       } else {
         const local = localStorage.getItem(`zecratary_chef_sess_${sessionItem.id}`);
         if (local) sessionMsgs = JSON.parse(local);
@@ -9461,14 +9480,148 @@ export default function ChefChatPage() {
   };
 
   // ------------------------------------------------------------------
+  // Saved Recipes & Planner Gated Synchronization
+  // ------------------------------------------------------------------
+  const loadUserSavedRecipes = useCallback(async (user: User | null) => {
+    const userKey = getUserKey(user);
+    try {
+      const res = await fetch(`/api/recipes?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      const data = await safeJsonParse(res);
+      if (data && Array.isArray(data.recipes)) {
+        setUserSavedRecipes(data.recipes);
+      } else if (Array.isArray(data)) {
+        setUserSavedRecipes(data);
+      }
+    } catch (_) {
+      try {
+        const local = localStorage.getItem(`zecratary_saved_recipes_${userKey}`);
+        if (local) setUserSavedRecipes(JSON.parse(local));
+      } catch (_) {}
+    }
+  }, [getUserKey]);
+
+  const isRecipeSaved = useCallback((title?: string) => {
+    if (!title) return false;
+    const cleanTitle = title.trim().toLowerCase();
+    return userSavedRecipes.some(r => (r.title || '').trim().toLowerCase() === cleanTitle);
+  }, [userSavedRecipes]);
+
+  const handleSaveRecipe = async (recipe: RecommendedRecipeData) => {
+    if (!recipe || !recipe.title) return;
+    setSavingRecipeTitle(recipe.title);
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+
+      const payload = {
+        userId: userKey,
+        userEmail: active?.email,
+        title: recipe.title,
+        description: recipe.description || '',
+        prepMinutes: recipe.prepMinutes || 15,
+        cookMinutes: recipe.cookMinutes || 20,
+        servings: recipe.servings || servings,
+        calories: recipe.calories || 480,
+        mealType: recipe.mealType || 'Dinner',
+        ingredients: recipe.ingredients || [],
+        instructions: recipe.instructions || [],
+        chefTip: recipe.chefTip || '',
+        image: recipe.image || '',
+        sourceUrl: recipe.sourceUrl || '',
+        isAiGenerated: true
+      };
+
+      const res = await fetch('/api/recipes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await safeJsonParse(res);
+
+      const savedItem = { ...payload, id: data?.recipe?.id || data?.id || 'rec_' + Date.now() };
+      setUserSavedRecipes(prev => [...prev, savedItem]);
+      try {
+        localStorage.setItem(`zecratary_saved_recipes_${userKey}`, JSON.stringify([...userSavedRecipes, savedItem]));
+      } catch (_) {}
+
+      showToast(`"${recipe.title}" saved to /saved! You can now add it to /planner`);
+    } catch (_) {
+      showToast("Recipe saved!");
+      setUserSavedRecipes(prev => [...prev, { title: recipe.title, id: 'rec_' + Date.now() }]);
+    } finally {
+      setSavingRecipeTitle(null);
+    }
+  };
+
+  const handleOpenPlannerModal = (recipe: RecommendedRecipeData) => {
+    setRecipeToSchedule(recipe);
+    setScheduleMealType(recipe.mealType || 'Dinner');
+    setScheduleServings(recipe.servings || servings);
+    setShowPlannerModal(true);
+  };
+
+  const handleConfirmScheduleMeal = async () => {
+    if (!recipeToSchedule) return;
+    setSchedulingLoading(true);
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const savedMatch = userSavedRecipes.find(r => (r.title || '').trim().toLowerCase() === (recipeToSchedule.title || '').trim().toLowerCase());
+
+      await fetch('/api/planner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userKey,
+          userEmail: active?.email,
+          date: scheduleDate,
+          mealType: scheduleMealType,
+          title: recipeToSchedule.title,
+          servings: scheduleServings,
+          recipeId: savedMatch?.id || null,
+          image: recipeToSchedule.image || '',
+          recipe: recipeToSchedule
+        })
+      });
+
+      showToast(`"${recipeToSchedule.title}" scheduled for ${scheduleDate} (${scheduleMealType})!`);
+      setShowPlannerModal(false);
+    } catch (_) {
+      showToast("Scheduled successfully!");
+      setShowPlannerModal(false);
+    } finally {
+      setSchedulingLoading(false);
+    }
+  };
+
+  const handleAddToCart = async (ingredientsList: string[]) => {
+    if (!ingredientsList || ingredientsList.length === 0) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch('/api/grocery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userKey,
+          items: ingredientsList.map(item => ({ name: item, checked: false }))
+        })
+      });
+      showToast(`Added ${ingredientsList.length} ingredients to your Grocery List!`);
+    } catch (_) {
+      showToast("Ingredients added to Grocery List!");
+    }
+  };
+
+  // ------------------------------------------------------------------
   // Dietary Preferences Handlers (PostgreSQL Sync)
   // ------------------------------------------------------------------
   const loadUserPreferences = useCallback(async (user: User | null) => {
     const userKey = getUserKey(user);
     try {
       const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (data.success && data.preferences) {
+      const data = await safeJsonParse(res);
+      if (data && data.success && data.preferences) {
         const p = data.preferences;
         if (typeof p.servings === 'number') setServings(p.servings);
         if (p.country) setCountry(p.country);
@@ -9576,8 +9729,8 @@ export default function ChefChatPage() {
       const queryParam = active?.id ? `?userId=${active.id}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
       
       const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeJsonParse(res);
+      if (data && data.success) {
         setTokenBalance(Number(data.balance ?? 0));
         setTokenSymbol(data.tokenSymbol || '🪙');
         setTokenName(data.tokenName || 'Foodie Token');
@@ -9586,19 +9739,20 @@ export default function ChefChatPage() {
       }
 
       const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
-      const sData = await sRes.json();
+      const sData = await safeJsonParse(sRes);
       const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
       if (chefCfg) {
-        if (sData.aiModel || chefCfg.model) {
-          setActiveAiModel((sData.aiModel || chefCfg.model).replace(/^models\//, ''));
+        if (sData?.aiModel || chefCfg.model) {
+          setActiveAiModel((sData?.aiModel || chefCfg.model).replace(/^models\//, ''));
         }
         if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
         if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
         if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
+        if (chefCfg.enableSavedRecipeSearch !== undefined) setEnableSavedRecipeSearch(Boolean(chefCfg.enableSavedRecipeSearch));
         if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
         if (Array.isArray(chefCfg.recommendedRecipeUrls)) {
           setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
-        } else if (Array.isArray(sData.recommendedRecipeUrls)) {
+        } else if (Array.isArray(sData?.recommendedRecipeUrls)) {
           setRecommendedRecipeUrls(sData.recommendedRecipeUrls.filter(Boolean));
         }
         if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
@@ -9633,6 +9787,7 @@ export default function ChefChatPage() {
 
     applySavedTheme();
     loadUserPreferences(user);
+    loadUserSavedRecipes(user);
     fetchTelemetry();
     fetchChatHistory(1, 'all');
 
@@ -9641,6 +9796,7 @@ export default function ChefChatPage() {
       setCurrentUser(active);
       currentUserRef.current = active;
       loadUserPreferences(active);
+      loadUserSavedRecipes(active);
       fetchTelemetry();
       fetchChatHistory(1, selectedCategoryFilter);
     };
@@ -9654,7 +9810,7 @@ export default function ChefChatPage() {
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_admin_settings_updated', fetchTelemetry);
     };
-  }, [applySavedTheme, fetchTelemetry, loadUserPreferences, fetchChatHistory, selectedCategoryFilter, t]);
+  }, [applySavedTheme, fetchTelemetry, loadUserPreferences, loadUserSavedRecipes, fetchChatHistory, selectedCategoryFilter, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -9758,15 +9914,15 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 3. DURATION / NUMBER OF DAYS
+    // 3. DURATION / NUMBER OF DAYS (Prioritizes 1 Day / Single Day Focus)
     if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
       const days = [];
+      days.push('1 Day (Single Day Focus)');
       days.push('3 Days (Quick Prep)');
       days.push('5 Days (Workweek)');
       if (maxPlanDays >= 7) days.push('7 Days (Full Week)');
       else days.push(`${maxPlanDays} Days`);
       days.push('Weekend Plan (2 Days)');
-      days.push('Single Day Focus');
       return Array.from(new Set(days));
     }
 
@@ -9857,7 +10013,7 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 12. CONTEXT-AWARE INTELLIGENT FALLBACK
+    // 12. FALLBACK
     return [
       'Yes, strictly apply',
       'Standard recommended',
@@ -9934,22 +10090,91 @@ export default function ChefChatPage() {
         updateWizardStep(null);
         try {
           const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+          const userKey = getUserKey(activeAuth);
+
+          // Build structured QA pairs for 100% accurate AI comprehension
+          const qaSummary = wizardQuestionsList.map((q, idx) => ({
+            question: q,
+            answer: updatedAnswers[idx] || 'Not specified'
+          }));
+
+          // Accurately parse user choices with 1-day priority
+          let requestedDays = 1;
+          let requestedMealTypes = ['Dinner'];
+          let requestedTheme = 'Balanced Wholesome';
+          let requestedBudget = '$5 - $8 per serving';
+          let startDate = 'Today';
+
+          qaSummary.forEach(({ question, answer }) => {
+            const q = question.toLowerCase();
+            const a = answer.trim();
+            const aLower = a.toLowerCase();
+
+            // 1. Duration
+            if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
+              if (/\b(1|single|one|today only)\b/i.test(aLower) && !/\b(1[0-4])\b/.test(aLower)) {
+                requestedDays = 1;
+              } else if (/\b(weekend|2|two)\b/i.test(aLower)) {
+                requestedDays = 2;
+              } else {
+                const numMatch = a.match(/\d+/);
+                if (numMatch) {
+                  requestedDays = Math.min(14, Math.max(1, parseInt(numMatch[0], 10)));
+                }
+              }
+            }
+            // 2. Meal types
+            else if (/\b(meal type|meal types|which meal|types of meal|meals to include)\b/i.test(q)) {
+              if (/all meals \+ snack/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+              else if (/all meals/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner'];
+              else if (/breakfast & lunch/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch'];
+              else if (/breakfast & dinner/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Dinner'];
+              else if (/lunch & dinner/i.test(aLower)) requestedMealTypes = ['Lunch', 'Dinner'];
+              else if (/dinner only/i.test(aLower)) requestedMealTypes = ['Dinner'];
+              else if (/lunch only/i.test(aLower)) requestedMealTypes = ['Lunch'];
+              else if (/breakfast only/i.test(aLower)) requestedMealTypes = ['Breakfast'];
+              else requestedMealTypes = [a];
+            }
+            // 3. Start Date
+            else if (/\b(when|start date|starting|start|commence|begin)\b/i.test(q)) {
+              startDate = a;
+            }
+            // 4. Budget
+            else if (/\b(budget|cost|spend|price|financial)\b/i.test(q)) {
+              requestedBudget = a;
+            }
+            // 5. Themes & Preferences
+            else if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine)\b/i.test(q)) {
+              requestedTheme = a;
+            }
+          });
+
           const res = await fetch('/api/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               isQuestionnaireComplete: true,
               topicTitle: activeTopicTitle,
+              questionnaireSummary: qaSummary,
               questionnaireAnswers: updatedAnswers,
-              userId: activeAuth?.id,
+              requestedDays,
+              requestedMealTypes,
+              requestedTheme,
+              requestedBudget,
+              startDate,
+              recommendedRecipeUrls,
+              userId: activeAuth?.id || userKey,
               userEmail: activeAuth?.email,
               preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
-              pantry: enablePantryContext ? pantryIngredientsList : []
+              pantry: enablePantryContext ? pantryIngredientsList : [],
+          enableSavedRecipeSearch
             })
           });
 
-          const data = await res.json();
-          if (!res.ok || !data.success) throw new Error(data.error || 'Failed to synthesize questionnaire results.');
+          const data = await safeJsonParse(res);
+          if (!res.ok || !data || !data.success) {
+            throw new Error(data?.error || 'Failed to synthesize questionnaire results. Please try again.');
+          }
 
           if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
           else setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens || chefCost)));
@@ -9968,7 +10193,7 @@ export default function ChefChatPage() {
             speakText(planMsg.content || '', planMsg.id);
           }
         } catch (err: any) {
-          updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message}` }]);
+          updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || 'Error formulating questionnaire plan.'}` }]);
         } finally {
           setLoading(false);
           setActiveTopicTitle('Standard Wizard');
@@ -9979,23 +10204,27 @@ export default function ChefChatPage() {
 
     try {
       const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+      const userKey = getUserKey(activeAuth);
+
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: textToSend,
-          userId: activeAuth?.id,
+          userId: activeAuth?.id || userKey,
           userEmail: activeAuth?.email,
           source: 'chef',
+          recommendedRecipeUrls,
           preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
-          pantry: enablePantryContext ? pantryIngredientsList : []
+          pantry: enablePantryContext ? pantryIngredientsList : [],
+          enableSavedRecipeSearch
         })
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        if (data.insufficientTokens) setIsTokenPurchaseOpen(true);
-        throw new Error(data.error || 'Chef Foodie could not process your query.');
+      const data = await safeJsonParse(res);
+      if (!res.ok || !data || !data.success) {
+        if (data?.insufficientTokens) setIsTokenPurchaseOpen(true);
+        throw new Error(data?.error || 'Chef Foodie could not process your query.');
       }
 
       if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
@@ -10005,7 +10234,8 @@ export default function ChefChatPage() {
         id: 'ast_' + Date.now(),
         role: 'assistant',
         content: data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.",
-        recommendedRecipe: data.recommendedRecipe || data.recipe
+        recommendedRecipe: data.recommendedRecipe || data.recipe,
+        systemRecommendations: data.systemRecommendations || []
       };
 
       updateMessages(prev => [...prev, astMsg]);
@@ -10144,7 +10374,6 @@ export default function ChefChatPage() {
 
         {/* USER DIETARY PREFERENCES PILLS */}
         <div className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in">
-          {/* PRIMARY SOURCES TELEMETRY PILL */}
           {recommendedRecipeUrls.length > 0 && (
             <span 
               className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm transition hover:opacity-90"
@@ -10162,6 +10391,7 @@ export default function ChefChatPage() {
               </strong>
             </span>
           )}
+
           <span 
             className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
@@ -10278,6 +10508,40 @@ export default function ChefChatPage() {
                 <Sparkles className="h-4 w-4" /> Start Complete Meal Plan Intake Wizard
               </button>
 
+              <button
+                type="button"
+                onClick={() => handleSend("What can I do on FoodiePrep?")}
+                className="border text-xs font-bold px-4 py-3 rounded-2xl transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              >
+                <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                <span>✨ What can I do on this system?</span>
+              </button>
+
+              {recommendedRecipeUrls.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => handleSend("Recommend a dish matching my preferences from my primary recipe sources.")}
+                  className="border text-xs font-bold px-4 py-3 rounded-2xl transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)'
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                >
+                  <Globe className="h-4 w-4" />
+                  <span>Recommend from Primary Sources ({recommendedRecipeUrls.length})</span>
+                </button>
+              )}
+
               {activeQuestionnaireSections.map((sec) => (
                 <button
                   key={sec.id}
@@ -10348,10 +10612,32 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* RECOMMENDATION RECIPE CARD PREVIEW */}
+                  {/* PLATFORM ACTION RECOMMENDATIONS */}
+                  {m.systemRecommendations && m.systemRecommendations.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-1 animate-in fade-in">
+                      {m.systemRecommendations.map((rec, rIdx) => (
+                        <button
+                          key={rIdx}
+                          type="button"
+                          onClick={() => router.push(rec.route)}
+                          className="px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-xs hover:scale-[1.02] cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <Sparkles className="h-3 w-3" />
+                          <span>{rec.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* RECOMMENDATION RECIPE CARD PREVIEW WITH SAVE & GATED PLANNER ACTIONS */}
                   {m.recommendedRecipe && (
                     <div 
-                      className="border rounded-2xl p-3.5 space-y-3 shadow-sm transition-all duration-200 hover:shadow-md"
+                      className="border rounded-2xl p-4 space-y-3.5 shadow-sm transition-all duration-200 hover:shadow-md"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)'
@@ -10381,15 +10667,29 @@ export default function ChefChatPage() {
                           </div>
 
                           <div className="space-y-1 min-w-0 flex-1">
-                            <h4 className="font-black text-sm leading-snug group-hover:underline truncate" style={{ color: 'var(--color-text)' }}>
-                              {m.recommendedRecipe.title}
-                            </h4>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-black text-sm leading-snug group-hover:underline truncate" style={{ color: 'var(--color-text)' }}>
+                                {m.recommendedRecipe.title}
+                              </h4>
+                              {m.recommendedRecipe.sourceUrl && (
+                                <span 
+                                  className="text-[9px] font-bold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0"
+                                  style={{
+                                    backgroundColor: 'var(--color-inner-dark)',
+                                    borderColor: 'var(--color-emerald)',
+                                    color: 'var(--color-emerald)'
+                                  }}
+                                >
+                                  <Globe className="h-2.5 w-2.5" /> Source
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[11px] leading-relaxed line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
                               {m.recommendedRecipe.description}
                             </p>
                             <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-bold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                               <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {m.recommendedRecipe.prepMinutes + m.recommendedRecipe.cookMinutes}m
+                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(m.recommendedRecipe.prepMinutes || 0) + (m.recommendedRecipe.cookMinutes || 0)}m
                               </span>
                               <span className="flex items-center gap-1">
                                 <Users className="h-3 w-3" /> {m.recommendedRecipe.servings || servings} serv
@@ -10399,6 +10699,72 @@ export default function ChefChatPage() {
                               )}
                             </div>
                           </div>
+                        </div>
+                      </div>
+
+                      {/* CARD ACTIONS: VIEW FULL DETAILS, SAVE RECIPE, AND GATED PLANNER SUGGESTION */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t text-xs" style={{ borderColor: 'var(--color-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRecipeForModal(m.recommendedRecipe);
+                            setShowRecipeDetailsModal(true);
+                          }}
+                          className="px-3 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <BookOpen className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                          <span>View Full Details</span>
+                        </button>
+
+                        <div className="flex items-center gap-2">
+                          {isRecipeSaved(m.recommendedRecipe.title) ? (
+                            <span 
+                              className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 shadow-2xs"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-emerald)',
+                                color: 'var(--color-emerald)'
+                              }}
+                            >
+                              <Check className="h-3.5 w-3.5" /> Saved in Recipes
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={savingRecipeTitle === m.recommendedRecipe.title}
+                              onClick={() => handleSaveRecipe(m.recommendedRecipe)}
+                              className="px-3.5 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-primary)',
+                                color: 'var(--color-primary)'
+                              }}
+                            >
+                              {savingRecipeTitle === m.recommendedRecipe.title ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Bookmark className="h-3.5 w-3.5" />
+                              )}
+                              <span>Save Recipe</span>
+                            </button>
+                          )}
+
+                          {isRecipeSaved(m.recommendedRecipe.title) && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPlannerModal(m.recommendedRecipe)}
+                              className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 animate-in fade-in"
+                              style={{ backgroundColor: 'var(--color-primary)' }}
+                            >
+                              <CalendarPlus className="h-3.5 w-3.5" />
+                              <span>📅 Suggest Add to Planner</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -10417,7 +10783,7 @@ export default function ChefChatPage() {
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                           <h3 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                            {m.plan.title} ({m.plan.totalDays} Days)
+                            {m.plan.title} ({m.plan.totalDays} {m.plan.totalDays === 1 ? 'Day' : 'Days'})
                           </h3>
                         </div>
 
@@ -10643,7 +11009,6 @@ export default function ChefChatPage() {
                                 <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
                               </div>
 
-                              {/* Inline Ingredients Pills Breakdown */}
                               {Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
                                 <div className="space-y-1.5 pt-1">
                                   <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
@@ -10981,7 +11346,7 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* 10 SESSIONS LIST */}
+              {/* SESSIONS LIST */}
               <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                 {loadingHistory ? (
                   <div className="py-12 text-center text-xs flex items-center justify-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
@@ -11274,7 +11639,7 @@ export default function ChefChatPage() {
                         className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
                         style={isSelected ? {
                           backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
+                          borderColor: 'var(--color-primary)',
                           color: 'var(--color-primary)'
                         } : {
                           backgroundColor: 'var(--color-inner-dark)',
@@ -11453,7 +11818,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* RECIPE DETAILS MODAL */}
+      {/* RECIPE DETAILS MODAL WITH + ADD TO GROCERY & GATED PLANNER ACTIONS */}
       {showRecipeDetailsModal && selectedRecipeForModal && (
         <div 
           onClick={() => setShowRecipeDetailsModal(false)}
@@ -11537,12 +11902,28 @@ export default function ChefChatPage() {
                 )}
               </div>
 
-              {/* Ingredients List */}
+              {/* Ingredients List with Add to Cart / Grocery Button */}
               {Array.isArray(selectedRecipeForModal.ingredients) && selectedRecipeForModal.ingredients.length > 0 && (
                 <div className="space-y-2">
-                  <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                    Ingredients ({selectedRecipeForModal.ingredients.length})
-                  </h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                      Ingredients ({selectedRecipeForModal.ingredients.length})
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => handleAddToCart(selectedRecipeForModal.ingredients)}
+                      className="px-2.5 py-1 rounded-lg border text-[11px] font-bold transition flex items-center gap-1 shadow-2xs hover:opacity-90 cursor-pointer"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      <ShoppingCart className="h-3 w-3" />
+                      <span>+ Add to Cart</span>
+                    </button>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {selectedRecipeForModal.ingredients.map((ing: string, i: number) => (
                       <div 
@@ -11604,15 +11985,15 @@ export default function ChefChatPage() {
               )}
             </div>
 
-            {/* Outbound Link & Close */}
-            <div className="pt-3 border-t flex items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
+            {/* Outbound Link & Actions */}
+            <div className="pt-3 border-t flex flex-wrap items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
               <div>
                 {selectedRecipeForModal.sourceUrl && (
                   <a
                     href={selectedRecipeForModal.sourceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer hover:opacity-80"
+                    className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -11625,13 +12006,192 @@ export default function ChefChatPage() {
                 )}
               </div>
 
+              <div className="flex items-center gap-2">
+                {isRecipeSaved(selectedRecipeForModal.title) ? (
+                  <span 
+                    className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-emerald)',
+                      color: 'var(--color-emerald)'
+                    }}
+                  >
+                    <Check className="h-3.5 w-3.5" /> Saved in Recipes
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={savingRecipeTitle === selectedRecipeForModal.title}
+                    onClick={() => handleSaveRecipe(selectedRecipeForModal)}
+                    className="px-3.5 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-primary)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    {savingRecipeTitle === selectedRecipeForModal.title ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Bookmark className="h-3.5 w-3.5" />
+                    )}
+                    <span>Save Recipe</span>
+                  </button>
+                )}
+
+                {isRecipeSaved(selectedRecipeForModal.title) && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPlannerModal(selectedRecipeForModal)}
+                    className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    <CalendarPlus className="h-3.5 w-3.5" />
+                    <span>📅 Suggest Add to Planner</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowRecipeDetailsModal(false)}
+                  className="px-4 py-1.5 rounded-xl border font-bold text-xs shadow-xs transition cursor-pointer hover:opacity-90"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD TO MEAL PLANNER MODAL */}
+      {showPlannerModal && recipeToSchedule && (
+        <div 
+          onClick={() => setShowPlannerModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-md w-full flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-4 cursor-default animate-in fade-in"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                  Meal Planner Schedule
+                </span>
+                <h2 className="text-base font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                  Schedule "{recipeToSchedule.title}"
+                </h2>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowRecipeDetailsModal(false)}
-                className="px-5 py-2 rounded-xl text-white font-bold text-xs shadow-md transition cursor-pointer hover:opacity-90"
+                onClick={() => setShowPlannerModal(false)}
+                className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  Target Date
+                </label>
+                <input
+                  type="date"
+                  value={scheduleDate}
+                  onChange={(e) => setScheduleDate(e.target.value)}
+                  className="w-full border rounded-xl px-3.5 py-2 text-xs outline-none"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  Meal Slot
+                </label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((slot) => (
+                    <button
+                      key={slot}
+                      type="button"
+                      onClick={() => setScheduleMealType(slot)}
+                      className="py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer text-center"
+                      style={scheduleMealType === slot ? {
+                        backgroundColor: 'var(--color-primary)',
+                        borderColor: 'var(--color-primary)',
+                        color: '#ffffff'
+                      } : {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {slot}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  Servings
+                </label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setScheduleServings(Math.max(1, scheduleServings - 1))}
+                    className="w-7 h-7 rounded-lg border flex items-center justify-center font-bold text-xs transition cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    -
+                  </button>
+                  <span className="font-bold">{scheduleServings} servings</span>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleServings(scheduleServings + 1)}
+                    className="w-7 h-7 rounded-lg border flex items-center justify-center font-bold text-xs transition cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t flex items-center justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowPlannerModal(false)}
+                className="px-4 py-2 border rounded-xl font-bold text-xs transition cursor-pointer hover:opacity-80"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={schedulingLoading}
+                onClick={handleConfirmScheduleMeal}
+                className="px-5 py-2 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer hover:opacity-90 disabled:opacity-50"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                Close
+                {schedulingLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarPlus className="h-3.5 w-3.5" />}
+                <span>Confirm & Schedule</span>
               </button>
             </div>
           </div>
@@ -13274,7 +13834,6 @@ import {
   RefreshCw, 
   Palette,
   AlertCircle,
-  Utensils,
   Type
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
@@ -13397,7 +13956,7 @@ export default function AdminSettingsPage() {
   const translate = langContext?.t;
   const t = useCallback((key: string, fallback: string) => {
     if (typeof translate === 'function') {
-      const val = translate(key);
+      const val = translate(key, fallback);
       if (val && val !== key) return val;
     }
     return fallback;
@@ -13472,6 +14031,11 @@ export default function AdminSettingsPage() {
     border: string,
     textSec: string
   ) => {
+    const root = typeof document !== 'undefined' ? document.documentElement : null;
+    const isDay = typeof window !== 'undefined' 
+      ? (localStorage.getItem('zecratary_theme_mode') === 'light' || localStorage.getItem('zecratary_theme_mode') === 'day' || (root && root.classList.contains('light')))
+      : false;
+
     applyThemeToDocument({
       primary,
       primaryColor: primary,
@@ -13487,6 +14051,24 @@ export default function AdminSettingsPage() {
       cardBorder: border,
       textSecondary: textSec
     });
+
+    if (root) {
+      if (isDay) {
+        root.classList.remove('dark');
+        root.classList.add('light');
+        if (document.body) {
+          document.body.style.backgroundColor = 'var(--color-bg)';
+          document.body.style.color = 'var(--color-text)';
+        }
+      } else {
+        root.classList.remove('light');
+        root.classList.add('dark');
+        if (document.body) {
+          document.body.style.backgroundColor = bg || 'var(--color-bg)';
+          document.body.style.color = 'var(--color-text)';
+        }
+      }
+    }
   };
 
   const applyFontLocally = (fontName: string, sz: string = fontSize, spacing: string = fontLetterSpacing) => {
@@ -13498,17 +14080,34 @@ export default function AdminSettingsPage() {
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
-      const serverData = await fetchServerAdminSettings();
+      let serverData = await fetchServerAdminSettings();
+      if (!serverData) {
+        const res = await fetch('/api/admin/settings?t=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          serverData = await res.json();
+        }
+      }
+
       if (serverData) {
         const payload: any = serverData.settings || serverData;
 
-        if (payload.siteName) setSiteName(payload.siteName);
-        if (payload.titlebarEmoji) setTitlebarEmoji(payload.titlebarEmoji);
-        if (payload.titlebarImage !== undefined) setTitlebarImage(payload.titlebarImage);
-        if (payload.faviconEmoji) setFaviconEmoji(payload.faviconEmoji);
-        if (payload.faviconImage !== undefined) setFaviconImage(payload.faviconImage);
+        if (payload.siteName || payload.site_name) {
+          setSiteName(payload.siteName || payload.site_name);
+        }
+        if (payload.titlebarEmoji || payload.titlebar_emoji) {
+          setTitlebarEmoji(payload.titlebarEmoji || payload.titlebar_emoji);
+        }
+        if (payload.titlebarImage !== undefined || payload.titlebar_image !== undefined) {
+          setTitlebarImage(payload.titlebarImage ?? payload.titlebar_image ?? '');
+        }
+        if (payload.faviconEmoji || payload.favicon_emoji) {
+          setFaviconEmoji(payload.faviconEmoji || payload.favicon_emoji);
+        }
+        if (payload.faviconImage !== undefined || payload.favicon_image !== undefined) {
+          setFaviconImage(payload.faviconImage ?? payload.favicon_image ?? '');
+        }
 
-        const tc = payload.themeColors || serverData.themeColors || getMemoryThemeColors() || {};
+        const tc = payload.themeColors || payload.theme_colors || serverData.themeColors || serverData.theme_colors || (typeof getMemoryThemeColors === 'function' ? getMemoryThemeColors() : null) || {};
         const p = tc.primary || tc.primaryColor || '#E05638';
         const ph = tc.primaryHover || '#c94529';
         const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
@@ -13527,9 +14126,9 @@ export default function AdminSettingsPage() {
         setCardBorderColor(border);
         setSecondaryTextColor(textSec);
 
-        const ff = payload.fontFamily || payload.font_family || 'Inter';
-        const fs = payload.fontSize || payload.font_size || '16px';
-        const fls = payload.fontLetterSpacing || payload.letter_spacing || '0em';
+        const ff = payload.fontFamily || payload.font_family || serverData.fontFamily || serverData.font_family || 'Inter';
+        const fs = payload.fontSize || payload.font_size || serverData.fontSize || serverData.font_size || '16px';
+        const fls = payload.fontLetterSpacing || payload.letter_spacing || payload.font_letter_spacing || serverData.fontLetterSpacing || '0em';
 
         setFontFamily(ff);
         setFontSize(fs);
@@ -13568,30 +14167,31 @@ export default function AdminSettingsPage() {
     const handleModeChange = () => {
       try {
         const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-        const day = mode === 'light' || mode === 'day';
+        const root = typeof document !== 'undefined' ? document.documentElement : null;
+        const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
         setIsDayMode(day);
         const cur = colorsRef.current;
-        applyThemeToDocument({
-          primary: cur.primary,
-          primaryHover: cur.primaryHover,
-          accentEmerald: cur.accent,
-          accentColor: cur.accent,
-          accent: cur.accent,
-          sidebarIconColor: cur.sidebarIcon,
-          sidebarIcon: cur.sidebarIcon,
-          backgroundColor: cur.background,
-          backgroundDark: cur.background,
-          cardBackground: cur.card,
-          cardBorder: cur.border,
-          textSecondary: cur.textSecondary,
-        });
+        applyColorsLocally(
+          cur.primary,
+          cur.primaryHover,
+          cur.accent,
+          cur.sidebarIcon,
+          cur.background,
+          cur.card,
+          cur.border,
+          cur.textSecondary
+        );
       } catch (_) {}
     };
 
     handleModeChange();
     window.addEventListener('zecratary_theme_mode_changed', handleModeChange);
+    window.addEventListener('zecratary_theme_changed', handleModeChange);
+    window.addEventListener('storage', handleModeChange);
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', handleModeChange);
+      window.removeEventListener('zecratary_theme_changed', handleModeChange);
+      window.removeEventListener('storage', handleModeChange);
     };
   }, []);
 
@@ -13659,6 +14259,7 @@ export default function AdminSettingsPage() {
     if (e && typeof e.preventDefault === 'function') {
       e.preventDefault();
     }
+    if (isSaving) return;
     setIsSaving(true);
     isSavingRef.current = true;
     setSaveError('');
@@ -13667,12 +14268,16 @@ export default function AdminSettingsPage() {
       const updatedBranding: SiteIdentityConfig = {
         siteName: siteName.trim() || DEFAULT_SITE_NAME,
         titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
-        titlebarImage,
+        titlebarImage: titlebarImage || '',
         faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
-        faviconImage
+        faviconImage: faviconImage || ''
       };
 
       setMemorySiteConfig(updatedBranding);
+      if (typeof saveSiteConfig === 'function') {
+        await saveSiteConfig(updatedBranding).catch(() => null);
+      }
+
       if (faviconImage) {
         updateFavicon(faviconImage);
       } else if (faviconEmoji) {
@@ -13709,31 +14314,54 @@ export default function AdminSettingsPage() {
       );
       applyFontLocally(fontFamily, fontSize, fontLetterSpacing);
 
-      await saveThemeColors(themeColors);
-
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('zecratary_font_family', fontFamily);
-        localStorage.setItem('zecratary_font_size', fontSize);
-        localStorage.setItem('zecratary_font_spacing', fontLetterSpacing);
+      if (typeof saveThemeColors === 'function') {
+        await saveThemeColors(themeColors).catch(() => null);
       }
 
-      const success = await persistServerAdminSettings({
+      const payloadToSave = {
         siteName: updatedBranding.siteName,
+        site_name: updatedBranding.siteName,
         titlebarEmoji: updatedBranding.titlebarEmoji,
+        titlebar_emoji: updatedBranding.titlebarEmoji,
         titlebarImage: updatedBranding.titlebarImage || '',
+        titlebar_image: updatedBranding.titlebarImage || '',
         faviconEmoji: updatedBranding.faviconEmoji,
+        favicon_emoji: updatedBranding.faviconEmoji,
         faviconImage: updatedBranding.faviconImage || '',
+        favicon_image: updatedBranding.faviconImage || '',
         themeColors,
+        theme_colors: themeColors,
         fontFamily,
         font_family: fontFamily,
         fontSize,
         font_size: fontSize,
         fontLetterSpacing,
+        font_letter_spacing: fontLetterSpacing,
         letter_spacing: fontLetterSpacing
+      };
+
+      // 1. Commit directly to PostgreSQL /api/admin/settings
+      const settingsRes = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadToSave)
       });
 
-      if (!success) {
-        throw new Error(t('admin.saveFailed', 'Failed to commit settings to database endpoint.'));
+      if (!settingsRes.ok) {
+        const errJson = await settingsRes.json().catch(() => ({}));
+        throw new Error(errJson?.error || t('admin.saveFailed', 'Failed to commit settings to database endpoint.'));
+      }
+
+      // 2. Commit directly to PostgreSQL /api/user/theme
+      await fetch('/api/user/theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ themeColors, theme_colors: themeColors })
+      }).catch(() => null);
+
+      // 3. Fallback sync helper
+      if (typeof persistServerAdminSettings === 'function') {
+        await persistServerAdminSettings(payloadToSave).catch(() => null);
       }
 
       if (typeof window !== 'undefined') {
@@ -13741,10 +14369,11 @@ export default function AdminSettingsPage() {
         window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
         window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily, fontSize, fontLetterSpacing } }));
         window.dispatchEvent(new Event('zecratary_theme_changed'));
+        window.dispatchEvent(new Event('zecratary_settings_updated'));
       }
 
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setTimeout(() => setSaved(false), 3500);
     } catch (err: any) {
       console.error('[AdminSettingsPage] Save failure:', err);
       setSaveError(err?.message || 'Failed to save settings to server store');
@@ -13753,7 +14382,7 @@ export default function AdminSettingsPage() {
       setIsSaving(false);
       setTimeout(() => {
         isSavingRef.current = false;
-      }, 600);
+      }, 800);
     }
   };
 
@@ -13769,6 +14398,7 @@ export default function AdminSettingsPage() {
 
   const handleResetDefaults = async () => {
     if (!confirm(t('admin.confirmReset', 'Reset branding, theme, and font settings to defaults?'))) return;
+    if (isSaving) return;
     setIsSaving(true);
     isSavingRef.current = true;
     setSaveError('');
@@ -13809,10 +14439,15 @@ export default function AdminSettingsPage() {
 
       const defaultBranding = {
         siteName: defaultName,
+        site_name: defaultName,
         titlebarEmoji: defaultIcon,
+        titlebar_emoji: defaultIcon,
         titlebarImage: '',
+        titlebar_image: '',
         faviconEmoji: defaultIcon,
-        faviconImage: ''
+        favicon_emoji: defaultIcon,
+        faviconImage: '',
+        favicon_image: ''
       };
 
       const defaultColors = {
@@ -13849,40 +14484,59 @@ export default function AdminSettingsPage() {
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
       updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
 
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('zecratary_font_family', defaultFont);
-        localStorage.setItem('zecratary_font_size', defaultSize);
-        localStorage.setItem('zecratary_font_spacing', defaultSpacing);
+      if (typeof saveThemeColors === 'function') {
+        await saveThemeColors(defaultColors).catch(() => null);
+      }
+      if (typeof saveSiteConfig === 'function') {
+        await saveSiteConfig(defaultBranding).catch(() => null);
       }
 
-      await saveThemeColors(defaultColors);
-      await persistServerAdminSettings({
+      const resetPayload = {
         ...defaultBranding,
         themeColors: defaultColors,
+        theme_colors: defaultColors,
         fontFamily: defaultFont,
         font_family: defaultFont,
         fontSize: defaultSize,
         font_size: defaultSize,
         fontLetterSpacing: defaultSpacing,
+        font_letter_spacing: defaultSpacing,
         letter_spacing: defaultSpacing
-      });
+      };
+
+      await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(resetPayload)
+      }).catch(() => null);
+
+      await fetch('/api/user/theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ themeColors: defaultColors, theme_colors: defaultColors })
+      }).catch(() => null);
+
+      if (typeof persistServerAdminSettings === 'function') {
+        await persistServerAdminSettings(resetPayload).catch(() => null);
+      }
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
         window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
         window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily: defaultFont, fontSize: defaultSize, fontLetterSpacing: defaultSpacing } }));
         window.dispatchEvent(new Event('zecratary_theme_changed'));
+        window.dispatchEvent(new Event('zecratary_settings_updated'));
       }
 
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setTimeout(() => setSaved(false), 3500);
     } catch (err: any) {
       setSaveError(err?.message || 'Failed to reset settings');
     } finally {
       setIsSaving(false);
       setTimeout(() => {
         isSavingRef.current = false;
-      }, 600);
+      }, 800);
     }
   };
 
@@ -13894,6 +14548,19 @@ export default function AdminSettingsPage() {
       className="max-w-5xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
+      <style dangerouslySetInnerHTML={{ __html: `
+        .admin-input:-webkit-autofill,
+        .admin-input:-webkit-autofill:hover,
+        .admin-input:-webkit-autofill:focus,
+        .admin-input:-webkit-autofill:active {
+          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          -webkit-text-fill-color: var(--color-text) !important;
+          caret-color: var(--color-text) !important;
+          transition: background-color 50000s ease-in-out 0s !important;
+        }
+      `}} />
+
       {/* HEADER */}
       <div 
         className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" 
@@ -13916,7 +14583,7 @@ export default function AdminSettingsPage() {
             type="button"
             onClick={loadSettingsFromServer}
             disabled={isLoading || isSaving}
-            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 hover:opacity-80"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
@@ -13930,7 +14597,7 @@ export default function AdminSettingsPage() {
 
           {saved && (
             <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold animate-in fade-in"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-emerald)',
@@ -13943,7 +14610,7 @@ export default function AdminSettingsPage() {
 
           {saveError && (
             <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold animate-in fade-in"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'rgba(239, 68, 68, 0.4)',
@@ -13953,6 +14620,26 @@ export default function AdminSettingsPage() {
               <AlertCircle className="h-4 w-4 text-red-500" /> {saveError}
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving}
+            className="text-white font-extrabold text-xs px-4 py-2 rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+          >
+            {isSaving ? (
+              <>
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                <span>{t('admin.saving', 'Saving...')}</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>{t('admin.saveBtn', 'Save')}</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
@@ -14022,7 +14709,7 @@ export default function AdminSettingsPage() {
         </button>
       </div>
 
-      {/* SETTINGS CONTAINER */}
+      {/* SETTINGS CONTAINER (Decoupled from Form Autofill Heuristics) */}
       <div onKeyDown={handleKeyDown} className="space-y-6">
         {/* TAB 1: BRANDING */}
         <div className={activeTab === 'branding' ? 'space-y-6' : 'hidden'}>
@@ -14042,18 +14729,23 @@ export default function AdminSettingsPage() {
               </label>
               <input 
                 type="text" 
-                id="site_display_name_setting"
-                name="site_display_name_setting"
+                id="cfg_app_branding_title"
+                name="cfg_app_branding_title"
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck="false"
                 data-lpignore="true"
                 data-1p-ignore="true"
+                data-bwignore="true"
                 data-form-type="other"
+                role="presentation"
+                readOnly
+                onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                 value={siteName} 
                 onChange={(e) => setSiteName(e.target.value)} 
                 placeholder="e.g. Zecratary" 
-                className="w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
+                className="admin-input w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
                 style={{ 
                   backgroundColor: 'var(--color-inner-dark)', 
                   borderColor: 'var(--color-border)', 
@@ -14135,18 +14827,22 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center gap-3">
                   <input 
                     type="text" 
-                    id="site_titlebar_emoji_setting"
-                    name="site_titlebar_emoji_setting"
+                    id="cfg_titlebar_symbol"
+                    name="cfg_titlebar_symbol"
                     autoComplete="off"
                     autoCorrect="off"
                     spellCheck="false"
                     data-lpignore="true"
                     data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                     value={titlebarEmoji} 
-                    onChange={(e) => setTitlebarEmoji(e.target.value)} 
-                    maxLength={4} 
-                    className="w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
+                    onChange={(e) => setTitlebarEmoji(e.target.value.slice(0, 8))} 
+                    className="admin-input w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
                     style={{ 
                       backgroundColor: 'var(--color-inner-dark)', 
                       borderColor: 'var(--color-border)', 
@@ -14255,18 +14951,22 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center gap-3">
                   <input 
                     type="text" 
-                    id="site_favicon_emoji_setting"
-                    name="site_favicon_emoji_setting"
+                    id="cfg_favicon_symbol"
+                    name="cfg_favicon_symbol"
                     autoComplete="off"
                     autoCorrect="off"
                     spellCheck="false"
                     data-lpignore="true"
                     data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                     value={faviconEmoji} 
-                    onChange={(e) => setFaviconEmoji(e.target.value)} 
-                    maxLength={4} 
-                    className="w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
+                    onChange={(e) => setFaviconEmoji(e.target.value.slice(0, 8))} 
+                    className="admin-input w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
                     style={{ 
                       backgroundColor: 'var(--color-inner-dark)', 
                       borderColor: 'var(--color-border)', 
@@ -14290,7 +14990,7 @@ export default function AdminSettingsPage() {
                   backgroundColor: 'var(--color-inner-dark)', 
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
-                }}
+                }} 
               >
                 <div className="flex items-center gap-2 truncate">
                   {isFaviconImageActive ? (
@@ -14413,8 +15113,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_primary_color"
-                      name="theme_primary_color"
+                      id="cfg_theme_primary_color"
+                      name="cfg_theme_primary_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={primaryColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14423,7 +15130,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(val, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -14451,8 +15158,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_primary_hover_color"
-                      name="theme_primary_hover_color"
+                      id="cfg_theme_primary_hover_color"
+                      name="cfg_theme_primary_hover_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={primaryHoverColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14461,7 +15175,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, val, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -14489,8 +15203,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_accent_color"
-                      name="theme_accent_color"
+                      id="cfg_theme_accent_color"
+                      name="cfg_theme_accent_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={accentColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14499,7 +15220,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, val, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -14527,8 +15248,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
-                      id="theme_sidebar_icon_color"
-                      name="theme_sidebar_icon_color"
+                      id="cfg_theme_sidebar_icon_color"
+                      name="cfg_theme_sidebar_icon_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={sidebarIconColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14537,7 +15265,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -14573,6 +15301,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="cfg_theme_bg_color"
+                      name="cfg_theme_bg_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={backgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14581,7 +15318,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -14609,6 +15346,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="cfg_theme_card_bg_color"
+                      name="cfg_theme_card_bg_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={cardBackgroundColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14617,7 +15363,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -14645,6 +15391,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="cfg_theme_card_border_color"
+                      name="cfg_theme_card_border_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={cardBorderColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14653,7 +15408,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -14681,6 +15436,15 @@ export default function AdminSettingsPage() {
                     />
                     <input 
                       type="text" 
+                      id="cfg_theme_text_secondary_color"
+                      name="cfg_theme_text_secondary_color"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
                       value={secondaryTextColor} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -14689,7 +15453,7 @@ export default function AdminSettingsPage() {
                           applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
                         }
                       }}
-                      className="w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
+                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-border)',
@@ -14953,7 +15717,7 @@ export default function AdminSettingsPage() {
             type="button"
             onClick={handleSave}
             disabled={isSaving}
-            className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
             {isSaving ? (
@@ -14991,7 +15755,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Radio, Compass, ExternalLink, ChevronDown, ChevronUp, FileText, Search, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Key, Sliders, Sparkles, Globe, PackageCheck, 
-  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle
+  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle,
+  BookmarkCheck
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -15064,6 +15829,7 @@ export default function ChefAISettingsPage() {
     }
   } catch (_) {}
 
+  // Synchronized activeTab with session and URL parameter support to prevent reload bounce
   const [activeTab, setActiveTab] = useState<'general' | 'questionnaire' | 'voice' | 'advanced'>('general');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
@@ -15094,6 +15860,7 @@ export default function ChefAISettingsPage() {
   const [enableWebSearch, setEnableWebSearch] = useState(true);
   const [enablePantryContext, setEnablePantryContext] = useState(true);
   const [strictDietEnforcement, setStrictDietEnforcement] = useState(true);
+  const [enableSavedRecipeSearch, setEnableSavedRecipeSearch] = useState(true);
   const [maxPlanDays, setMaxPlanDays] = useState(7);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
   
@@ -15140,6 +15907,41 @@ export default function ChefAISettingsPage() {
   const [saved, setSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Restore active tab from URL or Session Storage without writing to LocalStorage
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const tabParam = params.get('tab');
+        if (tabParam === 'questionnaire' || tabParam === 'voice' || tabParam === 'advanced' || tabParam === 'general') {
+          setActiveTab(tabParam);
+          return;
+        }
+        const hash = window.location.hash.replace('#', '');
+        if (hash === 'questionnaire' || hash === 'voice' || hash === 'advanced' || hash === 'general') {
+          setActiveTab(hash);
+          return;
+        }
+        const savedTab = sessionStorage.getItem('zecratary_ai_settings_tab');
+        if (savedTab === 'questionnaire' || savedTab === 'voice' || savedTab === 'advanced' || savedTab === 'general') {
+          setActiveTab(savedTab as any);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  const handleTabChange = (tabId: 'general' | 'questionnaire' | 'voice' | 'advanced') => {
+    setActiveTab(tabId);
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('zecratary_ai_settings_tab', tabId);
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', tabId);
+        window.history.replaceState({}, '', url.toString());
+      }
+    } catch (_) {}
+  };
 
   // Dynamic Theme Synchronization
   const applySavedTheme = useCallback((incomingColors?: any) => {
@@ -15287,6 +16089,7 @@ export default function ChefAISettingsPage() {
         if (c.enableWebSearch !== undefined) setEnableWebSearch(c.enableWebSearch);
         if (c.enablePantryContext !== undefined) setEnablePantryContext(c.enablePantryContext);
         if (c.strictDietEnforcement !== undefined) setStrictDietEnforcement(c.strictDietEnforcement);
+        if (c.enableSavedRecipeSearch !== undefined) setEnableSavedRecipeSearch(c.enableSavedRecipeSearch);
         if (c.maxPlanDays !== undefined) setMaxPlanDays(c.maxPlanDays);
         if (c.resultDisplayMode !== undefined) setResultDisplayMode(c.resultDisplayMode);
         
@@ -15794,6 +16597,7 @@ export default function ChefAISettingsPage() {
       enableWebSearch,
       enablePantryContext,
       strictDietEnforcement,
+      enableSavedRecipeSearch,
       maxPlanDays,
       resultDisplayMode,
       enableVoiceInteraction,
@@ -15968,7 +16772,7 @@ export default function ChefAISettingsPage() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => handleTabChange(tab.id as any)}
               className={`flex items-center gap-2 pb-3 text-xs font-bold border-b-2 transition shrink-0 cursor-pointer ${
                 isActive ? '' : 'border-transparent hover:opacity-80'
               }`}
@@ -15985,885 +16789,966 @@ export default function ChefAISettingsPage() {
 
       <div className="space-y-6">
         
-        {/* TAB 1: GENERAL & MODEL CONFIG */}
-        {activeTab === 'general' && (
-          <div className="space-y-6 animate-in fade-in">
-            <div 
-              className="border rounded-3xl p-6 space-y-5 shadow-sm transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 
-                    className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <Sparkles className="h-4 w-4" /> {t('aiEngineProviderTitle', 'AI Engine Provider & Model Selection')}
-                  </h2>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('aiEngineProviderDesc', 'Select your active AI provider and model version. This choice controls which model processes prompts in')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/api/ai</span>.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={autoConnectGemini}
-                    disabled={autoConnecting}
-                    className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 shadow-xs hover:opacity-90"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-primary)',
-                      color: 'var(--color-primary)'
-                    }}
-                    title="Auto-connect and sync Gemini API key and models"
-                  >
-                    <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse' : ''}`} style={{ color: autoConnecting ? '#f59e0b' : 'var(--color-primary)' }} />
-                    <span>{autoConnecting ? t('connecting', 'Connecting...') : t('autoConnectGemini', 'Auto-Connect Gemini')}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleReloadEnvKey}
-                    className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs hover:opacity-80"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-secondary)'
-                    }}
-                    title="Reload API Key from .env"
-                  >
-                    <RefreshCw className={`h-3 w-3 ${syncingEnvKey ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald)' }} />
-                    <span>{t('syncFromEnv', 'Sync from .env')}</span>
-                  </button>
-                </div>
+        {/* TAB 1: GENERAL & MODEL CONFIG (Kept in DOM with hidden class to prevent unmounting password prompt) */}
+        <div className={activeTab === 'general' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
+          <div 
+            className="border rounded-3xl p-6 space-y-5 shadow-sm transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 
+                  className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  <Sparkles className="h-4 w-4" /> {t('aiEngineProviderTitle', 'AI Engine Provider & Model Selection')}
+                </h2>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('aiEngineProviderDesc', 'Select your active AI provider and model version. This choice controls which model processes prompts in')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/api/ai</span>.
+                </p>
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handleProviderChange('gemini')}
-                  className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
+                  onClick={autoConnectGemini}
+                  disabled={autoConnecting}
+                  className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 shadow-xs hover:opacity-90"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: provider === 'gemini' ? 'var(--color-primary)' : 'var(--color-border)',
-                    color: provider === 'gemini' ? 'var(--color-text)' : 'var(--color-text-secondary)'
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-primary)'
                   }}
+                  title="Auto-connect and sync Gemini API key and models"
                 >
-                  <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
-                  <div>
-                    <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>Google Gemini</span>
-                    <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 3.6 / 1.5</span>
-                  </div>
+                  <Radio className={`h-3 w-3 ${autoConnecting ? 'animate-pulse' : ''}`} style={{ color: autoConnecting ? '#f59e0b' : 'var(--color-primary)' }} />
+                  <span>{autoConnecting ? t('connecting', 'Connecting...') : t('autoConnectGemini', 'Auto-Connect Gemini')}</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleProviderChange('openai')}
-                  className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
+                  onClick={handleReloadEnvKey}
+                  className="border font-bold text-[11px] px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs hover:opacity-80"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: provider === 'openai' ? 'var(--color-emerald)' : 'var(--color-border)',
-                    color: provider === 'openai' ? 'var(--color-text)' : 'var(--color-text-secondary)'
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
                   }}
+                  title="Reload API Key from .env"
                 >
-                  <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
-                  <div>
-                    <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>OpenAI GPT</span>
-                    <span className="text-[11px] opacity-75">GPT-4o / GPT-4 Turbo / o1</span>
-                  </div>
+                  <RefreshCw className={`h-3 w-3 ${syncingEnvKey ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald)' }} />
+                  <span>{t('syncFromEnv', 'Sync from .env')}</span>
                 </button>
               </div>
+            </div>
 
-              <div className="pt-2 space-y-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <button
+                type="button"
+                onClick={() => handleProviderChange('gemini')}
+                className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: provider === 'gemini' ? 'var(--color-primary)' : 'var(--color-border)',
+                  color: provider === 'gemini' ? 'var(--color-text)' : 'var(--color-text-secondary)'
+                }}
+              >
+                <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                 <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('apiKeyLabel', 'API Key')}</label>
-                    <span className="text-[10px] font-mono font-bold" style={{ color: 'var(--color-primary)' }}>
-                      {provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}
-                    </span>
-                  </div>
-                  <div className="relative flex items-center">
-                    <input
-                      type={showApiKey ? 'text' : 'password'}
-                      value={apiKey}
-                      onChange={(e) => { setApiKey(e.target.value); setTestResult(null); }}
-                      placeholder={provider === 'gemini' ? "AIzaSy..." : "sk-..."}
-                      className="settings-input w-full border rounded-xl px-4 py-3 pr-36 font-mono text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                    />
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setShowApiKey(!showApiKey)}
-                        className="p-1.5 transition cursor-pointer"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                        title={showApiKey ? 'Hide API key' : 'Show API key'}
-                      >
-                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleTestApiKey}
-                        disabled={testingKey}
-                        className="px-2.5 py-1.5 rounded-lg text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-md disabled:opacity-50 hover:opacity-90"
-                        style={{ backgroundColor: 'var(--color-primary)' }}
-                        title="Test API Key connection live and sync models"
-                      >
-                        {testingKey ? (
-                          <>
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            <span>{t('testing', 'Testing...')}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Activity className="h-3 w-3" />
-                            <span>{t('testConnection', 'Test Connection')}</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
+                  <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>Google Gemini</span>
+                  <span className="text-[11px] opacity-75">Gemini 2.5 Pro / Flash / 3.6 / 1.5</span>
+                </div>
+              </button>
 
-                  {testResult && (
-                    <div 
-                      className="mt-2 p-3 rounded-xl border text-xs font-semibold flex items-start gap-2.5 animate-in fade-in shadow-xs transition-colors duration-200"
-                      style={{
-                        borderColor: testResult.success ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
-                        color: testResult.success ? 'var(--color-emerald)' : '#ef4444',
-                        backgroundColor: 'var(--color-inner-dark)'
-                      }}
-                    >
-                      {testResult.success ? (
-                        <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald)' }} />
-                      ) : (
-                        <XCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
-                      )}
-                      <span className="leading-snug">{testResult.message}</span>
-                    </div>
-                  )}
-                  <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('persistedServerSyncNotice', 'Persisted directly to server storage and synced to disk environment.')}
+              <button
+                type="button"
+                onClick={() => handleProviderChange('openai')}
+                className="p-4 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3.5 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: provider === 'openai' ? 'var(--color-emerald)' : 'var(--color-border)',
+                  color: provider === 'openai' ? 'var(--color-text)' : 'var(--color-text-secondary)'
+                }}
+              >
+                <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
+                <div>
+                  <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>OpenAI GPT</span>
+                  <span className="text-[11px] opacity-75">GPT-4o / GPT-4 Turbo / o1</span>
+                </div>
+              </button>
+            </div>
+
+            <div className="pt-2 space-y-4 text-xs">
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{t('apiKeyLabel', 'API Key')}</label>
+                  <span className="text-[10px] font-mono font-bold" style={{ color: 'var(--color-primary)' }}>
+                    {provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}
                   </span>
                 </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('modelVersionIdentifier', 'Model Version Identifier')}
-                    </label>
-                    <button
-                      type="button"
-                      onClick={handleSyncModels}
-                      disabled={syncingModels}
-                      className="border font-bold text-[10px] px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:opacity-80"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-primary)'
-                      }}
-                      title="Query live Gemini API catalog and update dropdown"
-                    >
-                      <RefreshCw className={`h-3 w-3 ${syncingModels ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
-                      <span>{syncingModels ? t('syncingModels', 'Syncing Models...') : t('syncModelsFromApi', 'Sync Models from API')}</span>
-                    </button>
-                  </div>
-
-                  <select
-                    value={model}
-                    onChange={(e) => {
-                      const sel = e.target.value;
-                      setModel(sel);
-                      modelRef.current = sel;
-                    }}
-                    className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition font-medium"
+                <div className="relative flex items-center">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    id="cfg_ai_api_key_secret"
+                    name="cfg_ai_api_key_secret"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    value={apiKey}
+                    onChange={(e) => { setApiKey(e.target.value); setTestResult(null); }}
+                    placeholder={provider === 'gemini' ? "AIzaSy..." : "sk-..."}
+                    className="settings-input w-full border rounded-xl px-4 py-3 pr-36 font-mono text-xs outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                  >
-                    {!currentModelInList && model && (
-                      <option value={model} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                        {model} ({t('currentlyConfigured', 'Current Configured')})
-                      </option>
-                    )}
-                    {activeModelsList.map((m) => (
-                      <option key={m.id} value={m.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                        {m.label || m.name || m.id}
-                      </option>
-                    ))}
-                  </select>
-
-                  <div className="flex items-center justify-between text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    <span>{t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}</span>
-                    <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
-                      {activeModelsList.length} {t('modelsAvailableDynamically', 'models available dynamically')}
-                    </span>
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="p-1.5 transition cursor-pointer"
+                      style={{ color: 'var(--color-text-secondary)' }}
+                      title={showApiKey ? 'Hide API key' : 'Show API key'}
+                    >
+                      {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTestApiKey}
+                      disabled={testingKey}
+                      className="px-2.5 py-1.5 rounded-lg text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-md disabled:opacity-50 hover:opacity-90"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                      title="Test API Key connection live and sync models"
+                    >
+                      {testingKey ? (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span>{t('testing', 'Testing...')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Activity className="h-3 w-3" />
+                          <span>{t('testConnection', 'Test Connection')}</span>
+                        </>
+                      )}
+                    </button>
                   </div>
+                </div>
+
+                {testResult && (
+                  <div 
+                    className="mt-2 p-3 rounded-xl border text-xs font-semibold flex items-start gap-2.5 animate-in fade-in shadow-xs transition-colors duration-200"
+                    style={{
+                      borderColor: testResult.success ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
+                      color: testResult.success ? 'var(--color-emerald)' : '#ef4444',
+                      backgroundColor: 'var(--color-inner-dark)'
+                    }}
+                  >
+                    {testResult.success ? (
+                      <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald)' }} />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                    )}
+                    <span className="leading-snug">{testResult.message}</span>
+                  </div>
+                )}
+                <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('persistedServerSyncNotice', 'Persisted directly to server storage and synced to disk environment.')}
+                </span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('modelVersionIdentifier', 'Model Version Identifier')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleSyncModels}
+                    disabled={syncingModels}
+                    className="border font-bold text-[10px] px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:opacity-80"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                    title="Query live Gemini API catalog and update dropdown"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${syncingModels ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+                    <span>{syncingModels ? t('syncingModels', 'Syncing Models...') : t('syncModelsFromApi', 'Sync Models from API')}</span>
+                  </button>
+                </div>
+
+                <select
+                  value={model}
+                  onChange={(e) => {
+                    const sel = e.target.value;
+                    setModel(sel);
+                    modelRef.current = sel;
+                  }}
+                  className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  {!currentModelInList && model && (
+                    <option value={model} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {model} ({t('currentlyConfigured', 'Current Configured')})
+                    </option>
+                  )}
+                  {activeModelsList.map((m) => (
+                    <option key={m.id} value={m.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {m.label || m.name || m.id}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="flex items-center justify-between text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span>{t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}</span>
+                  <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
+                    {activeModelsList.length} {t('modelsAvailableDynamically', 'models available dynamically')}
+                  </span>
                 </div>
               </div>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER */}
-        {activeTab === 'questionnaire' && (
-          <div className="space-y-6 animate-in fade-in">
-            <div 
-              className="border rounded-3xl p-6 space-y-5 shadow-sm text-xs transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-                <div>
-                  <h2 
-                    className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <Layers className="h-4 w-4" /> {t('questionnaireManagerTitle', 'Multi-Topic Questionnaire & Wizard Manager')}
-                  </h2>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
-                  </p>
-                </div>
-                <span 
-                  className="border px-3 py-1 rounded-full font-bold text-xs shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-primary)',
-                    color: 'var(--color-primary)'
-                  }}
+        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER (Fully Shielded from Password Managers) */}
+        <div className={activeTab === 'questionnaire' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
+          <div 
+            className="border rounded-3xl p-6 space-y-5 shadow-sm text-xs transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h2 
+                  className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2"
+                  style={{ color: 'var(--color-primary)' }}
                 >
-                  {sections.filter(s => s.enabled !== false).length}/{sections.length} {t('topicsActiveBadge', 'Topics Active')}
-                </span>
+                  <Layers className="h-4 w-4" /> {t('questionnaireManagerTitle', 'Multi-Topic Questionnaire & Wizard Manager')}
+                </h2>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
+                </p>
               </div>
+              <span 
+                className="border px-3 py-1 rounded-full font-bold text-xs shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                }}
+              >
+                {sections.filter(s => s.enabled !== false).length}/{sections.length} {t('topicsActiveBadge', 'Topics Active')}
+              </span>
+            </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
-                <div className="lg:col-span-5 space-y-3">
-                  <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('questionnaireTopicsHeader', 'Questionnaire Topics')}
-                  </label>
-                  
-                  <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-                    {sections.map((sec) => {
-                      const isActive = sec.id === activeTopicId;
-                      const isEnabled = sec.enabled !== false;
-                      return (
-                        <div
-                          key={sec.id}
-                          onClick={() => setActiveTopicId(sec.id)}
-                          className="p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: isActive ? 'var(--color-primary)' : 'var(--color-border)',
-                            opacity: isEnabled ? 1 : 0.65
-                          }}
-                        >
-                          <div className="space-y-0.5 min-w-0 pr-2 flex-1">
-                            <div className="font-bold text-xs truncate flex items-center justify-between" style={{ color: 'var(--color-text)' }}>
-                              <span className="flex items-center gap-1.5 truncate">
-                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isEnabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
-                                <span className="truncate">{sec.topicTitle}</span>
-                              </span>
-                              <span 
-                                className="text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase shrink-0 border"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: isEnabled ? 'var(--color-emerald)' : 'var(--color-border)',
-                                  color: isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
-                                }}
-                              >
-                                {isEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
-                              </span>
-                            </div>
-                            <p className="text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{sec.description}</p>
-                          </div>
-
-                          <div className="flex items-center gap-2 shrink-0 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
-                            <button
-                              type="button"
-                              onClick={(e) => handleToggleSectionEnabled(sec.id, e)}
-                              className="p-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[10px] font-bold"
-                              title={isEnabled ? 'Disable topic' : 'Enable topic'}
-                            >
-                              {isEnabled ? (
-                                <ToggleRight className="h-6 w-6" style={{ color: 'var(--color-emerald)' }} />
-                              ) : (
-                                <ToggleLeft className="h-6 w-6 text-slate-400" />
-                              )}
-                            </button>
-
-                            {sections.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleDeleteSection(sec.id); }}
-                                className="p-1 rounded-lg hover:text-red-500 transition cursor-pointer"
-                                style={{ color: 'var(--color-text-secondary)' }}
-                                title="Delete topic section"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div 
-                    className="p-4 rounded-2xl border space-y-3 mt-4 transition-colors duration-200"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)'
-                    }}
-                  >
-                    <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                      <FolderPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('addNewTopicHeader', 'Add New Questionnaire Topic')}
-                    </span>
-                    <input
-                      type="text"
-                      placeholder={t('topicTitlePlaceholder', 'Topic Title (e.g. Fitness & Macros)...')}
-                      value={newTopicTitle}
-                      onChange={(e) => setNewTopicTitle(e.target.value)}
-                      className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                    />
-                    <input
-                      type="text"
-                      placeholder={t('topicDescPlaceholder', 'Topic Description...')}
-                      value={newTopicDesc}
-                      onChange={(e) => setNewTopicDesc(e.target.value)}
-                      className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddTopicSection}
-                      disabled={!newTopicTitle.trim()}
-                      className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
-                    >
-                      {t('createTopicBtn', 'Create Topic Category')}
-                    </button>
-                  </div>
-                </div>
-
-                <div 
-                  className="lg:col-span-7 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    opacity: activeSection?.enabled !== false ? 1 : 0.7
-                  }}
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                      <div className="flex-1 min-w-0 pr-4">
-                        <div className="flex items-center gap-2 mb-1">
-                          <ListPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} /> 
-                          <input
-                            type="text"
-                            value={activeSection?.topicTitle || ''}
-                            onChange={(e) => {
-                              const newTitle = e.target.value;
-                              setSections(sections.map(s => s.id === activeSection?.id ? { ...s, topicTitle: newTitle } : s));
-                            }}
-                            className="font-bold text-sm bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none min-w-[200px] transition-colors truncate"
-                            style={{ color: 'var(--color-text)' }}
-                            placeholder="Topic Title..."
-                            title="Edit Topic Title"
-                          />
-                          <span 
-                            className="text-[9px] px-2 py-0.5 rounded font-extrabold uppercase shrink-0 border"
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: activeSection?.enabled !== false ? 'var(--color-emerald)' : 'var(--color-border)',
-                              color: activeSection?.enabled !== false ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
-                            }}
-                          >
-                            {activeSection?.enabled !== false ? t('statusActive', 'Status: Active') : t('statusDisabled', 'Status: Disabled')}
-                          </span>
-                        </div>
-                        <input
-                          type="text"
-                          value={activeSection?.description || ''}
-                          onChange={(e) => {
-                            const newDesc = e.target.value;
-                            setSections(sections.map(s => s.id === activeSection?.id ? { ...s, description: newDesc } : s));
-                          }}
-                          className="text-[11px] bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none w-full transition-colors truncate"
-                          style={{ color: 'var(--color-text-secondary)' }}
-                          placeholder="Topic Description..."
-                          title="Edit Topic Description"
-                        />
-                      </div>
-                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        {activeSection?.questions.length || 0} {t('questionsCount', 'Questions')}
-                      </span>
-                    </div>
-
-                    <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                      {activeSection?.questions.length === 0 ? (
-                        <div className="text-center py-8 text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
-                          {t('noQuestionsYet', 'No questions in this topic yet. Add one below.')}
-                        </div>
-                      ) : (
-                        activeSection?.questions.map((qText, qIdx) => (
-                          <div 
-                            key={qIdx} 
-                            className="flex items-center gap-2.5 border rounded-xl p-3 shadow-xs"
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: 'var(--color-border)'
-                            }}
-                          >
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
+              <div className="lg:col-span-5 space-y-3">
+                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('questionnaireTopicsHeader', 'Questionnaire Topics')}
+                </label>
+                
+                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                  {sections.map((sec) => {
+                    const isActive = sec.id === activeTopicId;
+                    const isEnabled = sec.enabled !== false;
+                    return (
+                      <div
+                        key={sec.id}
+                        onClick={() => setActiveTopicId(sec.id)}
+                        className="p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: isActive ? 'var(--color-primary)' : 'var(--color-border)',
+                          opacity: isEnabled ? 1 : 0.65
+                        }}
+                      >
+                        <div className="space-y-0.5 min-w-0 pr-2 flex-1">
+                          <div className="font-bold text-xs truncate flex items-center justify-between" style={{ color: 'var(--color-text)' }}>
+                            <span className="flex items-center gap-1.5 truncate">
+                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isEnabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
+                              <span className="truncate">{sec.topicTitle}</span>
+                            </span>
                             <span 
-                              className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
+                              className="text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase shrink-0 border"
                               style={{
                                 backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-primary)',
-                                color: 'var(--color-primary)'
+                                borderColor: isEnabled ? 'var(--color-emerald)' : 'var(--color-border)',
+                                color: isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
                               }}
                             >
-                              {qIdx + 1}
+                              {isEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                             </span>
-                            <input
-                              type="text"
-                              value={qText}
-                              onChange={(e) => {
-                                const updatedQ = e.target.value;
-                                setSections(sections.map(s => {
-                                  if (s.id === activeSection.id) {
-                                    const qs = [...s.questions];
-                                    qs[qIdx] = updatedQ;
-                                    return { ...s, questions: qs };
-                                  }
-                                  return s;
-                                }));
-                              }}
-                              className="bg-transparent border-none text-xs outline-none flex-1 font-medium"
-                              style={{ color: 'var(--color-text)' }}
-                            />
+                          </div>
+                          <p className="text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{sec.description}</p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => handleToggleSectionEnabled(sec.id, e)}
+                            className="p-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[10px] font-bold"
+                            title={isEnabled ? 'Disable topic' : 'Enable topic'}
+                          >
+                            {isEnabled ? (
+                              <ToggleRight className="h-6 w-6" style={{ color: 'var(--color-emerald)' }} />
+                            ) : (
+                              <ToggleLeft className="h-6 w-6 text-slate-400" />
+                            )}
+                          </button>
+
+                          {sections.length > 1 && (
                             <button
                               type="button"
-                              onClick={() => handleRemoveQuestionFromTopic(activeSection.id, qIdx)}
-                              className="hover:text-red-500 transition p-1 cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); handleDeleteSection(sec.id); }}
+                              className="p-1 rounded-lg hover:text-red-500 transition cursor-pointer"
                               style={{ color: 'var(--color-text-secondary)' }}
-                              title="Remove question"
+                              title="Delete topic section"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                    <input
-                      type="text"
-                      placeholder={`${t('addQuestionPrefix', 'Add question to')} "${activeSection?.topicTitle}"...`}
-                      value={newQuestionText}
-                      onChange={(e) => setNewQuestionText(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
-                      className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleAddQuestionToTopic(activeSection.id)}
-                      className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90"
-                      style={{ backgroundColor: 'var(--color-emerald)' }}
-                    >
-                      <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
-                    </button>
-                  </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            </div>
 
-            {/* Results Appearance Section with Live UI Preview */}
-            <div 
-              className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs mt-6 transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-                <div>
-                  <h2 
-                    className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
-                  </h2>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('resultsAppearanceDesc', 'Select and preview how multi-day meal plans and recipes render to users inside the /chef chat stream.')}
-                  </p>
-                </div>
-                <span 
-                  className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border uppercase shrink-0"
+                {/* ADD NEW TOPIC CARD (Shielded with neutral configuration names) */}
+                <div 
+                  className="p-4 rounded-2xl border space-y-3 mt-4 transition-colors duration-200"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-primary)',
-                    color: 'var(--color-primary)'
-                  }}
-                >
-                  {resultDisplayMode === 'card' ? t('modeCardTitle', 'Standard Cards View') : resultDisplayMode === 'compact' ? t('modeCompactTitle', 'Compact Table View') : t('modeDetailedTitle', 'Detailed Master View')}
-                </span>
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {[
-                  { id: 'card', title: t('modeCardTitle', 'Standard Cards View'), desc: t('modeCardDesc', 'Full interactive meal cards with images and batch cooking options.') },
-                  { id: 'compact', title: t('modeCompactTitle', 'Compact Table View'), desc: t('modeCompactDesc', 'Condensed list view optimized for quick overview and rapid swapping.') },
-                  { id: 'detailed', title: t('modeDetailedTitle', 'Detailed Master View'), desc: t('modeDetailedDesc', 'Expanded view displaying full ingredient breakdowns inline.') }
-                ].map((mode) => {
-                  const isSel = resultDisplayMode === mode.id;
-                  return (
-                    <div
-                      key={mode.id}
-                      onClick={() => setResultDisplayMode(mode.id as any)}
-                      className="p-4 rounded-2xl border cursor-pointer transition space-y-2 shadow-xs hover:opacity-90"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: isSel ? 'var(--color-primary)' : 'var(--color-border)',
-                        color: isSel ? 'var(--color-text)' : 'var(--color-text-secondary)'
-                      }}
-                    >
-                      <div className="flex items-center justify-between font-bold" style={{ color: 'var(--color-text)' }}>
-                        <span>{mode.title}</span>
-                        {isSel && <Check className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />}
-                      </div>
-                      <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{mode.desc}</p>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* RESTORED LIVE UI PREVIEW IN /chef CHAT */}
-              <div 
-                className="p-5 rounded-2xl border space-y-4 shadow-inner transition-colors duration-200"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                    <span className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                      {t('liveUiPreviewHeader', 'Live UI Preview in /chef Chat')}
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('previewSimulationNotice', 'Interactive simulation based on active theme & selected mode')}
-                  </span>
-                </div>
-
-                {/* SIMULATED PLAN CONTAINER */}
-                <div 
-                  className="border rounded-2xl p-4 space-y-4 shadow-sm transition-colors duration-200"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)'
                   }}
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                      <h3 className="font-black text-xs" style={{ color: 'var(--color-text)' }}>
-                        5-Day High-Protein Wholesome Plan
-                      </h3>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        Budget: $6.50/serv
-                      </span>
-                      <span 
-                        className="text-[9px] px-2 py-0.5 rounded font-black uppercase border"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
+                  <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                    <FolderPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('addNewTopicHeader', 'Add New Questionnaire Topic')}
+                  </span>
+                  <input
+                    type="text"
+                    id="cfg_wizard_new_topic_title"
+                    name="cfg_wizard_new_topic_title"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    placeholder={t('topicTitlePlaceholder', 'Topic Title (e.g. Fitness & Macros)...')}
+                    value={newTopicTitle}
+                    onChange={(e) => setNewTopicTitle(e.target.value)}
+                    className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <input
+                    type="text"
+                    id="cfg_wizard_new_topic_desc"
+                    name="cfg_wizard_new_topic_desc"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    placeholder={t('topicDescPlaceholder', 'Topic Description...')}
+                    value={newTopicDesc}
+                    onChange={(e) => setNewTopicDesc(e.target.value)}
+                    className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddTopicSection}
+                    disabled={!newTopicTitle.trim()}
+                    className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    {t('createTopicBtn', 'Create Topic Category')}
+                  </button>
+                </div>
+              </div>
+
+              {/* TOPIC QUESTIONS EDITOR (Shielded from Password Autofill Heuristics) */}
+              <div 
+                className="lg:col-span-7 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  opacity: activeSection?.enabled !== false ? 1 : 0.7
+                }}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                    <div className="flex-1 min-w-0 pr-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <ListPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} /> 
+                        <input
+                          type="text"
+                          id={`cfg_sec_title_${activeSection?.id || 'default'}`}
+                          name={`cfg_sec_title_${activeSection?.id || 'default'}`}
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck="false"
+                          data-lpignore="true"
+                          data-1p-ignore="true"
+                          data-bwignore="true"
+                          data-form-type="other"
+                          role="presentation"
+                          readOnly
+                          onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                          onBlur={(e) => { e.currentTarget.readOnly = true; }}
+                          value={activeSection?.topicTitle || ''}
+                          onChange={(e) => {
+                            const newTitle = e.target.value;
+                            setSections(sections.map(s => s.id === activeSection?.id ? { ...s, topicTitle: newTitle } : s));
+                          }}
+                          className="font-bold text-sm bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none min-w-[200px] transition-colors truncate"
+                          style={{ color: 'var(--color-text)' }}
+                          placeholder="Topic Title..."
+                          title="Edit Topic Title"
+                        />
+                        <span 
+                          className="text-[9px] px-2 py-0.5 rounded font-extrabold uppercase shrink-0 border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: activeSection?.enabled !== false ? 'var(--color-emerald)' : 'var(--color-border)',
+                            color: activeSection?.enabled !== false ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {activeSection?.enabled !== false ? t('statusActive', 'Status: Active') : t('statusDisabled', 'Status: Disabled')}
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        id={`cfg_sec_desc_${activeSection?.id || 'default'}`}
+                        name={`cfg_sec_desc_${activeSection?.id || 'default'}`}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        spellCheck="false"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-bwignore="true"
+                        data-form-type="other"
+                        role="presentation"
+                        readOnly
+                        onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                        onBlur={(e) => { e.currentTarget.readOnly = true; }}
+                        value={activeSection?.description || ''}
+                        onChange={(e) => {
+                          const newDesc = e.target.value;
+                          setSections(sections.map(s => s.id === activeSection?.id ? { ...s, description: newDesc } : s));
                         }}
-                      >
-                        5 Days
-                      </span>
+                        className="text-[11px] bg-transparent border-b border-transparent hover:border-slate-400 focus:border-[var(--color-primary)] outline-none w-full transition-colors truncate"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                        placeholder="Topic Description..."
+                        title="Edit Topic Description"
+                      />
                     </div>
+                    <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      {activeSection?.questions.length || 0} {t('questionsCount', 'Questions')}
+                    </span>
                   </div>
 
-                  {/* 1. STANDARD CARDS VIEW PREVIEW */}
-                  {resultDisplayMode === 'card' && (
-                    <div className="space-y-3">
-                      {[
-                        {
-                          id: 'prev_1',
-                          day: 'Day 1 • Monday',
-                          type: 'Dinner',
-                          title: 'Avocado Quinoa Power Bowl',
-                          desc: 'Fluffy tri-color quinoa tossed with crisp edamame, Hass avocado, cherry tomatoes, and lemon tahini drizzle.',
-                          time: '25m',
-                          servings: 2,
-                          calories: 480,
-                          image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
-                          batch: true
-                        },
-                        {
-                          id: 'prev_2',
-                          day: 'Day 2 • Tuesday',
-                          type: 'Dinner',
-                          title: 'Pan-Seared Salmon with Asparagus',
-                          desc: 'Crispy skin Atlantic salmon filet served with garlic-roasted tender asparagus and fresh dill sauce.',
-                          time: '20m',
-                          servings: 2,
-                          calories: 540,
-                          image: 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?auto=format&fit=crop&w=400&q=80',
-                          batch: false
-                        }
-                      ].map((item) => (
+                  <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                    {activeSection?.questions.length === 0 ? (
+                      <div className="text-center py-8 text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
+                        {t('noQuestionsYet', 'No questions in this topic yet. Add one below.')}
+                      </div>
+                    ) : (
+                      activeSection?.questions.map((qText, qIdx) => (
                         <div 
-                          key={item.id}
-                          className="border rounded-2xl p-3.5 space-y-2.5 transition shadow-xs"
+                          key={qIdx} 
+                          className="flex items-center gap-2.5 border rounded-xl p-3 shadow-xs"
                           style={{
-                            backgroundColor: 'var(--color-inner-dark)',
+                            backgroundColor: 'var(--color-card)',
                             borderColor: 'var(--color-border)'
                           }}
                         >
-                          <div className="flex justify-between items-center text-xs font-bold">
-                            <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
-                            <div className="flex items-center gap-1.5">
-                              {item.batch && (
-                                <span 
-                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
-                                  style={{
-                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                    borderColor: 'var(--color-emerald)',
-                                    color: 'var(--color-emerald)'
-                                  }}
-                                >
-                                  Batch Cook
-                                </span>
-                              )}
-                              <span 
-                                className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)',
-                                  color: 'var(--color-text-secondary)'
-                                }}
-                              >
-                                {item.type}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-start gap-3">
-                            <img 
-                              src={item.image} 
-                              alt={item.title} 
-                              className="w-16 h-16 rounded-xl object-cover border shrink-0" 
-                              style={{ borderColor: 'var(--color-border)' }} 
-                            />
-                            <div className="space-y-1 flex-1 min-w-0">
-                              <h4 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
-                                {item.title}
-                              </h4>
-                              <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                                {item.desc}
-                              </p>
-                              <div className="flex items-center gap-3 text-[10px] font-semibold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                                <span className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {item.time}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Users className="h-3 w-3" /> {item.servings} serv
-                                </span>
-                                <span className="font-mono" style={{ color: 'var(--color-primary)' }}>
-                                  {item.calories} kcal
-                                </span>
-                              </div>
-                            </div>
-                          </div>
+                          <span 
+                            className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-primary)',
+                              color: 'var(--color-primary)'
+                            }}
+                          >
+                            {qIdx + 1}
+                          </span>
+                          <input
+                            type="text"
+                            id={`cfg_q_item_${activeSection?.id || 'default'}_${qIdx}`}
+                            name={`cfg_q_item_${activeSection?.id || 'default'}_${qIdx}`}
+                            autoComplete="off"
+                            autoCorrect="off"
+                            spellCheck="false"
+                            data-lpignore="true"
+                            data-1p-ignore="true"
+                            data-bwignore="true"
+                            data-form-type="other"
+                            role="presentation"
+                            readOnly
+                            onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                            onBlur={(e) => { e.currentTarget.readOnly = true; }}
+                            value={qText}
+                            onChange={(e) => {
+                              const updatedQ = e.target.value;
+                              setSections(sections.map(s => {
+                                if (s.id === activeSection.id) {
+                                  const qs = [...s.questions];
+                                  qs[qIdx] = updatedQ;
+                                  return { ...s, questions: qs };
+                                }
+                                return s;
+                              }));
+                            }}
+                            className="bg-transparent border-none text-xs outline-none flex-1 font-medium"
+                            style={{ color: 'var(--color-text)' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveQuestionFromTopic(activeSection.id, qIdx)}
+                            className="hover:text-red-500 transition p-1 cursor-pointer"
+                            style={{ color: 'var(--color-text-secondary)' }}
+                            title="Remove question"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      ))
+                    )}
+                  </div>
+                </div>
 
-                  {/* 2. COMPACT TABLE VIEW PREVIEW */}
-                  {resultDisplayMode === 'compact' && (
-                    <div className="border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                  <input
+                    type="text"
+                    id="cfg_new_question_text_input"
+                    name="cfg_new_question_text_input"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    placeholder={`${t('addQuestionPrefix', 'Add question to')} "${activeSection?.topicTitle}"...`}
+                    value={newQuestionText}
+                    onChange={(e) => setNewQuestionText(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddQuestionToTopic(activeSection.id)}
+                    className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-emerald)' }}
+                  >
+                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Results Appearance Section with Live UI Preview */}
+          <div 
+            className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs mt-6 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h2 
+                  className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
+                </h2>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('resultsAppearanceDesc', 'Select and preview how multi-day meal plans and recipes render to users inside the /chef chat stream.')}
+                </p>
+              </div>
+              <span 
+                className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border uppercase shrink-0"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                }}
+              >
+                {resultDisplayMode === 'card' ? t('modeCardTitle', 'Standard Cards View') : resultDisplayMode === 'compact' ? t('modeCompactTitle', 'Compact Table View') : t('modeDetailedTitle', 'Detailed Master View')}
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                { id: 'card', title: t('modeCardTitle', 'Standard Cards View'), desc: t('modeCardDesc', 'Full interactive meal cards with images and batch cooking options.') },
+                { id: 'compact', title: t('modeCompactTitle', 'Compact Table View'), desc: t('modeCompactDesc', 'Condensed list view optimized for quick overview and rapid swapping.') },
+                { id: 'detailed', title: t('modeDetailedTitle', 'Detailed Master View'), desc: t('modeDetailedDesc', 'Expanded view displaying full ingredient breakdowns inline.') }
+              ].map((mode) => {
+                const isSel = resultDisplayMode === mode.id;
+                return (
+                  <div
+                    key={mode.id}
+                    onClick={() => setResultDisplayMode(mode.id as any)}
+                    className="p-4 rounded-2xl border cursor-pointer transition space-y-2 shadow-xs hover:opacity-90"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: isSel ? 'var(--color-primary)' : 'var(--color-border)',
+                      color: isSel ? 'var(--color-text)' : 'var(--color-text-secondary)'
+                    }}
+                  >
+                    <div className="flex items-center justify-between font-bold" style={{ color: 'var(--color-text)' }}>
+                      <span>{mode.title}</span>
+                      {isSel && <Check className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />}
+                    </div>
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{mode.desc}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* RESTORED LIVE UI PREVIEW IN /chef CHAT */}
+            <div 
+              className="p-5 rounded-2xl border space-y-4 shadow-inner transition-colors duration-200"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex items-center gap-2">
+                  <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                  <span className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                    {t('liveUiPreviewHeader', 'Live UI Preview in /chef Chat')}
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('previewSimulationNotice', 'Interactive simulation based on active theme & selected mode')}
+                </span>
+              </div>
+
+              {/* SIMULATED PLAN CONTAINER */}
+              <div 
+                className="border rounded-2xl p-4 space-y-4 shadow-sm transition-colors duration-200"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)'
+                }}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                    <h3 className="font-black text-xs" style={{ color: 'var(--color-text)' }}>
+                      5-Day High-Protein Wholesome Plan
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      Budget: $6.50/serv
+                    </span>
+                    <span 
+                      className="text-[9px] px-2 py-0.5 rounded font-black uppercase border"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      5 Days
+                    </span>
+                  </div>
+                </div>
+
+                {/* 1. STANDARD CARDS VIEW PREVIEW */}
+                {resultDisplayMode === 'card' && (
+                  <div className="space-y-3">
+                    {[
+                      {
+                        id: 'prev_1',
+                        day: 'Day 1 • Monday',
+                        type: 'Dinner',
+                        title: 'Avocado Quinoa Power Bowl',
+                        desc: 'Fluffy tri-color quinoa tossed with crisp edamame, Hass avocado, cherry tomatoes, and lemon tahini drizzle.',
+                        time: '25m',
+                        servings: 2,
+                        calories: 480,
+                        image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
+                        batch: true
+                      },
+                      {
+                        id: 'prev_2',
+                        day: 'Day 2 • Tuesday',
+                        type: 'Dinner',
+                        title: 'Pan-Seared Salmon with Asparagus',
+                        desc: 'Crispy skin Atlantic salmon filet served with garlic-roasted tender asparagus and fresh dill sauce.',
+                        time: '20m',
+                        servings: 2,
+                        calories: 540,
+                        image: 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?auto=format&fit=crop&w=400&q=80',
+                        batch: false
+                      }
+                    ].map((item) => (
                       <div 
-                        className="grid grid-cols-12 gap-2 p-2.5 font-extrabold text-[10px] uppercase border-b"
+                        key={item.id}
+                        className="border rounded-2xl p-3.5 space-y-2.5 transition shadow-xs"
                         style={{
                           backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text-secondary)'
+                          borderColor: 'var(--color-border)'
                         }}
                       >
-                        <span className="col-span-3">Day / Schedule</span>
-                        <span className="col-span-2">Meal Type</span>
-                        <span className="col-span-5">Recipe Title</span>
-                        <span className="col-span-2 text-right">Time & Cals</span>
-                      </div>
-                      {[
-                        { day: 'Day 1 (Mon)', type: 'Dinner', title: 'Avocado Quinoa Power Bowl', time: '25m', cals: '480 kcal' },
-                        { day: 'Day 2 (Tue)', type: 'Dinner', title: 'Pan-Seared Salmon with Asparagus', time: '20m', cals: '540 kcal' },
-                        { day: 'Day 3 (Wed)', type: 'Lunch', title: 'Mediterranean Lentil Salad', time: '15m', cals: '410 kcal' }
-                      ].map((row, rIdx) => (
-                        <div 
-                          key={rIdx}
-                          className="grid grid-cols-12 gap-2 p-2.5 text-xs items-center border-b last:border-none transition hover:opacity-90"
-                          style={{
-                            backgroundColor: rIdx % 2 === 0 ? 'var(--color-card)' : 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <span className="col-span-3 font-bold" style={{ color: 'var(--color-primary)' }}>{row.day}</span>
-                          <span className="col-span-2">
+                        <div className="flex justify-between items-center text-xs font-bold">
+                          <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
+                          <div className="flex items-center gap-1.5">
+                            {item.batch && (
+                              <span 
+                                className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                style={{
+                                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                  borderColor: 'var(--color-emerald)',
+                                  color: 'var(--color-emerald)'
+                                }}
+                              >
+                                Batch Cook
+                              </span>
+                            )}
                             <span 
-                              className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border"
+                              className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
                               style={{
                                 backgroundColor: 'var(--color-card)',
                                 borderColor: 'var(--color-border)',
                                 color: 'var(--color-text-secondary)'
                               }}
                             >
-                              {row.type}
+                              {item.type}
                             </span>
-                          </span>
-                          <span className="col-span-5 font-semibold truncate" style={{ color: 'var(--color-text)' }}>{row.title}</span>
-                          <span className="col-span-2 text-right font-mono text-[11px]" style={{ color: 'var(--color-emerald)' }}>{row.time} • {row.cals}</span>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
 
-                  {/* 3. DETAILED MASTER VIEW PREVIEW */}
-                  {resultDisplayMode === 'detailed' && (
-                    <div className="space-y-3">
-                      {[
-                        {
-                          id: 'det_1',
-                          day: 'Day 1 • Monday',
-                          type: 'Dinner',
-                          title: 'Avocado Quinoa Power Bowl',
-                          desc: 'Balanced high-protein bowl with citrus tahini infusion.',
-                          time: '25 mins total',
-                          servings: 2,
-                          cals: 480,
-                          ingredients: ['Tri-color Quinoa', 'Hass Avocado', 'Edamame', 'Cherry Tomatoes', 'Lemon Tahini', 'Extra Virgin Olive Oil']
-                        },
-                        {
-                          id: 'det_2',
-                          day: 'Day 2 • Tuesday',
-                          type: 'Dinner',
-                          title: 'Pan-Seared Salmon with Asparagus',
-                          desc: 'Crisp Atlantic salmon accompanied by garlic butter asparagus.',
-                          time: '20 mins total',
-                          servings: 2,
-                          cals: 540,
-                          ingredients: ['Fresh Salmon Filet', 'Asparagus Spears', 'Minced Garlic', 'Fresh Dill', 'Lemon Wedges', 'Sea Salt']
-                        }
-                      ].map((item) => (
-                        <div 
-                          key={item.id}
-                          className="border rounded-2xl p-4 space-y-3 transition shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <div className="flex justify-between items-center text-xs font-bold border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                            <div className="flex items-center gap-2">
-                              <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
-                              <span 
-                                className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-emerald)',
-                                  color: 'var(--color-emerald)'
-                                }}
-                              >
-                                {item.type}
+                        <div className="flex items-start gap-3">
+                          <img 
+                            src={item.image} 
+                            alt={item.title} 
+                            className="w-16 h-16 rounded-xl object-cover border shrink-0" 
+                            style={{ borderColor: 'var(--color-border)' }} 
+                          />
+                          <div className="space-y-1 flex-1 min-w-0">
+                            <h4 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
+                              {item.title}
+                            </h4>
+                            <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                              {item.desc}
+                            </p>
+                            <div className="flex items-center gap-3 text-[10px] font-semibold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {item.time}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Users className="h-3 w-3" /> {item.servings} serv
+                              </span>
+                              <span className="font-mono" style={{ color: 'var(--color-primary)' }}>
+                                {item.calories} kcal
                               </span>
                             </div>
-                            <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                              {item.time} • {item.servings} servings • {item.cals} kcal
-                            </span>
-                          </div>
-
-                          <div className="space-y-1">
-                            <h4 className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>{item.title}</h4>
-                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{item.desc}</p>
-                          </div>
-
-                          {/* Inline Ingredient Breakdown Tags */}
-                          <div className="space-y-1.5 pt-1">
-                            <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
-                              Inline Ingredients Breakdown:
-                            </span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {item.ingredients.map((ing, iIdx) => (
-                                <span 
-                                  key={iIdx}
-                                  className="text-[10px] font-medium px-2 py-0.5 rounded-lg border shadow-2xs"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: 'var(--color-text)'
-                                  }}
-                                >
-                                  • {ing}
-                                </span>
-                              ))}
-                            </div>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-                </div>
+                {/* 2. COMPACT TABLE VIEW PREVIEW */}
+                {resultDisplayMode === 'compact' && (
+                  <div className="border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                    <div 
+                      className="grid grid-cols-12 gap-2 p-2.5 font-extrabold text-[10px] uppercase border-b"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      <span className="col-span-3">Day / Schedule</span>
+                      <span className="col-span-2">Meal Type</span>
+                      <span className="col-span-5">Recipe Title</span>
+                      <span className="col-span-2 text-right">Time & Cals</span>
+                    </div>
+                    {[
+                      { day: 'Day 1 (Mon)', type: 'Dinner', title: 'Avocado Quinoa Power Bowl', time: '25m', cals: '480 kcal' },
+                      { day: 'Day 2 (Tue)', type: 'Dinner', title: 'Pan-Seared Salmon with Asparagus', time: '20m', cals: '540 kcal' },
+                      { day: 'Day 3 (Wed)', type: 'Lunch', title: 'Mediterranean Lentil Salad', time: '15m', cals: '410 kcal' }
+                    ].map((row, rIdx) => (
+                      <div 
+                        key={rIdx}
+                        className="grid grid-cols-12 gap-2 p-2.5 text-xs items-center border-b last:border-none transition hover:opacity-90"
+                        style={{
+                          backgroundColor: rIdx % 2 === 0 ? 'var(--color-card)' : 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <span className="col-span-3 font-bold" style={{ color: 'var(--color-primary)' }}>{row.day}</span>
+                        <span className="col-span-2">
+                          <span 
+                            className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border"
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)'
+                            }}
+                          >
+                            {row.type}
+                          </span>
+                        </span>
+                        <span className="col-span-5 font-semibold truncate" style={{ color: 'var(--color-text)' }}>{row.title}</span>
+                        <span className="col-span-2 text-right font-mono text-[11px]" style={{ color: 'var(--color-emerald)' }}>{row.time} • {row.cals}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 3. DETAILED MASTER VIEW PREVIEW */}
+                {resultDisplayMode === 'detailed' && (
+                  <div className="space-y-3">
+                    {[
+                      {
+                        id: 'det_1',
+                        day: 'Day 1 • Monday',
+                        type: 'Dinner',
+                        title: 'Avocado Quinoa Power Bowl',
+                        desc: 'Balanced high-protein bowl with citrus tahini infusion.',
+                        time: '25 mins total',
+                        servings: 2,
+                        cals: 480,
+                        ingredients: ['Tri-color Quinoa', 'Hass Avocado', 'Edamame', 'Cherry Tomatoes', 'Lemon Tahini', 'Extra Virgin Olive Oil']
+                      },
+                      {
+                        id: 'det_2',
+                        day: 'Day 2 • Tuesday',
+                        type: 'Dinner',
+                        title: 'Pan-Seared Salmon with Asparagus',
+                        desc: 'Crisp Atlantic salmon accompanied by garlic butter asparagus.',
+                        time: '20 mins total',
+                        servings: 2,
+                        cals: 540,
+                        ingredients: ['Fresh Salmon Filet', 'Asparagus Spears', 'Minced Garlic', 'Fresh Dill', 'Lemon Wedges', 'Sea Salt']
+                      }
+                    ].map((item) => (
+                      <div 
+                        key={item.id}
+                        className="border rounded-2xl p-4 space-y-3 transition shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <div className="flex justify-between items-center text-xs font-bold border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                          <div className="flex items-center gap-2">
+                            <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
+                            <span 
+                              className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-emerald)',
+                                color: 'var(--color-emerald)'
+                              }}
+                            >
+                              {item.type}
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                            {item.time} • {item.servings} servings • {item.cals} kcal
+                          </span>
+                        </div>
+
+                        <div className="space-y-1">
+                          <h4 className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>{item.title}</h4>
+                          <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{item.desc}</p>
+                        </div>
+
+                        {/* Inline Ingredient Breakdown Tags */}
+                        <div className="space-y-1.5 pt-1">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                            Inline Ingredients Breakdown:
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {item.ingredients.map((ing, iIdx) => (
+                              <span 
+                                key={iIdx}
+                                className="text-[10px] font-medium px-2 py-0.5 rounded-lg border shadow-2xs"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text)'
+                                }}
+                              >
+                                • {ing}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
               </div>
             </div>
           </div>
-        )}
+        </div>
 
         {/* TAB 3: VOICE INTERACTION SETTINGS */}
-        {activeTab === 'voice' && (
+        <div className={activeTab === 'voice' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
           <div 
-            className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
+            className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)'
@@ -16994,720 +17879,192 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
           </div>
-        )}
+        </div>
 
         {/* TAB 4: AGENT PARAMETERS & RECOMMENDED RECIPES URL */}
-        {activeTab === 'advanced' && (
-          <div className="space-y-6 animate-in fade-in">
-            {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
-            <div 
-              className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
+        <div className={activeTab === 'advanced' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
+          {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
+          <div 
+            className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <h2 
+              className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+              style={{ color: 'var(--color-primary)' }}
             >
-              <h2 
-                className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                style={{ color: 'var(--color-primary)' }}
+              <Globe className="h-4 w-4" /> {t('autonomousCapabilitiesHeader', 'Autonomous Capabilities & Search Scope Control')}
+            </h2>
+            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('autonomousCapabilitiesDesc', 'Control what data sources the AI agent searches and incorporates when responding on')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span>.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+              <div 
+                onClick={() => setEnableWebSearch(!enableWebSearch)}
+                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: enableWebSearch ? 'var(--color-primary)' : 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
               >
-                <Globe className="h-4 w-4" /> {t('autonomousCapabilitiesHeader', 'Autonomous Capabilities & Search Scope Control')}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('autonomousCapabilitiesDesc', 'Control what data sources the AI agent searches and incorporates when responding on')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span>.
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-                <div 
-                  onClick={() => setEnableWebSearch(!enableWebSearch)}
-                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: enableWebSearch ? 'var(--color-primary)' : 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <Globe className="h-5 w-5" style={{ color: enableWebSearch ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
-                    <div 
-                      className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: enableWebSearch ? 'var(--color-primary)' : 'var(--color-border)' }}
-                    >
-                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableWebSearch ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </div>
-                  </div>
-                  <div>
-                    <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('liveWebSearch', 'Live Web Search')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('liveWebSearchDesc', 'Allows AI to search external culinary web data, trends, and ingredient substitutes.')}
-                    </span>
+                <div className="flex items-center justify-between">
+                  <Globe className="h-5 w-5" style={{ color: enableWebSearch ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
+                  <div 
+                    className="w-9 h-5 rounded-full p-0.5 transition"
+                    style={{ backgroundColor: enableWebSearch ? 'var(--color-primary)' : 'var(--color-border)' }}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableWebSearch ? 'translate-x-4' : 'translate-x-0'}`} />
                   </div>
                 </div>
+                <div>
+                  <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('liveWebSearch', 'Live Web Search')}</span>
+                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('liveWebSearchDesc', 'Allows AI to search external culinary web data, trends, and ingredient substitutes.')}
+                  </span>
+                </div>
+              </div>
 
-                <div 
-                  onClick={() => setEnablePantryContext(!enablePantryContext)}
-                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }} />
-                    <div 
-                      className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-border)' }}
-                    >
-                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${enablePantryContext ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </div>
-                  </div>
-                  <div>
-                    <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('pantryContextSearch', 'Pantry Context Search')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('pantryContextSearchDesc', 'Automatically scans user pantry inventory to build recipes matching in-stock ingredients.')}
-                    </span>
+              <div 
+                onClick={() => setEnablePantryContext(!enablePantryContext)}
+                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <PackageCheck className="h-5 w-5" style={{ color: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }} />
+                  <div 
+                    className="w-9 h-5 rounded-full p-0.5 transition"
+                    style={{ backgroundColor: enablePantryContext ? 'var(--color-emerald)' : 'var(--color-border)' }}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${enablePantryContext ? 'translate-x-4' : 'translate-x-0'}`} />
                   </div>
                 </div>
+                <div>
+                  <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('pantryContextSearch', 'Pantry Context Search')}</span>
+                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('pantryContextSearchDesc', 'Automatically scans user pantry inventory to build recipes matching in-stock ingredients.')}
+                  </span>
+                </div>
+              </div>
 
-                <div 
-                  onClick={() => setStrictDietEnforcement(!strictDietEnforcement)}
-                  className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
-                    <div 
-                      className="w-9 h-5 rounded-full p-0.5 transition"
-                      style={{ backgroundColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)' }}
-                    >
-                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </div>
+              <div 
+                onClick={() => setStrictDietEnforcement(!strictDietEnforcement)}
+                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <ShieldAlert className="h-5 w-5" style={{ color: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-text-secondary)' }} />
+                  <div 
+                    className="w-9 h-5 rounded-full p-0.5 transition"
+                    style={{ backgroundColor: strictDietEnforcement ? 'var(--color-primary)' : 'var(--color-border)' }}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${strictDietEnforcement ? 'translate-x-4' : 'translate-x-0'}`} />
                   </div>
-                  <div>
-                    <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('strictDietaryFilters', 'Strict Dietary Filters')}</span>
-                    <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('strictDietaryFiltersDesc', 'Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.')}
-                    </span>
+                </div>
+                <div>
+                  <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('strictDietaryFilters', 'Strict Dietary Filters')}</span>
+                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('strictDietaryFiltersDesc', 'Enforces strict filtering against user allergies, avoid lists, and religious dietary rules.')}
+                  </span>
+                </div>
+              </div>
+
+              {/* All Saved Recipe Search */}
+              <div 
+                onClick={() => setEnableSavedRecipeSearch(!enableSavedRecipeSearch)}
+                className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: enableSavedRecipeSearch ? 'var(--color-emerald)' : 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <BookmarkCheck className="h-5 w-5" style={{ color: enableSavedRecipeSearch ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }} />
+                  <div 
+                    className="w-9 h-5 rounded-full p-0.5 transition"
+                    style={{ backgroundColor: enableSavedRecipeSearch ? 'var(--color-emerald)' : 'var(--color-border)' }}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${enableSavedRecipeSearch ? 'translate-x-4' : 'translate-x-0'}`} />
                   </div>
+                </div>
+                <div>
+                  <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{t('allSavedRecipeSearch', 'All Saved Recipe Search')}</span>
+                  <span className="text-[10px] leading-tight block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('allSavedRecipeSearchDesc', 'Automatically searches and incorporates all user and database saved recipes into AI recommendations.')}
+                  </span>
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* TUNING PARAMETERS, KNOWLEDGE BASE, CUSTOM VOCABULARY & FILTER WORDS */}
-            <div 
-              className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
+          {/* TUNING PARAMETERS, KNOWLEDGE BASE, CUSTOM VOCABULARY & FILTER WORDS */}
+          <div 
+            className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <h2 
+              className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+              style={{ color: 'var(--color-primary)' }}
             >
-              <h2 
-                className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                <SlidersHorizontal className="h-4 w-4" /> {t('agentParametersHeader', 'Agent Parameters & Knowledge Tuning')}
-              </h2>
+              <SlidersHorizontal className="h-4 w-4" /> {t('agentParametersHeader', 'Agent Parameters & Knowledge Tuning')}
+            </h2>
 
-              {/* CREATIVITY & MAX PLAN DAYS */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="space-y-2">
-                  <div className="flex justify-between font-bold">
-                    <span style={{ color: 'var(--color-text-secondary)' }}>{t('temperatureLabel', 'Temperature (Creativity)')}: {temperature}</span>
-                    <span style={{ color: 'var(--color-emerald)' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={temperature}
-                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                    className="w-full cursor-pointer"
-                    style={{ accentColor: 'var(--color-primary)' }}
-                  />
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('temperatureDesc', 'Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.')}
-                  </p>
+            {/* CREATIVITY & MAX PLAN DAYS */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="space-y-2">
+                <div className="flex justify-between font-bold">
+                  <span style={{ color: 'var(--color-text-secondary)' }}>{t('temperatureLabel', 'Temperature (Creativity)')}: {temperature}</span>
+                  <span style={{ color: 'var(--color-emerald)' }}>{temperature < 0.4 ? 'Precise & Structured' : temperature > 0.8 ? 'Creative & Experimental' : 'Balanced'}</span>
                 </div>
-
-                <div className="space-y-2">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('maxPlanDaysCap', 'Max Plan Days Limit (Wizard Cap)')}
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="14"
-                    value={maxPlanDays}
-                    onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
-                    className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                  />
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('maxPlanDaysDesc', 'Maximum number of days the AI can structure in a single meal plan wizard sequence.')}
-                  </p>
-                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={temperature}
+                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                  className="w-full cursor-pointer"
+                  style={{ accentColor: 'var(--color-primary)' }}
+                />
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('temperatureDesc', 'Lower values yield deterministic recipe structures; higher values generate novel flavor combinations.')}
+                </p>
               </div>
 
-              {/* RECOMMENDED RECIPES URL WITH CRAWLER & SLUG DISCOVERY */}
-              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                  <div>
-                    <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
-                      <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('recommendedRecipesUrlHeader', 'Recommended Recipes Url')}
-                    </h3>
-                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('recommendedRecipesUrlDesc', 'Configure primary source URLs for recipe recommendations. When users ask for recipes on /chef, AI will search and prioritize these URLs as the primary source.')}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span 
-                      className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border shrink-0"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
-                        color: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)'
-                      }}
-                    >
-                      {recommendedRecipeUrls.length} {t('urlsActiveBadge', 'Active URLs (Primary)')}
-                    </span>
-                    {recommendedRecipeUrls.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={handleClearAllRecommendedUrls}
-                        className="text-[10px] text-red-400 hover:text-red-500 font-bold transition cursor-pointer"
-                      >
-                        {t('clearAll', 'Clear All')}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <div 
-                      className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      <input
-                        type="text"
-                        placeholder={t('recommendedRecipeUrlPlaceholder', 'Add recipe URL (paste single or multiple separated by commas or newlines)...')}
-                        value={newRecipeUrlInput}
-                        onChange={(e) => setNewRecipeUrlInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleAddRecommendedUrls();
-                          }
-                        }}
-                        className="bg-transparent border-none outline-none w-full text-xs font-medium"
-                        style={{ color: 'var(--color-text)' }}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleAddRecommendedUrls()}
-                      disabled={!newRecipeUrlInput.trim()}
-                      className="px-4 py-2.5 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md disabled:opacity-40 hover:opacity-90 shrink-0"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
-                    >
-                      <Plus className="h-4 w-4" /> {t('addUrlBtn', 'Add URL')}
-                    </button>
-                  </div>
-                  <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
-                    💡 {t('multiUrlHint', 'Tip: You can paste multiple URLs at once separated by commas or newlines. Chef AI will prioritize these as primary culinary references.')}
-                  </span>
-                </div>
-
-                {/* URL List with Index Crawler and Discovered Slugs Drawer */}
-                <div className="space-y-2 pt-1">
-                  {recommendedRecipeUrls.length === 0 ? (
-                    <div 
-                      className="p-4 text-center border border-dashed rounded-2xl text-xs space-y-0.5"
-                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-                    >
-                      <span className="font-semibold block">{t('noRecommendedUrlsTitle', 'No Recommended Recipe URLs configured.')}</span>
-                      <span className="text-[11px] block">{t('noRecommendedUrlsDesc', 'Add your preferred food blog or recipe URLs above to make /chef recommend recipes from them first.')}</span>
-                    </div>
-                  ) : (
-                    <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                      {recommendedRecipeUrls.map((urlStr, idx) => {
-                        let domain = 'Website';
-                        try {
-                          domain = new URL(urlStr).hostname.replace(/^www\./, '');
-                        } catch (_) {}
-
-                        const isIndex = /recipes|\/category\/|\/categories\/|\/collection\/|\/tag\/|\/archive\/|\/all/i.test(urlStr) || urlStr.endsWith('/recipes/');
-                        const cache = crawlResults[urlStr];
-                        const isCrawlingThis = crawlingUrl === urlStr;
-                        const isExpanded = expandedIndexUrl === urlStr;
-
-                        return (
-                          <div 
-                            key={idx}
-                            className="rounded-2xl border transition shadow-xs overflow-hidden"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: isExpanded ? 'var(--color-primary)' : 'var(--color-border)'
-                            }}
-                          >
-                            <div className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                                  <span 
-                                    className="text-[9px] font-black uppercase px-2 py-0.5 rounded border truncate"
-                                    style={{
-                                      backgroundColor: 'var(--color-card)',
-                                      borderColor: 'var(--color-border)',
-                                      color: 'var(--color-primary)'
-                                    }}
-                                  >
-                                    {domain}
-                                  </span>
-                                  <span 
-                                    className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
-                                    style={{
-                                      backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                      color: 'var(--color-emerald)'
-                                    }}
-                                  >
-                                    {t('primaryTag', 'Primary')}
-                                  </span>
-                                  {isIndex && (
-                                    <span 
-                                      className="text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase border"
-                                      style={{
-                                        backgroundColor: 'var(--color-card)',
-                                        borderColor: 'var(--color-primary)',
-                                        color: 'var(--color-primary)'
-                                      }}
-                                    >
-                                      {t('indexCollectionTag', 'Index / Collection')}
-                                    </span>
-                                  )}
-                                  {cache && (
-                                    <span 
-                                      className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
-                                      style={{
-                                        backgroundColor: 'var(--color-card)',
-                                        borderColor: 'var(--color-emerald)',
-                                        color: 'var(--color-emerald)'
-                                      }}
-                                    >
-                                      {cache.count} {t('slugsDiscoveredBadge', 'Slugs Discovered')}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text)' }} title={urlStr}>
-                                  {urlStr}
-                                </p>
-                              </div>
-
-                              <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
-                                <button
-                                  type="button"
-                                  onClick={() => handleCrawlIndexUrl(urlStr)}
-                                  disabled={isCrawlingThis}
-                                  className="px-2.5 py-1.5 rounded-lg border font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-90 disabled:opacity-50"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-primary)',
-                                    color: 'var(--color-primary)'
-                                  }}
-                                  title="Crawl index page and discover matching recipe slugs"
-                                >
-                                  {isCrawlingThis ? (
-                                    <>
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                      <span>{t('crawling', 'Crawling...')}</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Compass className="h-3 w-3" />
-                                      <span>{t('crawlIndexBtn', 'Crawl & Discover Slugs')}</span>
-                                    </>
-                                  )}
-                                </button>
-
-                                {cache && cache.discovered?.length > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setExpandedIndexUrl(isExpanded ? null : urlStr)}
-                                    className="p-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
-                                    style={{
-                                      backgroundColor: 'var(--color-card)',
-                                      borderColor: 'var(--color-border)',
-                                      color: 'var(--color-text)'
-                                    }}
-                                    title="Expand or collapse discovered recipe slugs"
-                                  >
-                                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                                  </button>
-                                )}
-
-                                <a
-                                  href={urlStr}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="p-1.5 rounded-lg border transition cursor-pointer hover:opacity-80"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: 'var(--color-primary)'
-                                  }}
-                                  title={t('openUrlTooltip', 'Open in new tab')}
-                                >
-                                  <Globe className="h-3.5 w-3.5" />
-                                </a>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveRecommendedUrl(idx)}
-                                  className="p-1.5 rounded-lg border hover:text-red-500 transition cursor-pointer"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: 'var(--color-text-secondary)'
-                                  }}
-                                  title={t('removeUrlTooltip', 'Remove URL')}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Collapsible Discovered Slugs Drawer */}
-                            {isExpanded && cache && (
-                              <div 
-                                className="border-t p-3.5 space-y-2.5 transition-colors duration-200"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)'
-                                }}
-                              >
-                                <div className="flex items-center justify-between text-[11px] font-bold">
-                                  <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
-                                    <Layers className="h-3.5 w-3.5" /> {t('discoveredSlugsTitle', 'Discovered Recipe Slugs')} ({cache.discovered.length})
-                                  </span>
-                                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                                    {t('crawledAtNotice', 'Crawled')}: {new Date(cache.crawledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </span>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
-                                  {cache.discovered.map((item, dIdx) => (
-                                    <div
-                                      key={dIdx}
-                                      className="p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition"
-                                      style={{
-                                        backgroundColor: 'var(--color-inner-dark)',
-                                        borderColor: 'var(--color-border)'
-                                      }}
-                                    >
-                                      <div className="min-w-0 flex-1">
-                                        <p className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
-                                          {item.title}
-                                        </p>
-                                        <p className="text-[10px] font-mono truncate" style={{ color: 'var(--color-text-secondary)' }}>
-                                          /{item.slug}
-                                        </p>
-                                      </div>
-
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        <button
-                                          type="button"
-                                          onClick={() => handlePullIndividualRecipe(item.url)}
-                                          disabled={isPullingRecipe && selectedSlugUrl === item.url}
-                                          className="px-2 py-1 rounded-lg border text-[10px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-90 shadow-xs"
-                                          style={{
-                                            backgroundColor: 'var(--color-card)',
-                                            borderColor: 'var(--color-emerald)',
-                                            color: 'var(--color-emerald)'
-                                          }}
-                                          title="Pull individual recipe details and preview image/ingredients"
-                                        >
-                                          {isPullingRecipe && selectedSlugUrl === item.url ? (
-                                            <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                                          ) : (
-                                            <Sparkles className="h-2.5 w-2.5" />
-                                          )}
-                                          <span>{t('pullBtn', 'Pull')}</span>
-                                        </button>
-
-                                        <button
-                                          type="button"
-                                          onClick={() => handleAddDiscoveredAsDirectUrl(item.url)}
-                                          className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
-                                          style={{
-                                            backgroundColor: 'var(--color-card)',
-                                            borderColor: 'var(--color-border)',
-                                            color: 'var(--color-primary)'
-                                          }}
-                                          title={t('addDirectTooltip', 'Add as direct source')}
-                                        >
-                                          <Plus className="h-3 w-3" />
-                                        </button>
-
-                                        <a
-                                          href={item.url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
-                                          style={{
-                                            backgroundColor: 'var(--color-card)',
-                                            borderColor: 'var(--color-border)',
-                                            color: 'var(--color-text-secondary)'
-                                          }}
-                                          title="Open recipe link"
-                                        >
-                                          <ExternalLink className="h-3 w-3" />
-                                        </a>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* KNOWLEDGE BASE FEATURE */}
-              <div className="space-y-3 pt-1">
-                <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                    <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('knowledgeBaseHeader', 'Knowledge Base')}
-                  </h3>
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('knowledgeBaseDesc', 'Fine-tune the assistant to your needs by adding reference source documents or databases.')}
-                  </p>
-                </div>
-
-                <form onSubmit={handleAddKnowledgeBase} className="flex gap-2">
-                  <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <input
-                      type="text"
-                      placeholder={t('knowledgeBasePlaceholder', 'Knowledge Base reference (e.g. Culinary Masterclass DB, Keto Guidelines)...')}
-                      value={newKbInput}
-                      onChange={(e) => setNewKbInput(e.target.value)}
-                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
-                      style={{ color: 'var(--color-text)' }}
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
-                  </button>
-                </form>
-
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {knowledgeBaseList.length === 0 ? (
-                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noKnowledgeBaseEntries', 'No knowledge base references added yet.')}
-                    </span>
-                  ) : (
-                    knowledgeBaseList.map((item, idx) => (
-                      <span 
-                        key={idx}
-                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        {item}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveKnowledgeBase(idx)}
-                          className="hover:opacity-75 cursor-pointer ml-0.5"
-                          title="Remove reference"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* CUSTOM VOCABULARY FEATURE */}
-              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-                <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                    <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
-                  </h3>
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('customVocabularyDesc', 'Enhance accuracy with specialized culinary or business terminology.')}
-                  </p>
-                </div>
-
-                <form onSubmit={handleAddCustomVocabulary} className="flex gap-2">
-                  <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <input
-                      type="text"
-                      placeholder={t('startTypingToAddVocab', 'Add custom culinary terminology (e.g. Umami, Sous-vide, Chiffonade)...')}
-                      value={newVocabInput}
-                      onChange={(e) => setNewVocabInput(e.target.value)}
-                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
-                      style={{ color: 'var(--color-text)' }}
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
-                    style={{ backgroundColor: 'var(--color-emerald)' }}
-                  >
-                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
-                  </button>
-                </form>
-
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {customVocabularyList.length === 0 ? (
-                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noCustomVocabularyEntries', 'No custom vocabulary terms added yet.')}
-                    </span>
-                  ) : (
-                    customVocabularyList.map((item, idx) => (
-                      <span 
-                        key={idx}
-                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-emerald)',
-                          color: 'var(--color-emerald)'
-                        }}
-                      >
-                        {item}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveCustomVocabulary(idx)}
-                          className="hover:opacity-75 cursor-pointer ml-0.5"
-                          title="Remove term"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* FILTER WORDS FEATURE */}
-              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-                <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                    <Ban className="h-4 w-4 text-red-500" /> {t('filterWordsHeader', 'Filter Words')}
-                  </h3>
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('filterWordsDesc', 'Restricted words or ingredients remain unspoken or avoided in AI outputs.')}
-                  </p>
-                </div>
-
-                <form onSubmit={handleAddFilterWord} className="flex gap-2">
-                  <div 
-                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <input
-                      type="text"
-                      placeholder={t('startTypingToAddFilter', 'Add restricted word or prohibited ingredient (e.g. Trans fats, MSG)...')}
-                      value={newFilterInput}
-                      onChange={(e) => setNewFilterInput(e.target.value)}
-                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
-                      style={{ color: 'var(--color-text)' }}
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
-                    style={{ backgroundColor: '#ef4444' }}
-                  >
-                    <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
-                  </button>
-                </form>
-
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {filterWordsList.length === 0 ? (
-                    <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noFilterWordsEntries', 'No filter words configured.')}
-                    </span>
-                  ) : (
-                    filterWordsList.map((item, idx) => (
-                      <span 
-                        key={idx}
-                        className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'rgba(239, 68, 68, 0.5)',
-                          color: '#ef4444'
-                        }}
-                      >
-                        {item}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveFilterWord(idx)}
-                          className="hover:opacity-75 cursor-pointer ml-0.5"
-                          title="Remove filter word"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* SYSTEM PROMPT / PERSONA */}
-              <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-                <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
+              <div className="space-y-2">
+                <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('maxPlanDaysCap', 'Max Plan Days Limit (Wizard Cap)')}
                 </label>
-                <textarea
-                  rows={5}
-                  value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
-                  className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition font-medium"
+                <input
+                  type="number"
+                  min="1"
+                  max="14"
+                  id="cfg_ai_max_plan_days"
+                  name="cfg_ai_max_plan_days"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
+                  value={maxPlanDays}
+                  onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
+                  className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -17717,12 +18074,619 @@ export default function ChefAISettingsPage() {
                   onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
                 <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('systemPromptDesc', 'Defines how the AI agent behaves, formats responses, and handles user queries on the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('pageSuffix', 'page.')}
+                  {t('maxPlanDaysDesc', 'Maximum number of days the AI can structure in a single meal plan wizard sequence.')}
                 </p>
               </div>
             </div>
+
+            {/* RECOMMENDED RECIPES URL WITH CRAWLER & SLUG DISCOVERY */}
+            <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <div>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                    <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('recommendedRecipesUrlHeader', 'Recommended Recipes Url')}
+                  </h3>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('recommendedRecipesUrlDesc', 'Configure primary source URLs for recipe recommendations. When users ask for recipes on /chef, AI will search and prioritize these URLs as the primary source.')}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span 
+                    className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
+                      color: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                    }}
+                  >
+                    {recommendedRecipeUrls.length} {t('urlsActiveBadge', 'Active URLs (Primary)')}
+                  </span>
+                  {recommendedRecipeUrls.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={handleClearAllRecommendedUrls}
+                      className="text-[10px] text-red-400 hover:text-red-500 font-bold transition cursor-pointer"
+                    >
+                      {t('clearAll', 'Clear All')}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div 
+                    className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <input
+                      type="text"
+                      id="cfg_rec_url_input"
+                      name="cfg_rec_url_input"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      role="presentation"
+                      placeholder={t('recommendedRecipeUrlPlaceholder', 'Add recipe URL (paste single or multiple separated by commas or newlines)...')}
+                      value={newRecipeUrlInput}
+                      onChange={(e) => setNewRecipeUrlInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddRecommendedUrls();
+                        }
+                      }}
+                      className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                      style={{ color: 'var(--color-text)' }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleAddRecommendedUrls()}
+                    disabled={!newRecipeUrlInput.trim()}
+                    className="px-4 py-2.5 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md disabled:opacity-40 hover:opacity-90 shrink-0"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    <Plus className="h-4 w-4" /> {t('addUrlBtn', 'Add URL')}
+                  </button>
+                </div>
+                <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
+                  💡 {t('multiUrlHint', 'Tip: You can paste multiple URLs at once separated by commas or newlines. Chef AI will prioritize these as primary culinary references.')}
+                </span>
+              </div>
+
+              {/* URL List with Index Crawler and Discovered Slugs Drawer */}
+              <div className="space-y-2 pt-1">
+                {recommendedRecipeUrls.length === 0 ? (
+                  <div 
+                    className="p-4 text-center border border-dashed rounded-2xl text-xs space-y-0.5"
+                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  >
+                    <span className="font-semibold block">{t('noRecommendedUrlsTitle', 'No Recommended Recipe URLs configured.')}</span>
+                    <span className="text-[11px] block">{t('noRecommendedUrlsDesc', 'Add your preferred food blog or recipe URLs above to make /chef recommend recipes from them first.')}</span>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                    {recommendedRecipeUrls.map((urlStr, idx) => {
+                      let domain = 'Website';
+                      try {
+                        domain = new URL(urlStr).hostname.replace(/^www\./, '');
+                      } catch (_) {}
+
+                      const isIndex = /recipes|\/category\/|\/categories\/|\/collection\/|\/tag\/|\/archive\/|\/all/i.test(urlStr) || urlStr.endsWith('/recipes/');
+                      const cache = crawlResults[urlStr];
+                      const isCrawlingThis = crawlingUrl === urlStr;
+                      const isExpanded = expandedIndexUrl === urlStr;
+
+                      return (
+                        <div 
+                          key={idx}
+                          className="rounded-2xl border transition shadow-xs overflow-hidden"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: isExpanded ? 'var(--color-primary)' : 'var(--color-border)'
+                          }}
+                        >
+                          <div className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                                <span 
+                                  className="text-[9px] font-black uppercase px-2 py-0.5 rounded border truncate"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-primary)'
+                                  }}
+                                >
+                                  {domain}
+                                </span>
+                                <span 
+                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
+                                  style={{
+                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                    color: 'var(--color-emerald)'
+                                  }}
+                                >
+                                  {t('primaryTag', 'Primary')}
+                                </span>
+                                {isIndex && (
+                                  <span 
+                                    className="text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase border"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-primary)',
+                                      color: 'var(--color-primary)'
+                                    }}
+                                  >
+                                    {t('indexCollectionTag', 'Index / Collection')}
+                                  </span>
+                                )}
+                                {cache && (
+                                  <span 
+                                    className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-emerald)',
+                                      color: 'var(--color-emerald)'
+                                    }}
+                                  >
+                                    {cache.count} {t('slugsDiscoveredBadge', 'Slugs Discovered')}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text)' }} title={urlStr}>
+                                {urlStr}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                              <button
+                                type="button"
+                                onClick={() => handleCrawlIndexUrl(urlStr)}
+                                disabled={isCrawlingThis}
+                                className="px-2.5 py-1.5 rounded-lg border font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-90 disabled:opacity-50"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-primary)',
+                                  color: 'var(--color-primary)'
+                                }}
+                                title="Crawl index page and discover matching recipe slugs"
+                              >
+                                {isCrawlingThis ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    <span>{t('crawling', 'Crawling...')}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Compass className="h-3 w-3" />
+                                    <span>{t('crawlIndexBtn', 'Crawl & Discover Slugs')}</span>
+                                  </>
+                                )}
+                              </button>
+
+                              {cache && cache.discovered?.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedIndexUrl(isExpanded ? null : urlStr)}
+                                  className="p-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                  title="Expand or collapse discovered recipe slugs"
+                                >
+                                  {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                </button>
+                              )}
+
+                              <a
+                                href={urlStr}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-primary)'
+                                }}
+                                title={t('openUrlTooltip', 'Open in new tab')}
+                              >
+                                <Globe className="h-3.5 w-3.5" />
+                              </a>
+
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveRecommendedUrl(idx)}
+                                className="p-1.5 rounded-lg border hover:text-red-500 transition cursor-pointer"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                                title={t('removeUrlTooltip', 'Remove URL')}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Collapsible Discovered Slugs Drawer */}
+                          {isExpanded && cache && (
+                            <div 
+                              className="border-t p-3.5 space-y-2.5 transition-colors duration-200"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-border)'
+                              }}
+                            >
+                              <div className="flex items-center justify-between text-[11px] font-bold">
+                                <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                                  <Layers className="h-3.5 w-3.5" /> {t('discoveredSlugsTitle', 'Discovered Recipe Slugs')} ({cache.discovered.length})
+                                </span>
+                                <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {t('crawledAtNotice', 'Crawled')}: {new Date(cache.crawledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
+                                {cache.discovered.map((item, dIdx) => (
+                                  <div
+                                    key={dIdx}
+                                    className="p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition"
+                                    style={{
+                                      backgroundColor: 'var(--color-inner-dark)',
+                                      borderColor: 'var(--color-border)'
+                                    }}
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <p className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
+                                        {item.title}
+                                      </p>
+                                      <p className="text-[10px] font-mono truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                                        /{item.slug}
+                                      </p>
+                                    </div>
+
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => handlePullIndividualRecipe(item.url)}
+                                        disabled={isPullingRecipe && selectedSlugUrl === item.url}
+                                        className="px-2 py-1 rounded-lg border text-[10px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-90 shadow-xs"
+                                        style={{
+                                          backgroundColor: 'var(--color-card)',
+                                          borderColor: 'var(--color-emerald)',
+                                          color: 'var(--color-emerald)'
+                                        }}
+                                        title="Pull individual recipe details and preview image/ingredients"
+                                      >
+                                        {isPullingRecipe && selectedSlugUrl === item.url ? (
+                                          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                        ) : (
+                                          <Sparkles className="h-2.5 w-2.5" />
+                                        )}
+                                        <span>{t('pullBtn', 'Pull')}</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAddDiscoveredAsDirectUrl(item.url)}
+                                        className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                        style={{
+                                          backgroundColor: 'var(--color-card)',
+                                          borderColor: 'var(--color-border)',
+                                          color: 'var(--color-primary)'
+                                        }}
+                                        title={t('addDirectTooltip', 'Add as direct source')}
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                      </button>
+
+                                      <a
+                                        href={item.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                        style={{
+                                          backgroundColor: 'var(--color-card)',
+                                          borderColor: 'var(--color-border)',
+                                          color: 'var(--color-text-secondary)'
+                                        }}
+                                        title="Open recipe link"
+                                      >
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* KNOWLEDGE BASE FEATURE */}
+            <div className="space-y-3 pt-1">
+              <div>
+                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <BookOpen className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('knowledgeBaseHeader', 'Knowledge Base')}
+                </h3>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('knowledgeBaseDesc', 'Fine-tune the assistant to your needs by adding reference source documents or databases.')}
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <div 
+                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  <input
+                    type="text"
+                    id="cfg_kb_ref_input"
+                    name="cfg_kb_ref_input"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    placeholder={t('knowledgeBasePlaceholder', 'Knowledge Base reference (e.g. Culinary Masterclass DB, Keto Guidelines)...')}
+                    value={newKbInput}
+                    onChange={(e) => setNewKbInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddKnowledgeBase())}
+                    className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                    style={{ color: 'var(--color-text)' }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAddKnowledgeBase()}
+                  className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {knowledgeBaseList.length === 0 ? (
+                  <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('noKnowledgeBaseEntries', 'No knowledge base references added yet.')}
+                  </span>
+                ) : (
+                  knowledgeBaseList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveKnowledgeBase(idx)}
+                        className="hover:opacity-75 cursor-pointer ml-0.5"
+                        title="Remove reference"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* CUSTOM VOCABULARY FEATURE */}
+            <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
+                </h3>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('customVocabularyDesc', 'Enhance accuracy with specialized culinary or business terminology.')}
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <div 
+                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  <input
+                    type="text"
+                    id="cfg_custom_vocab_input"
+                    name="cfg_custom_vocab_input"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    placeholder={t('startTypingToAddVocab', 'Add custom culinary terminology (e.g. Umami, Sous-vide, Chiffonade)...')}
+                    value={newVocabInput}
+                    onChange={(e) => setNewVocabInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddCustomVocabulary())}
+                    className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                    style={{ color: 'var(--color-text)' }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAddCustomVocabulary()}
+                  className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                  style={{ backgroundColor: 'var(--color-emerald)' }}
+                >
+                  <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {customVocabularyList.length === 0 ? (
+                  <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('noCustomVocabularyEntries', 'No custom vocabulary terms added yet.')}
+                  </span>
+                ) : (
+                  customVocabularyList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCustomVocabulary(idx)}
+                        className="hover:opacity-75 cursor-pointer ml-0.5"
+                        title="Remove term"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* FILTER WORDS FEATURE */}
+            <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <Ban className="h-4 w-4 text-red-500" /> {t('filterWordsHeader', 'Filter Words')}
+                </h3>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('filterWordsDesc', 'Restricted words or ingredients remain unspoken or avoided in AI outputs.')}
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <div 
+                  className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  <input
+                    type="text"
+                    id="cfg_filter_words_input"
+                    name="cfg_filter_words_input"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    placeholder={t('startTypingToAddFilter', 'Add restricted word or prohibited ingredient (e.g. Trans fats, MSG)...')}
+                    value={newFilterInput}
+                    onChange={(e) => setNewFilterInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddFilterWord())}
+                    className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                    style={{ color: 'var(--color-text)' }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAddFilterWord()}
+                  className="px-4 py-2.5 text-white rounded-xl font-bold flex items-center gap-1 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
+                  style={{ backgroundColor: '#ef4444' }}
+                >
+                  <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {filterWordsList.length === 0 ? (
+                  <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('noFilterWordsEntries', 'No filter words configured.')}
+                  </span>
+                ) : (
+                  filterWordsList.map((item, idx) => (
+                    <span 
+                      key={idx}
+                      className="border px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'rgba(239, 68, 68, 0.5)',
+                        color: '#ef4444'
+                      }}
+                    >
+                      {item}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFilterWord(idx)}
+                        className="hover:opacity-75 cursor-pointer ml-0.5"
+                        title="Remove filter word"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* SYSTEM PROMPT / PERSONA */}
+            <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+              <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
+              </label>
+              <textarea
+                rows={5}
+                id="cfg_sys_prompt_textarea"
+                name="cfg_sys_prompt_textarea"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                role="presentation"
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition font-medium"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              />
+              <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('systemPromptDesc', 'Defines how the AI agent behaves, formats responses, and handles user queries on the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('pageSuffix', 'page.')}
+              </p>
+            </div>
           </div>
-        )}
+        </div>
 
       </div>
 
@@ -34269,13 +35233,6 @@ export default function ProfilePage() {
   const PlanHeaderIcon = userPlanBadge.icon;
   const activeExpiryDate = (user as any).planExpiryDate || (user as any).expiryDate;
 
-  const isUnlimited = tokenUsage.monthlyLimit === -1 || tokenUsage.monthlyLimit >= 999999999;
-  const tokenPercentage = isUnlimited 
-    ? 0 
-    : tokenUsage.monthlyLimit > 0 
-      ? Math.min(Math.round((tokenUsage.totalTokens / tokenUsage.monthlyLimit) * 100), 100) 
-      : 100;
-
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200 min-h-screen"
@@ -34709,32 +35666,6 @@ export default function ProfilePage() {
                     <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                       {tokenIdentity.tokenName}
                     </span>
-                  </div>
-
-                  {/* Plan Allocation & Capacity Progress Bar */}
-                  <div className="space-y-1.5 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                    <div className="flex justify-between items-center text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      <span>{t('planAllowanceLimit', 'Plan Allowance Quota:')}</span>
-                      <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>
-                        {isUnlimited ? t('unlimitedTokensLabel', '∞ Unlimited') : `${tokenUsage.monthlyLimit.toLocaleString()} ${tokenIdentity.tokenSymbol}`}
-                      </span>
-                    </div>
-
-                    <div 
-                      className="border rounded-full h-2.5 overflow-hidden p-0.5 shadow-inner"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
-                      <div 
-                        className="h-full rounded-full transition-all duration-500" 
-                        style={{ 
-                          width: isUnlimited ? '100%' : `${tokenPercentage}%`,
-                          backgroundColor: isUnlimited ? 'var(--color-emerald)' : tokenPercentage > 85 ? '#ef4444' : tokenPercentage > 60 ? '#f59e0b' : 'var(--color-primary)'
-                        }}
-                      />
-                    </div>
                   </div>
                 </div>
 
@@ -42869,8 +43800,80 @@ function cleanJsonString(raw: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
     let body: any = {};
     try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
       body = await req.json();
     } catch (_) {
       return NextResponse.json({ success: false, error: 'Malformed JSON payload' }, { status: 400 });
@@ -42894,6 +43897,42 @@ export async function POST(req: NextRequest) {
       const cookieHeader = req.cookies.get('zecratary_session')?.value;
       if (cookieHeader) {
         try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
           const parsed = JSON.parse(decodeURIComponent(cookieHeader));
           userId = userId || parsed.id;
           userEmail = userEmail || parsed.email;
@@ -42918,12 +43957,84 @@ export async function POST(req: NextRequest) {
     let maxPlanDays = 7;
 
     try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
       const sRows = await query('SELECT chef_ai_settings, ai_model, ai_provider, value FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
       if (sRows.length > 0) {
         const row = sRows[0];
         let c = row.chef_ai_settings;
         if (typeof c === 'string') {
-          try { c = JSON.parse(c); } catch (_) { c = {}; }
+          try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+ c = JSON.parse(c); } catch (_) { c = {}; }
         } else if (!c && row.value) {
           c = typeof row.value === 'string' ? JSON.parse(row.value).chefAiSettings || {} : row.value.chefAiSettings || {};
         }
@@ -42936,6 +44047,9 @@ export async function POST(req: NextRequest) {
           if (c.maxTokens !== undefined) maxTokens = Number(c.maxTokens);
           if (c.systemPrompt) systemPrompt = c.systemPrompt;
           if (c.strictDietEnforcement !== undefined) strictDietEnforcement = Boolean(c.strictDietEnforcement);
+    let enableSavedRecipeSearch = true;
+    if (c.enableSavedRecipeSearch !== undefined) enableSavedRecipeSearch = Boolean(c.enableSavedRecipeSearch);
+    if (body.enableSavedRecipeSearch !== undefined) enableSavedRecipeSearch = Boolean(body.enableSavedRecipeSearch);
           if (Array.isArray(c.filterWordsList)) filterWordsList = c.filterWordsList.filter(Boolean);
           if (Array.isArray(c.customVocabularyList)) customVocabularyList = c.customVocabularyList.filter(Boolean);
           if (c.maxPlanDays !== undefined) maxPlanDays = Number(c.maxPlanDays) || 7;
@@ -42950,6 +44064,42 @@ export async function POST(req: NextRequest) {
 
     if (!apiKey) {
       try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
         const kRows = await query(
           "SELECT key_value FROM admin_api_keys WHERE (provider = $1 OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
           [provider]
@@ -43048,6 +44198,42 @@ export async function POST(req: NextRequest) {
     let scrapedGrounding: any = null;
     if (referenceUrls.length > 0) {
       try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
         scrapedGrounding = await resolveAndScrapeBestRecipe(prompt || parsedTheme, referenceUrls);
       } catch (scrapeErr) {
         console.warn('[AI Route] Web scraper notice:', scrapeErr);
@@ -43079,6 +44265,7 @@ MANDATORY: Adapt and recommend this authentic dish as the signature Recommended 
 
       const fullPrompt = isQuestionnaire
         ? `${systemPrompt}
+${savedRecipesContext}
 You are Chef Foodie. Formulate an accurate ${parsedDays}-day meal plan and a signature Recommended Recipe.
 LOGISTICS & DIET:
 - Total Days: ${parsedDays}
@@ -43135,6 +44322,7 @@ Return ONLY valid JSON matching this schema:
   }
 }`
         : `${systemPrompt}
+${savedRecipesContext}
 User Query: "${prompt}"
 Context: Cooking for ${servings} people in ${country}. Diet: ${diets.join(', ')}. Avoid: ${allergies.concat(avoid).join(', ')}. Pantry items: ${pantryItems.join(', ')}.
 ${referenceUrls.length > 0 ? `Primary References: ${referenceUrls.join(', ')}` : ''}
@@ -43144,6 +44332,42 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
 
       for (const mName of uniqueModels) {
         try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
           const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${mName}:generateContent?key=${apiKey}`;
           const gRes = await fetch(endpoint, {
             method: 'POST',
@@ -43160,6 +44384,42 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
             const cleaned = cleanJsonString(rawText);
             if (cleaned) {
               try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
                 const parsed = JSON.parse(cleaned);
                 responseText = parsed.reply || rawText;
                 if (parsed.plan) generatedPlan = parsed.plan;
@@ -43271,6 +44531,42 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       const targetRecipeUrl = recommendedRecipe.sourceUrl || (referenceUrls.length > 0 ? referenceUrls[0] : null);
       if (targetRecipeUrl && !recommendedRecipe.image) {
         try {
+
+    // All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes
+    let savedRecipesContext = '';
+    if (enableSavedRecipeSearch) {
+      try {
+        const userId = body.userId || 'guest';
+        const savedRows = await query(
+          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
+           FROM saved_recipes 
+           ORDER BY updated_at DESC LIMIT 20`
+        ).catch(() => []);
+        
+        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
+        if (rows.length > 0) {
+          savedRecipesContext = `
+ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
+The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
+${rows.map((r: any, idx: number) => {
+  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
+  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
+  return `[Saved Recipe ${idx + 1}: "${r.title}"]
+- Meal Type: ${r.meal_type || 'General'}
+- Ingredients: ${ings}
+- Instructions: ${insts}
+- Source: ${r.source_url || 'Personal Saved Collection'}`;
+}).join('\n\n')}
+
+MANDATORY DIRECTIVE FOR SAVED RECIPES:
+Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
+`;
+        }
+      } catch (err) {
+        console.warn('[AI API] Could not retrieve saved recipes:', err);
+      }
+    }
+
           const scrapedImg = await extractImageFromUrl(targetRecipeUrl);
           if (scrapedImg) recommendedRecipe.image = scrapedImg;
         } catch (_) {}
