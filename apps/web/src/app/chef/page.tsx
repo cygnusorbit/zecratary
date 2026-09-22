@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
-  ChefHat, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
+  ChefHat, Globe, ExternalLink, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
   Calendar, CalendarPlus, X, ArrowLeftRight, Utensils, Loader2, User as UserIcon, 
   Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
   ChevronLeft, ChevronRight, Search, Heart, Copy, ShoppingCart, Dices, 
@@ -163,6 +163,7 @@ export default function ChefChatPage() {
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
   const [maxPlanDays, setMaxPlanDays] = useState<number>(7);
+  const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
 
   // Voice Interaction State
   const [enableVoiceInteraction, setEnableVoiceInteraction] = useState<boolean>(true);
@@ -642,6 +643,11 @@ export default function ChefChatPage() {
         if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
         if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
         if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
+        if (Array.isArray(chefCfg.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
+        } else if (Array.isArray(sData.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(sData.recommendedRecipeUrls.filter(Boolean));
+        }
         if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
         if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
         if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
@@ -1185,6 +1191,24 @@ export default function ChefChatPage() {
 
         {/* USER DIETARY PREFERENCES PILLS */}
         <div className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in">
+          {/* PRIMARY SOURCES TELEMETRY PILL */}
+          {recommendedRecipeUrls.length > 0 && (
+            <span 
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm transition hover:opacity-90"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
+              }}
+              title={`Primary Recipe Sources: ${recommendedRecipeUrls.join(', ')}`}
+            >
+              <Globe className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
+              <span>Primary Sources:</span>
+              <strong className="font-bold font-mono" style={{ color: 'var(--color-text)' }}>
+                {recommendedRecipeUrls.length} URLs
+              </strong>
+            </span>
+          )}
           <span 
             className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
@@ -1427,7 +1451,7 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* MULTI-DAY PLAN PRESENTATION */}
+                  {/* MULTI-DAY PLAN PRESENTATION (SUPPORTS CARD, COMPACT, DETAILED MODES) */}
                   {m.plan && (
                     <div 
                       className="border rounded-3xl p-5 space-y-4 shadow-sm transition-colors duration-200"
@@ -1436,39 +1460,264 @@ export default function ChefChatPage() {
                         borderColor: 'var(--color-border)'
                       }}
                     >
-                      <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                           <h3 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
                             {m.plan.title} ({m.plan.totalDays} Days)
                           </h3>
                         </div>
-                        <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                          Budget: {m.plan.budgetPerServing || '$4.00'}/serv
-                        </span>
+
+                        {/* In-Chat View Mode Switcher Pills */}
+                        <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                          <span className="text-[10px] font-bold mr-1 hidden sm:inline" style={{ color: 'var(--color-text-secondary)' }}>
+                            {m.plan.budgetPerServing ? `Budget: ${m.plan.budgetPerServing}` : '$5.00/serv'}
+                          </span>
+                          <div className="border p-0.5 rounded-xl flex items-center gap-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                            {(['card', 'compact', 'detailed'] as const).map((mode) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => setResultDisplayMode(mode)}
+                                className="px-2 py-0.5 rounded-lg text-[10px] font-bold transition cursor-pointer capitalize"
+                                style={resultDisplayMode === mode ? {
+                                  backgroundColor: 'var(--color-primary)',
+                                  color: '#ffffff'
+                                } : {
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                              >
+                                {mode}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="space-y-3">
-                        {m.plan.meals.map((meal) => (
-                          <div 
-                            key={meal.id}
-                            className="border rounded-2xl p-3.5 space-y-2"
-                            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                          >
-                            <div className="flex justify-between items-center text-xs font-bold">
-                              <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
-                              <span className="uppercase text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{meal.mealType}</span>
-                            </div>
-                            <div className="flex items-start gap-3">
-                              <img src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} alt={meal.title} className="w-14 h-14 rounded-xl object-cover border shrink-0" style={{ borderColor: 'var(--color-border)' }} />
-                              <div className="space-y-0.5 flex-1 min-w-0">
-                                <h4 className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
-                                <p className="text-[11px] line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
+                      {/* 1. STANDARD CARDS VIEW */}
+                      {resultDisplayMode === 'card' && (
+                        <div className="space-y-3">
+                          {m.plan.meals.map((meal) => (
+                            <div 
+                              key={meal.id}
+                              onClick={() => {
+                                setSelectedRecipeForModal({
+                                  title: meal.title,
+                                  description: meal.description,
+                                  prepMinutes: meal.prepMinutes || 15,
+                                  cookMinutes: meal.cookMinutes || 20,
+                                  servings: meal.servings || servings,
+                                  calories: meal.calories || 480,
+                                  mealType: meal.mealType,
+                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Aromatics & seasonings', 'Cold-pressed olive oil'],
+                                  instructions: ['Prepare and rinse all ingredients cleanly.', 'Sauté aromatics over medium heat until fragrant.', 'Cook protein and vegetables thoroughly.', 'Garnish with fresh herbs and serve warm.'],
+                                  chefTip: meal.isBatchCook ? 'Double the quantity to save time for subsequent days.' : 'Serve immediately while hot for optimal flavor infusion.',
+                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                });
+                                setShowRecipeDetailsModal(true);
+                              }}
+                              className="border rounded-2xl p-3.5 space-y-2.5 transition cursor-pointer hover:scale-[1.01] shadow-xs"
+                              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                            >
+                              <div className="flex justify-between items-center text-xs font-bold">
+                                <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
+                                <div className="flex items-center gap-1.5">
+                                  {meal.isBatchCook && (
+                                    <span 
+                                      className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                      style={{
+                                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                        borderColor: 'var(--color-emerald)',
+                                        color: 'var(--color-emerald)'
+                                      }}
+                                    >
+                                      Batch Cook
+                                    </span>
+                                  )}
+                                  <span 
+                                    className="uppercase text-[9px] font-extrabold px-1.5 py-0.5 rounded border"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-border)',
+                                      color: 'var(--color-text-secondary)'
+                                    }}
+                                  >
+                                    {meal.mealType}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-start gap-3">
+                                <img 
+                                  src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} 
+                                  alt={meal.title} 
+                                  className="w-16 h-16 rounded-xl object-cover border shrink-0" 
+                                  style={{ borderColor: 'var(--color-border)' }} 
+                                />
+                                <div className="space-y-1 flex-1 min-w-0">
+                                  <h4 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
+                                  <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
+                                  <div className="flex items-center gap-3 text-[10px] font-semibold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                                    <span className="flex items-center gap-1">
+                                      <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <Users className="h-3 w-3" /> {meal.servings || servings} serv
+                                    </span>
+                                    {meal.calories && (
+                                      <span className="font-mono" style={{ color: 'var(--color-primary)' }}>{meal.calories} kcal</span>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* 2. COMPACT TABLE VIEW */}
+                      {resultDisplayMode === 'compact' && (
+                        <div className="border rounded-2xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                          <div 
+                            className="grid grid-cols-12 gap-2 p-2.5 font-extrabold text-[10px] uppercase border-b"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)'
+                            }}
+                          >
+                            <span className="col-span-3">Day / Schedule</span>
+                            <span className="col-span-2">Meal Type</span>
+                            <span className="col-span-5">Recipe Title</span>
+                            <span className="col-span-2 text-right">Time & Cals</span>
                           </div>
-                        ))}
-                      </div>
+
+                          {m.plan.meals.map((meal, rIdx) => (
+                            <div 
+                              key={meal.id || rIdx}
+                              onClick={() => {
+                                setSelectedRecipeForModal({
+                                  title: meal.title,
+                                  description: meal.description,
+                                  prepMinutes: meal.prepMinutes || 15,
+                                  cookMinutes: meal.cookMinutes || 20,
+                                  servings: meal.servings || servings,
+                                  calories: meal.calories || 480,
+                                  mealType: meal.mealType,
+                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Seasonings'],
+                                  instructions: ['Follow standard chef cooking guidelines for this dish.'],
+                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                });
+                                setShowRecipeDetailsModal(true);
+                              }}
+                              className="grid grid-cols-12 gap-2 p-2.5 text-xs items-center border-b last:border-none transition cursor-pointer hover:opacity-80"
+                              style={{
+                                backgroundColor: rIdx % 2 === 0 ? 'var(--color-card)' : 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)'
+                              }}
+                            >
+                              <span className="col-span-3 font-bold truncate" style={{ color: 'var(--color-primary)' }}>
+                                {meal.dayLabel}
+                              </span>
+                              <span className="col-span-2">
+                                <span 
+                                  className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text-secondary)'
+                                  }}
+                                >
+                                  {meal.mealType}
+                                </span>
+                              </span>
+                              <span className="col-span-5 font-semibold truncate" style={{ color: 'var(--color-text)' }}>
+                                {meal.title}
+                              </span>
+                              <span className="col-span-2 text-right font-mono text-[11px]" style={{ color: 'var(--color-emerald)' }}>
+                                {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* 3. DETAILED MASTER VIEW */}
+                      {resultDisplayMode === 'detailed' && (
+                        <div className="space-y-3">
+                          {m.plan.meals.map((meal) => (
+                            <div 
+                              key={meal.id}
+                              onClick={() => {
+                                setSelectedRecipeForModal({
+                                  title: meal.title,
+                                  description: meal.description,
+                                  prepMinutes: meal.prepMinutes || 15,
+                                  cookMinutes: meal.cookMinutes || 20,
+                                  servings: meal.servings || servings,
+                                  calories: meal.calories || 480,
+                                  mealType: meal.mealType,
+                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Quality produce', 'Seasonings'],
+                                  instructions: ['Follow standard chef cooking guidelines for this dish.'],
+                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                });
+                                setShowRecipeDetailsModal(true);
+                              }}
+                              className="border rounded-2xl p-4 space-y-3 transition cursor-pointer hover:scale-[1.01] shadow-xs"
+                              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                            >
+                              <div className="flex justify-between items-center text-xs font-bold border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                                <div className="flex items-center gap-2">
+                                  <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
+                                  <span 
+                                    className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-emerald)',
+                                      color: 'var(--color-emerald)'
+                                    }}
+                                  >
+                                    {meal.mealType}
+                                  </span>
+                                </div>
+                                <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m • {meal.servings || servings} serv
+                                </span>
+                              </div>
+
+                              <div className="space-y-1">
+                                <h4 className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
+                                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
+                              </div>
+
+                              {/* Inline Ingredients Pills Breakdown */}
+                              {Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
+                                <div className="space-y-1.5 pt-1">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                                    Ingredients Breakdown:
+                                  </span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {meal.ingredients.map((ing, iIdx) => (
+                                      <span 
+                                        key={iIdx}
+                                        className="text-[10px] font-medium px-2 py-0.5 rounded-lg border shadow-2xs"
+                                        style={{
+                                          backgroundColor: 'var(--color-card)',
+                                          borderColor: 'var(--color-border)',
+                                          color: 'var(--color-text)'
+                                        }}
+                                      >
+                                        • {ing}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                     </div>
                   )}
 
@@ -2245,6 +2494,191 @@ export default function ChefChatPage() {
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {t('saveBtn', 'Save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECIPE DETAILS MODAL */}
+      {showRecipeDetailsModal && selectedRecipeForModal && (
+        <div 
+          onClick={() => setShowRecipeDetailsModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-4 cursor-default animate-in fade-in"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span 
+                    className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md text-white shadow-xs"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    Recommended
+                  </span>
+                  {selectedRecipeForModal.sourceUrl && (
+                    <span 
+                      className="text-[9px] font-bold px-2 py-0.5 rounded-md border flex items-center gap-1"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                    >
+                      <Globe className="h-2.5 w-2.5" /> Primary Source
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-lg font-black tracking-tight mt-1" style={{ color: 'var(--color-text)' }}>
+                  {selectedRecipeForModal.title}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRecipeDetailsModal(false)}
+                className="p-1.5 rounded-xl border transition cursor-pointer hover:opacity-80"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-4 pr-1 text-xs custom-scrollbar">
+              {selectedRecipeForModal.image && (
+                <img
+                  src={selectedRecipeForModal.image}
+                  alt={selectedRecipeForModal.title}
+                  className="w-full h-44 rounded-2xl object-cover border shadow-xs"
+                  style={{ borderColor: 'var(--color-border)' }}
+                />
+              )}
+
+              <p className="leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {selectedRecipeForModal.description}
+              </p>
+
+              <div 
+                className="flex items-center gap-4 p-3 rounded-2xl border font-bold text-xs"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <span className="flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
+                  <Clock className="h-3.5 w-3.5" /> {(selectedRecipeForModal.prepMinutes || 0) + (selectedRecipeForModal.cookMinutes || 0)} mins total
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5" /> {selectedRecipeForModal.servings || servings} servings
+                </span>
+                {selectedRecipeForModal.calories && (
+                  <span className="font-mono text-emerald-500">{selectedRecipeForModal.calories} kcal</span>
+                )}
+              </div>
+
+              {/* Ingredients List */}
+              {Array.isArray(selectedRecipeForModal.ingredients) && selectedRecipeForModal.ingredients.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                    Ingredients ({selectedRecipeForModal.ingredients.length})
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {selectedRecipeForModal.ingredients.map((ing: string, i: number) => (
+                      <div 
+                        key={i}
+                        className="p-2 rounded-xl border text-[11px] font-medium flex items-center gap-2"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
+                        <span className="truncate">{ing}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Instructions */}
+              {Array.isArray(selectedRecipeForModal.instructions) && selectedRecipeForModal.instructions.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                    Instructions
+                  </h4>
+                  <div className="space-y-2">
+                    {selectedRecipeForModal.instructions.map((step: string, sIdx: number) => (
+                      <div 
+                        key={sIdx}
+                        className="p-2.5 rounded-xl border text-xs leading-relaxed flex items-start gap-2.5"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                      >
+                        <span 
+                          className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          {sIdx + 1}
+                        </span>
+                        <p className="flex-1">{step}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Chef Tip */}
+              {selectedRecipeForModal.chefTip && (
+                <div 
+                  className="p-3 rounded-2xl border text-xs leading-relaxed flex items-start gap-2"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-emerald)',
+                    color: 'var(--color-emerald)'
+                  }}
+                >
+                  <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span><strong>Chef Tip:</strong> {selectedRecipeForModal.chefTip}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Outbound Link & Close */}
+            <div className="pt-3 border-t flex items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                {selectedRecipeForModal.sourceUrl && (
+                  <a
+                    href={selectedRecipeForModal.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer hover:opacity-80"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span>View Source Recipe ↗</span>
+                  </a>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowRecipeDetailsModal(false)}
+                className="px-5 py-2 rounded-xl text-white font-bold text-xs shadow-md transition cursor-pointer hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                Close
               </button>
             </div>
           </div>

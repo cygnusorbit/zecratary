@@ -1,61 +1,38 @@
 {
-  "aiModel": "gemini-3.5-flash",
-  "taxRate": 0,
-  "currency": "USD",
-  "siteName": "Zecratary",
-  "updatedAt": "2026-09-21T14:20:27.882Z",
   "aiProvider": "gemini",
-  "recipeTypes": [
-    "Breakfast",
-    "Lunch",
-    "Dinner",
-    "Snack",
-    "Dessert",
-    "Beverage",
-    "Appetizer",
-    "Salad",
-    "Soup",
-    "Side Dish",
-    "Baking"
-  ],
-  "socialLogin": {
-    "updatedAt": "2026-09-18T12:28:40.488Z",
-    "appleKeyId": "",
-    "appleTeamId": "",
-    "appleEnabled": false,
-    "appleClientId": "",
-    "facebookAppId": "",
-    "googleEnabled": true,
-    "googleClientId": "479443923058-jeajhc080ad3kb0b57ighm8k101ip7q6.apps.googleusercontent.com",
-    "facebookEnabled": false,
-    "facebookClientId": "",
-    "facebookAppSecret": "",
-    "googleClientSecret": "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",
-    "facebookClientSecret": "",
-    "allowSocialRegistration": true,
-    "requireEmailVerification": true
-  },
+  "aiModel": "gemini-3.6-flash",
   "themeColors": {
-    "accent": "#ec4899",
-    "primary": "#ec4899",
-    "cardBorder": "#2a1650",
-    "accentColor": "#ec4899",
-    "sidebarIcon": "#c084fc",
-    "primaryColor": "#ec4899",
-    "primaryHover": "#7c3aed",
-    "accentEmerald": "#ec4899",
-    "textSecondary": "#d8b4fe",
-    "backgroundDark": "#0f081c",
-    "cardBackground": "#180d2e",
-    "backgroundColor": "#0f081c",
-    "sidebarIconColor": "#c084fc"
+    "accent": "#a855f7",
+    "primary": "#38bdf8",
+    "cardBorder": "#172554",
+    "accentColor": "#a855f7",
+    "sidebarIcon": "#38bdf8",
+    "primaryColor": "#38bdf8",
+    "primaryHover": "#0284c7",
+    "accentEmerald": "#a855f7",
+    "textSecondary": "#7dd3fc",
+    "backgroundDark": "#020617",
+    "cardBackground": "#080e22",
+    "backgroundColor": "#020617",
+    "sidebarIconColor": "#38bdf8"
   },
-  "faviconEmoji": "🍳",
-  "faviconImage": "",
-  "titlebarEmoji": "🍳",
-  "titlebarImage": "",
+  "theme_colors": {
+    "accent": "#a855f7",
+    "primary": "#38bdf8",
+    "cardBorder": "#172554",
+    "accentColor": "#a855f7",
+    "sidebarIcon": "#38bdf8",
+    "primaryColor": "#38bdf8",
+    "primaryHover": "#0284c7",
+    "accentEmerald": "#a855f7",
+    "textSecondary": "#7dd3fc",
+    "backgroundDark": "#020617",
+    "cardBackground": "#080e22",
+    "backgroundColor": "#020617",
+    "sidebarIconColor": "#38bdf8"
+  },
   "chefAiSettings": {
-    "model": "gemini-3.5-flash",
+    "model": "gemini-3.6-flash",
     "apiKey": "AQ.Ab8RN6IV413r-my3ha0UekHmrrFtKz1f9il12r2QUqnVh7pisg",
     "provider": "gemini",
     "sections": [
@@ -82,15 +59,17 @@
       }
     ],
     "maxTokens": 4096,
-    "updatedAt": "2026-09-21T14:20:27.882Z",
+    "updatedAt": "2026-09-22T07:29:35.310Z",
     "voiceSpeed": 1,
     "maxPlanDays": 7,
     "temperature": 0.7,
     "voiceEngine": "version2",
-    "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize the selected Knowledge Base, custom vocabulary, filter words, and dietary preferences when generating culinary or meal planning responses. main goal is to guide user ",
+    "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize Recommended Recipes Url. ultimately you must guide user to create recipe, and make plan for each recipe.",
     "voiceAutoPlay": false,
     "enableWebSearch": true,
-    "filterWordsList": [],
+    "filterWordsList": [
+      "Artificial preservatives"
+    ],
     "knowledgeBaseList": [
       "Culinary Masterclass DB v2",
       "Nutritional Guidelines 2026"
@@ -98,7 +77,9 @@
     "resultDisplayMode": "card",
     "selectedVoiceName": "en-US-Neural2-F",
     "enablePantryContext": true,
-    "customVocabularyList": [],
+    "customVocabularyList": [
+      "Umami"
+    ],
     "availableGeminiModels": [
       {
         "id": "gemini-2.5-flash",
@@ -329,6 +310,12 @@
         "description": "Preview release of Antigravity Agent (09-2026)"
       },
       {
+        "id": "antigravity-preview-latest",
+        "name": "Antigravity Agent Preview Latest",
+        "label": "Antigravity Agent Preview Latest (antigravity-preview-latest)",
+        "description": "Latest preview release of Antigravity Agent"
+      },
+      {
         "id": "deep-research-max-preview-04-2026",
         "name": "Deep Research Max Preview (Apr-21-2026)",
         "label": "Deep Research Max Preview (Apr-21-2026) (deep-research-max-preview-04-2026)",
@@ -369,110 +356,3477 @@
         "label": "GPT-3.5 Turbo (High Speed)"
       }
     ],
+    "recommendedRecipeUrls": [
+      "https://www.recipetineats.com/recipes/",
+      "https://www.taste.com.au/recipes"
+    ],
     "strictDietEnforcement": true,
+    "discoveredRecipesCache": {
+      "https://www.taste.com.au/recipes": {
+        "count": 130,
+        "crawledAt": "2026-09-22T06:50:10.993Z",
+        "discovered": [
+          {
+            "url": "https://www.taste.com.au/recipes/crispy-quinoa-salad-recipe/yvzc6l2h",
+            "slug": "yvzc6l2h",
+            "title": "Crispy quinoa salad"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/creamy-french-onion-chicken-bacon-lasagne-recipe/ydnyqih1",
+            "slug": "ydnyqih1",
+            "title": "Creamy French onion chicken and bacon lasagne"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/air-fryer-crispy-rice-prawn-salad-recipe/g1yiy8ag",
+            "slug": "g1yiy8ag",
+            "title": "Air fryer crispy rice and prawn salad"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/easy-butter-chicken-rissoles-recipe/sr8x1jns",
+            "slug": "sr8x1jns",
+            "title": "Easy butter chicken rissoles"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/marry-me-stuffed-chicken-breasts-recipe/p42hykjp",
+            "slug": "p42hykjp",
+            "title": "'Marry me' stuffed chicken breasts"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/5-ingredient-mediterranean-vegetable-bake-recipe/5t69vf0h",
+            "slug": "5t69vf0h",
+            "title": "5-ingredient Mediterranean vegetable bake"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/air-fryer-chicken-breast-tacos-recipe/ytmp61rf",
+            "slug": "ytmp61rf",
+            "title": "Air fryer chicken breast tacos"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/slow-cooker-sticky-korean-bbq-beef-brisket-recipe/vdx9ywl3",
+            "slug": "vdx9ywl3",
+            "title": "Slow cooker sticky Korean BBQ beef brisket"
+          },
+          {
+            "url": "https://www.taste.com.au/meal-types",
+            "slug": "meal-types",
+            "title": "Meal type"
+          },
+          {
+            "url": "https://www.taste.com.au/dinner",
+            "slug": "dinner",
+            "title": "Dinner"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/breakfast-recipes",
+            "slug": "breakfast-recipes",
+            "title": "Breakfast"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/lunch-recipes",
+            "slug": "lunch-recipes",
+            "title": "Lunch & light meals"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/salad-recipes",
+            "slug": "salad-recipes",
+            "title": "Salads"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/dessert-recipes",
+            "slug": "dessert-recipes",
+            "title": "Desserts"
+          },
+          {
+            "url": "https://www.taste.com.au/diet",
+            "slug": "diet",
+            "title": "Diet"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/gluten-free",
+            "slug": "gluten-free",
+            "title": "Gluten-free"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/high-protein-recipes",
+            "slug": "high-protein-recipes",
+            "title": "Protein"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/vegan-recipes",
+            "slug": "vegan-recipes",
+            "title": "Vegan"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/vegetarian-recipes",
+            "slug": "vegetarian-recipes",
+            "title": "Vegetarian"
+          },
+          {
+            "url": "https://www.taste.com.au/ingredients",
+            "slug": "ingredients",
+            "title": "Ingredient"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/chicken-recipes",
+            "slug": "chicken-recipes",
+            "title": "Chicken"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/lamb-recipes",
+            "slug": "lamb-recipes",
+            "title": "Lamb"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/pork-recipes",
+            "slug": "pork-recipes",
+            "title": "Pork"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/fish-seafood-recipes",
+            "slug": "fish-seafood-recipes",
+            "title": "Seafood"
+          },
+          {
+            "url": "https://www.taste.com.au/cuisine",
+            "slug": "cuisine",
+            "title": "Cuisine"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/australian-recipes",
+            "slug": "australian-recipes",
+            "title": "Australian"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/greek-recipes",
+            "slug": "greek-recipes",
+            "title": "Greek"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/japanese-recipes",
+            "slug": "japanese-recipes",
+            "title": "Japanese"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/mexican-recipes",
+            "slug": "mexican-recipes",
+            "title": "Mexican"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/thai-recipes",
+            "slug": "thai-recipes",
+            "title": "Thai"
+          },
+          {
+            "url": "https://www.taste.com.au/cooking-method",
+            "slug": "cooking-method",
+            "title": "Cooking method"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/air-fryer-recipes",
+            "slug": "air-fryer-recipes",
+            "title": "Air fryer"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/baking-recipes",
+            "slug": "baking-recipes",
+            "title": "Baking"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/barbecue",
+            "slug": "barbecue",
+            "title": "Grill & bbq"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/slow-cooker-recipes",
+            "slug": "slow-cooker-recipes",
+            "title": "Slow cooker"
+          },
+          {
+            "url": "https://www.taste.com.au/occasions",
+            "slug": "occasions",
+            "title": "Occasion"
+          },
+          {
+            "url": "https://www.taste.com.au/pages/taste-best-christmas-recipes",
+            "slug": "taste-best-christmas-recipes",
+            "title": "Christmas"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/kids-party-food",
+            "slug": "kids-party-food",
+            "title": "Birthday & party"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/drink-recipes",
+            "slug": "drink-recipes",
+            "title": "Drinks"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/easy-entertaining",
+            "slug": "easy-entertaining",
+            "title": "Entertaining"
+          },
+          {
+            "url": "https://www.taste.com.au/meal-plans",
+            "slug": "meal-plans",
+            "title": "Meal plans"
+          },
+          {
+            "url": "https://www.taste.com.au/quick-easy",
+            "slug": "quick-easy",
+            "title": "Quick & Easy"
+          },
+          {
+            "url": "https://www.taste.com.au/healthy",
+            "slug": "healthy",
+            "title": "Healthy"
+          },
+          {
+            "url": "https://www.taste.com.au/cheap-tasty",
+            "slug": "cheap-tasty",
+            "title": "Cheap & Tasty"
+          },
+          {
+            "url": "https://www.taste.com.au/top-picks",
+            "slug": "top-picks",
+            "title": "Top Picks"
+          },
+          {
+            "url": "https://www.taste.com.au/taste-test-kitchen",
+            "slug": "taste-test-kitchen",
+            "title": "Test Kitchen"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/air-fryers",
+            "slug": "air-fryers",
+            "title": "Air Fryers"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/blenders-food-processors",
+            "slug": "blenders-food-processors",
+            "title": "Blenders & Food Processors"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/small-appliances",
+            "slug": "small-appliances",
+            "title": "Small Appliances"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/white-goods",
+            "slug": "white-goods",
+            "title": "Fridges, Stoves & Ovens"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/winter-warmers",
+            "slug": "winter-warmers",
+            "title": "Winter Appliances"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/summer-cooking",
+            "slug": "summer-cooking",
+            "title": "Summer Appliances"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/appliance-reviews",
+            "slug": "appliance-reviews",
+            "title": "Appliance Reviews"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/pots-pans",
+            "slug": "pots-pans",
+            "title": "Pots & Pans"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/food-prep",
+            "slug": "food-prep",
+            "title": "Food Prep"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/utensils",
+            "slug": "utensils",
+            "title": "Utensils"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/gadgets",
+            "slug": "gadgets",
+            "title": "Gadgets"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/kitchen-accessories-reviews",
+            "slug": "kitchen-accessories-reviews",
+            "title": "Kitchenware Reviews"
+          },
+          {
+            "url": "https://www.taste.com.au/zones/black-friday",
+            "slug": "black-friday",
+            "title": "Black Friday"
+          },
+          {
+            "url": "https://www.taste.com.au/food-news",
+            "slug": "food-news",
+            "title": "News"
+          },
+          {
+            "url": "https://www.taste.com.au/articles/win/VLd6qEWJ",
+            "slug": "vld6qewj",
+            "title": "Win!"
+          },
+          {
+            "url": "https://www.taste.com.au/articles/taste-publishing-principles-recipe-guidelines/ccmdgzlz",
+            "slug": "ccmdgzlz",
+            "title": "Our Philosophy"
+          },
+          {
+            "url": "https://www.taste.com.au/dinner/galleries/17-secretly-easy-finger-food-recipes-perfect-spring-entertaining/o0hb3vw2",
+            "slug": "o0hb3vw2",
+            "title": "O0hb3vw2"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/football-finals",
+            "slug": "football-finals",
+            "title": "Football Finals"
+          },
+          {
+            "url": "https://www.taste.com.au/dinner/galleries/16-crowd-pleasing-footy-finals-bbq-recipes-score-big-flavour/ubhzfk51",
+            "slug": "ubhzfk51",
+            "title": "Ubhzfk51"
+          },
+          {
+            "url": "https://www.taste.com.au/food-news/coles-releases-crazy-delicious-finger-foods-just-time-finals-season/qleqmzno",
+            "slug": "qleqmzno",
+            "title": "Qleqmzno"
+          },
+          {
+            "url": "https://www.taste.com.au/dinner/galleries/footy-finals-sorted-ultimate-barbecue-sausage-sizzle-feast-just-7-ingredients/2zrcywep",
+            "slug": "2zrcywep",
+            "title": "2zrcywep"
+          },
+          {
+            "url": "https://www.taste.com.au/galleries/best-footy-food-ideas-recipes-watching-grand-final/77vlce8t",
+            "slug": "77vlce8t",
+            "title": "77vlce8t"
+          },
+          {
+            "url": "https://www.taste.com.au/baking/galleries/food-editors-pick-their-favourite-easy-cake-recipes-guests-request-most/jwy2k37f",
+            "slug": "jwy2k37f",
+            "title": "Jwy2k37f"
+          },
+          {
+            "url": "https://www.taste.com.au/galleries/easy-footy-finals-food-ideas-feed-hungry-crowd/a7dj23u2",
+            "slug": "a7dj23u2",
+            "title": "A7dj23u2"
+          },
+          {
+            "url": "https://www.taste.com.au/entertaining/galleries/99-top-ranked-picnic-recipes-arent-sandwiches/rkl34xsu",
+            "slug": "rkl34xsu",
+            "title": "Rkl34xsu"
+          },
+          {
+            "url": "https://www.taste.com.au/baking/galleries/australias-100-most-saved-lemon-dessert-recipes-time-revealed/o36wum3i",
+            "slug": "o36wum3i",
+            "title": "O36wum3i"
+          },
+          {
+            "url": "https://www.taste.com.au/galleries/best-roast-chicken-recipes-crispy-outside-juicy-inside/5cx7ipwl",
+            "slug": "5cx7ipwl",
+            "title": "5cx7ipwl"
+          },
+          {
+            "url": "https://www.taste.com.au/galleries/crispiest-ever-air-fryer-schnitzel-thats-better-than-pubs/z9kes2xo",
+            "slug": "z9kes2xo",
+            "title": "Z9kes2xo"
+          },
+          {
+            "url": "https://www.taste.com.au/galleries/mascarpone-recipes/cyj4xdi0",
+            "slug": "cyj4xdi0",
+            "title": "Cyj4xdi0"
+          },
+          {
+            "url": "https://www.taste.com.au/dinner/galleries/salmon-fillet-recipes/nsaf5mt5",
+            "slug": "nsaf5mt5",
+            "title": "Nsaf5mt5"
+          },
+          {
+            "url": "https://www.taste.com.au/taste-test-kitchen/galleries/best-slow-cooker-dishes-we-tested-winter/i1g3lbz5",
+            "slug": "i1g3lbz5",
+            "title": "I1g3lbz5"
+          },
+          {
+            "url": "https://www.taste.com.au/galleries/best-hasselback-recipes-potato-pork-beyond/jy1zyoop",
+            "slug": "jy1zyoop",
+            "title": "Jy1zyoop"
+          },
+          {
+            "url": "https://www.taste.com.au/baking/galleries/strawberry-jam-recipes/ns9dsynq",
+            "slug": "ns9dsynq",
+            "title": "Ns9dsynq"
+          },
+          {
+            "url": "https://www.taste.com.au/dinner/galleries/marry-me-chicken-recipe-spin-offs-worth-saying/z2y0r0gv",
+            "slug": "z2y0r0gv",
+            "title": "Z2y0r0gv"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/one-pot-creamy-spinach-fetta-zucchini-risoni-recipe/w0lutc23",
+            "slug": "w0lutc23",
+            "title": "W0lutc23"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/5-ingredient-cheesy-mexican-vegetarian-rice-bake-recipe/hxyt4qyx",
+            "slug": "hxyt4qyx",
+            "title": "Hxyt4qyx"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/tomatokeftedes-greek-tomato-fritters-recipe/21f8u46d",
+            "slug": "21f8u46d",
+            "title": "21f8u46d"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/spanakorizo-recipe-greek-spinach-rice/ubdj8c71",
+            "slug": "ubdj8c71",
+            "title": "Ubdj8c71"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/buttery-broccoli-spanakopita-recipe/bsa1qlpi",
+            "slug": "bsa1qlpi",
+            "title": "Bsa1qlpi"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/spinach-lentil-gozleme-inspired-pasta-bake-recipe/5037n9c2",
+            "slug": "5037n9c2",
+            "title": "5037n9c2"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/20-minute-easy-tofu-san-choy-bau/rzdkdh6q",
+            "slug": "rzdkdh6q",
+            "title": "Rzdkdh6q"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/mary-kalifatidis-greek-spinach-pie-recipe/usqkcyta",
+            "slug": "usqkcyta",
+            "title": "Usqkcyta"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/asian-style-okra-stir-fry-recipe/trsxjbsa",
+            "slug": "trsxjbsa",
+            "title": "Trsxjbsa"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/mini-filo-cheese-quiches-recipe/9tynn3ie",
+            "slug": "9tynn3ie",
+            "title": "9tynn3ie"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/cypriot-grain-salad-stuffed-butternut-pumpkin-recipe/mp8i2yqr",
+            "slug": "mp8i2yqr",
+            "title": "Mp8i2yqr"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/beef-recipes",
+            "slug": "beef-recipes",
+            "title": "Beef Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/easy-rice-recipes",
+            "slug": "easy-rice-recipes",
+            "title": "Easy Rice Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/egg-recipes",
+            "slug": "egg-recipes",
+            "title": "Egg Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/potato-recipes",
+            "slug": "potato-recipes",
+            "title": "Potato Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/cheese-recipes",
+            "slug": "cheese-recipes",
+            "title": "Cheese Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/tofu-recipes",
+            "slug": "tofu-recipes",
+            "title": "Tofu Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/italian-recipes",
+            "slug": "italian-recipes",
+            "title": "Italian Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/chinese-recipes",
+            "slug": "chinese-recipes",
+            "title": "Chinese Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/indian-recipes",
+            "slug": "indian-recipes",
+            "title": "Indian Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/french-recipes",
+            "slug": "french-recipes",
+            "title": "French Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/vietnamese-recipes",
+            "slug": "vietnamese-recipes",
+            "title": "Vietnamese Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/malaysian-recipes",
+            "slug": "malaysian-recipes",
+            "title": "Malaysian Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/middle-eastern-recipes",
+            "slug": "middle-eastern-recipes",
+            "title": "Middle Eastern Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/korean-recipes",
+            "slug": "korean-recipes",
+            "title": "Korean Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/easy-turkish-beef-pasta-recipe/ttvoj9q4",
+            "slug": "ttvoj9q4",
+            "title": "Ttvoj9q4"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/quick-french-onion-chicken-pie-recipe/s1vkh68o",
+            "slug": "s1vkh68o",
+            "title": "S1vkh68o"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/one-pot-cheesy-french-onion-meatballs-recipe/glf4kb9d",
+            "slug": "glf4kb9d",
+            "title": "Glf4kb9d"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/5-ingredient-chicken-pie-parmentier-potato-topping-recipe/lht1h9ol",
+            "slug": "lht1h9ol",
+            "title": "Lht1h9ol"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/5-ingredient-cheesy-mexican-stuffed-chicken-breasts-recipe/057vczyg",
+            "slug": "057vczyg",
+            "title": "057vczyg"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/cocktails",
+            "slug": "cocktails",
+            "title": "Cocktails"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/easy-finger-food-recipes",
+            "slug": "easy-finger-food-recipes",
+            "title": "Easy Finger Food Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/dinner-party-recipes",
+            "slug": "dinner-party-recipes",
+            "title": "Dinner Party Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/picnic-recipes",
+            "slug": "picnic-recipes",
+            "title": "Picnic Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/camping-recipes",
+            "slug": "camping-recipes",
+            "title": "Camping Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/morning-afternoon-tea-recipes",
+            "slug": "morning-afternoon-tea-recipes",
+            "title": "Morning Afternoon Tea Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections/winter-recipes",
+            "slug": "winter-recipes",
+            "title": "Winter Recipes"
+          },
+          {
+            "url": "https://www.taste.com.au/menus/coles-7-nights-easy-healthy-dinners/0afqo1nd",
+            "slug": "0afqo1nd",
+            "title": "0afqo1nd"
+          },
+          {
+            "url": "https://www.taste.com.au/healthy/menus/week-500-calorie-family-dinners/71dfpk3x",
+            "slug": "71dfpk3x",
+            "title": "71dfpk3x"
+          },
+          {
+            "url": "https://www.taste.com.au/quick-easy/menus/slow-cooker-menu-plan-week-easy-crockpot-dinners/icn3kuhh",
+            "slug": "icn3kuhh",
+            "title": "Icn3kuhh"
+          },
+          {
+            "url": "https://www.taste.com.au/quick-easy/menus/easy-family-dinners-menu-plan/3y79zi22",
+            "slug": "3y79zi22",
+            "title": "3y79zi22"
+          },
+          {
+            "url": "https://www.taste.com.au/menus/week-prep-ahead-meal-ideas-save-you-time-money/2djj0q1f",
+            "slug": "2djj0q1f",
+            "title": "2djj0q1f"
+          },
+          {
+            "url": "https://www.taste.com.au/menus/savvy-dinner-plan-week-1-back-school-dinners-made-easy/19y3stc4",
+            "slug": "19y3stc4",
+            "title": "19y3stc4"
+          },
+          {
+            "url": "https://www.taste.com.au/articles/taste-au-cookbooks/X9lIG922",
+            "slug": "x9lig922",
+            "title": "X9lig922"
+          },
+          {
+            "url": "https://www.taste.com.au/recipes/collections",
+            "slug": "collections",
+            "title": "Get our very latest recipes: browse all taste recipe collections"
+          },
+          {
+            "url": "https://www.taste.com.au/articles/affiliate-content/er1ynv6f",
+            "slug": "er1ynv6f",
+            "title": "Learn more."
+          },
+          {
+            "url": "https://www.taste.com.au/our-team",
+            "slug": "our-team",
+            "title": "About us"
+          },
+          {
+            "url": "https://www.taste.com.au/articles/frequently-asked-questions-faqs/Yz98CQPR",
+            "slug": "yz98cqpr",
+            "title": "Yz98cqpr"
+          },
+          {
+            "url": "https://www.taste.com.au/articles/legal-notices/MUfw5jyc",
+            "slug": "mufw5jyc",
+            "title": "Terms of Use"
+          },
+          {
+            "url": "https://www.taste.com.au/articles/code-conduct/xk5x2inm",
+            "slug": "xk5x2inm",
+            "title": "Code of conduct"
+          }
+        ]
+      },
+      "https://www.recipetineats.com/recipes/": {
+        "count": 29,
+        "crawledAt": "2026-09-22T06:50:03.762Z",
+        "discovered": [
+          {
+            "url": "https://www.recipetineats.com/cookbooks/",
+            "slug": "cookbooks",
+            "title": "My cookbooks!"
+          },
+          {
+            "url": "https://www.recipetineats.com/chicken-mince-recipes-ground-chicken/",
+            "slug": "chicken-mince-recipes-ground-chicken",
+            "title": "Chicken mince"
+          },
+          {
+            "url": "https://www.recipetineats.com/nagi-recipetin-eats/",
+            "slug": "nagi-recipetin-eats",
+            "title": "About"
+          },
+          {
+            "url": "https://www.recipetineats.com/tonight-cookbook/",
+            "slug": "tonight-cookbook",
+            "title": "Tonight (NEW!)"
+          },
+          {
+            "url": "https://www.recipetineats.com/dinner-cookbook/",
+            "slug": "dinner-cookbook",
+            "title": "Dinner"
+          },
+          {
+            "url": "https://www.recipetineats.com/free-recipe-books/",
+            "slug": "free-recipe-books",
+            "title": "Free Recipe Books"
+          },
+          {
+            "url": "https://www.recipetineats.com/policy-use-of-recipes-images/",
+            "slug": "policy-use-of-recipes-images",
+            "title": "Policy: Use of Recipes &#038; Images"
+          },
+          {
+            "url": "https://www.recipetineats.com/aglio-e-olio-garlic-spaghetti/",
+            "slug": "aglio-e-olio-garlic-spaghetti",
+            "title": "Aglio E Olio Garlic Spaghetti"
+          },
+          {
+            "url": "https://www.recipetineats.com/monster-cookies-recipe/",
+            "slug": "monster-cookies-recipe",
+            "title": "Monster Cookies Recipe"
+          },
+          {
+            "url": "https://www.recipetineats.com/nagis-everyday-kale-side-salad/",
+            "slug": "nagis-everyday-kale-side-salad",
+            "title": "Nagis Everyday Kale Side Salad"
+          },
+          {
+            "url": "https://www.recipetineats.com/one-pan-mongolian-beef-noodles-with-broccoli/",
+            "slug": "one-pan-mongolian-beef-noodles-with-broccoli",
+            "title": "One Pan Mongolian Beef Noodles With Broccoli"
+          },
+          {
+            "url": "https://www.recipetineats.com/cheesy-zucchini-muffins/",
+            "slug": "cheesy-zucchini-muffins",
+            "title": "Cheesy Zucchini Muffins"
+          },
+          {
+            "url": "https://www.recipetineats.com/mayonnaise-recipe/",
+            "slug": "mayonnaise-recipe",
+            "title": "Mayonnaise Recipe"
+          },
+          {
+            "url": "https://www.recipetineats.com/fish-en-papillote-recipe/",
+            "slug": "fish-en-papillote-recipe",
+            "title": "Fish En Papillote Recipe"
+          },
+          {
+            "url": "https://www.recipetineats.com/white-chocolate-raspberry-muffins/",
+            "slug": "white-chocolate-raspberry-muffins",
+            "title": "White Chocolate Raspberry Muffins"
+          },
+          {
+            "url": "https://www.recipetineats.com/dirty-martini/",
+            "slug": "dirty-martini",
+            "title": "Dirty Martini"
+          },
+          {
+            "url": "https://www.recipetineats.com/one-pan-portuguese-chicken-and-potato-bake/",
+            "slug": "one-pan-portuguese-chicken-and-potato-bake",
+            "title": "One Pan Portuguese Chicken And Potato Bake"
+          },
+          {
+            "url": "https://www.recipetineats.com/mushroom-ragu-pasta-recipe/",
+            "slug": "mushroom-ragu-pasta-recipe",
+            "title": "Mushroom Ragu Pasta Recipe"
+          },
+          {
+            "url": "https://www.recipetineats.com/mediterranean-cucumber-salad/",
+            "slug": "mediterranean-cucumber-salad",
+            "title": "Mediterranean Cucumber Salad"
+          },
+          {
+            "url": "https://www.recipetineats.com/satay-chicken-legs-with-peanut-sauce/",
+            "slug": "satay-chicken-legs-with-peanut-sauce",
+            "title": "Satay Chicken Legs With Peanut Sauce"
+          },
+          {
+            "url": "https://www.recipetineats.com/choc-chip-peanut-butter-cookies/",
+            "slug": "choc-chip-peanut-butter-cookies",
+            "title": "Choc Chip Peanut Butter Cookies"
+          },
+          {
+            "url": "https://www.recipetineats.com/broccoli-wedge-salad/",
+            "slug": "broccoli-wedge-salad",
+            "title": "Broccoli Wedge Salad"
+          },
+          {
+            "url": "https://www.recipetineats.com/fresh-basil-vinaigrette/",
+            "slug": "fresh-basil-vinaigrette",
+            "title": "Fresh Basil Vinaigrette"
+          },
+          {
+            "url": "https://www.recipetineats.com/beef-rice-noodles/",
+            "slug": "beef-rice-noodles",
+            "title": "Beef Rice Noodles"
+          },
+          {
+            "url": "https://www.recipetineats.com/tartiflette-recipe/",
+            "slug": "tartiflette-recipe",
+            "title": "Tartiflette Recipe"
+          },
+          {
+            "url": "https://www.recipetineats.com/slow-cooker-beef-stew/",
+            "slug": "slow-cooker-beef-stew",
+            "title": "Slow Cooker Beef Stew"
+          },
+          {
+            "url": "https://www.recipetineats.com/raspberry-tartlets-recipe/",
+            "slug": "raspberry-tartlets-recipe",
+            "title": "Raspberry Tartlets Recipe"
+          },
+          {
+            "url": "https://www.recipetineats.com/dozer-the-golden-retriever-dog/",
+            "slug": "dozer-the-golden-retriever-dog",
+            "title": "Meet Dozer"
+          },
+          {
+            "url": "https://www.recipetineats.com/recipetin-meals/",
+            "slug": "recipetin-meals",
+            "title": "RecipeTin Meals"
+          }
+        ]
+      }
+    },
     "enableVoiceInteraction": true
   },
-  "maintenanceMode": false,
-  "siteDescription": "Smart Meal Planning & Recipe Assistant",
-  "allowRegistration": true,
-  "chefQuestionnaire": [
-    "How many days would you like to plan for (up to 7 days)?",
-    "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
-    "When would you like the meal plan to start (today, tomorrow, or a specific date)?",
-    "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
-    "What is your approximate ingredient budget per serving?"
+  "recommendedRecipeUrls": [
+    "https://www.recipetineats.com/recipes/",
+    "https://www.taste.com.au/recipes"
   ],
-  "subscriptionPlans": [
-    {
-      "id": "preset_taster",
-      "name": "Taster",
-      "slug": "taster",
-      "isFree": true,
-      "features": [
-        "Create up to 5 AI-powered recipes per month",
-        "Personal recipe library (25 total recipes)",
-        "Smart ingredient repurposing",
-        "Automated shopping list creation",
-        "Direct online grocery shopping links",
-        "Meal planner",
-        "Ingredient photo recognition"
+  "value": {
+    "aiModel": "gemini-3.6-flash",
+    "taxRate": 0,
+    "currency": "USD",
+    "fontSize": "16px",
+    "siteName": "Zecratary",
+    "font_size": "16px",
+    "updatedAt": "2026-09-18T08:24:02.536Z",
+    "aiProvider": "gemini",
+    "fontFamily": "Inter",
+    "font_family": "Inter",
+    "recipeTypes": [
+      "Breakfast",
+      "Lunch",
+      "Dinner",
+      "Snack",
+      "Dessert",
+      "Beverage",
+      "Appetizer",
+      "Salad",
+      "Soup",
+      "Side Dish",
+      "Baking"
+    ],
+    "socialLogin": {
+      "updatedAt": "2026-09-18T12:28:40.488Z",
+      "appleKeyId": "",
+      "appleTeamId": "",
+      "appleEnabled": false,
+      "appleClientId": "",
+      "facebookAppId": "",
+      "googleEnabled": true,
+      "googleClientId": "479443923058-jeajhc080ad3kb0b57ighm8k101ip7q6.apps.googleusercontent.com",
+      "facebookEnabled": false,
+      "facebookClientId": "",
+      "facebookAppSecret": "",
+      "googleClientSecret": "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",
+      "facebookClientSecret": "",
+      "allowSocialRegistration": true,
+      "requireEmailVerification": true
+    },
+    "themeColors": {
+      "accent": "#a855f7",
+      "primary": "#38bdf8",
+      "cardBorder": "#172554",
+      "accentColor": "#a855f7",
+      "sidebarIcon": "#38bdf8",
+      "primaryColor": "#38bdf8",
+      "primaryHover": "#0284c7",
+      "accentEmerald": "#a855f7",
+      "textSecondary": "#7dd3fc",
+      "backgroundDark": "#020617",
+      "cardBackground": "#080e22",
+      "backgroundColor": "#020617",
+      "sidebarIconColor": "#38bdf8"
+    },
+    "faviconEmoji": "🍳",
+    "faviconImage": "",
+    "theme_colors": {
+      "accent": "#a855f7",
+      "primary": "#38bdf8",
+      "cardBorder": "#172554",
+      "accentColor": "#a855f7",
+      "sidebarIcon": "#38bdf8",
+      "primaryColor": "#38bdf8",
+      "primaryHover": "#0284c7",
+      "accentEmerald": "#a855f7",
+      "textSecondary": "#7dd3fc",
+      "backgroundDark": "#020617",
+      "cardBackground": "#080e22",
+      "backgroundColor": "#020617",
+      "sidebarIconColor": "#38bdf8"
+    },
+    "titlebarEmoji": "🍳",
+    "titlebarImage": "",
+    "chefAiSettings": {
+      "model": "gemini-3.6-flash",
+      "apiKey": "AQ.Ab8RN6IV413r-my3ha0UekHmrrFtKz1f9il12r2QUqnVh7pisg",
+      "provider": "gemini",
+      "sections": [
+        {
+          "id": "sec_core",
+          "enabled": true,
+          "questions": [
+            "How many days would you like to plan for (up to 7 days)?",
+            "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+            "When would you like the meal plan to start (today, tomorrow, or a specific date)?"
+          ],
+          "topicTitle": "Core Meal Plan Logistics",
+          "description": "Basic duration, meal types, and start dates for the multi-day plan."
+        },
+        {
+          "id": "sec_pref",
+          "enabled": true,
+          "questions": [
+            "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+            "What is your approximate ingredient budget per serving?"
+          ],
+          "topicTitle": "Dietary Preferences & Budget",
+          "description": "Themes, nutritional restrictions, and financial target per serving."
+        }
       ],
-      "isDefault": true,
-      "updatedAt": "2026-09-16T08:22:09.057Z",
-      "buttonText": "Manage",
-      "tokenLimit": 500,
-      "trialBadge": "",
-      "annualBadge": "",
-      "featuresText": "Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition",
-      "monthlyBadge": "",
-      "aiRecipeLimit": 5,
-      "canViewMacros": false,
-      "allowedAiModels": "gemini-3.5-flash-lite,gpt-3.5-turbo",
-      "descriptionAnnual": "Free tier with limited features",
-      "socialScrapeLimit": 5,
-      "annualPriceDollars": 0,
-      "descriptionMonthly": "Free tier with limited features",
-      "recipeLibraryLimit": 25,
-      "monthlyPriceDollars": 0,
-      "tokenReimburseFrequency": "monthly"
-    }
-  ],
-  "supportedLanguages": [
-    {
-      "code": "en",
-      "flag": "🇺🇸",
-      "name": "English",
-      "status": "active",
-      "direction": "ltr",
-      "isDefault": true,
-      "nativeName": "English",
-      "lastUpdated": "2026-09-18T10:38:26.048Z"
+      "maxTokens": 4096,
+      "updatedAt": "2026-09-22T07:29:35.310Z",
+      "voiceSpeed": 1,
+      "maxPlanDays": 7,
+      "temperature": 0.7,
+      "voiceEngine": "version2",
+      "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize Recommended Recipes Url. ultimately you must guide user to create recipe, and make plan for each recipe.",
+      "voiceAutoPlay": false,
+      "enableWebSearch": true,
+      "filterWordsList": [
+        "Artificial preservatives"
+      ],
+      "knowledgeBaseList": [
+        "Culinary Masterclass DB v2",
+        "Nutritional Guidelines 2026"
+      ],
+      "resultDisplayMode": "card",
+      "selectedVoiceName": "en-US-Neural2-F",
+      "enablePantryContext": true,
+      "customVocabularyList": [
+        "Umami"
+      ],
+      "availableGeminiModels": [
+        {
+          "id": "gemini-2.5-flash",
+          "name": "Gemini 2.5 Flash",
+          "label": "Gemini 2.5 Flash (gemini-2.5-flash)",
+          "description": "Stable version of Gemini 2.5 Flash, our mid-size multimodal model that supports up to 1 million tokens, released in June of 2025."
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "name": "Gemini 2.5 Pro",
+          "label": "Gemini 2.5 Pro (gemini-2.5-pro)",
+          "description": "Stable release (June 17th, 2025) of Gemini 2.5 Pro"
+        },
+        {
+          "id": "gemini-2.5-flash-preview-tts",
+          "name": "Gemini 2.5 Flash Preview TTS",
+          "label": "Gemini 2.5 Flash Preview TTS (gemini-2.5-flash-preview-tts)",
+          "description": "Gemini 2.5 Flash Preview TTS"
+        },
+        {
+          "id": "gemini-2.5-pro-preview-tts",
+          "name": "Gemini 2.5 Pro Preview TTS",
+          "label": "Gemini 2.5 Pro Preview TTS (gemini-2.5-pro-preview-tts)",
+          "description": "Gemini 2.5 Pro Preview TTS"
+        },
+        {
+          "id": "gemma-4-26b-a4b-it",
+          "name": "Gemma 4 26B A4B IT",
+          "label": "Gemma 4 26B A4B IT (gemma-4-26b-a4b-it)",
+          "description": "Gemma 4 26B A4B IT"
+        },
+        {
+          "id": "gemma-4-31b-it",
+          "name": "Gemma 4 31B IT",
+          "label": "Gemma 4 31B IT (gemma-4-31b-it)",
+          "description": "Gemma 4 31B IT"
+        },
+        {
+          "id": "gemini-flash-latest",
+          "name": "Gemini Flash Latest",
+          "label": "Gemini Flash Latest (gemini-flash-latest)",
+          "description": "Latest release of Gemini Flash"
+        },
+        {
+          "id": "gemini-flash-lite-latest",
+          "name": "Gemini Flash-Lite Latest",
+          "label": "Gemini Flash-Lite Latest (gemini-flash-lite-latest)",
+          "description": "Latest release of Gemini Flash-Lite"
+        },
+        {
+          "id": "gemini-pro-latest",
+          "name": "Gemini Pro Latest",
+          "label": "Gemini Pro Latest (gemini-pro-latest)",
+          "description": "Latest release of Gemini Pro"
+        },
+        {
+          "id": "gemini-2.5-flash-lite",
+          "name": "Gemini 2.5 Flash-Lite",
+          "label": "Gemini 2.5 Flash-Lite (gemini-2.5-flash-lite)",
+          "description": "Stable version of Gemini 2.5 Flash-Lite, released in July of 2025"
+        },
+        {
+          "id": "gemini-2.5-flash-image",
+          "name": "Nano Banana",
+          "label": "Nano Banana (gemini-2.5-flash-image)",
+          "description": "Gemini 2.5 Flash Preview Image"
+        },
+        {
+          "id": "gemini-3-flash-preview",
+          "name": "Gemini 3 Flash Preview",
+          "label": "Gemini 3 Flash Preview (gemini-3-flash-preview)",
+          "description": "Gemini 3 Flash Preview"
+        },
+        {
+          "id": "gemini-3.1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "label": "Gemini 3.1 Pro Preview (gemini-3.1-pro-preview)",
+          "description": "Gemini 3.1 Pro Preview"
+        },
+        {
+          "id": "gemini-3.1-pro-preview-customtools",
+          "name": "Gemini 3.1 Pro Preview Custom Tools",
+          "label": "Gemini 3.1 Pro Preview Custom Tools (gemini-3.1-pro-preview-customtools)",
+          "description": "Gemini 3.1 Pro Preview optimized for custom tool usage"
+        },
+        {
+          "id": "gemini-3.1-flash-lite-preview",
+          "name": "Gemini 3.1 Flash Lite Preview",
+          "label": "Gemini 3.1 Flash Lite Preview (gemini-3.1-flash-lite-preview)",
+          "description": "Gemini 3.1 Flash Lite Preview"
+        },
+        {
+          "id": "gemini-3.1-flash-lite",
+          "name": "Gemini 3.1 Flash Lite",
+          "label": "Gemini 3.1 Flash Lite (gemini-3.1-flash-lite)",
+          "description": "Gemini 3.1 Flash Lite"
+        },
+        {
+          "id": "gemini-3-pro-image-preview",
+          "name": "Nano Banana Pro",
+          "label": "Nano Banana Pro (gemini-3-pro-image-preview)",
+          "description": "Gemini 3 Pro Image Preview"
+        },
+        {
+          "id": "gemini-3-pro-image",
+          "name": "Nano Banana Pro",
+          "label": "Nano Banana Pro (gemini-3-pro-image)",
+          "description": "Gemini 3 Pro Image"
+        },
+        {
+          "id": "nano-banana-pro-preview",
+          "name": "Nano Banana Pro",
+          "label": "Nano Banana Pro (nano-banana-pro-preview)",
+          "description": "Gemini 3 Pro Image Preview"
+        },
+        {
+          "id": "gemini-3.1-flash-image-preview",
+          "name": "Nano Banana 2",
+          "label": "Nano Banana 2 (gemini-3.1-flash-image-preview)",
+          "description": "Gemini 3.1 Flash Image Preview."
+        },
+        {
+          "id": "gemini-3.1-flash-image",
+          "name": "Nano Banana 2",
+          "label": "Nano Banana 2 (gemini-3.1-flash-image)",
+          "description": "Gemini 3.1 Flash Image."
+        },
+        {
+          "id": "gemini-3.1-flash-lite-image",
+          "name": "Nano Banana 2 Lite",
+          "label": "Nano Banana 2 Lite (gemini-3.1-flash-lite-image)",
+          "description": "Gemini 3.1 Flash Lite Image."
+        },
+        {
+          "id": "gemini-3.5-flash",
+          "name": "Gemini 3.5 Flash",
+          "label": "Gemini 3.5 Flash (gemini-3.5-flash)",
+          "description": "Gemini 3.5 Flash"
+        },
+        {
+          "id": "gemini-3.5-flash-lite",
+          "name": "Gemini 3.5 Flash Lite",
+          "label": "Gemini 3.5 Flash Lite (gemini-3.5-flash-lite)",
+          "description": "Gemini 3.5 Flash Lite"
+        },
+        {
+          "id": "gemini-omni-flash-preview",
+          "name": "Gemini Omni Flash Preview",
+          "label": "Gemini Omni Flash Preview (gemini-omni-flash-preview)",
+          "description": "Gemini Omni Flash Preview"
+        },
+        {
+          "id": "gemini-omni-1.1-flash",
+          "name": "Gemini Omni 1.1 Flash",
+          "label": "Gemini Omni 1.1 Flash (gemini-omni-1.1-flash)",
+          "description": "Gemini Omni 1.1 Flash "
+        },
+        {
+          "id": "gemini-3.5-transcribe",
+          "name": "Gemini 3.5 Transcribe",
+          "label": "Gemini 3.5 Transcribe (gemini-3.5-transcribe)",
+          "description": "Gemini 3.5 Transcribe"
+        },
+        {
+          "id": "gemini-3.6-flash",
+          "name": "Gemini 3.6 Flash",
+          "label": "Gemini 3.6 Flash (gemini-3.6-flash)",
+          "description": "Gemini 3.6 Flash"
+        },
+        {
+          "id": "gemini-3.7-flash",
+          "name": "Gemini 3.7 Flash",
+          "label": "Gemini 3.7 Flash (gemini-3.7-flash)",
+          "description": "Gemini 3.7 Flash"
+        },
+        {
+          "id": "gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
+          "label": "Gemini 3.8 Flash (gemini-3.8-flash)",
+          "description": "Gemini 3.8 Flash"
+        },
+        {
+          "id": "lyria-3-clip-preview",
+          "name": "Lyria 3 Clip Preview",
+          "label": "Lyria 3 Clip Preview (lyria-3-clip-preview)",
+          "description": "Lyria 3 30s model Preview"
+        },
+        {
+          "id": "lyria-3-pro-preview",
+          "name": "Lyria 3 Pro Preview",
+          "label": "Lyria 3 Pro Preview (lyria-3-pro-preview)",
+          "description": "Lyria 3 Pro Preview"
+        },
+        {
+          "id": "lyria-3.5",
+          "name": "Lyria 3.5",
+          "label": "Lyria 3.5 (lyria-3.5)",
+          "description": "Music Generation model"
+        },
+        {
+          "id": "gemini-3.1-flash-tts-preview",
+          "name": "Gemini 3.1 Flash TTS Preview",
+          "label": "Gemini 3.1 Flash TTS Preview (gemini-3.1-flash-tts-preview)",
+          "description": "Gemini 3.1 Flash TTS Preview"
+        },
+        {
+          "id": "gemini-robotics-er-2-preview",
+          "name": "Gemini Robotics-ER 2 Preview",
+          "label": "Gemini Robotics-ER 2 Preview (gemini-robotics-er-2-preview)",
+          "description": "Gemini Robotics-ER 2 Preview"
+        },
+        {
+          "id": "gemini-2.5-computer-use-preview-10-2025",
+          "name": "Gemini 2.5 Computer Use Preview 10-2025",
+          "label": "Gemini 2.5 Computer Use Preview 10-2025 (gemini-2.5-computer-use-preview-10-2025)",
+          "description": "Gemini 2.5 Computer Use Preview 10-2025"
+        },
+        {
+          "id": "antigravity-preview-05-2026",
+          "name": "Antigravity Agent Preview",
+          "label": "Antigravity Agent Preview (antigravity-preview-05-2026)",
+          "description": "Preview release of Antigravity Agent (05-2026)"
+        },
+        {
+          "id": "antigravity-preview-09-2026",
+          "name": "Antigravity Agent Preview",
+          "label": "Antigravity Agent Preview (antigravity-preview-09-2026)",
+          "description": "Preview release of Antigravity Agent (09-2026)"
+        },
+        {
+          "id": "antigravity-preview-latest",
+          "name": "Antigravity Agent Preview Latest",
+          "label": "Antigravity Agent Preview Latest (antigravity-preview-latest)",
+          "description": "Latest preview release of Antigravity Agent"
+        },
+        {
+          "id": "deep-research-max-preview-04-2026",
+          "name": "Deep Research Max Preview (Apr-21-2026)",
+          "label": "Deep Research Max Preview (Apr-21-2026) (deep-research-max-preview-04-2026)",
+          "description": "Preview release (April 21st, 2026) of Deep Research Max"
+        },
+        {
+          "id": "deep-research-preview-04-2026",
+          "name": "Deep Research Preview (Apr-21-2026)",
+          "label": "Deep Research Preview (Apr-21-2026) (deep-research-preview-04-2026)",
+          "description": "Preview release (April 21th, 2026) of Deep Research"
+        },
+        {
+          "id": "deep-research-pro-preview-12-2025",
+          "name": "Deep Research Pro Preview (Dec-12-2025)",
+          "label": "Deep Research Pro Preview (Dec-12-2025) (deep-research-pro-preview-12-2025)",
+          "description": "Preview release (December 12th, 2025) of Deep Research Pro"
+        }
+      ],
+      "availableOpenAiModels": [
+        {
+          "id": "gpt-4o",
+          "name": "GPT-4o",
+          "label": "GPT-4o (Omni High Intelligence)"
+        },
+        {
+          "id": "gpt-4o-mini",
+          "name": "GPT-4o Mini",
+          "label": "GPT-4o Mini (Fast & Cost-Efficient)"
+        },
+        {
+          "id": "gpt-4-turbo",
+          "name": "GPT-4 Turbo",
+          "label": "GPT-4 Turbo (High Capacity)"
+        },
+        {
+          "id": "gpt-3.5-turbo",
+          "name": "GPT-3.5 Turbo",
+          "label": "GPT-3.5 Turbo (High Speed)"
+        }
+      ],
+      "recommendedRecipeUrls": [
+        "https://www.recipetineats.com/recipes/",
+        "https://www.taste.com.au/recipes"
+      ],
+      "strictDietEnforcement": true,
+      "discoveredRecipesCache": {
+        "https://www.taste.com.au/recipes": {
+          "count": 130,
+          "crawledAt": "2026-09-22T06:50:10.993Z",
+          "discovered": [
+            {
+              "url": "https://www.taste.com.au/recipes/crispy-quinoa-salad-recipe/yvzc6l2h",
+              "slug": "yvzc6l2h",
+              "title": "Crispy quinoa salad"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/creamy-french-onion-chicken-bacon-lasagne-recipe/ydnyqih1",
+              "slug": "ydnyqih1",
+              "title": "Creamy French onion chicken and bacon lasagne"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/air-fryer-crispy-rice-prawn-salad-recipe/g1yiy8ag",
+              "slug": "g1yiy8ag",
+              "title": "Air fryer crispy rice and prawn salad"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/easy-butter-chicken-rissoles-recipe/sr8x1jns",
+              "slug": "sr8x1jns",
+              "title": "Easy butter chicken rissoles"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/marry-me-stuffed-chicken-breasts-recipe/p42hykjp",
+              "slug": "p42hykjp",
+              "title": "'Marry me' stuffed chicken breasts"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/5-ingredient-mediterranean-vegetable-bake-recipe/5t69vf0h",
+              "slug": "5t69vf0h",
+              "title": "5-ingredient Mediterranean vegetable bake"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/air-fryer-chicken-breast-tacos-recipe/ytmp61rf",
+              "slug": "ytmp61rf",
+              "title": "Air fryer chicken breast tacos"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/slow-cooker-sticky-korean-bbq-beef-brisket-recipe/vdx9ywl3",
+              "slug": "vdx9ywl3",
+              "title": "Slow cooker sticky Korean BBQ beef brisket"
+            },
+            {
+              "url": "https://www.taste.com.au/meal-types",
+              "slug": "meal-types",
+              "title": "Meal type"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner",
+              "slug": "dinner",
+              "title": "Dinner"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/breakfast-recipes",
+              "slug": "breakfast-recipes",
+              "title": "Breakfast"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/lunch-recipes",
+              "slug": "lunch-recipes",
+              "title": "Lunch & light meals"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/salad-recipes",
+              "slug": "salad-recipes",
+              "title": "Salads"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/dessert-recipes",
+              "slug": "dessert-recipes",
+              "title": "Desserts"
+            },
+            {
+              "url": "https://www.taste.com.au/diet",
+              "slug": "diet",
+              "title": "Diet"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/gluten-free",
+              "slug": "gluten-free",
+              "title": "Gluten-free"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/high-protein-recipes",
+              "slug": "high-protein-recipes",
+              "title": "Protein"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/vegan-recipes",
+              "slug": "vegan-recipes",
+              "title": "Vegan"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/vegetarian-recipes",
+              "slug": "vegetarian-recipes",
+              "title": "Vegetarian"
+            },
+            {
+              "url": "https://www.taste.com.au/ingredients",
+              "slug": "ingredients",
+              "title": "Ingredient"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/chicken-recipes",
+              "slug": "chicken-recipes",
+              "title": "Chicken"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/lamb-recipes",
+              "slug": "lamb-recipes",
+              "title": "Lamb"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/pork-recipes",
+              "slug": "pork-recipes",
+              "title": "Pork"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/fish-seafood-recipes",
+              "slug": "fish-seafood-recipes",
+              "title": "Seafood"
+            },
+            {
+              "url": "https://www.taste.com.au/cuisine",
+              "slug": "cuisine",
+              "title": "Cuisine"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/australian-recipes",
+              "slug": "australian-recipes",
+              "title": "Australian"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/greek-recipes",
+              "slug": "greek-recipes",
+              "title": "Greek"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/japanese-recipes",
+              "slug": "japanese-recipes",
+              "title": "Japanese"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/mexican-recipes",
+              "slug": "mexican-recipes",
+              "title": "Mexican"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/thai-recipes",
+              "slug": "thai-recipes",
+              "title": "Thai"
+            },
+            {
+              "url": "https://www.taste.com.au/cooking-method",
+              "slug": "cooking-method",
+              "title": "Cooking method"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/air-fryer-recipes",
+              "slug": "air-fryer-recipes",
+              "title": "Air fryer"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/baking-recipes",
+              "slug": "baking-recipes",
+              "title": "Baking"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/barbecue",
+              "slug": "barbecue",
+              "title": "Grill & bbq"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/slow-cooker-recipes",
+              "slug": "slow-cooker-recipes",
+              "title": "Slow cooker"
+            },
+            {
+              "url": "https://www.taste.com.au/occasions",
+              "slug": "occasions",
+              "title": "Occasion"
+            },
+            {
+              "url": "https://www.taste.com.au/pages/taste-best-christmas-recipes",
+              "slug": "taste-best-christmas-recipes",
+              "title": "Christmas"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/kids-party-food",
+              "slug": "kids-party-food",
+              "title": "Birthday & party"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/drink-recipes",
+              "slug": "drink-recipes",
+              "title": "Drinks"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/easy-entertaining",
+              "slug": "easy-entertaining",
+              "title": "Entertaining"
+            },
+            {
+              "url": "https://www.taste.com.au/meal-plans",
+              "slug": "meal-plans",
+              "title": "Meal plans"
+            },
+            {
+              "url": "https://www.taste.com.au/quick-easy",
+              "slug": "quick-easy",
+              "title": "Quick & Easy"
+            },
+            {
+              "url": "https://www.taste.com.au/healthy",
+              "slug": "healthy",
+              "title": "Healthy"
+            },
+            {
+              "url": "https://www.taste.com.au/cheap-tasty",
+              "slug": "cheap-tasty",
+              "title": "Cheap & Tasty"
+            },
+            {
+              "url": "https://www.taste.com.au/top-picks",
+              "slug": "top-picks",
+              "title": "Top Picks"
+            },
+            {
+              "url": "https://www.taste.com.au/taste-test-kitchen",
+              "slug": "taste-test-kitchen",
+              "title": "Test Kitchen"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/air-fryers",
+              "slug": "air-fryers",
+              "title": "Air Fryers"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/blenders-food-processors",
+              "slug": "blenders-food-processors",
+              "title": "Blenders & Food Processors"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/small-appliances",
+              "slug": "small-appliances",
+              "title": "Small Appliances"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/white-goods",
+              "slug": "white-goods",
+              "title": "Fridges, Stoves & Ovens"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/winter-warmers",
+              "slug": "winter-warmers",
+              "title": "Winter Appliances"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/summer-cooking",
+              "slug": "summer-cooking",
+              "title": "Summer Appliances"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/appliance-reviews",
+              "slug": "appliance-reviews",
+              "title": "Appliance Reviews"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/pots-pans",
+              "slug": "pots-pans",
+              "title": "Pots & Pans"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/food-prep",
+              "slug": "food-prep",
+              "title": "Food Prep"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/utensils",
+              "slug": "utensils",
+              "title": "Utensils"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/gadgets",
+              "slug": "gadgets",
+              "title": "Gadgets"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/kitchen-accessories-reviews",
+              "slug": "kitchen-accessories-reviews",
+              "title": "Kitchenware Reviews"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/black-friday",
+              "slug": "black-friday",
+              "title": "Black Friday"
+            },
+            {
+              "url": "https://www.taste.com.au/food-news",
+              "slug": "food-news",
+              "title": "News"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/win/VLd6qEWJ",
+              "slug": "vld6qewj",
+              "title": "Win!"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/taste-publishing-principles-recipe-guidelines/ccmdgzlz",
+              "slug": "ccmdgzlz",
+              "title": "Our Philosophy"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner/galleries/17-secretly-easy-finger-food-recipes-perfect-spring-entertaining/o0hb3vw2",
+              "slug": "o0hb3vw2",
+              "title": "O0hb3vw2"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/football-finals",
+              "slug": "football-finals",
+              "title": "Football Finals"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner/galleries/16-crowd-pleasing-footy-finals-bbq-recipes-score-big-flavour/ubhzfk51",
+              "slug": "ubhzfk51",
+              "title": "Ubhzfk51"
+            },
+            {
+              "url": "https://www.taste.com.au/food-news/coles-releases-crazy-delicious-finger-foods-just-time-finals-season/qleqmzno",
+              "slug": "qleqmzno",
+              "title": "Qleqmzno"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner/galleries/footy-finals-sorted-ultimate-barbecue-sausage-sizzle-feast-just-7-ingredients/2zrcywep",
+              "slug": "2zrcywep",
+              "title": "2zrcywep"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/best-footy-food-ideas-recipes-watching-grand-final/77vlce8t",
+              "slug": "77vlce8t",
+              "title": "77vlce8t"
+            },
+            {
+              "url": "https://www.taste.com.au/baking/galleries/food-editors-pick-their-favourite-easy-cake-recipes-guests-request-most/jwy2k37f",
+              "slug": "jwy2k37f",
+              "title": "Jwy2k37f"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/easy-footy-finals-food-ideas-feed-hungry-crowd/a7dj23u2",
+              "slug": "a7dj23u2",
+              "title": "A7dj23u2"
+            },
+            {
+              "url": "https://www.taste.com.au/entertaining/galleries/99-top-ranked-picnic-recipes-arent-sandwiches/rkl34xsu",
+              "slug": "rkl34xsu",
+              "title": "Rkl34xsu"
+            },
+            {
+              "url": "https://www.taste.com.au/baking/galleries/australias-100-most-saved-lemon-dessert-recipes-time-revealed/o36wum3i",
+              "slug": "o36wum3i",
+              "title": "O36wum3i"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/best-roast-chicken-recipes-crispy-outside-juicy-inside/5cx7ipwl",
+              "slug": "5cx7ipwl",
+              "title": "5cx7ipwl"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/crispiest-ever-air-fryer-schnitzel-thats-better-than-pubs/z9kes2xo",
+              "slug": "z9kes2xo",
+              "title": "Z9kes2xo"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/mascarpone-recipes/cyj4xdi0",
+              "slug": "cyj4xdi0",
+              "title": "Cyj4xdi0"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner/galleries/salmon-fillet-recipes/nsaf5mt5",
+              "slug": "nsaf5mt5",
+              "title": "Nsaf5mt5"
+            },
+            {
+              "url": "https://www.taste.com.au/taste-test-kitchen/galleries/best-slow-cooker-dishes-we-tested-winter/i1g3lbz5",
+              "slug": "i1g3lbz5",
+              "title": "I1g3lbz5"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/best-hasselback-recipes-potato-pork-beyond/jy1zyoop",
+              "slug": "jy1zyoop",
+              "title": "Jy1zyoop"
+            },
+            {
+              "url": "https://www.taste.com.au/baking/galleries/strawberry-jam-recipes/ns9dsynq",
+              "slug": "ns9dsynq",
+              "title": "Ns9dsynq"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner/galleries/marry-me-chicken-recipe-spin-offs-worth-saying/z2y0r0gv",
+              "slug": "z2y0r0gv",
+              "title": "Z2y0r0gv"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/one-pot-creamy-spinach-fetta-zucchini-risoni-recipe/w0lutc23",
+              "slug": "w0lutc23",
+              "title": "W0lutc23"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/5-ingredient-cheesy-mexican-vegetarian-rice-bake-recipe/hxyt4qyx",
+              "slug": "hxyt4qyx",
+              "title": "Hxyt4qyx"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/tomatokeftedes-greek-tomato-fritters-recipe/21f8u46d",
+              "slug": "21f8u46d",
+              "title": "21f8u46d"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/spanakorizo-recipe-greek-spinach-rice/ubdj8c71",
+              "slug": "ubdj8c71",
+              "title": "Ubdj8c71"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/buttery-broccoli-spanakopita-recipe/bsa1qlpi",
+              "slug": "bsa1qlpi",
+              "title": "Bsa1qlpi"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/spinach-lentil-gozleme-inspired-pasta-bake-recipe/5037n9c2",
+              "slug": "5037n9c2",
+              "title": "5037n9c2"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/20-minute-easy-tofu-san-choy-bau/rzdkdh6q",
+              "slug": "rzdkdh6q",
+              "title": "Rzdkdh6q"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/mary-kalifatidis-greek-spinach-pie-recipe/usqkcyta",
+              "slug": "usqkcyta",
+              "title": "Usqkcyta"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/asian-style-okra-stir-fry-recipe/trsxjbsa",
+              "slug": "trsxjbsa",
+              "title": "Trsxjbsa"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/mini-filo-cheese-quiches-recipe/9tynn3ie",
+              "slug": "9tynn3ie",
+              "title": "9tynn3ie"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/cypriot-grain-salad-stuffed-butternut-pumpkin-recipe/mp8i2yqr",
+              "slug": "mp8i2yqr",
+              "title": "Mp8i2yqr"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/beef-recipes",
+              "slug": "beef-recipes",
+              "title": "Beef Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/easy-rice-recipes",
+              "slug": "easy-rice-recipes",
+              "title": "Easy Rice Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/egg-recipes",
+              "slug": "egg-recipes",
+              "title": "Egg Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/potato-recipes",
+              "slug": "potato-recipes",
+              "title": "Potato Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/cheese-recipes",
+              "slug": "cheese-recipes",
+              "title": "Cheese Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/tofu-recipes",
+              "slug": "tofu-recipes",
+              "title": "Tofu Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/italian-recipes",
+              "slug": "italian-recipes",
+              "title": "Italian Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/chinese-recipes",
+              "slug": "chinese-recipes",
+              "title": "Chinese Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/indian-recipes",
+              "slug": "indian-recipes",
+              "title": "Indian Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/french-recipes",
+              "slug": "french-recipes",
+              "title": "French Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/vietnamese-recipes",
+              "slug": "vietnamese-recipes",
+              "title": "Vietnamese Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/malaysian-recipes",
+              "slug": "malaysian-recipes",
+              "title": "Malaysian Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/middle-eastern-recipes",
+              "slug": "middle-eastern-recipes",
+              "title": "Middle Eastern Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/korean-recipes",
+              "slug": "korean-recipes",
+              "title": "Korean Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/easy-turkish-beef-pasta-recipe/ttvoj9q4",
+              "slug": "ttvoj9q4",
+              "title": "Ttvoj9q4"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/quick-french-onion-chicken-pie-recipe/s1vkh68o",
+              "slug": "s1vkh68o",
+              "title": "S1vkh68o"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/one-pot-cheesy-french-onion-meatballs-recipe/glf4kb9d",
+              "slug": "glf4kb9d",
+              "title": "Glf4kb9d"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/5-ingredient-chicken-pie-parmentier-potato-topping-recipe/lht1h9ol",
+              "slug": "lht1h9ol",
+              "title": "Lht1h9ol"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/5-ingredient-cheesy-mexican-stuffed-chicken-breasts-recipe/057vczyg",
+              "slug": "057vczyg",
+              "title": "057vczyg"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/cocktails",
+              "slug": "cocktails",
+              "title": "Cocktails"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/easy-finger-food-recipes",
+              "slug": "easy-finger-food-recipes",
+              "title": "Easy Finger Food Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/dinner-party-recipes",
+              "slug": "dinner-party-recipes",
+              "title": "Dinner Party Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/picnic-recipes",
+              "slug": "picnic-recipes",
+              "title": "Picnic Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/camping-recipes",
+              "slug": "camping-recipes",
+              "title": "Camping Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/morning-afternoon-tea-recipes",
+              "slug": "morning-afternoon-tea-recipes",
+              "title": "Morning Afternoon Tea Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/winter-recipes",
+              "slug": "winter-recipes",
+              "title": "Winter Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/menus/coles-7-nights-easy-healthy-dinners/0afqo1nd",
+              "slug": "0afqo1nd",
+              "title": "0afqo1nd"
+            },
+            {
+              "url": "https://www.taste.com.au/healthy/menus/week-500-calorie-family-dinners/71dfpk3x",
+              "slug": "71dfpk3x",
+              "title": "71dfpk3x"
+            },
+            {
+              "url": "https://www.taste.com.au/quick-easy/menus/slow-cooker-menu-plan-week-easy-crockpot-dinners/icn3kuhh",
+              "slug": "icn3kuhh",
+              "title": "Icn3kuhh"
+            },
+            {
+              "url": "https://www.taste.com.au/quick-easy/menus/easy-family-dinners-menu-plan/3y79zi22",
+              "slug": "3y79zi22",
+              "title": "3y79zi22"
+            },
+            {
+              "url": "https://www.taste.com.au/menus/week-prep-ahead-meal-ideas-save-you-time-money/2djj0q1f",
+              "slug": "2djj0q1f",
+              "title": "2djj0q1f"
+            },
+            {
+              "url": "https://www.taste.com.au/menus/savvy-dinner-plan-week-1-back-school-dinners-made-easy/19y3stc4",
+              "slug": "19y3stc4",
+              "title": "19y3stc4"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/taste-au-cookbooks/X9lIG922",
+              "slug": "x9lig922",
+              "title": "X9lig922"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections",
+              "slug": "collections",
+              "title": "Get our very latest recipes: browse all taste recipe collections"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/affiliate-content/er1ynv6f",
+              "slug": "er1ynv6f",
+              "title": "Learn more."
+            },
+            {
+              "url": "https://www.taste.com.au/our-team",
+              "slug": "our-team",
+              "title": "About us"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/frequently-asked-questions-faqs/Yz98CQPR",
+              "slug": "yz98cqpr",
+              "title": "Yz98cqpr"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/legal-notices/MUfw5jyc",
+              "slug": "mufw5jyc",
+              "title": "Terms of Use"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/code-conduct/xk5x2inm",
+              "slug": "xk5x2inm",
+              "title": "Code of conduct"
+            }
+          ]
+        },
+        "https://www.recipetineats.com/recipes/": {
+          "count": 29,
+          "crawledAt": "2026-09-22T06:50:03.762Z",
+          "discovered": [
+            {
+              "url": "https://www.recipetineats.com/cookbooks/",
+              "slug": "cookbooks",
+              "title": "My cookbooks!"
+            },
+            {
+              "url": "https://www.recipetineats.com/chicken-mince-recipes-ground-chicken/",
+              "slug": "chicken-mince-recipes-ground-chicken",
+              "title": "Chicken mince"
+            },
+            {
+              "url": "https://www.recipetineats.com/nagi-recipetin-eats/",
+              "slug": "nagi-recipetin-eats",
+              "title": "About"
+            },
+            {
+              "url": "https://www.recipetineats.com/tonight-cookbook/",
+              "slug": "tonight-cookbook",
+              "title": "Tonight (NEW!)"
+            },
+            {
+              "url": "https://www.recipetineats.com/dinner-cookbook/",
+              "slug": "dinner-cookbook",
+              "title": "Dinner"
+            },
+            {
+              "url": "https://www.recipetineats.com/free-recipe-books/",
+              "slug": "free-recipe-books",
+              "title": "Free Recipe Books"
+            },
+            {
+              "url": "https://www.recipetineats.com/policy-use-of-recipes-images/",
+              "slug": "policy-use-of-recipes-images",
+              "title": "Policy: Use of Recipes &#038; Images"
+            },
+            {
+              "url": "https://www.recipetineats.com/aglio-e-olio-garlic-spaghetti/",
+              "slug": "aglio-e-olio-garlic-spaghetti",
+              "title": "Aglio E Olio Garlic Spaghetti"
+            },
+            {
+              "url": "https://www.recipetineats.com/monster-cookies-recipe/",
+              "slug": "monster-cookies-recipe",
+              "title": "Monster Cookies Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/nagis-everyday-kale-side-salad/",
+              "slug": "nagis-everyday-kale-side-salad",
+              "title": "Nagis Everyday Kale Side Salad"
+            },
+            {
+              "url": "https://www.recipetineats.com/one-pan-mongolian-beef-noodles-with-broccoli/",
+              "slug": "one-pan-mongolian-beef-noodles-with-broccoli",
+              "title": "One Pan Mongolian Beef Noodles With Broccoli"
+            },
+            {
+              "url": "https://www.recipetineats.com/cheesy-zucchini-muffins/",
+              "slug": "cheesy-zucchini-muffins",
+              "title": "Cheesy Zucchini Muffins"
+            },
+            {
+              "url": "https://www.recipetineats.com/mayonnaise-recipe/",
+              "slug": "mayonnaise-recipe",
+              "title": "Mayonnaise Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/fish-en-papillote-recipe/",
+              "slug": "fish-en-papillote-recipe",
+              "title": "Fish En Papillote Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/white-chocolate-raspberry-muffins/",
+              "slug": "white-chocolate-raspberry-muffins",
+              "title": "White Chocolate Raspberry Muffins"
+            },
+            {
+              "url": "https://www.recipetineats.com/dirty-martini/",
+              "slug": "dirty-martini",
+              "title": "Dirty Martini"
+            },
+            {
+              "url": "https://www.recipetineats.com/one-pan-portuguese-chicken-and-potato-bake/",
+              "slug": "one-pan-portuguese-chicken-and-potato-bake",
+              "title": "One Pan Portuguese Chicken And Potato Bake"
+            },
+            {
+              "url": "https://www.recipetineats.com/mushroom-ragu-pasta-recipe/",
+              "slug": "mushroom-ragu-pasta-recipe",
+              "title": "Mushroom Ragu Pasta Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/mediterranean-cucumber-salad/",
+              "slug": "mediterranean-cucumber-salad",
+              "title": "Mediterranean Cucumber Salad"
+            },
+            {
+              "url": "https://www.recipetineats.com/satay-chicken-legs-with-peanut-sauce/",
+              "slug": "satay-chicken-legs-with-peanut-sauce",
+              "title": "Satay Chicken Legs With Peanut Sauce"
+            },
+            {
+              "url": "https://www.recipetineats.com/choc-chip-peanut-butter-cookies/",
+              "slug": "choc-chip-peanut-butter-cookies",
+              "title": "Choc Chip Peanut Butter Cookies"
+            },
+            {
+              "url": "https://www.recipetineats.com/broccoli-wedge-salad/",
+              "slug": "broccoli-wedge-salad",
+              "title": "Broccoli Wedge Salad"
+            },
+            {
+              "url": "https://www.recipetineats.com/fresh-basil-vinaigrette/",
+              "slug": "fresh-basil-vinaigrette",
+              "title": "Fresh Basil Vinaigrette"
+            },
+            {
+              "url": "https://www.recipetineats.com/beef-rice-noodles/",
+              "slug": "beef-rice-noodles",
+              "title": "Beef Rice Noodles"
+            },
+            {
+              "url": "https://www.recipetineats.com/tartiflette-recipe/",
+              "slug": "tartiflette-recipe",
+              "title": "Tartiflette Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/slow-cooker-beef-stew/",
+              "slug": "slow-cooker-beef-stew",
+              "title": "Slow Cooker Beef Stew"
+            },
+            {
+              "url": "https://www.recipetineats.com/raspberry-tartlets-recipe/",
+              "slug": "raspberry-tartlets-recipe",
+              "title": "Raspberry Tartlets Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/dozer-the-golden-retriever-dog/",
+              "slug": "dozer-the-golden-retriever-dog",
+              "title": "Meet Dozer"
+            },
+            {
+              "url": "https://www.recipetineats.com/recipetin-meals/",
+              "slug": "recipetin-meals",
+              "title": "RecipeTin Meals"
+            }
+          ]
+        }
+      },
+      "enableVoiceInteraction": true
     },
-    {
-      "code": "es",
-      "flag": "🇪🇸",
-      "name": "Spanish",
-      "status": "active",
-      "direction": "ltr",
-      "isDefault": false,
-      "nativeName": "Español",
-      "lastUpdated": "2026-09-18T10:38:11.128Z"
+    "letter_spacing": "0em",
+    "maintenanceMode": false,
+    "siteDescription": "Smart Meal Planning & Recipe Assistant",
+    "allowRegistration": true,
+    "chefQuestionnaire": [
+      "How many days would you like to plan for (up to 7 days)?",
+      "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+      "When would you like the meal plan to start (today, tomorrow, or a specific date)?",
+      "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+      "What is your approximate ingredient budget per serving?"
+    ],
+    "fontLetterSpacing": "0em",
+    "subscriptionPlans": [
+      {
+        "id": "preset_taster",
+        "name": "Taster",
+        "slug": "taster",
+        "isFree": true,
+        "features": [
+          "Create up to 5 AI-powered recipes per month",
+          "Personal recipe library (25 total recipes)",
+          "Smart ingredient repurposing",
+          "Automated shopping list creation",
+          "Direct online grocery shopping links",
+          "Meal planner",
+          "Ingredient photo recognition"
+        ],
+        "isDefault": true,
+        "updatedAt": "2026-09-16T08:22:09.057Z",
+        "buttonText": "Manage",
+        "tokenLimit": 500,
+        "trialBadge": "",
+        "annualBadge": "",
+        "featuresText": "Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition",
+        "monthlyBadge": "",
+        "aiRecipeLimit": 5,
+        "canViewMacros": false,
+        "allowedAiModels": "gemini-3.5-flash-lite,gpt-3.5-turbo",
+        "descriptionAnnual": "Free tier with limited features",
+        "socialScrapeLimit": 5,
+        "annualPriceDollars": 0,
+        "descriptionMonthly": "Free tier with limited features",
+        "recipeLibraryLimit": 25,
+        "monthlyPriceDollars": 0,
+        "tokenReimburseFrequency": "monthly"
+      }
+    ],
+    "supportedLanguages": [
+      {
+        "code": "en",
+        "flag": "🇺🇸",
+        "name": "English",
+        "status": "active",
+        "direction": "ltr",
+        "isDefault": true,
+        "nativeName": "English",
+        "lastUpdated": "2026-09-18T10:38:26.048Z"
+      },
+      {
+        "code": "es",
+        "flag": "🇪🇸",
+        "name": "Spanish",
+        "status": "active",
+        "direction": "ltr",
+        "isDefault": false,
+        "nativeName": "Español",
+        "lastUpdated": "2026-09-18T10:38:11.128Z"
+      },
+      {
+        "code": "fr",
+        "flag": "🇫🇷",
+        "name": "French",
+        "status": "active",
+        "direction": "ltr",
+        "isDefault": false,
+        "nativeName": "Français",
+        "lastUpdated": "2026-09-18T10:38:11.128Z"
+      },
+      {
+        "code": "th",
+        "flag": "🇹🇭",
+        "name": "Thai",
+        "status": "active",
+        "direction": "ltr",
+        "isDefault": false,
+        "nativeName": "ไทย",
+        "lastUpdated": "2026-09-18T10:38:11.128Z"
+      }
+    ],
+    "ingredientCategories": [
+      "Produce",
+      "Dairy & Eggs",
+      "Meat & Poultry",
+      "Seafood",
+      "Bakery",
+      "Pantry & Dry Goods",
+      "Canned Goods",
+      "Baking & Cooking",
+      "Spices & Seasonings",
+      "Snacks",
+      "Beverages",
+      "Frozen Foods",
+      "Condiments & Sauces",
+      "Oils & Vinegars"
+    ],
+    "recommendedRecipeUrls": [
+      "https://www.recipetineats.com/recipes/",
+      "https://www.taste.com.au/recipes"
+    ]
+  },
+  "settings": {
+    "aiModel": "gemini-3.6-flash",
+    "taxRate": 0,
+    "currency": "USD",
+    "fontSize": "16px",
+    "siteName": "Zecratary",
+    "font_size": "16px",
+    "updatedAt": "2026-09-18T08:24:02.536Z",
+    "aiProvider": "gemini",
+    "fontFamily": "Inter",
+    "font_family": "Inter",
+    "recipeTypes": [
+      "Breakfast",
+      "Lunch",
+      "Dinner",
+      "Snack",
+      "Dessert",
+      "Beverage",
+      "Appetizer",
+      "Salad",
+      "Soup",
+      "Side Dish",
+      "Baking"
+    ],
+    "socialLogin": {
+      "updatedAt": "2026-09-18T12:28:40.488Z",
+      "appleKeyId": "",
+      "appleTeamId": "",
+      "appleEnabled": false,
+      "appleClientId": "",
+      "facebookAppId": "",
+      "googleEnabled": true,
+      "googleClientId": "479443923058-jeajhc080ad3kb0b57ighm8k101ip7q6.apps.googleusercontent.com",
+      "facebookEnabled": false,
+      "facebookClientId": "",
+      "facebookAppSecret": "",
+      "googleClientSecret": "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",
+      "facebookClientSecret": "",
+      "allowSocialRegistration": true,
+      "requireEmailVerification": true
     },
-    {
-      "code": "fr",
-      "flag": "🇫🇷",
-      "name": "French",
-      "status": "active",
-      "direction": "ltr",
-      "isDefault": false,
-      "nativeName": "Français",
-      "lastUpdated": "2026-09-18T10:38:11.128Z"
+    "themeColors": {
+      "accent": "#a855f7",
+      "primary": "#38bdf8",
+      "cardBorder": "#172554",
+      "accentColor": "#a855f7",
+      "sidebarIcon": "#38bdf8",
+      "primaryColor": "#38bdf8",
+      "primaryHover": "#0284c7",
+      "accentEmerald": "#a855f7",
+      "textSecondary": "#7dd3fc",
+      "backgroundDark": "#020617",
+      "cardBackground": "#080e22",
+      "backgroundColor": "#020617",
+      "sidebarIconColor": "#38bdf8"
     },
-    {
-      "code": "th",
-      "flag": "🇹🇭",
-      "name": "Thai",
-      "status": "active",
-      "direction": "ltr",
-      "isDefault": false,
-      "nativeName": "ไทย",
-      "lastUpdated": "2026-09-18T10:38:11.128Z"
-    }
-  ],
-  "ingredientCategories": [
-    "Produce",
-    "Dairy & Eggs",
-    "Meat & Poultry",
-    "Seafood",
-    "Bakery",
-    "Pantry & Dry Goods",
-    "Canned Goods",
-    "Baking & Cooking",
-    "Spices & Seasonings",
-    "Snacks",
-    "Beverages",
-    "Frozen Foods",
-    "Condiments & Sauces",
-    "Oils & Vinegars"
-  ]
+    "faviconEmoji": "🍳",
+    "faviconImage": "",
+    "theme_colors": {
+      "accent": "#a855f7",
+      "primary": "#38bdf8",
+      "cardBorder": "#172554",
+      "accentColor": "#a855f7",
+      "sidebarIcon": "#38bdf8",
+      "primaryColor": "#38bdf8",
+      "primaryHover": "#0284c7",
+      "accentEmerald": "#a855f7",
+      "textSecondary": "#7dd3fc",
+      "backgroundDark": "#020617",
+      "cardBackground": "#080e22",
+      "backgroundColor": "#020617",
+      "sidebarIconColor": "#38bdf8"
+    },
+    "titlebarEmoji": "🍳",
+    "titlebarImage": "",
+    "chefAiSettings": {
+      "model": "gemini-3.6-flash",
+      "apiKey": "AQ.Ab8RN6IV413r-my3ha0UekHmrrFtKz1f9il12r2QUqnVh7pisg",
+      "provider": "gemini",
+      "sections": [
+        {
+          "id": "sec_core",
+          "enabled": true,
+          "questions": [
+            "How many days would you like to plan for (up to 7 days)?",
+            "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+            "When would you like the meal plan to start (today, tomorrow, or a specific date)?"
+          ],
+          "topicTitle": "Core Meal Plan Logistics",
+          "description": "Basic duration, meal types, and start dates for the multi-day plan."
+        },
+        {
+          "id": "sec_pref",
+          "enabled": true,
+          "questions": [
+            "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+            "What is your approximate ingredient budget per serving?"
+          ],
+          "topicTitle": "Dietary Preferences & Budget",
+          "description": "Themes, nutritional restrictions, and financial target per serving."
+        }
+      ],
+      "maxTokens": 4096,
+      "updatedAt": "2026-09-22T07:29:35.310Z",
+      "voiceSpeed": 1,
+      "maxPlanDays": 7,
+      "temperature": 0.7,
+      "voiceEngine": "version2",
+      "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize Recommended Recipes Url. ultimately you must guide user to create recipe, and make plan for each recipe.",
+      "voiceAutoPlay": false,
+      "enableWebSearch": true,
+      "filterWordsList": [
+        "Artificial preservatives"
+      ],
+      "knowledgeBaseList": [
+        "Culinary Masterclass DB v2",
+        "Nutritional Guidelines 2026"
+      ],
+      "resultDisplayMode": "card",
+      "selectedVoiceName": "en-US-Neural2-F",
+      "enablePantryContext": true,
+      "customVocabularyList": [
+        "Umami"
+      ],
+      "availableGeminiModels": [
+        {
+          "id": "gemini-2.5-flash",
+          "name": "Gemini 2.5 Flash",
+          "label": "Gemini 2.5 Flash (gemini-2.5-flash)",
+          "description": "Stable version of Gemini 2.5 Flash, our mid-size multimodal model that supports up to 1 million tokens, released in June of 2025."
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "name": "Gemini 2.5 Pro",
+          "label": "Gemini 2.5 Pro (gemini-2.5-pro)",
+          "description": "Stable release (June 17th, 2025) of Gemini 2.5 Pro"
+        },
+        {
+          "id": "gemini-2.5-flash-preview-tts",
+          "name": "Gemini 2.5 Flash Preview TTS",
+          "label": "Gemini 2.5 Flash Preview TTS (gemini-2.5-flash-preview-tts)",
+          "description": "Gemini 2.5 Flash Preview TTS"
+        },
+        {
+          "id": "gemini-2.5-pro-preview-tts",
+          "name": "Gemini 2.5 Pro Preview TTS",
+          "label": "Gemini 2.5 Pro Preview TTS (gemini-2.5-pro-preview-tts)",
+          "description": "Gemini 2.5 Pro Preview TTS"
+        },
+        {
+          "id": "gemma-4-26b-a4b-it",
+          "name": "Gemma 4 26B A4B IT",
+          "label": "Gemma 4 26B A4B IT (gemma-4-26b-a4b-it)",
+          "description": "Gemma 4 26B A4B IT"
+        },
+        {
+          "id": "gemma-4-31b-it",
+          "name": "Gemma 4 31B IT",
+          "label": "Gemma 4 31B IT (gemma-4-31b-it)",
+          "description": "Gemma 4 31B IT"
+        },
+        {
+          "id": "gemini-flash-latest",
+          "name": "Gemini Flash Latest",
+          "label": "Gemini Flash Latest (gemini-flash-latest)",
+          "description": "Latest release of Gemini Flash"
+        },
+        {
+          "id": "gemini-flash-lite-latest",
+          "name": "Gemini Flash-Lite Latest",
+          "label": "Gemini Flash-Lite Latest (gemini-flash-lite-latest)",
+          "description": "Latest release of Gemini Flash-Lite"
+        },
+        {
+          "id": "gemini-pro-latest",
+          "name": "Gemini Pro Latest",
+          "label": "Gemini Pro Latest (gemini-pro-latest)",
+          "description": "Latest release of Gemini Pro"
+        },
+        {
+          "id": "gemini-2.5-flash-lite",
+          "name": "Gemini 2.5 Flash-Lite",
+          "label": "Gemini 2.5 Flash-Lite (gemini-2.5-flash-lite)",
+          "description": "Stable version of Gemini 2.5 Flash-Lite, released in July of 2025"
+        },
+        {
+          "id": "gemini-2.5-flash-image",
+          "name": "Nano Banana",
+          "label": "Nano Banana (gemini-2.5-flash-image)",
+          "description": "Gemini 2.5 Flash Preview Image"
+        },
+        {
+          "id": "gemini-3-flash-preview",
+          "name": "Gemini 3 Flash Preview",
+          "label": "Gemini 3 Flash Preview (gemini-3-flash-preview)",
+          "description": "Gemini 3 Flash Preview"
+        },
+        {
+          "id": "gemini-3.1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "label": "Gemini 3.1 Pro Preview (gemini-3.1-pro-preview)",
+          "description": "Gemini 3.1 Pro Preview"
+        },
+        {
+          "id": "gemini-3.1-pro-preview-customtools",
+          "name": "Gemini 3.1 Pro Preview Custom Tools",
+          "label": "Gemini 3.1 Pro Preview Custom Tools (gemini-3.1-pro-preview-customtools)",
+          "description": "Gemini 3.1 Pro Preview optimized for custom tool usage"
+        },
+        {
+          "id": "gemini-3.1-flash-lite-preview",
+          "name": "Gemini 3.1 Flash Lite Preview",
+          "label": "Gemini 3.1 Flash Lite Preview (gemini-3.1-flash-lite-preview)",
+          "description": "Gemini 3.1 Flash Lite Preview"
+        },
+        {
+          "id": "gemini-3.1-flash-lite",
+          "name": "Gemini 3.1 Flash Lite",
+          "label": "Gemini 3.1 Flash Lite (gemini-3.1-flash-lite)",
+          "description": "Gemini 3.1 Flash Lite"
+        },
+        {
+          "id": "gemini-3-pro-image-preview",
+          "name": "Nano Banana Pro",
+          "label": "Nano Banana Pro (gemini-3-pro-image-preview)",
+          "description": "Gemini 3 Pro Image Preview"
+        },
+        {
+          "id": "gemini-3-pro-image",
+          "name": "Nano Banana Pro",
+          "label": "Nano Banana Pro (gemini-3-pro-image)",
+          "description": "Gemini 3 Pro Image"
+        },
+        {
+          "id": "nano-banana-pro-preview",
+          "name": "Nano Banana Pro",
+          "label": "Nano Banana Pro (nano-banana-pro-preview)",
+          "description": "Gemini 3 Pro Image Preview"
+        },
+        {
+          "id": "gemini-3.1-flash-image-preview",
+          "name": "Nano Banana 2",
+          "label": "Nano Banana 2 (gemini-3.1-flash-image-preview)",
+          "description": "Gemini 3.1 Flash Image Preview."
+        },
+        {
+          "id": "gemini-3.1-flash-image",
+          "name": "Nano Banana 2",
+          "label": "Nano Banana 2 (gemini-3.1-flash-image)",
+          "description": "Gemini 3.1 Flash Image."
+        },
+        {
+          "id": "gemini-3.1-flash-lite-image",
+          "name": "Nano Banana 2 Lite",
+          "label": "Nano Banana 2 Lite (gemini-3.1-flash-lite-image)",
+          "description": "Gemini 3.1 Flash Lite Image."
+        },
+        {
+          "id": "gemini-3.5-flash",
+          "name": "Gemini 3.5 Flash",
+          "label": "Gemini 3.5 Flash (gemini-3.5-flash)",
+          "description": "Gemini 3.5 Flash"
+        },
+        {
+          "id": "gemini-3.5-flash-lite",
+          "name": "Gemini 3.5 Flash Lite",
+          "label": "Gemini 3.5 Flash Lite (gemini-3.5-flash-lite)",
+          "description": "Gemini 3.5 Flash Lite"
+        },
+        {
+          "id": "gemini-omni-flash-preview",
+          "name": "Gemini Omni Flash Preview",
+          "label": "Gemini Omni Flash Preview (gemini-omni-flash-preview)",
+          "description": "Gemini Omni Flash Preview"
+        },
+        {
+          "id": "gemini-omni-1.1-flash",
+          "name": "Gemini Omni 1.1 Flash",
+          "label": "Gemini Omni 1.1 Flash (gemini-omni-1.1-flash)",
+          "description": "Gemini Omni 1.1 Flash "
+        },
+        {
+          "id": "gemini-3.5-transcribe",
+          "name": "Gemini 3.5 Transcribe",
+          "label": "Gemini 3.5 Transcribe (gemini-3.5-transcribe)",
+          "description": "Gemini 3.5 Transcribe"
+        },
+        {
+          "id": "gemini-3.6-flash",
+          "name": "Gemini 3.6 Flash",
+          "label": "Gemini 3.6 Flash (gemini-3.6-flash)",
+          "description": "Gemini 3.6 Flash"
+        },
+        {
+          "id": "gemini-3.7-flash",
+          "name": "Gemini 3.7 Flash",
+          "label": "Gemini 3.7 Flash (gemini-3.7-flash)",
+          "description": "Gemini 3.7 Flash"
+        },
+        {
+          "id": "gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
+          "label": "Gemini 3.8 Flash (gemini-3.8-flash)",
+          "description": "Gemini 3.8 Flash"
+        },
+        {
+          "id": "lyria-3-clip-preview",
+          "name": "Lyria 3 Clip Preview",
+          "label": "Lyria 3 Clip Preview (lyria-3-clip-preview)",
+          "description": "Lyria 3 30s model Preview"
+        },
+        {
+          "id": "lyria-3-pro-preview",
+          "name": "Lyria 3 Pro Preview",
+          "label": "Lyria 3 Pro Preview (lyria-3-pro-preview)",
+          "description": "Lyria 3 Pro Preview"
+        },
+        {
+          "id": "lyria-3.5",
+          "name": "Lyria 3.5",
+          "label": "Lyria 3.5 (lyria-3.5)",
+          "description": "Music Generation model"
+        },
+        {
+          "id": "gemini-3.1-flash-tts-preview",
+          "name": "Gemini 3.1 Flash TTS Preview",
+          "label": "Gemini 3.1 Flash TTS Preview (gemini-3.1-flash-tts-preview)",
+          "description": "Gemini 3.1 Flash TTS Preview"
+        },
+        {
+          "id": "gemini-robotics-er-2-preview",
+          "name": "Gemini Robotics-ER 2 Preview",
+          "label": "Gemini Robotics-ER 2 Preview (gemini-robotics-er-2-preview)",
+          "description": "Gemini Robotics-ER 2 Preview"
+        },
+        {
+          "id": "gemini-2.5-computer-use-preview-10-2025",
+          "name": "Gemini 2.5 Computer Use Preview 10-2025",
+          "label": "Gemini 2.5 Computer Use Preview 10-2025 (gemini-2.5-computer-use-preview-10-2025)",
+          "description": "Gemini 2.5 Computer Use Preview 10-2025"
+        },
+        {
+          "id": "antigravity-preview-05-2026",
+          "name": "Antigravity Agent Preview",
+          "label": "Antigravity Agent Preview (antigravity-preview-05-2026)",
+          "description": "Preview release of Antigravity Agent (05-2026)"
+        },
+        {
+          "id": "antigravity-preview-09-2026",
+          "name": "Antigravity Agent Preview",
+          "label": "Antigravity Agent Preview (antigravity-preview-09-2026)",
+          "description": "Preview release of Antigravity Agent (09-2026)"
+        },
+        {
+          "id": "antigravity-preview-latest",
+          "name": "Antigravity Agent Preview Latest",
+          "label": "Antigravity Agent Preview Latest (antigravity-preview-latest)",
+          "description": "Latest preview release of Antigravity Agent"
+        },
+        {
+          "id": "deep-research-max-preview-04-2026",
+          "name": "Deep Research Max Preview (Apr-21-2026)",
+          "label": "Deep Research Max Preview (Apr-21-2026) (deep-research-max-preview-04-2026)",
+          "description": "Preview release (April 21st, 2026) of Deep Research Max"
+        },
+        {
+          "id": "deep-research-preview-04-2026",
+          "name": "Deep Research Preview (Apr-21-2026)",
+          "label": "Deep Research Preview (Apr-21-2026) (deep-research-preview-04-2026)",
+          "description": "Preview release (April 21th, 2026) of Deep Research"
+        },
+        {
+          "id": "deep-research-pro-preview-12-2025",
+          "name": "Deep Research Pro Preview (Dec-12-2025)",
+          "label": "Deep Research Pro Preview (Dec-12-2025) (deep-research-pro-preview-12-2025)",
+          "description": "Preview release (December 12th, 2025) of Deep Research Pro"
+        }
+      ],
+      "availableOpenAiModels": [
+        {
+          "id": "gpt-4o",
+          "name": "GPT-4o",
+          "label": "GPT-4o (Omni High Intelligence)"
+        },
+        {
+          "id": "gpt-4o-mini",
+          "name": "GPT-4o Mini",
+          "label": "GPT-4o Mini (Fast & Cost-Efficient)"
+        },
+        {
+          "id": "gpt-4-turbo",
+          "name": "GPT-4 Turbo",
+          "label": "GPT-4 Turbo (High Capacity)"
+        },
+        {
+          "id": "gpt-3.5-turbo",
+          "name": "GPT-3.5 Turbo",
+          "label": "GPT-3.5 Turbo (High Speed)"
+        }
+      ],
+      "recommendedRecipeUrls": [
+        "https://www.recipetineats.com/recipes/",
+        "https://www.taste.com.au/recipes"
+      ],
+      "strictDietEnforcement": true,
+      "discoveredRecipesCache": {
+        "https://www.taste.com.au/recipes": {
+          "count": 130,
+          "crawledAt": "2026-09-22T06:50:10.993Z",
+          "discovered": [
+            {
+              "url": "https://www.taste.com.au/recipes/crispy-quinoa-salad-recipe/yvzc6l2h",
+              "slug": "yvzc6l2h",
+              "title": "Crispy quinoa salad"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/creamy-french-onion-chicken-bacon-lasagne-recipe/ydnyqih1",
+              "slug": "ydnyqih1",
+              "title": "Creamy French onion chicken and bacon lasagne"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/air-fryer-crispy-rice-prawn-salad-recipe/g1yiy8ag",
+              "slug": "g1yiy8ag",
+              "title": "Air fryer crispy rice and prawn salad"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/easy-butter-chicken-rissoles-recipe/sr8x1jns",
+              "slug": "sr8x1jns",
+              "title": "Easy butter chicken rissoles"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/marry-me-stuffed-chicken-breasts-recipe/p42hykjp",
+              "slug": "p42hykjp",
+              "title": "'Marry me' stuffed chicken breasts"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/5-ingredient-mediterranean-vegetable-bake-recipe/5t69vf0h",
+              "slug": "5t69vf0h",
+              "title": "5-ingredient Mediterranean vegetable bake"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/air-fryer-chicken-breast-tacos-recipe/ytmp61rf",
+              "slug": "ytmp61rf",
+              "title": "Air fryer chicken breast tacos"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/slow-cooker-sticky-korean-bbq-beef-brisket-recipe/vdx9ywl3",
+              "slug": "vdx9ywl3",
+              "title": "Slow cooker sticky Korean BBQ beef brisket"
+            },
+            {
+              "url": "https://www.taste.com.au/meal-types",
+              "slug": "meal-types",
+              "title": "Meal type"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner",
+              "slug": "dinner",
+              "title": "Dinner"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/breakfast-recipes",
+              "slug": "breakfast-recipes",
+              "title": "Breakfast"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/lunch-recipes",
+              "slug": "lunch-recipes",
+              "title": "Lunch & light meals"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/salad-recipes",
+              "slug": "salad-recipes",
+              "title": "Salads"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/dessert-recipes",
+              "slug": "dessert-recipes",
+              "title": "Desserts"
+            },
+            {
+              "url": "https://www.taste.com.au/diet",
+              "slug": "diet",
+              "title": "Diet"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/gluten-free",
+              "slug": "gluten-free",
+              "title": "Gluten-free"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/high-protein-recipes",
+              "slug": "high-protein-recipes",
+              "title": "Protein"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/vegan-recipes",
+              "slug": "vegan-recipes",
+              "title": "Vegan"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/vegetarian-recipes",
+              "slug": "vegetarian-recipes",
+              "title": "Vegetarian"
+            },
+            {
+              "url": "https://www.taste.com.au/ingredients",
+              "slug": "ingredients",
+              "title": "Ingredient"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/chicken-recipes",
+              "slug": "chicken-recipes",
+              "title": "Chicken"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/lamb-recipes",
+              "slug": "lamb-recipes",
+              "title": "Lamb"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/pork-recipes",
+              "slug": "pork-recipes",
+              "title": "Pork"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/fish-seafood-recipes",
+              "slug": "fish-seafood-recipes",
+              "title": "Seafood"
+            },
+            {
+              "url": "https://www.taste.com.au/cuisine",
+              "slug": "cuisine",
+              "title": "Cuisine"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/australian-recipes",
+              "slug": "australian-recipes",
+              "title": "Australian"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/greek-recipes",
+              "slug": "greek-recipes",
+              "title": "Greek"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/japanese-recipes",
+              "slug": "japanese-recipes",
+              "title": "Japanese"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/mexican-recipes",
+              "slug": "mexican-recipes",
+              "title": "Mexican"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/thai-recipes",
+              "slug": "thai-recipes",
+              "title": "Thai"
+            },
+            {
+              "url": "https://www.taste.com.au/cooking-method",
+              "slug": "cooking-method",
+              "title": "Cooking method"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/air-fryer-recipes",
+              "slug": "air-fryer-recipes",
+              "title": "Air fryer"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/baking-recipes",
+              "slug": "baking-recipes",
+              "title": "Baking"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/barbecue",
+              "slug": "barbecue",
+              "title": "Grill & bbq"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/slow-cooker-recipes",
+              "slug": "slow-cooker-recipes",
+              "title": "Slow cooker"
+            },
+            {
+              "url": "https://www.taste.com.au/occasions",
+              "slug": "occasions",
+              "title": "Occasion"
+            },
+            {
+              "url": "https://www.taste.com.au/pages/taste-best-christmas-recipes",
+              "slug": "taste-best-christmas-recipes",
+              "title": "Christmas"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/kids-party-food",
+              "slug": "kids-party-food",
+              "title": "Birthday & party"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/drink-recipes",
+              "slug": "drink-recipes",
+              "title": "Drinks"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/easy-entertaining",
+              "slug": "easy-entertaining",
+              "title": "Entertaining"
+            },
+            {
+              "url": "https://www.taste.com.au/meal-plans",
+              "slug": "meal-plans",
+              "title": "Meal plans"
+            },
+            {
+              "url": "https://www.taste.com.au/quick-easy",
+              "slug": "quick-easy",
+              "title": "Quick & Easy"
+            },
+            {
+              "url": "https://www.taste.com.au/healthy",
+              "slug": "healthy",
+              "title": "Healthy"
+            },
+            {
+              "url": "https://www.taste.com.au/cheap-tasty",
+              "slug": "cheap-tasty",
+              "title": "Cheap & Tasty"
+            },
+            {
+              "url": "https://www.taste.com.au/top-picks",
+              "slug": "top-picks",
+              "title": "Top Picks"
+            },
+            {
+              "url": "https://www.taste.com.au/taste-test-kitchen",
+              "slug": "taste-test-kitchen",
+              "title": "Test Kitchen"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/air-fryers",
+              "slug": "air-fryers",
+              "title": "Air Fryers"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/blenders-food-processors",
+              "slug": "blenders-food-processors",
+              "title": "Blenders & Food Processors"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/small-appliances",
+              "slug": "small-appliances",
+              "title": "Small Appliances"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/white-goods",
+              "slug": "white-goods",
+              "title": "Fridges, Stoves & Ovens"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/winter-warmers",
+              "slug": "winter-warmers",
+              "title": "Winter Appliances"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/summer-cooking",
+              "slug": "summer-cooking",
+              "title": "Summer Appliances"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/appliance-reviews",
+              "slug": "appliance-reviews",
+              "title": "Appliance Reviews"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/pots-pans",
+              "slug": "pots-pans",
+              "title": "Pots & Pans"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/food-prep",
+              "slug": "food-prep",
+              "title": "Food Prep"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/utensils",
+              "slug": "utensils",
+              "title": "Utensils"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/gadgets",
+              "slug": "gadgets",
+              "title": "Gadgets"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/kitchen-accessories-reviews",
+              "slug": "kitchen-accessories-reviews",
+              "title": "Kitchenware Reviews"
+            },
+            {
+              "url": "https://www.taste.com.au/zones/black-friday",
+              "slug": "black-friday",
+              "title": "Black Friday"
+            },
+            {
+              "url": "https://www.taste.com.au/food-news",
+              "slug": "food-news",
+              "title": "News"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/win/VLd6qEWJ",
+              "slug": "vld6qewj",
+              "title": "Win!"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/taste-publishing-principles-recipe-guidelines/ccmdgzlz",
+              "slug": "ccmdgzlz",
+              "title": "Our Philosophy"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner/galleries/17-secretly-easy-finger-food-recipes-perfect-spring-entertaining/o0hb3vw2",
+              "slug": "o0hb3vw2",
+              "title": "O0hb3vw2"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/football-finals",
+              "slug": "football-finals",
+              "title": "Football Finals"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner/galleries/16-crowd-pleasing-footy-finals-bbq-recipes-score-big-flavour/ubhzfk51",
+              "slug": "ubhzfk51",
+              "title": "Ubhzfk51"
+            },
+            {
+              "url": "https://www.taste.com.au/food-news/coles-releases-crazy-delicious-finger-foods-just-time-finals-season/qleqmzno",
+              "slug": "qleqmzno",
+              "title": "Qleqmzno"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner/galleries/footy-finals-sorted-ultimate-barbecue-sausage-sizzle-feast-just-7-ingredients/2zrcywep",
+              "slug": "2zrcywep",
+              "title": "2zrcywep"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/best-footy-food-ideas-recipes-watching-grand-final/77vlce8t",
+              "slug": "77vlce8t",
+              "title": "77vlce8t"
+            },
+            {
+              "url": "https://www.taste.com.au/baking/galleries/food-editors-pick-their-favourite-easy-cake-recipes-guests-request-most/jwy2k37f",
+              "slug": "jwy2k37f",
+              "title": "Jwy2k37f"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/easy-footy-finals-food-ideas-feed-hungry-crowd/a7dj23u2",
+              "slug": "a7dj23u2",
+              "title": "A7dj23u2"
+            },
+            {
+              "url": "https://www.taste.com.au/entertaining/galleries/99-top-ranked-picnic-recipes-arent-sandwiches/rkl34xsu",
+              "slug": "rkl34xsu",
+              "title": "Rkl34xsu"
+            },
+            {
+              "url": "https://www.taste.com.au/baking/galleries/australias-100-most-saved-lemon-dessert-recipes-time-revealed/o36wum3i",
+              "slug": "o36wum3i",
+              "title": "O36wum3i"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/best-roast-chicken-recipes-crispy-outside-juicy-inside/5cx7ipwl",
+              "slug": "5cx7ipwl",
+              "title": "5cx7ipwl"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/crispiest-ever-air-fryer-schnitzel-thats-better-than-pubs/z9kes2xo",
+              "slug": "z9kes2xo",
+              "title": "Z9kes2xo"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/mascarpone-recipes/cyj4xdi0",
+              "slug": "cyj4xdi0",
+              "title": "Cyj4xdi0"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner/galleries/salmon-fillet-recipes/nsaf5mt5",
+              "slug": "nsaf5mt5",
+              "title": "Nsaf5mt5"
+            },
+            {
+              "url": "https://www.taste.com.au/taste-test-kitchen/galleries/best-slow-cooker-dishes-we-tested-winter/i1g3lbz5",
+              "slug": "i1g3lbz5",
+              "title": "I1g3lbz5"
+            },
+            {
+              "url": "https://www.taste.com.au/galleries/best-hasselback-recipes-potato-pork-beyond/jy1zyoop",
+              "slug": "jy1zyoop",
+              "title": "Jy1zyoop"
+            },
+            {
+              "url": "https://www.taste.com.au/baking/galleries/strawberry-jam-recipes/ns9dsynq",
+              "slug": "ns9dsynq",
+              "title": "Ns9dsynq"
+            },
+            {
+              "url": "https://www.taste.com.au/dinner/galleries/marry-me-chicken-recipe-spin-offs-worth-saying/z2y0r0gv",
+              "slug": "z2y0r0gv",
+              "title": "Z2y0r0gv"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/one-pot-creamy-spinach-fetta-zucchini-risoni-recipe/w0lutc23",
+              "slug": "w0lutc23",
+              "title": "W0lutc23"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/5-ingredient-cheesy-mexican-vegetarian-rice-bake-recipe/hxyt4qyx",
+              "slug": "hxyt4qyx",
+              "title": "Hxyt4qyx"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/tomatokeftedes-greek-tomato-fritters-recipe/21f8u46d",
+              "slug": "21f8u46d",
+              "title": "21f8u46d"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/spanakorizo-recipe-greek-spinach-rice/ubdj8c71",
+              "slug": "ubdj8c71",
+              "title": "Ubdj8c71"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/buttery-broccoli-spanakopita-recipe/bsa1qlpi",
+              "slug": "bsa1qlpi",
+              "title": "Bsa1qlpi"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/spinach-lentil-gozleme-inspired-pasta-bake-recipe/5037n9c2",
+              "slug": "5037n9c2",
+              "title": "5037n9c2"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/20-minute-easy-tofu-san-choy-bau/rzdkdh6q",
+              "slug": "rzdkdh6q",
+              "title": "Rzdkdh6q"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/mary-kalifatidis-greek-spinach-pie-recipe/usqkcyta",
+              "slug": "usqkcyta",
+              "title": "Usqkcyta"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/asian-style-okra-stir-fry-recipe/trsxjbsa",
+              "slug": "trsxjbsa",
+              "title": "Trsxjbsa"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/mini-filo-cheese-quiches-recipe/9tynn3ie",
+              "slug": "9tynn3ie",
+              "title": "9tynn3ie"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/cypriot-grain-salad-stuffed-butternut-pumpkin-recipe/mp8i2yqr",
+              "slug": "mp8i2yqr",
+              "title": "Mp8i2yqr"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/beef-recipes",
+              "slug": "beef-recipes",
+              "title": "Beef Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/easy-rice-recipes",
+              "slug": "easy-rice-recipes",
+              "title": "Easy Rice Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/egg-recipes",
+              "slug": "egg-recipes",
+              "title": "Egg Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/potato-recipes",
+              "slug": "potato-recipes",
+              "title": "Potato Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/cheese-recipes",
+              "slug": "cheese-recipes",
+              "title": "Cheese Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/tofu-recipes",
+              "slug": "tofu-recipes",
+              "title": "Tofu Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/italian-recipes",
+              "slug": "italian-recipes",
+              "title": "Italian Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/chinese-recipes",
+              "slug": "chinese-recipes",
+              "title": "Chinese Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/indian-recipes",
+              "slug": "indian-recipes",
+              "title": "Indian Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/french-recipes",
+              "slug": "french-recipes",
+              "title": "French Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/vietnamese-recipes",
+              "slug": "vietnamese-recipes",
+              "title": "Vietnamese Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/malaysian-recipes",
+              "slug": "malaysian-recipes",
+              "title": "Malaysian Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/middle-eastern-recipes",
+              "slug": "middle-eastern-recipes",
+              "title": "Middle Eastern Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/korean-recipes",
+              "slug": "korean-recipes",
+              "title": "Korean Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/easy-turkish-beef-pasta-recipe/ttvoj9q4",
+              "slug": "ttvoj9q4",
+              "title": "Ttvoj9q4"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/quick-french-onion-chicken-pie-recipe/s1vkh68o",
+              "slug": "s1vkh68o",
+              "title": "S1vkh68o"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/one-pot-cheesy-french-onion-meatballs-recipe/glf4kb9d",
+              "slug": "glf4kb9d",
+              "title": "Glf4kb9d"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/5-ingredient-chicken-pie-parmentier-potato-topping-recipe/lht1h9ol",
+              "slug": "lht1h9ol",
+              "title": "Lht1h9ol"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/5-ingredient-cheesy-mexican-stuffed-chicken-breasts-recipe/057vczyg",
+              "slug": "057vczyg",
+              "title": "057vczyg"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/cocktails",
+              "slug": "cocktails",
+              "title": "Cocktails"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/easy-finger-food-recipes",
+              "slug": "easy-finger-food-recipes",
+              "title": "Easy Finger Food Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/dinner-party-recipes",
+              "slug": "dinner-party-recipes",
+              "title": "Dinner Party Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/picnic-recipes",
+              "slug": "picnic-recipes",
+              "title": "Picnic Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/camping-recipes",
+              "slug": "camping-recipes",
+              "title": "Camping Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/morning-afternoon-tea-recipes",
+              "slug": "morning-afternoon-tea-recipes",
+              "title": "Morning Afternoon Tea Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections/winter-recipes",
+              "slug": "winter-recipes",
+              "title": "Winter Recipes"
+            },
+            {
+              "url": "https://www.taste.com.au/menus/coles-7-nights-easy-healthy-dinners/0afqo1nd",
+              "slug": "0afqo1nd",
+              "title": "0afqo1nd"
+            },
+            {
+              "url": "https://www.taste.com.au/healthy/menus/week-500-calorie-family-dinners/71dfpk3x",
+              "slug": "71dfpk3x",
+              "title": "71dfpk3x"
+            },
+            {
+              "url": "https://www.taste.com.au/quick-easy/menus/slow-cooker-menu-plan-week-easy-crockpot-dinners/icn3kuhh",
+              "slug": "icn3kuhh",
+              "title": "Icn3kuhh"
+            },
+            {
+              "url": "https://www.taste.com.au/quick-easy/menus/easy-family-dinners-menu-plan/3y79zi22",
+              "slug": "3y79zi22",
+              "title": "3y79zi22"
+            },
+            {
+              "url": "https://www.taste.com.au/menus/week-prep-ahead-meal-ideas-save-you-time-money/2djj0q1f",
+              "slug": "2djj0q1f",
+              "title": "2djj0q1f"
+            },
+            {
+              "url": "https://www.taste.com.au/menus/savvy-dinner-plan-week-1-back-school-dinners-made-easy/19y3stc4",
+              "slug": "19y3stc4",
+              "title": "19y3stc4"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/taste-au-cookbooks/X9lIG922",
+              "slug": "x9lig922",
+              "title": "X9lig922"
+            },
+            {
+              "url": "https://www.taste.com.au/recipes/collections",
+              "slug": "collections",
+              "title": "Get our very latest recipes: browse all taste recipe collections"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/affiliate-content/er1ynv6f",
+              "slug": "er1ynv6f",
+              "title": "Learn more."
+            },
+            {
+              "url": "https://www.taste.com.au/our-team",
+              "slug": "our-team",
+              "title": "About us"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/frequently-asked-questions-faqs/Yz98CQPR",
+              "slug": "yz98cqpr",
+              "title": "Yz98cqpr"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/legal-notices/MUfw5jyc",
+              "slug": "mufw5jyc",
+              "title": "Terms of Use"
+            },
+            {
+              "url": "https://www.taste.com.au/articles/code-conduct/xk5x2inm",
+              "slug": "xk5x2inm",
+              "title": "Code of conduct"
+            }
+          ]
+        },
+        "https://www.recipetineats.com/recipes/": {
+          "count": 29,
+          "crawledAt": "2026-09-22T06:50:03.762Z",
+          "discovered": [
+            {
+              "url": "https://www.recipetineats.com/cookbooks/",
+              "slug": "cookbooks",
+              "title": "My cookbooks!"
+            },
+            {
+              "url": "https://www.recipetineats.com/chicken-mince-recipes-ground-chicken/",
+              "slug": "chicken-mince-recipes-ground-chicken",
+              "title": "Chicken mince"
+            },
+            {
+              "url": "https://www.recipetineats.com/nagi-recipetin-eats/",
+              "slug": "nagi-recipetin-eats",
+              "title": "About"
+            },
+            {
+              "url": "https://www.recipetineats.com/tonight-cookbook/",
+              "slug": "tonight-cookbook",
+              "title": "Tonight (NEW!)"
+            },
+            {
+              "url": "https://www.recipetineats.com/dinner-cookbook/",
+              "slug": "dinner-cookbook",
+              "title": "Dinner"
+            },
+            {
+              "url": "https://www.recipetineats.com/free-recipe-books/",
+              "slug": "free-recipe-books",
+              "title": "Free Recipe Books"
+            },
+            {
+              "url": "https://www.recipetineats.com/policy-use-of-recipes-images/",
+              "slug": "policy-use-of-recipes-images",
+              "title": "Policy: Use of Recipes &#038; Images"
+            },
+            {
+              "url": "https://www.recipetineats.com/aglio-e-olio-garlic-spaghetti/",
+              "slug": "aglio-e-olio-garlic-spaghetti",
+              "title": "Aglio E Olio Garlic Spaghetti"
+            },
+            {
+              "url": "https://www.recipetineats.com/monster-cookies-recipe/",
+              "slug": "monster-cookies-recipe",
+              "title": "Monster Cookies Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/nagis-everyday-kale-side-salad/",
+              "slug": "nagis-everyday-kale-side-salad",
+              "title": "Nagis Everyday Kale Side Salad"
+            },
+            {
+              "url": "https://www.recipetineats.com/one-pan-mongolian-beef-noodles-with-broccoli/",
+              "slug": "one-pan-mongolian-beef-noodles-with-broccoli",
+              "title": "One Pan Mongolian Beef Noodles With Broccoli"
+            },
+            {
+              "url": "https://www.recipetineats.com/cheesy-zucchini-muffins/",
+              "slug": "cheesy-zucchini-muffins",
+              "title": "Cheesy Zucchini Muffins"
+            },
+            {
+              "url": "https://www.recipetineats.com/mayonnaise-recipe/",
+              "slug": "mayonnaise-recipe",
+              "title": "Mayonnaise Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/fish-en-papillote-recipe/",
+              "slug": "fish-en-papillote-recipe",
+              "title": "Fish En Papillote Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/white-chocolate-raspberry-muffins/",
+              "slug": "white-chocolate-raspberry-muffins",
+              "title": "White Chocolate Raspberry Muffins"
+            },
+            {
+              "url": "https://www.recipetineats.com/dirty-martini/",
+              "slug": "dirty-martini",
+              "title": "Dirty Martini"
+            },
+            {
+              "url": "https://www.recipetineats.com/one-pan-portuguese-chicken-and-potato-bake/",
+              "slug": "one-pan-portuguese-chicken-and-potato-bake",
+              "title": "One Pan Portuguese Chicken And Potato Bake"
+            },
+            {
+              "url": "https://www.recipetineats.com/mushroom-ragu-pasta-recipe/",
+              "slug": "mushroom-ragu-pasta-recipe",
+              "title": "Mushroom Ragu Pasta Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/mediterranean-cucumber-salad/",
+              "slug": "mediterranean-cucumber-salad",
+              "title": "Mediterranean Cucumber Salad"
+            },
+            {
+              "url": "https://www.recipetineats.com/satay-chicken-legs-with-peanut-sauce/",
+              "slug": "satay-chicken-legs-with-peanut-sauce",
+              "title": "Satay Chicken Legs With Peanut Sauce"
+            },
+            {
+              "url": "https://www.recipetineats.com/choc-chip-peanut-butter-cookies/",
+              "slug": "choc-chip-peanut-butter-cookies",
+              "title": "Choc Chip Peanut Butter Cookies"
+            },
+            {
+              "url": "https://www.recipetineats.com/broccoli-wedge-salad/",
+              "slug": "broccoli-wedge-salad",
+              "title": "Broccoli Wedge Salad"
+            },
+            {
+              "url": "https://www.recipetineats.com/fresh-basil-vinaigrette/",
+              "slug": "fresh-basil-vinaigrette",
+              "title": "Fresh Basil Vinaigrette"
+            },
+            {
+              "url": "https://www.recipetineats.com/beef-rice-noodles/",
+              "slug": "beef-rice-noodles",
+              "title": "Beef Rice Noodles"
+            },
+            {
+              "url": "https://www.recipetineats.com/tartiflette-recipe/",
+              "slug": "tartiflette-recipe",
+              "title": "Tartiflette Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/slow-cooker-beef-stew/",
+              "slug": "slow-cooker-beef-stew",
+              "title": "Slow Cooker Beef Stew"
+            },
+            {
+              "url": "https://www.recipetineats.com/raspberry-tartlets-recipe/",
+              "slug": "raspberry-tartlets-recipe",
+              "title": "Raspberry Tartlets Recipe"
+            },
+            {
+              "url": "https://www.recipetineats.com/dozer-the-golden-retriever-dog/",
+              "slug": "dozer-the-golden-retriever-dog",
+              "title": "Meet Dozer"
+            },
+            {
+              "url": "https://www.recipetineats.com/recipetin-meals/",
+              "slug": "recipetin-meals",
+              "title": "RecipeTin Meals"
+            }
+          ]
+        }
+      },
+      "enableVoiceInteraction": true
+    },
+    "letter_spacing": "0em",
+    "maintenanceMode": false,
+    "siteDescription": "Smart Meal Planning & Recipe Assistant",
+    "allowRegistration": true,
+    "chefQuestionnaire": [
+      "How many days would you like to plan for (up to 7 days)?",
+      "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+      "When would you like the meal plan to start (today, tomorrow, or a specific date)?",
+      "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+      "What is your approximate ingredient budget per serving?"
+    ],
+    "fontLetterSpacing": "0em",
+    "subscriptionPlans": [
+      {
+        "id": "preset_taster",
+        "name": "Taster",
+        "slug": "taster",
+        "isFree": true,
+        "features": [
+          "Create up to 5 AI-powered recipes per month",
+          "Personal recipe library (25 total recipes)",
+          "Smart ingredient repurposing",
+          "Automated shopping list creation",
+          "Direct online grocery shopping links",
+          "Meal planner",
+          "Ingredient photo recognition"
+        ],
+        "isDefault": true,
+        "updatedAt": "2026-09-16T08:22:09.057Z",
+        "buttonText": "Manage",
+        "tokenLimit": 500,
+        "trialBadge": "",
+        "annualBadge": "",
+        "featuresText": "Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition",
+        "monthlyBadge": "",
+        "aiRecipeLimit": 5,
+        "canViewMacros": false,
+        "allowedAiModels": "gemini-3.5-flash-lite,gpt-3.5-turbo",
+        "descriptionAnnual": "Free tier with limited features",
+        "socialScrapeLimit": 5,
+        "annualPriceDollars": 0,
+        "descriptionMonthly": "Free tier with limited features",
+        "recipeLibraryLimit": 25,
+        "monthlyPriceDollars": 0,
+        "tokenReimburseFrequency": "monthly"
+      }
+    ],
+    "supportedLanguages": [
+      {
+        "code": "en",
+        "flag": "🇺🇸",
+        "name": "English",
+        "status": "active",
+        "direction": "ltr",
+        "isDefault": true,
+        "nativeName": "English",
+        "lastUpdated": "2026-09-18T10:38:26.048Z"
+      },
+      {
+        "code": "es",
+        "flag": "🇪🇸",
+        "name": "Spanish",
+        "status": "active",
+        "direction": "ltr",
+        "isDefault": false,
+        "nativeName": "Español",
+        "lastUpdated": "2026-09-18T10:38:11.128Z"
+      },
+      {
+        "code": "fr",
+        "flag": "🇫🇷",
+        "name": "French",
+        "status": "active",
+        "direction": "ltr",
+        "isDefault": false,
+        "nativeName": "Français",
+        "lastUpdated": "2026-09-18T10:38:11.128Z"
+      },
+      {
+        "code": "th",
+        "flag": "🇹🇭",
+        "name": "Thai",
+        "status": "active",
+        "direction": "ltr",
+        "isDefault": false,
+        "nativeName": "ไทย",
+        "lastUpdated": "2026-09-18T10:38:11.128Z"
+      }
+    ],
+    "ingredientCategories": [
+      "Produce",
+      "Dairy & Eggs",
+      "Meat & Poultry",
+      "Seafood",
+      "Bakery",
+      "Pantry & Dry Goods",
+      "Canned Goods",
+      "Baking & Cooking",
+      "Spices & Seasonings",
+      "Snacks",
+      "Beverages",
+      "Frozen Foods",
+      "Condiments & Sauces",
+      "Oils & Vinegars"
+    ],
+    "recommendedRecipeUrls": [
+      "https://www.recipetineats.com/recipes/",
+      "https://www.taste.com.au/recipes"
+    ]
+  },
+  "updatedAt": "2026-09-22T07:29:35.496Z"
 }

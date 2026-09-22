@@ -1,293 +1,384 @@
-export interface ScrapedRecipe {
+export interface ScrapedRecipeData {
   title: string;
   description: string;
   ingredients: string[];
-  directions: string[];
   instructions: string[];
-  imageUrl: string;
-  prepTime: string;
-  cookTime: string;
+  prepMinutes: number;
+  cookMinutes: number;
   servings: number;
-  recipeType: string;
-  cuisine: string;
-  nutrition: Record<string, any>;
+  calories?: number;
+  image?: string;
   sourceUrl: string;
+  sourceName?: string;
 }
 
-export function decodeHtmlEntities(str: string): string {
-  if (!str) return '';
-  return str
-    .replace(/&quot;/g, '"')
-    .replace(/&#0*39;/g, "'")
-    .replace(/&apos;/g, "'")
+export interface DiscoveredSlugItem {
+  url: string;
+  slug: string;
+  title: string;
+}
+
+function parseDurationMinutes(durationStr?: string): number {
+  if (!durationStr || typeof durationStr !== 'string') return 15;
+  const match = durationStr.match(/PT(?:(\d+)H)?(?:(\d+)M)?/i);
+  if (match) {
+    const hours = parseInt(match[1] || '0', 10);
+    const minutes = parseInt(match[2] || '0', 10);
+    return hours * 60 + minutes || 15;
+  }
+  const num = parseInt(durationStr, 10);
+  return isNaN(num) || num <= 0 ? 15 : num;
+}
+
+function cleanText(txt: any): string {
+  if (!txt) return '';
+  return String(txt)
+    .replace(/<[^>]*>/g, '')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&deg;/g, '°')
-    .replace(/&#0*8211;/g, '–')
-    .replace(/&#0*8212;/g, '—')
-    .replace(/&ndash;/g, '–')
-    .replace(/&mdash;/g, '—')
-    .replace(/&#0*8216;/g, "'")
-    .replace(/&#0*8217;/g, "'")
-    .replace(/&#0*8220;/g, '"')
-    .replace(/&#0*8221;/g, '"')
-    .replace(/&#0*160;/g, ' ')
-    .replace(/&#(\d+);/g, (_, dec) => {
-      try { return String.fromCharCode(parseInt(dec, 10)); } catch { return _; }
-    })
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
-      try { return String.fromCharCode(parseInt(hex, 16)); } catch { return _; }
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function isIndexOrCollectionUrl(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const parsed = new URL(urlStr.trim());
+    const p = parsed.pathname.toLowerCase().replace(/\/+$/, '');
+    return (
+      p === '' ||
+      p === '/recipes' ||
+      p.includes('/recipes/') ||
+      p.includes('/category/') ||
+      p.includes('/categories/') ||
+      p.includes('/collection/') ||
+      p.includes('/collections/') ||
+      p.includes('/tag/') ||
+      p.includes('/archive/') ||
+      p.endsWith('/recipes') ||
+      p.endsWith('/all') ||
+      parsed.search.includes('page=') ||
+      parsed.search.includes('category=')
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+export async function discoverRecipeLinksFromIndex(indexUrl: string): Promise<DiscoveredSlugItem[]> {
+  try {
+    const targetUrl = (indexUrl || '').trim();
+    if (!/^https?:\/\//i.test(targetUrl)) return [];
+
+    const response = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      signal: AbortSignal.timeout(8000),
+      redirect: 'follow'
     });
-}
 
-function parseIsoDuration(duration: string): string {
-  if (!duration || typeof duration !== 'string') return '';
-  const match = duration.match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/i);
-  if (!match) return duration.replace(/^PT/i, '');
-  const days = parseInt(match[1] || '0', 10);
-  const hours = parseInt(match[2] || '0', 10);
-  const minutes = parseInt(match[3] || '0', 10);
-  const totalMinutes = days * 1440 + hours * 60 + minutes;
-  if (totalMinutes > 0) {
-    if (hours > 0 && minutes > 0 && days === 0) {
-      return `${hours} hr ${minutes} mins`;
-    }
-    if (hours > 0 && minutes === 0 && days === 0) {
-      return `${hours} hr`;
-    }
-    return `${totalMinutes} mins`;
-  }
-  return duration;
-}
+    if (!response.ok) return [];
+    const html = await response.text();
+    const targetHost = new URL(targetUrl).hostname;
+    const discoveredMap = new Map<string, DiscoveredSlugItem>();
 
-function findRecipeInObject(obj: any): any | null {
-  if (!obj || typeof obj !== 'object') return null;
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = findRecipeInObject(item);
-      if (found) return found;
-    }
-    return null;
-  }
-  const type = obj['@type'];
-  const isRecipe = (typeof type === 'string' && type.toLowerCase().includes('recipe')) ||
-    (Array.isArray(type) && type.some((t: any) => typeof t === 'string' && t.toLowerCase().includes('recipe')));
-  
-  if (isRecipe) return obj;
-
-  if (Array.isArray(obj['@graph'])) {
-    for (const item of obj['@graph']) {
-      const found = findRecipeInObject(item);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function extractJsonLd(html: string): any | null {
-  const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  let match;
-  while ((match = jsonLdRegex.exec(html)) !== null) {
-    const rawContent = match[1].trim();
-    if (!rawContent) continue;
-    try {
-      const parsed = JSON.parse(rawContent);
-      const recipe = findRecipeInObject(parsed);
-      if (recipe) return recipe;
-    } catch (_) {
+    // 1. Inspect Schema.org ItemList JSON-LD
+    const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    for (const match of jsonLdMatches) {
       try {
-        const cleaned = rawContent
-          .replace(/[\u0000-\u001F]+/g, ' ')
-          .replace(/,\s*([\]}])/g, '$1');
-        const parsed = JSON.parse(cleaned);
-        const recipe = findRecipeInObject(parsed);
-        if (recipe) return recipe;
+        const parsed = JSON.parse(match[1].trim());
+        const findItems = (node: any) => {
+          if (!node) return;
+          if (Array.isArray(node)) {
+            node.forEach(findItems);
+          } else if (typeof node === 'object') {
+            if ((node['@type'] === 'ItemList' || node['@type'] === 'CollectionPage') && Array.isArray(node.itemListElement)) {
+              for (const el of node.itemListElement) {
+                const itemUrl = el.url || (typeof el.item === 'string' ? el.item : el.item?.url);
+                if (itemUrl && typeof itemUrl === 'string' && itemUrl.startsWith('http')) {
+                  const p = new URL(itemUrl).pathname;
+                  const slug = p.split('/').filter(Boolean).pop() || '';
+                  const itemTitle = cleanText(el.name || el.item?.name || slug.replace(/[-_]/g, ' '));
+                  if (slug.length > 3) {
+                    discoveredMap.set(itemUrl, {
+                      url: itemUrl,
+                      slug,
+                      title: itemTitle.length > 2 ? itemTitle : slug.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+                    });
+                  }
+                }
+              }
+            }
+            if (node['@graph']) findItems(node['@graph']);
+          }
+        };
+        findItems(parsed);
       } catch (_) {}
     }
+
+    // 2. Scan HTML anchor tags
+    const anchorMatches = html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi);
+    for (const m of anchorMatches) {
+      try {
+        const rawHref = m[1].trim();
+        const innerText = cleanText(m[2]);
+        if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) continue;
+
+        const resolved = new URL(rawHref, targetUrl);
+        if (resolved.hostname !== targetHost) continue;
+
+        const p = resolved.pathname.toLowerCase();
+        if (
+          p === '' ||
+          p === '/' ||
+          p === '/recipes' ||
+          p === '/recipes/' ||
+          p.includes('/category/') ||
+          p.includes('/categories/') ||
+          p.includes('/tag/') ||
+          p.includes('/page/') ||
+          p.includes('/author/') ||
+          p.includes('/contact') ||
+          p.includes('/about') ||
+          p.includes('/privacy') ||
+          p.includes('/terms') ||
+          p.includes('/shop') ||
+          p.includes('/cart') ||
+          p.includes('/wp-content') ||
+          p.includes('/wp-json') ||
+          /\.(jpg|jpeg|png|gif|webp|svg|pdf|css|js)$/i.test(p)
+        ) {
+          continue;
+        }
+
+        const segments = p.split('/').filter(Boolean);
+        const slug = segments[segments.length - 1] || '';
+        if (slug.length > 3 && !/^\d+$/.test(slug)) {
+          const canonicalUrl = resolved.origin + resolved.pathname;
+          if (!discoveredMap.has(canonicalUrl)) {
+            const rawTitle = innerText && innerText.length > 3 && !innerText.toLowerCase().includes('read more')
+              ? innerText
+              : slug.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+            discoveredMap.set(canonicalUrl, {
+              url: canonicalUrl,
+              slug,
+              title: rawTitle
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    return Array.from(discoveredMap.values());
+  } catch (_) {
+    return [];
   }
+}
+
+export function findBestMatchingUrl(queryText: string, urls: string[]): string | null {
+  if (!urls || urls.length === 0) return null;
+  if (urls.length === 1) return urls[0];
+
+  const cleanQuery = (queryText || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  const queryTokens = cleanQuery.split(/\s+/).filter(w => w.length > 2);
+
+  let bestCandidate = urls[0];
+  let highestScore = -1;
+
+  for (const candUrl of urls) {
+    let score = 0;
+    try {
+      const urlObj = new URL(candUrl);
+      const pathname = urlObj.pathname.toLowerCase().replace(/[-_./]/g, ' ');
+
+      for (const token of queryTokens) {
+        if (pathname.includes(token)) {
+          score += 4;
+        }
+      }
+    } catch (_) {}
+
+    if (score > highestScore) {
+      highestScore = score;
+      bestCandidate = candUrl;
+    }
+  }
+
+  return bestCandidate;
+}
+
+export async function scrapeRecipeFromUrl(rawUrl: string): Promise<ScrapedRecipeData | null> {
+  try {
+    const targetUrl = (rawUrl || '').trim();
+    if (!/^https?:\/\//i.test(targetUrl)) return null;
+
+    const response = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      signal: AbortSignal.timeout(8000),
+      redirect: 'follow'
+    });
+
+    if (!response.ok) return null;
+    const html = await response.text();
+    const domain = new URL(targetUrl).hostname.replace(/^www\./, '');
+
+    // Search Schema.org Recipe in JSON-LD
+    const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    let recipeNode: any = null;
+
+    for (const match of jsonLdMatches) {
+      try {
+        const parsed = JSON.parse(match[1].trim());
+        const findRecipe = (node: any): any => {
+          if (!node) return null;
+          if (Array.isArray(node)) {
+            for (const item of node) {
+              const res = findRecipe(item);
+              if (res) return res;
+            }
+          } else if (typeof node === 'object') {
+            const type = node['@type'];
+            if (type === 'Recipe' || (Array.isArray(type) && type.includes('Recipe'))) {
+              return node;
+            }
+            if (node['@graph']) return findRecipe(node['@graph']);
+          }
+          return null;
+        };
+        const found = findRecipe(parsed);
+        if (found) {
+          recipeNode = found;
+          break;
+        }
+      } catch (_) {}
+    }
+
+    if (recipeNode) {
+      const title = cleanText(recipeNode.name || recipeNode.headline) || `Recipe from ${domain}`;
+      const description = cleanText(recipeNode.description) || `Authentic recipe from ${domain}`;
+
+      let ingredients: string[] = [];
+      if (Array.isArray(recipeNode.recipeIngredient)) {
+        ingredients = recipeNode.recipeIngredient.map(cleanText).filter(Boolean);
+      }
+
+      let instructions: string[] = [];
+      if (Array.isArray(recipeNode.recipeInstructions)) {
+        instructions = recipeNode.recipeInstructions.flatMap((inst: any) => {
+          if (typeof inst === 'string') return [cleanText(inst)];
+          if (inst && typeof inst === 'object') {
+            if (inst.text) return [cleanText(inst.text)];
+            if (Array.isArray(inst.itemListElement)) {
+              return inst.itemListElement.map((sub: any) => cleanText(sub.text || sub.name)).filter(Boolean);
+            }
+          }
+          return [];
+        }).filter(Boolean);
+      } else if (typeof recipeNode.recipeInstructions === 'string') {
+        instructions = recipeNode.recipeInstructions.split(/\r?\n/).map(cleanText).filter(Boolean);
+      }
+
+      let image = '';
+      if (typeof recipeNode.image === 'string' && recipeNode.image.startsWith('http')) {
+        image = recipeNode.image;
+      } else if (Array.isArray(recipeNode.image) && recipeNode.image[0]) {
+        const first = recipeNode.image[0];
+        image = typeof first === 'string' ? first : first.url || '';
+      } else if (recipeNode.image?.url) {
+        image = recipeNode.image.url;
+      }
+
+      const prepMinutes = parseDurationMinutes(recipeNode.prepTime);
+      const cookMinutes = parseDurationMinutes(recipeNode.cookTime || recipeNode.totalTime);
+      let servings = 2;
+      if (recipeNode.recipeYield) {
+        const m = String(recipeNode.recipeYield).match(/\d+/);
+        if (m) servings = parseInt(m[0], 10);
+      }
+
+      let calories: number | undefined = undefined;
+      if (recipeNode.nutrition?.calories) {
+        const calMatch = String(recipeNode.nutrition.calories).match(/\d+/);
+        if (calMatch) calories = parseInt(calMatch[0], 10);
+      }
+
+      return {
+        title,
+        description,
+        ingredients: ingredients.length > 0 ? ingredients : ['Fresh produce & proteins', 'Aromatics & seasonings', 'Olive oil'],
+        instructions: instructions.length > 0 ? instructions : ['Prepare ingredients and cook according to recipe guidelines.'],
+        prepMinutes,
+        cookMinutes,
+        servings,
+        calories,
+        image: image || undefined,
+        sourceUrl: targetUrl,
+        sourceName: domain
+      };
+    }
+
+    // Heuristic OpenGraph Fallback
+    const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i);
+    const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i);
+    const ogImage = html.match(/<meta[^>]*property=["'](?:og:image|og:image:secure_url)["'][^>]*content=["']([^"']+)["']/i);
+
+    return {
+      title: ogTitle ? cleanText(ogTitle[1]) : `Curated Dish from ${domain}`,
+      description: ogDesc ? cleanText(ogDesc[1]) : `Recipe curated from ${domain}`,
+      ingredients: ['Fresh seasonal produce', 'Quality protein & olive oil', 'Herbs & spices'],
+      instructions: ['Prepare ingredients and cook according to source recipe guidelines.'],
+      prepMinutes: 15,
+      cookMinutes: 20,
+      servings: 2,
+      image: ogImage ? ogImage[1].trim() : undefined,
+      sourceUrl: targetUrl,
+      sourceName: domain
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function resolveAndScrapeBestRecipe(queryText: string, candidateUrls: string[]): Promise<ScrapedRecipeData | null> {
+  if (!candidateUrls || candidateUrls.length === 0) return null;
+
+  for (const candUrl of candidateUrls) {
+    if (!candUrl || typeof candUrl !== 'string') continue;
+
+    if (isIndexOrCollectionUrl(candUrl)) {
+      const discoveredItems = await discoverRecipeLinksFromIndex(candUrl);
+      if (discoveredItems.length > 0) {
+        const urlsOnly = discoveredItems.map(d => d.url);
+        const bestMatchedUrl = findBestMatchingUrl(queryText, urlsOnly) || urlsOnly[0];
+        const scraped = await scrapeRecipeFromUrl(bestMatchedUrl);
+        if (scraped && scraped.ingredients.length > 0) {
+          return scraped;
+        }
+      }
+    } else {
+      const direct = await scrapeRecipeFromUrl(candUrl);
+      if (direct && direct.ingredients.length > 0) {
+        return direct;
+      }
+    }
+  }
+
   return null;
 }
 
-function extractInstructions(instructions: any): string[] {
-  if (!instructions) return [];
-  if (typeof instructions === 'string') {
-    return instructions
-      .split(/\r?\n+/)
-      .map(s => decodeHtmlEntities(s).replace(/^(\d+[\.\)]|\bstep\s*\d+[:.-]?|[-*•])\s*/i, '').trim())
-      .filter(s => s.length > 3);
-  }
-  if (Array.isArray(instructions)) {
-    const steps: string[] = [];
-    for (const item of instructions) {
-      if (typeof item === 'string') {
-        const cleaned = decodeHtmlEntities(item).replace(/^(\d+[\.\)]|\bstep\s*\d+[:.-]?|[-*•])\s*/i, '').trim();
-        if (cleaned.length > 2) steps.push(cleaned);
-      } else if (item && typeof item === 'object') {
-        if (item.itemListElement && Array.isArray(item.itemListElement)) {
-          steps.push(...extractInstructions(item.itemListElement));
-        } else {
-          const stepText = item.text || item.description || item.name || '';
-          const cleaned = decodeHtmlEntities(stepText).replace(/^(\d+[\.\)]|\bstep\s*\d+[:.-]?|[-*•])\s*/i, '').trim();
-          if (cleaned.length > 2) steps.push(cleaned);
-        }
-      }
-    }
-    return steps;
-  }
-  return [];
-}
-
-function extractImageUrl(image: any): string {
-  if (!image) return '';
-  if (typeof image === 'string') return image;
-  if (Array.isArray(image)) {
-    for (const item of image) {
-      const url = extractImageUrl(item);
-      if (url) return url;
-    }
-  }
-  if (typeof image === 'object') {
-    if (typeof image.url === 'string') return image.url;
-    if (typeof image.contentUrl === 'string') return image.contentUrl;
-  }
-  return '';
-}
-
-function extractMeta(html: string, propertyOrName: string): string {
-  const regex = new RegExp(`<meta[^>]*(?:property|name)=["']${propertyOrName}["'][^>]*content=["']([^"']*)["']`, 'i');
-  const match = html.match(regex);
-  if (match && match[1]) return decodeHtmlEntities(match[1].trim());
-  const regex2 = new RegExp(`<meta[^>]*content=["']([^"']*)["'][^>]*(?:property|name)=["']${propertyOrName}["']`, 'i');
-  const match2 = html.match(regex2);
-  if (match2 && match2[1]) return decodeHtmlEntities(match2[1].trim());
-  return '';
-}
-
-export async function scrapeRecipeFromUrl(rawUrl: string): Promise<ScrapedRecipe> {
-  let targetUrl = rawUrl.trim();
-  if (!/^https?:\/\//i.test(targetUrl)) {
-    targetUrl = 'https://' + targetUrl;
-  }
-
-  const cleanDomain = targetUrl.replace(/^https?:\/\//i, '').split('/')[0].replace(/^www\./i, '');
-
-  const response = await fetch(targetUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Cache-Control': 'no-cache'
-    },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(15000)
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch recipe URL: HTTP ${response.status} ${response.statusText}`);
-  }
-
-  const html = await response.text();
-
-  // 1. Primary Extraction: Schema.org JSON-LD (Used by 95% of food blogs)
-  const jsonLd = extractJsonLd(html);
-  if (jsonLd) {
-    const title = decodeHtmlEntities(jsonLd.name || jsonLd.headline || '').trim();
-    const description = decodeHtmlEntities(jsonLd.description || '').trim();
-
-    let ingredients: string[] = [];
-    const rawIngredients = jsonLd.recipeIngredient || jsonLd.ingredients;
-    if (Array.isArray(rawIngredients)) {
-      ingredients = rawIngredients
-        .map((i: any) => decodeHtmlEntities(String(i)).trim())
-        .filter((i: string) => i.length > 1);
-    }
-
-    const directions = extractInstructions(jsonLd.recipeInstructions);
-    const imageUrl = extractImageUrl(jsonLd.image) || extractMeta(html, 'og:image') || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
-
-    let servings = 4;
-    const rawYield = jsonLd.recipeYield || jsonLd.yield;
-    if (rawYield) {
-      const match = String(rawYield).match(/\d+/);
-      if (match) servings = parseInt(match[0], 10);
-    }
-
-    const prepTime = parseIsoDuration(jsonLd.prepTime) || '15 mins';
-    const cookTime = parseIsoDuration(jsonLd.cookTime) || '25 mins';
-    const category = decodeHtmlEntities(Array.isArray(jsonLd.recipeCategory) ? jsonLd.recipeCategory[0] : jsonLd.recipeCategory || 'Main Dish');
-    const cuisine = decodeHtmlEntities(Array.isArray(jsonLd.recipeCuisine) ? jsonLd.recipeCuisine[0] : jsonLd.recipeCuisine || 'International');
-
-    if (title && (ingredients.length > 0 || directions.length > 0)) {
-      return {
-        title,
-        description: description || `Imported from ${cleanDomain}`,
-        ingredients: ingredients.length > 0 ? ingredients : ['Seasonal Fresh Ingredients'],
-        directions: directions.length > 0 ? directions : ['Follow preparation steps on source page.'],
-        instructions: directions.length > 0 ? directions : ['Follow preparation steps on source page.'],
-        imageUrl,
-        prepTime,
-        cookTime,
-        servings,
-        recipeType: category,
-        cuisine,
-        nutrition: jsonLd.nutrition || {},
-        sourceUrl: targetUrl
-      };
-    }
-  }
-
-  // 2. Fallback: OpenGraph Meta Tags & HTML Content Scanning
-  const ogTitle = extractMeta(html, 'og:title') || '';
-  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  const rawTitle = ogTitle || (titleMatch ? titleMatch[1] : `Recipe from ${cleanDomain}`);
-  const title = decodeHtmlEntities(rawTitle.replace(/(\s*[-|–—]\s*[^-\|–—]+)$/, '')).trim();
-
-  const description = extractMeta(html, 'og:description') || extractMeta(html, 'description') || `Recipe imported from ${targetUrl}`;
-  const imageUrl = extractMeta(html, 'og:image') || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
-
-  // Extract list items inside common recipe containers
-  const ingredients: string[] = [];
-  const directions: string[] = [];
-
-  const ingMatches = html.matchAll(/<li[^>]*class=["'][^"']*(?:ingredient|recipe-ingredient|wprm-recipe-ingredient)[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi);
-  for (const m of ingMatches) {
-    const text = decodeHtmlEntities(m[1].replace(/<[^>]+>/g, '')).trim();
-    if (text.length > 2) ingredients.push(text);
-  }
-
-  const stepMatches = html.matchAll(/<li[^>]*class=["'][^"']*(?:instruction|direction|step|recipe-instruction)[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi);
-  for (const m of stepMatches) {
-    const text = decodeHtmlEntities(m[1].replace(/<[^>]+>/g, '')).trim();
-    if (text.length > 3) directions.push(text);
-  }
-
-  return {
-    title: title || `Delicious Dish from ${cleanDomain}`,
-    description,
-    ingredients: ingredients.length > 0 ? ingredients : [
-      'Fresh Seasonal Produce',
-      'Extra Virgin Olive Oil & Seasonings',
-      'Aromatics (Garlic, Onion, Herbs)'
-    ],
-    directions: directions.length > 0 ? directions : [
-      'Prepare and assemble all fresh ingredients as indicated.',
-      'Cook over medium heat until golden and aromatic.',
-      'Garnish and serve immediately.'
-    ],
-    instructions: directions.length > 0 ? directions : [
-      'Prepare and assemble all fresh ingredients as indicated.',
-      'Cook over medium heat until golden and aromatic.',
-      'Garnish and serve immediately.'
-    ],
-    imageUrl,
-    prepTime: '20 mins',
-    cookTime: '25 mins',
-    servings: 4,
-    recipeType: 'Main Dish',
-    cuisine: 'International',
-    nutrition: {},
-    sourceUrl: targetUrl
-  };
+export async function extractImageFromUrl(rawUrl: string): Promise<string | null> {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  const data = await scrapeRecipeFromUrl(rawUrl);
+  return data?.image || null;
 }

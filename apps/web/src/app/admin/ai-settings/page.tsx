@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
-  Radio, Activity, CheckCircle2, XCircle, Loader2,
+  Radio, Compass, ExternalLink, ChevronDown, ChevronUp, FileText, Search, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Key, Sliders, Sparkles, Globe, PackageCheck, 
   ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle
 } from 'lucide-react';
@@ -132,6 +132,18 @@ export default function ChefAISettingsPage() {
   const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
   const [newRecipeUrlInput, setNewRecipeUrlInput] = useState('');
 
+  // Index Link Crawler & Slug Discovery State
+  const [crawlingUrl, setCrawlingUrl] = useState<string | null>(null);
+  const [crawlResults, setCrawlResults] = useState<Record<string, {
+    count: number;
+    discovered: { url: string; slug: string; title: string }[];
+    crawledAt: string;
+  }>>({});
+  const [expandedIndexUrl, setExpandedIndexUrl] = useState<string | null>(null);
+  const [previewRecipeData, setPreviewRecipeData] = useState<any | null>(null);
+  const [isPullingRecipe, setIsPullingRecipe] = useState(false);
+  const [selectedSlugUrl, setSelectedSlugUrl] = useState<string | null>(null);
+
   // Multi-Topic Questionnaire State
   const [sections, setSections] = useState<QuestionnaireSection[]>(DEFAULT_SECTIONS);
   const [newTopicTitle, setNewTopicTitle] = useState('');
@@ -140,6 +152,8 @@ export default function ChefAISettingsPage() {
   const [newQuestionText, setNewQuestionText] = useState('');
 
   const [saved, setSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Dynamic Theme Synchronization
   const applySavedTheme = useCallback((incomingColors?: any) => {
@@ -150,6 +164,12 @@ export default function ChefAISettingsPage() {
       setIsDayMode(isDay);
 
       let colors = incomingColors || (typeof getMemoryThemeColors === 'function' ? getMemoryThemeColors() : null);
+      if (!colors && typeof window !== 'undefined') {
+        try {
+          const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+          if (stored) colors = JSON.parse(stored);
+        } catch (_) {}
+      }
 
       if (colors && Object.keys(colors).length > 0) {
         if (typeof setMemoryThemeColors === 'function') setMemoryThemeColors(colors);
@@ -183,16 +203,26 @@ export default function ChefAISettingsPage() {
     fetch('/api/admin/settings', { cache: 'no-store' })
       .then(res => res.json())
       .then(data => {
-        if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
-          localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
-          applySavedTheme(data.themeColors);
+        const theme = data?.themeColors || data?.settings?.themeColors || data?.theme_colors;
+        if (theme && Object.keys(theme).length > 0) {
+          localStorage.setItem('zecratary_theme_colors', JSON.stringify(theme));
+          applySavedTheme(theme);
         }
       })
       .catch(() => {});
 
     const handleThemeEvent = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      applySavedTheme(detail);
+      if (detail && typeof detail === 'object' && Object.keys(detail).length > 0) {
+        applySavedTheme(detail);
+      } else {
+        const activeMemory = typeof getMemoryThemeColors === 'function' ? getMemoryThemeColors() : null;
+        if (activeMemory) {
+          applySavedTheme(activeMemory);
+        } else {
+          applySavedTheme();
+        }
+      }
     };
 
     window.addEventListener('zecratary_theme_updated', handleThemeEvent);
@@ -283,6 +313,15 @@ export default function ChefAISettingsPage() {
         if (Array.isArray(c.knowledgeBaseList)) setKnowledgeBaseList(c.knowledgeBaseList);
         if (Array.isArray(c.customVocabularyList)) setCustomVocabularyList(c.customVocabularyList);
         if (Array.isArray(c.filterWordsList)) setFilterWordsList(c.filterWordsList);
+        if (c.discoveredRecipesCache && typeof c.discoveredRecipesCache === 'object') setCrawlResults(c.discoveredRecipesCache);
+
+        if (Array.isArray(c.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(c.recommendedRecipeUrls.filter(Boolean));
+        } else if (Array.isArray(c.recommendedRecipesUrls)) {
+          setRecommendedRecipeUrls(c.recommendedRecipesUrls.filter(Boolean));
+        } else if (Array.isArray(serverData.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(serverData.recommendedRecipeUrls.filter(Boolean));
+        }
 
         if (Array.isArray(c.sections) && c.sections.length > 0) {
           setSections(c.sections.map((s: any) => ({ ...s, enabled: s.enabled !== false })));
@@ -518,7 +557,7 @@ export default function ChefAISettingsPage() {
     }
   };
 
-  // Agent Parameter Handlers: Knowledge Base, Custom Vocabulary, Filter Words
+  // Agent Parameter Handlers
   const handleAddKnowledgeBase = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const clean = newKbInput.trim();
@@ -561,13 +600,12 @@ export default function ChefAISettingsPage() {
     setFilterWordsList(filterWordsList.filter((_, i) => i !== idx));
   };
 
-  // Recommended Recipes Url Handlers (Supports single and multiple URLs)
+  // Recommended Recipes Url Handlers
   const handleAddRecommendedUrls = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const raw = newRecipeUrlInput.trim();
     if (!raw) return;
 
-    // Split by newlines, commas, or multiple whitespaces to support multiple URLs
     const entries = raw
       .split(/[\n,]+/)
       .map(s => s.trim())
@@ -594,6 +632,86 @@ export default function ChefAISettingsPage() {
 
   const handleRemoveRecommendedUrl = (idx: number) => {
     setRecommendedRecipeUrls(recommendedRecipeUrls.filter((_, i) => i !== idx));
+  };
+
+  // Crawl Index Links & Discover Slugs Handler
+  const handleCrawlIndexUrl = async (targetUrl: string) => {
+    setCrawlingUrl(targetUrl);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/admin/crawl-index', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'crawl', url: targetUrl })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.discovered)) {
+        const updated = {
+          ...crawlResults,
+          [targetUrl]: {
+            count: data.count || data.discovered.length,
+            discovered: data.discovered,
+            crawledAt: new Date().toISOString()
+          }
+        };
+        setCrawlResults(updated);
+        setExpandedIndexUrl(targetUrl);
+        setTestResult({
+          success: true,
+          message: `${t('crawlSuccessNotice', 'Crawled index successfully')}: ${data.discovered.length} ${t('recipeSlugsDiscovered', 'recipe slugs discovered from')} ${new URL(targetUrl).hostname}!`
+        });
+
+        await persistServerAdminSettings({
+          chefAiSettings: {
+            discoveredRecipesCache: updated
+          }
+        });
+      } else {
+        setTestResult({
+          success: false,
+          message: data.error || t('crawlFailedNotice', 'Failed to discover recipe links from index URL.')
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err.message || t('crawlErrorNotice', 'Error connecting to index crawler.')
+      });
+    } finally {
+      setCrawlingUrl(null);
+    }
+  };
+
+  const handlePullIndividualRecipe = async (recipeUrl: string) => {
+    setIsPullingRecipe(true);
+    setSelectedSlugUrl(recipeUrl);
+    setPreviewRecipeData(null);
+    try {
+      const res = await fetch('/api/admin/crawl-index', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pull', recipeUrl })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.recipe) {
+        setPreviewRecipeData(data.recipe);
+      } else {
+        alert(data.error || t('pullRecipeFailed', 'Failed to pull recipe details from slug.'));
+      }
+    } catch (err: any) {
+      alert(err.message || t('pullRecipeError', 'Error pulling individual recipe.'));
+    } finally {
+      setIsPullingRecipe(false);
+    }
+  };
+
+  const handleAddDiscoveredAsDirectUrl = (recipeUrl: string) => {
+    if (!recommendedRecipeUrls.includes(recipeUrl)) {
+      setRecommendedRecipeUrls([...recommendedRecipeUrls, recipeUrl]);
+      alert(t('addedDirectUrlSuccess', 'Recipe URL added to Recommended Recipes as a primary source!'));
+    } else {
+      alert(t('alreadyInListNotice', 'This recipe URL is already in your recommended list.'));
+    }
   };
 
   const handleClearAllRecommendedUrls = () => {
@@ -662,8 +780,21 @@ export default function ChefAISettingsPage() {
 
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
+    setSaveError(null);
+
     const cleanApiKey = apiKey.trim();
     const activeModel = modelRef.current || model;
+
+    // Preserve active theme configuration during AI settings persistence
+    let currentTheme = typeof getMemoryThemeColors === 'function' ? getMemoryThemeColors() : null;
+    if (!currentTheme && typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+        if (stored) currentTheme = JSON.parse(stored);
+      } catch (_) {}
+    }
 
     const config = {
       provider,
@@ -687,6 +818,8 @@ export default function ChefAISettingsPage() {
       knowledgeBaseList,
       customVocabularyList,
       filterWordsList,
+      recommendedRecipeUrls,
+      discoveredRecipesCache: crawlResults,
       sections,
       updatedAt: new Date().toISOString()
     };
@@ -695,58 +828,59 @@ export default function ChefAISettingsPage() {
       .filter(s => s.enabled !== false)
       .flatMap(s => s.questions);
 
-    await persistServerAdminSettings({
-      aiProvider: provider,
-      aiModel: activeModel,
-      chefAiSettings: config,
-      chefQuestionnaire: activeFlattenedQuestions
-    });
+    try {
+      await persistServerAdminSettings({
+        aiProvider: provider,
+        aiModel: activeModel,
+        chefAiSettings: config,
+        recommendedRecipeUrls,
+        chefQuestionnaire: activeFlattenedQuestions,
+        themeColors: currentTheme
+      });
 
-    if (cleanApiKey) {
-      try {
-        const res = await fetch('/api/admin/keys', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o',
-            provider,
-            envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
-            keyValue: cleanApiKey,
-            model: activeModel,
-            status: 'active'
-          })
-        });
-
-        const data = await res.json();
-        if (res.ok && data.success) {
-          setTestResult({
-            success: true,
-            message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (${provider === 'gemini' ? 'Gemini' : 'OpenAI'} • ${activeModel})`
+      if (cleanApiKey) {
+        try {
+          await fetch('/api/admin/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o',
+              provider,
+              envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
+              keyValue: cleanApiKey,
+              model: activeModel,
+              status: 'active'
+            })
           });
-        }
-      } catch (err: any) {
-        setTestResult({
-          success: false,
-          message: `Server stored settings, but .env save failed: ${err.message || 'Network error'}`
-        });
+        } catch (_) {}
       }
-    } else {
+
+      setSaved(true);
       setTestResult({
         success: true,
-        message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (Model: ${activeModel})`
+        message: `${t('settingsSavedSuccess', 'Configuration saved & synchronized successfully!')} (${provider === 'gemini' ? 'Gemini' : 'OpenAI'} • ${activeModel})`
       });
-    }
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      window.dispatchEvent(new Event('zecratary_engine_config_updated'));
-      window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
-      window.dispatchEvent(new Event('zecratary_settings_updated'));
-      window.dispatchEvent(new Event('storage'));
+      if (typeof window !== 'undefined') {
+        if (currentTheme) {
+          setMemoryThemeColors(currentTheme);
+          applyThemeToDocument(currentTheme);
+          window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: currentTheme }));
+        }
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+        window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_settings_updated'));
+        window.dispatchEvent(new Event('storage'));
+      }
+
+      setTimeout(() => setSaved(false), 3500);
+    } catch (err: any) {
+      console.error('Failed to save settings:', err);
+      setSaveError(err.message || 'Failed to save settings');
+    } finally {
+      setIsSaving(false);
     }
-    
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3500);
   };
 
   const activeSection = sections.find(s => s.id === activeTopicId) || sections[0];
@@ -786,6 +920,26 @@ export default function ChefAISettingsPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {isSaving && (
+            <span 
+              className="border px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
+              }}
+            >
+              <Loader2 className="h-4 w-4 animate-spin" /> {t('saving', 'Saving...')}
+            </span>
+          )}
+          {saveError && (
+            <span 
+              className="border px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in shadow-xs border-red-500/50 text-red-500"
+              style={{ backgroundColor: 'var(--color-inner-dark)' }}
+            >
+              <XCircle className="h-4 w-4" /> {saveError}
+            </span>
+          )}
           {saved && (
             <span 
               className="border px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-in fade-in shadow-xs"
@@ -801,13 +955,15 @@ export default function ChefAISettingsPage() {
           <button
             type="button"
             onClick={handleSave}
-            className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90"
+            disabled={isSaving}
+            className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
             style={{ 
               backgroundColor: 'var(--color-primary)',
               boxShadow: '0 8px 20px -4px rgba(224, 86, 56, 0.3)'
             }}
           >
-            <Check className="h-4 w-4" /> {t('saveConfigurationBtn', 'Save Configuration')}
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            <span>{isSaving ? t('savingBtn', 'Saving...') : t('saveConfigurationBtn', 'Save Configuration')}</span>
           </button>
         </div>
       </div>
@@ -841,7 +997,7 @@ export default function ChefAISettingsPage() {
         })}
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6">
+      <div className="space-y-6">
         
         {/* TAB 1: GENERAL & MODEL CONFIG */}
         {activeTab === 'general' && (
@@ -1369,7 +1525,7 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
 
-            {/* Results Appearance Section */}
+            {/* Results Appearance Section with Live UI Preview */}
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs mt-6 transition-colors duration-200"
               style={{
@@ -1377,12 +1533,29 @@ export default function ChefAISettingsPage() {
                 borderColor: 'var(--color-border)'
               }}
             >
-              <h2 
-                className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
-              </h2>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+                <div>
+                  <h2 
+                    className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    <LayoutTemplate className="h-4 w-4" /> {t('resultsAppearanceHeader', 'Final Results Appearance in /chef Chat')}
+                  </h2>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('resultsAppearanceDesc', 'Select and preview how multi-day meal plans and recipes render to users inside the /chef chat stream.')}
+                  </p>
+                </div>
+                <span 
+                  className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border uppercase shrink-0"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  {resultDisplayMode === 'card' ? t('modeCardTitle', 'Standard Cards View') : resultDisplayMode === 'compact' ? t('modeCompactTitle', 'Compact Table View') : t('modeDetailedTitle', 'Detailed Master View')}
+                </span>
+              </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
@@ -1410,6 +1583,292 @@ export default function ChefAISettingsPage() {
                     </div>
                   );
                 })}
+              </div>
+
+              {/* RESTORED LIVE UI PREVIEW IN /chef CHAT */}
+              <div 
+                className="p-5 rounded-2xl border space-y-4 shadow-inner transition-colors duration-200"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
+                }}
+              >
+                <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                    <span className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                      {t('liveUiPreviewHeader', 'Live UI Preview in /chef Chat')}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('previewSimulationNotice', 'Interactive simulation based on active theme & selected mode')}
+                  </span>
+                </div>
+
+                {/* SIMULATED PLAN CONTAINER */}
+                <div 
+                  className="border rounded-2xl p-4 space-y-4 shadow-sm transition-colors duration-200"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                      <h3 className="font-black text-xs" style={{ color: 'var(--color-text)' }}>
+                        5-Day High-Protein Wholesome Plan
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                        Budget: $6.50/serv
+                      </span>
+                      <span 
+                        className="text-[9px] px-2 py-0.5 rounded font-black uppercase border"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        5 Days
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 1. STANDARD CARDS VIEW PREVIEW */}
+                  {resultDisplayMode === 'card' && (
+                    <div className="space-y-3">
+                      {[
+                        {
+                          id: 'prev_1',
+                          day: 'Day 1 • Monday',
+                          type: 'Dinner',
+                          title: 'Avocado Quinoa Power Bowl',
+                          desc: 'Fluffy tri-color quinoa tossed with crisp edamame, Hass avocado, cherry tomatoes, and lemon tahini drizzle.',
+                          time: '25m',
+                          servings: 2,
+                          calories: 480,
+                          image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
+                          batch: true
+                        },
+                        {
+                          id: 'prev_2',
+                          day: 'Day 2 • Tuesday',
+                          type: 'Dinner',
+                          title: 'Pan-Seared Salmon with Asparagus',
+                          desc: 'Crispy skin Atlantic salmon filet served with garlic-roasted tender asparagus and fresh dill sauce.',
+                          time: '20m',
+                          servings: 2,
+                          calories: 540,
+                          image: 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?auto=format&fit=crop&w=400&q=80',
+                          batch: false
+                        }
+                      ].map((item) => (
+                        <div 
+                          key={item.id}
+                          className="border rounded-2xl p-3.5 space-y-2.5 transition shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          <div className="flex justify-between items-center text-xs font-bold">
+                            <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
+                            <div className="flex items-center gap-1.5">
+                              {item.batch && (
+                                <span 
+                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                  style={{
+                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                    borderColor: 'var(--color-emerald)',
+                                    color: 'var(--color-emerald)'
+                                  }}
+                                >
+                                  Batch Cook
+                                </span>
+                              )}
+                              <span 
+                                className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                              >
+                                {item.type}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-3">
+                            <img 
+                              src={item.image} 
+                              alt={item.title} 
+                              className="w-16 h-16 rounded-xl object-cover border shrink-0" 
+                              style={{ borderColor: 'var(--color-border)' }} 
+                            />
+                            <div className="space-y-1 flex-1 min-w-0">
+                              <h4 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
+                                {item.title}
+                              </h4>
+                              <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                                {item.desc}
+                              </p>
+                              <div className="flex items-center gap-3 text-[10px] font-semibold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {item.time}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Users className="h-3 w-3" /> {item.servings} serv
+                                </span>
+                                <span className="font-mono" style={{ color: 'var(--color-primary)' }}>
+                                  {item.calories} kcal
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 2. COMPACT TABLE VIEW PREVIEW */}
+                  {resultDisplayMode === 'compact' && (
+                    <div className="border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                      <div 
+                        className="grid grid-cols-12 gap-2 p-2.5 font-extrabold text-[10px] uppercase border-b"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
+                        }}
+                      >
+                        <span className="col-span-3">Day / Schedule</span>
+                        <span className="col-span-2">Meal Type</span>
+                        <span className="col-span-5">Recipe Title</span>
+                        <span className="col-span-2 text-right">Time & Cals</span>
+                      </div>
+                      {[
+                        { day: 'Day 1 (Mon)', type: 'Dinner', title: 'Avocado Quinoa Power Bowl', time: '25m', cals: '480 kcal' },
+                        { day: 'Day 2 (Tue)', type: 'Dinner', title: 'Pan-Seared Salmon with Asparagus', time: '20m', cals: '540 kcal' },
+                        { day: 'Day 3 (Wed)', type: 'Lunch', title: 'Mediterranean Lentil Salad', time: '15m', cals: '410 kcal' }
+                      ].map((row, rIdx) => (
+                        <div 
+                          key={rIdx}
+                          className="grid grid-cols-12 gap-2 p-2.5 text-xs items-center border-b last:border-none transition hover:opacity-90"
+                          style={{
+                            backgroundColor: rIdx % 2 === 0 ? 'var(--color-card)' : 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          <span className="col-span-3 font-bold" style={{ color: 'var(--color-primary)' }}>{row.day}</span>
+                          <span className="col-span-2">
+                            <span 
+                              className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)'
+                              }}
+                            >
+                              {row.type}
+                            </span>
+                          </span>
+                          <span className="col-span-5 font-semibold truncate" style={{ color: 'var(--color-text)' }}>{row.title}</span>
+                          <span className="col-span-2 text-right font-mono text-[11px]" style={{ color: 'var(--color-emerald)' }}>{row.time} • {row.cals}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 3. DETAILED MASTER VIEW PREVIEW */}
+                  {resultDisplayMode === 'detailed' && (
+                    <div className="space-y-3">
+                      {[
+                        {
+                          id: 'det_1',
+                          day: 'Day 1 • Monday',
+                          type: 'Dinner',
+                          title: 'Avocado Quinoa Power Bowl',
+                          desc: 'Balanced high-protein bowl with citrus tahini infusion.',
+                          time: '25 mins total',
+                          servings: 2,
+                          cals: 480,
+                          ingredients: ['Tri-color Quinoa', 'Hass Avocado', 'Edamame', 'Cherry Tomatoes', 'Lemon Tahini', 'Extra Virgin Olive Oil']
+                        },
+                        {
+                          id: 'det_2',
+                          day: 'Day 2 • Tuesday',
+                          type: 'Dinner',
+                          title: 'Pan-Seared Salmon with Asparagus',
+                          desc: 'Crisp Atlantic salmon accompanied by garlic butter asparagus.',
+                          time: '20 mins total',
+                          servings: 2,
+                          cals: 540,
+                          ingredients: ['Fresh Salmon Filet', 'Asparagus Spears', 'Minced Garlic', 'Fresh Dill', 'Lemon Wedges', 'Sea Salt']
+                        }
+                      ].map((item) => (
+                        <div 
+                          key={item.id}
+                          className="border rounded-2xl p-4 space-y-3 transition shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          <div className="flex justify-between items-center text-xs font-bold border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                            <div className="flex items-center gap-2">
+                              <span style={{ color: 'var(--color-primary)' }}>{item.day}</span>
+                              <span 
+                                className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-emerald)',
+                                  color: 'var(--color-emerald)'
+                                }}
+                              >
+                                {item.type}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                              {item.time} • {item.servings} servings • {item.cals} kcal
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <h4 className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>{item.title}</h4>
+                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{item.desc}</p>
+                          </div>
+
+                          {/* Inline Ingredient Breakdown Tags */}
+                          <div className="space-y-1.5 pt-1">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                              Inline Ingredients Breakdown:
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {item.ingredients.map((ing, iIdx) => (
+                                <span 
+                                  key={iIdx}
+                                  className="text-[10px] font-medium px-2 py-0.5 rounded-lg border shadow-2xs"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                >
+                                  • {ing}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                </div>
               </div>
             </div>
           </div>
@@ -1551,7 +2010,7 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 4: AGENT PARAMETERS (RESTORED ALL FUNCTIONS) */}
+        {/* TAB 4: AGENT PARAMETERS & RECOMMENDED RECIPES URL */}
         {activeTab === 'advanced' && (
           <div className="space-y-6 animate-in fade-in">
             {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
@@ -1715,7 +2174,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-                            {/* RECOMMENDED RECIPES URL (PRIMARY SOURCE FOR /chef) */}
+              {/* RECOMMENDED RECIPES URL WITH CRAWLER & SLUG DISCOVERY */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                   <div>
@@ -1749,7 +2208,6 @@ export default function ChefAISettingsPage() {
                   </div>
                 </div>
 
-                {/* Multi-URL Input Box with Batch Support */}
                 <div className="space-y-2">
                   <div className="flex flex-col sm:flex-row gap-2">
                     <div 
@@ -1790,7 +2248,7 @@ export default function ChefAISettingsPage() {
                   </span>
                 </div>
 
-                {/* URL List / Badges */}
+                {/* URL List with Index Crawler and Discovered Slugs Drawer */}
                 <div className="space-y-2 pt-1">
                   {recommendedRecipeUrls.length === 0 ? (
                     <div 
@@ -1801,70 +2259,244 @@ export default function ChefAISettingsPage() {
                       <span className="text-[11px] block">{t('noRecommendedUrlsDesc', 'Add your preferred food blog or recipe URLs above to make /chef recommend recipes from them first.')}</span>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[260px] overflow-y-auto pr-1">
+                    <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
                       {recommendedRecipeUrls.map((urlStr, idx) => {
                         let domain = 'Website';
                         try {
                           domain = new URL(urlStr).hostname.replace(/^www\./, '');
                         } catch (_) {}
 
+                        const isIndex = /recipes|\/category\/|\/categories\/|\/collection\/|\/tag\/|\/archive\/|\/all/i.test(urlStr) || urlStr.endsWith('/recipes/');
+                        const cache = crawlResults[urlStr];
+                        const isCrawlingThis = crawlingUrl === urlStr;
+                        const isExpanded = expandedIndexUrl === urlStr;
+
                         return (
                           <div 
                             key={idx}
-                            className="p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition"
+                            className="rounded-2xl border transition shadow-xs overflow-hidden"
                             style={{
                               backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)'
+                              borderColor: isExpanded ? 'var(--color-primary)' : 'var(--color-border)'
                             }}
                           >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 mb-0.5">
-                                <span 
-                                  className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border truncate"
+                            <div className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                                  <span 
+                                    className="text-[9px] font-black uppercase px-2 py-0.5 rounded border truncate"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-border)',
+                                      color: 'var(--color-primary)'
+                                    }}
+                                  >
+                                    {domain}
+                                  </span>
+                                  <span 
+                                    className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
+                                    style={{
+                                      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                      color: 'var(--color-emerald)'
+                                    }}
+                                  >
+                                    {t('primaryTag', 'Primary')}
+                                  </span>
+                                  {isIndex && (
+                                    <span 
+                                      className="text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase border"
+                                      style={{
+                                        backgroundColor: 'var(--color-card)',
+                                        borderColor: 'var(--color-primary)',
+                                        color: 'var(--color-primary)'
+                                      }}
+                                    >
+                                      {t('indexCollectionTag', 'Index / Collection')}
+                                    </span>
+                                  )}
+                                  {cache && (
+                                    <span 
+                                      className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                      style={{
+                                        backgroundColor: 'var(--color-card)',
+                                        borderColor: 'var(--color-emerald)',
+                                        color: 'var(--color-emerald)'
+                                      }}
+                                    >
+                                      {cache.count} {t('slugsDiscoveredBadge', 'Slugs Discovered')}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text)' }} title={urlStr}>
+                                  {urlStr}
+                                </p>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCrawlIndexUrl(urlStr)}
+                                  disabled={isCrawlingThis}
+                                  className="px-2.5 py-1.5 rounded-lg border font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-90 disabled:opacity-50"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-primary)',
+                                    color: 'var(--color-primary)'
+                                  }}
+                                  title="Crawl index page and discover matching recipe slugs"
+                                >
+                                  {isCrawlingThis ? (
+                                    <>
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                      <span>{t('crawling', 'Crawling...')}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Compass className="h-3 w-3" />
+                                      <span>{t('crawlIndexBtn', 'Crawl & Discover Slugs')}</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                {cache && cache.discovered?.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedIndexUrl(isExpanded ? null : urlStr)}
+                                    className="p-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-border)',
+                                      color: 'var(--color-text)'
+                                    }}
+                                    title="Expand or collapse discovered recipe slugs"
+                                  >
+                                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                  </button>
+                                )}
+
+                                <a
+                                  href={urlStr}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-1.5 rounded-lg border transition cursor-pointer hover:opacity-80"
                                   style={{
                                     backgroundColor: 'var(--color-card)',
                                     borderColor: 'var(--color-border)',
                                     color: 'var(--color-primary)'
                                   }}
+                                  title={t('openUrlTooltip', 'Open in new tab')}
                                 >
-                                  {domain}
-                                </span>
-                                <span 
-                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
+                                  <Globe className="h-3.5 w-3.5" />
+                                </a>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveRecommendedUrl(idx)}
+                                  className="p-1.5 rounded-lg border hover:text-red-500 transition cursor-pointer"
                                   style={{
-                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                    color: 'var(--color-emerald)'
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text-secondary)'
                                   }}
+                                  title={t('removeUrlTooltip', 'Remove URL')}
                                 >
-                                  {t('primaryTag', 'Primary')}
-                                </span>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
                               </div>
-                              <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text)' }} title={urlStr}>
-                                {urlStr}
-                              </p>
                             </div>
 
-                            <div className="flex items-center gap-1 shrink-0">
-                              <a
-                                href={urlStr}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="p-1 rounded-lg hover:opacity-80 transition cursor-pointer"
-                                style={{ color: 'var(--color-primary)' }}
-                                title={t('openUrlTooltip', 'Open in new tab')}
+                            {/* Collapsible Discovered Slugs Drawer */}
+                            {isExpanded && cache && (
+                              <div 
+                                className="border-t p-3.5 space-y-2.5 transition-colors duration-200"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)'
+                                }}
                               >
-                                <Globe className="h-3.5 w-3.5" />
-                              </a>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveRecommendedUrl(idx)}
-                                className="p-1 rounded-lg hover:text-red-500 transition cursor-pointer"
-                                style={{ color: 'var(--color-text-secondary)' }}
-                                title={t('removeUrlTooltip', 'Remove URL')}
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
+                                <div className="flex items-center justify-between text-[11px] font-bold">
+                                  <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                                    <Layers className="h-3.5 w-3.5" /> {t('discoveredSlugsTitle', 'Discovered Recipe Slugs')} ({cache.discovered.length})
+                                  </span>
+                                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                                    {t('crawledAtNotice', 'Crawled')}: {new Date(cache.crawledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
+                                  {cache.discovered.map((item, dIdx) => (
+                                    <div
+                                      key={dIdx}
+                                      className="p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition"
+                                      style={{
+                                        backgroundColor: 'var(--color-inner-dark)',
+                                        borderColor: 'var(--color-border)'
+                                      }}
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <p className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
+                                          {item.title}
+                                        </p>
+                                        <p className="text-[10px] font-mono truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                                          /{item.slug}
+                                        </p>
+                                      </div>
+
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePullIndividualRecipe(item.url)}
+                                          disabled={isPullingRecipe && selectedSlugUrl === item.url}
+                                          className="px-2 py-1 rounded-lg border text-[10px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-90 shadow-xs"
+                                          style={{
+                                            backgroundColor: 'var(--color-card)',
+                                            borderColor: 'var(--color-emerald)',
+                                            color: 'var(--color-emerald)'
+                                          }}
+                                          title="Pull individual recipe details and preview image/ingredients"
+                                        >
+                                          {isPullingRecipe && selectedSlugUrl === item.url ? (
+                                            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                          ) : (
+                                            <Sparkles className="h-2.5 w-2.5" />
+                                          )}
+                                          <span>{t('pullBtn', 'Pull')}</span>
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAddDiscoveredAsDirectUrl(item.url)}
+                                          className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                          style={{
+                                            backgroundColor: 'var(--color-card)',
+                                            borderColor: 'var(--color-border)',
+                                            color: 'var(--color-primary)'
+                                          }}
+                                          title={t('addDirectTooltip', 'Add as direct source')}
+                                        >
+                                          <Plus className="h-3 w-3" />
+                                        </button>
+
+                                        <a
+                                          href={item.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="p-1 rounded-lg border transition cursor-pointer hover:opacity-80"
+                                          style={{
+                                            backgroundColor: 'var(--color-card)',
+                                            borderColor: 'var(--color-border)',
+                                            color: 'var(--color-text-secondary)'
+                                          }}
+                                          title="Open recipe link"
+                                        >
+                                          <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -1873,7 +2505,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* RESTORED: KNOWLEDGE BASE FEATURE */}
+              {/* KNOWLEDGE BASE FEATURE */}
               <div className="space-y-3 pt-1">
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
@@ -1942,7 +2574,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* RESTORED: CUSTOM VOCABULARY FEATURE */}
+              {/* CUSTOM VOCABULARY FEATURE */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
@@ -2011,7 +2643,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* RESTORED: FILTER WORDS FEATURE */}
+              {/* FILTER WORDS FEATURE */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
@@ -2080,7 +2712,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* RESTORED: SYSTEM PROMPT / AUTONOMOUS PERSONA */}
+              {/* SYSTEM PROMPT / PERSONA */}
               <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
@@ -2106,7 +2738,122 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-      </form>
+      </div>
+
+      {/* INDIVIDUAL RECIPE PULL & INSPECT MODAL */}
+      {previewRecipeData && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
+          onClick={() => setPreviewRecipeData(null)}
+        >
+          <div 
+            className="border rounded-3xl max-w-xl w-full p-6 space-y-4 shadow-2xl relative max-h-[85vh] overflow-y-auto transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <span 
+                  className="text-[9px] font-black uppercase px-2 py-0.5 rounded border inline-block mb-1"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  {previewRecipeData.sourceName || 'Individual Recipe Pulled'}
+                </span>
+                <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
+                  {previewRecipeData.title}
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setPreviewRecipeData(null)}
+                className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
+                }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {previewRecipeData.image && (
+              <div className="w-full h-44 rounded-2xl overflow-hidden relative border" style={{ borderColor: 'var(--color-border)' }}>
+                <img 
+                  src={previewRecipeData.image} 
+                  alt={previewRecipeData.title}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            )}
+
+            {previewRecipeData.description && (
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {previewRecipeData.description}
+              </p>
+            )}
+
+            <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold pt-1">
+              <div className="p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <span className="block text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Prep Time</span>
+                <span style={{ color: 'var(--color-primary)' }}>{previewRecipeData.prepMinutes}m</span>
+              </div>
+              <div className="p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <span className="block text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Cook Time</span>
+                <span style={{ color: 'var(--color-emerald)' }}>{previewRecipeData.cookMinutes}m</span>
+              </div>
+              <div className="p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <span className="block text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Servings</span>
+                <span style={{ color: 'var(--color-text)' }}>{previewRecipeData.servings}</span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>
+                {t('ingredientsCount', 'Ingredients')} ({previewRecipeData.ingredients?.length || 0})
+              </span>
+              <ul className="text-xs space-y-1 max-h-32 overflow-y-auto pl-2 border-l-2" style={{ borderColor: 'var(--color-primary)', color: 'var(--color-text-secondary)' }}>
+                {(previewRecipeData.ingredients || []).map((ing: string, iIdx: number) => (
+                  <li key={iIdx}>• {ing}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <a
+                href={previewRecipeData.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-bold flex items-center gap-1 hover:underline"
+                style={{ color: 'var(--color-primary)' }}
+              >
+                <Globe className="h-3.5 w-3.5" /> {t('visitOriginalPage', 'Visit Source Recipe ↗')}
+              </a>
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleAddDiscoveredAsDirectUrl(previewRecipeData.sourceUrl);
+                  setPreviewRecipeData(null);
+                }}
+                className="px-4 py-2 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {t('addAsDirectSourceBtn', 'Add to Primary URLs')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
