@@ -1,3 +1,4 @@
+// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -34,6 +35,11 @@ interface PlanConfig {
   isDefault?: boolean;
 }
 
+const SUPPORTED_CURRENCIES: Record<string, string> = {
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
+  JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
+};
+
 export default function AdminPlansPage() {
   const { t } = useTranslation();
   
@@ -45,10 +51,13 @@ export default function AdminPlansPage() {
 
   const [plans, setPlans] = useState<PlanConfig[]>([]);
   const [previewInterval, setPreviewInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
+  const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
-  // Token Identity from Settings
+  // Dynamic Token & Currency Identity from Settings
   const [tokenSymbol, setTokenSymbol] = useState('🪙');
   const [tokenName, setTokenName] = useState('Tokens');
+  const [currencyCode, setCurrencyCode] = useState('USD');
+  const [currencySymbol, setCurrencySymbol] = useState('$');
 
   // Plan Form State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -68,26 +77,129 @@ export default function AdminPlansPage() {
   const [featuresText, setFeaturesText] = useState('Personal recipe library\nSmart ingredient repurposing\nAutomated shopping list creation');
   const [isFree, setIsFree] = useState(false);
 
-  // Sync token settings identity
-  useEffect(() => {
-    fetch('/api/admin/token-settings')
-      .then(res => res.json())
-      .then(data => {
-        if (data.settings) {
-          if (data.settings.tokenSymbol) setTokenSymbol(data.settings.tokenSymbol);
-          if (data.settings.tokenName) setTokenName(data.settings.tokenName);
-        }
-      })
-      .catch(() => {});
+  // Dynamic Theme Synchronization
+  const applySavedTheme = useCallback(() => {
+    try {
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      const root = typeof document !== 'undefined' ? document.documentElement : null;
+      const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
+      setIsDayMode(Boolean(day));
+    } catch (_) {}
   }, []);
+
+  useEffect(() => {
+    applySavedTheme();
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
+    window.addEventListener('storage', applySavedTheme);
+
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+      window.removeEventListener('storage', applySavedTheme);
+    };
+  }, [applySavedTheme]);
+
+  // Sync token and currency settings
+  const fetchSettings = useCallback(async () => {
+    try {
+      const tRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
+      if (tRes.ok) {
+        const tData = await tRes.json();
+        const cfg = tData.settings || tData.config || tData;
+        if (cfg) {
+          if (cfg.tokenSymbol || cfg.symbol) setTokenSymbol(cfg.tokenSymbol || cfg.symbol);
+          if (cfg.tokenName || cfg.name) setTokenName(cfg.tokenName || cfg.name);
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const sRes = await fetch('/api/system-settings', { cache: 'no-store' });
+      if (sRes.ok) {
+        const sData = await sRes.json();
+        const curr = sData?.settings?.currency || sData?.currency;
+        if (curr) {
+          setCurrencyCode(curr);
+          setCurrencySymbol(SUPPORTED_CURRENCIES[curr.toUpperCase()] || '$');
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
+    window.addEventListener('zecratary_token_settings_updated', fetchSettings);
+    window.addEventListener('zecratary_admin_settings_updated', fetchSettings);
+
+    return () => {
+      window.removeEventListener('zecratary_token_settings_updated', fetchSettings);
+      window.removeEventListener('zecratary_admin_settings_updated', fetchSettings);
+    };
+  }, [fetchSettings]);
+
+  // Universal Plan Parser
+  const normalizePlan = (p: any): PlanConfig => {
+    const isFreePlan = Boolean(
+      p.isFree || p.is_free || p.free || 
+      p.slug === 'taster' || p.id === 'preset_taster' ||
+      (Number(p.monthlyPriceDollars ?? p.monthly_price_dollars ?? 0) === 0 && 
+       Number(p.annualPriceDollars ?? p.annual_price_dollars ?? 0) === 0)
+    );
+
+    let rawFeatures: string[] = [];
+    if (Array.isArray(p.features)) {
+      rawFeatures = p.features.map(String).filter(Boolean);
+    } else if (typeof p.features === 'string') {
+      try {
+        const parsed = JSON.parse(p.features);
+        if (Array.isArray(parsed)) rawFeatures = parsed.map(String).filter(Boolean);
+        else rawFeatures = p.features.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      } catch (_) {
+        rawFeatures = p.features.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      }
+    } else if (typeof p.featuresText === 'string') {
+      rawFeatures = p.featuresText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    }
+
+    const mPrice = Number(p.monthlyPriceDollars ?? p.monthly_price_dollars ?? p.price ?? 0);
+    const aPrice = Number(p.annualPriceDollars ?? p.annual_price_dollars ?? (mPrice > 0 ? mPrice * 10 : 0));
+    const cleanSlug = String(p.slug || p.id || 'plan').toLowerCase().trim();
+
+    return {
+      id: String(p.id || cleanSlug),
+      name: String(p.name || cleanSlug),
+      slug: cleanSlug,
+      planGroupId: p.planGroupId || p.plan_group_id || `group_${cleanSlug}`,
+      monthlyPlanId: p.monthlyPlanId || p.monthly_plan_id || `plan_${cleanSlug}_monthly`,
+      annualPlanId: p.annualPlanId || p.annual_plan_id || `plan_${cleanSlug}_annual`,
+      monthlyPriceDollars: isFreePlan ? 0 : (isNaN(mPrice) ? 0 : mPrice),
+      annualPriceDollars: isFreePlan ? 0 : (isNaN(aPrice) ? 0 : aPrice),
+      monthlyBadge: p.monthlyBadge || p.monthly_badge || '',
+      annualBadge: p.annualBadge || p.annual_badge || '',
+      trialBadge: p.trialBadge || p.trial_badge || '',
+      descriptionMonthly: p.descriptionMonthly || p.description_monthly || '',
+      descriptionAnnual: p.descriptionAnnual || p.description_annual || '',
+      features: rawFeatures,
+      tokenLimit: p.tokenLimit !== undefined ? Number(p.tokenLimit) : (p.token_limit !== undefined ? Number(p.token_limit) : (isFreePlan ? 50000 : 500)),
+      isFree: isFreePlan,
+      isDefault: Boolean(p.isDefault || p.is_default || cleanSlug === 'taster' || p.id === 'preset_taster')
+    };
+  };
 
   const fetchPlans = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
+      const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
       const data = await res.json();
-      if (data.success && Array.isArray(data.configs)) {
-        setPlans(data.configs);
+      const rawList = Array.isArray(data) 
+        ? data 
+        : (data.configs || data.plans || data.packages || data.subscriptionPlans || data.data || []);
+      
+      if (Array.isArray(rawList)) {
+        setPlans(rawList.map(normalizePlan));
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to fetch plans');
@@ -98,6 +210,10 @@ export default function AdminPlansPage() {
 
   useEffect(() => {
     fetchPlans();
+    window.addEventListener('zecratary_plans_updated', fetchPlans);
+    return () => {
+      window.removeEventListener('zecratary_plans_updated', fetchPlans);
+    };
   }, [fetchPlans]);
 
   const handleSlugChange = (val: string) => {
@@ -117,9 +233,9 @@ export default function AdminPlansPage() {
     setPlanGroupId(p.planGroupId || `group_${p.slug}`);
     setMonthlyPlanId(p.monthlyPlanId || `plan_${p.slug}_monthly`);
     setAnnualPlanId(p.annualPlanId || `plan_${p.slug}_annual`);
-    setMonthlyPrice(p.monthlyPriceDollars);
-    setAnnualPrice(p.annualPriceDollars);
-    setTokenLimit(p.tokenLimit ?? 500);
+    setMonthlyPrice(Number(p.monthlyPriceDollars || 0));
+    setAnnualPrice(Number(p.annualPriceDollars || 0));
+    setTokenLimit(Number(p.tokenLimit ?? 500));
     setMonthlyBadge(p.monthlyBadge || '');
     setAnnualBadge(p.annualBadge || '');
     setTrialBadge(p.trialBadge || '');
@@ -156,24 +272,28 @@ export default function AdminPlansPage() {
     setSuccessMsg('');
 
     try {
-      const parsedFeatures = featuresText.split('\n').map(s => s.trim()).filter(Boolean);
+      const parsedFeatures = featuresText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      const cleanSlug = slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      const planId = editingId || (cleanSlug ? `plan_${cleanSlug}` : `plan_${Date.now()}`);
+
       const payload = {
-        id: editingId || slug || `plan_${Date.now()}`,
-        name,
-        slug,
-        planGroupId,
-        monthlyPlanId,
-        annualPlanId,
-        monthlyPriceDollars: Number(monthlyPrice),
-        annualPriceDollars: Number(annualPrice),
-        tokenLimit: Number(tokenLimit),
-        monthlyBadge,
-        annualBadge,
-        trialBadge,
-        descriptionMonthly,
-        descriptionAnnual,
+        id: planId,
+        name: name.trim(),
+        slug: cleanSlug,
+        planGroupId: planGroupId.trim() || `group_${cleanSlug}`,
+        monthlyPlanId: monthlyPlanId.trim() || `plan_${cleanSlug}_monthly`,
+        annualPlanId: annualPlanId.trim() || `plan_${cleanSlug}_annual`,
+        monthlyPriceDollars: isFree ? 0 : Number(monthlyPrice || 0),
+        annualPriceDollars: isFree ? 0 : Number(annualPrice || 0),
+        tokenLimit: Number(tokenLimit || 0),
+        monthlyBadge: monthlyBadge.trim(),
+        annualBadge: annualBadge.trim(),
+        trialBadge: trialBadge.trim(),
+        descriptionMonthly: descriptionMonthly.trim(),
+        descriptionAnnual: descriptionAnnual.trim(),
         features: parsedFeatures,
-        isFree
+        isFree: Boolean(isFree),
+        isDefault: Boolean(editingId === 'preset_taster' || cleanSlug === 'taster')
       };
 
       const res = await fetch('/api/admin/plans', {
@@ -189,9 +309,10 @@ export default function AdminPlansPage() {
 
       setSuccessMsg(t('planSavedSuccess', 'Subscription Plan & Token Quotas saved and synchronized with PostgreSQL!'));
       resetForm();
-      fetchPlans();
+      await fetchPlans();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_plans_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
@@ -238,6 +359,7 @@ export default function AdminPlansPage() {
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_plans_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
 
       setSuccessMsg(`"${p.name}" ${t('planDeletedSuccess', 'has been permanently deleted from PostgreSQL.')}`);
@@ -261,13 +383,13 @@ export default function AdminPlansPage() {
           <div className="flex items-center gap-2">
             <Link 
               href="/admin" 
-              className="p-1.5 rounded-lg border hover:opacity-80 transition"
+              className="p-1.5 rounded-lg border hover:opacity-80 transition cursor-pointer"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
               <ArrowLeft className="h-4 w-4" />
             </Link>
             <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-              <Zap className="h-6 w-6 text-orange-400" /> {t('adminPlansTitle', 'Subscription Plans & Token Allocations')}
+              <Zap className="h-6 w-6" style={{ color: 'var(--color-primary)' }} /> {t('adminPlansTitle', 'Subscription Plans & Token Allocations')}
             </h1>
           </div>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
@@ -317,7 +439,7 @@ export default function AdminPlansPage() {
         >
           <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
             <h2 className="text-sm font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              <Edit3 className="h-4 w-4 text-orange-400" />
+              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
               <span>{editingId ? t('editPlanHeader', 'Edit Subscription Plan') : t('createNewPlanHeader', 'Create New Plan')}</span>
             </h2>
             {editingId && (
@@ -339,7 +461,8 @@ export default function AdminPlansPage() {
                 <button 
                   type="button" 
                   onClick={resetForm} 
-                  className="text-xs text-slate-400 hover:text-slate-200 cursor-pointer font-bold transition"
+                  className="text-xs opacity-70 hover:opacity-100 cursor-pointer font-bold transition"
+                  style={{ color: 'var(--color-text-secondary)' }}
                 >
                   {t('cancelEdit', 'Cancel Edit')}
                 </button>
@@ -360,6 +483,8 @@ export default function AdminPlansPage() {
                 placeholder="e.g. Nutrition Pro"
                 className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none transition"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
               />
             </div>
 
@@ -375,6 +500,8 @@ export default function AdminPlansPage() {
                 placeholder="e.g. nutrition-pro"
                 className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none transition"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
               />
             </div>
           </div>
@@ -425,30 +552,32 @@ export default function AdminPlansPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="space-y-1">
               <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('monthlyPriceLabel', 'Monthly Price ($ USD)')}
+                {t('monthlyPriceLabel', 'Monthly Price')} ({currencySymbol} {currencyCode})
               </label>
               <input
                 type="number"
                 step="0.01"
                 min="0"
-                value={monthlyPrice}
+                disabled={isFree}
+                value={isFree ? 0 : monthlyPrice}
                 onChange={(e) => setMonthlyPrice(parseFloat(e.target.value) || 0)}
-                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none"
+                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none disabled:opacity-50"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
             </div>
 
             <div className="space-y-1">
               <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('annualPriceLabel', 'Annual Price ($ USD)')}
+                {t('annualPriceLabel', 'Annual Price')} ({currencySymbol} {currencyCode})
               </label>
               <input
                 type="number"
                 step="0.01"
                 min="0"
-                value={annualPrice}
+                disabled={isFree}
+                value={isFree ? 0 : annualPrice}
                 onChange={(e) => setAnnualPrice(parseFloat(e.target.value) || 0)}
-                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none"
+                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none disabled:opacity-50"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
             </div>
@@ -488,20 +617,27 @@ export default function AdminPlansPage() {
           </div>
 
           <div className="flex items-center justify-between pt-2">
-            <label className="flex items-center gap-2 text-xs font-bold cursor-pointer">
+            <label className="flex items-center gap-2 text-xs font-bold cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={isFree}
-                onChange={(e) => setIsFree(e.target.checked)}
-                className="rounded accent-emerald-500 w-4 h-4"
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setIsFree(val);
+                  if (val) {
+                    setMonthlyPrice(0);
+                    setAnnualPrice(0);
+                  }
+                }}
+                className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
               />
               <span>{t('isFreeTierLabel', 'Mark as Free Tier')}</span>
             </label>
 
             <button
               type="submit"
-              disabled={saving}
-              className="px-6 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50"
+              disabled={saving || !name.trim()}
+              className="px-6 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50 hover:opacity-90"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -518,7 +654,7 @@ export default function AdminPlansPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
               <div className="flex items-center gap-2">
-                <Eye className="h-4 w-4 text-emerald-400" />
+                <Eye className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
                 <h3 className="text-sm font-black" style={{ color: 'var(--color-text)' }}>
                   {t('planCardMockup', 'Live Card Mockup')}
                 </h3>
@@ -527,14 +663,26 @@ export default function AdminPlansPage() {
                 <button
                   type="button"
                   onClick={() => setPreviewInterval('MONTH')}
-                  className={`px-2 py-1 rounded-md transition ${previewInterval === 'MONTH' ? 'bg-primary text-white' : 'text-slate-400'}`}
+                  className="px-2.5 py-1 rounded-md transition cursor-pointer"
+                  style={previewInterval === 'MONTH' ? {
+                    backgroundColor: 'var(--color-primary)',
+                    color: '#ffffff'
+                  } : {
+                    color: 'var(--color-text-secondary)'
+                  }}
                 >
                   Monthly
                 </button>
                 <button
                   type="button"
                   onClick={() => setPreviewInterval('YEAR')}
-                  className={`px-2 py-1 rounded-md transition ${previewInterval === 'YEAR' ? 'bg-primary text-white' : 'text-slate-400'}`}
+                  className="px-2.5 py-1 rounded-md transition cursor-pointer"
+                  style={previewInterval === 'YEAR' ? {
+                    backgroundColor: 'var(--color-primary)',
+                    color: '#ffffff'
+                  } : {
+                    color: 'var(--color-text-secondary)'
+                  }}
                 >
                   Annual
                 </button>
@@ -551,11 +699,18 @@ export default function AdminPlansPage() {
                   <h4 className="text-lg font-black" style={{ color: 'var(--color-text)' }}>
                     {name || 'Plan Preview'}
                   </h4>
-                  <p className="text-[10px] font-mono text-slate-400">
+                  <p className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
                     ID: {previewInterval === 'MONTH' ? (monthlyPlanId || 'plan_monthly') : (annualPlanId || 'plan_annual')}
                   </p>
                 </div>
-                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                <span 
+                  className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full border shadow-xs"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
                   {previewInterval === 'MONTH' ? (monthlyBadge || 'Monthly') : (annualBadge || 'Annual')}
                 </span>
               </div>
@@ -563,7 +718,9 @@ export default function AdminPlansPage() {
               {/* Price & Token Allowance Display */}
               <div className="flex items-baseline gap-1">
                 <span className="text-3xl font-black" style={{ color: 'var(--color-text)' }}>
-                  ${previewInterval === 'MONTH' ? monthlyPrice.toFixed(2) : annualPrice.toFixed(2)}
+                  {currencySymbol}{previewInterval === 'MONTH' 
+                    ? (isFree ? '0.00' : Number(monthlyPrice || 0).toFixed(2)) 
+                    : (isFree ? '0.00' : Number(annualPrice || 0).toFixed(2))}
                 </span>
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   /{previewInterval === 'MONTH' ? 'mo' : 'yr'}
@@ -574,7 +731,7 @@ export default function AdminPlansPage() {
               <div className="flex items-center gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
                 <Coins className="h-4 w-4 text-amber-500 shrink-0" />
                 <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                  <span>+{tokenLimit.toLocaleString()} {tokenSymbol}</span>{' '}
+                  <span>+{Number(tokenLimit || 0).toLocaleString()} {tokenSymbol}</span>{' '}
                   <span className="text-[10px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('creditedUponPurchase', 'credited instantly on purchase')}
                   </span>
@@ -583,9 +740,9 @@ export default function AdminPlansPage() {
 
               {/* Features snippet */}
               <ul className="space-y-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {featuresText.split('\n').slice(0, 4).map((f, i) => (
+                {featuresText.split(/\r?\n/).slice(0, 4).map((f, i) => (
                   <li key={i} className="flex items-center gap-2">
-                    <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                    <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
                     <span>{f}</span>
                   </li>
                 ))}
@@ -595,7 +752,7 @@ export default function AdminPlansPage() {
 
           <div className="pt-2 border-t text-[11px] flex items-center justify-between" style={{ borderColor: 'var(--color-border)' }}>
             <span style={{ color: 'var(--color-text-secondary)' }}>Parent Group: {planGroupId || 'None'}</span>
-            <span className="font-mono text-emerald-400 font-bold">PostgreSQL Synced</span>
+            <span className="font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>PostgreSQL Synced</span>
           </div>
         </div>
       </div>
@@ -607,12 +764,12 @@ export default function AdminPlansPage() {
       >
         <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
           <div className="flex items-center gap-2">
-            <Layers className="h-4 w-4 text-orange-400" />
+            <Layers className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
             <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
               {t('publishedPlansTable', 'Configured Subscription Plans in PostgreSQL')}
             </h2>
           </div>
-          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full border" style={{ borderColor: 'var(--color-border)' }}>
+          <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
             {plans.length} {t('plansCount', 'Plans')}
           </span>
         </div>
@@ -631,13 +788,13 @@ export default function AdminPlansPage() {
             <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-xs font-bold text-slate-400">
-                    <RefreshCw className="h-4 w-4 animate-spin inline mr-2 text-primary" /> Loading plans...
+                  <td colSpan={5} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    <RefreshCw className="h-4 w-4 animate-spin inline mr-2" style={{ color: 'var(--color-primary)' }} /> Loading plans...
                   </td>
                 </tr>
               ) : plans.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-xs text-slate-400">
+                  <td colSpan={5} className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     No subscription plans configured yet.
                   </td>
                 </tr>
@@ -648,30 +805,39 @@ export default function AdminPlansPage() {
                     <tr key={p.id} className="hover:bg-slate-500/5 transition">
                       <td className="p-3.5">
                         <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{p.name}</div>
-                        <div className="text-[10px] font-mono text-slate-400">{p.slug}</div>
+                        <div className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>{p.slug}</div>
                       </td>
 
                       <td className="p-3.5">
                         <div className="space-y-0.5 text-[10px] font-mono">
-                          <div className="text-blue-400">M: {p.monthlyPlanId || `plan_${p.slug}_monthly`}</div>
-                          <div className="text-purple-400">A: {p.annualPlanId || `plan_${p.slug}_annual`}</div>
+                          <div style={{ color: '#60a5fa' }}>M: {p.monthlyPlanId || `plan_${p.slug}_monthly`}</div>
+                          <div style={{ color: '#c084fc' }}>A: {p.annualPlanId || `plan_${p.slug}_annual`}</div>
                         </div>
                       </td>
 
                       <td className="p-3.5 font-mono font-bold">
                         {p.isFree ? (
-                          <span className="text-emerald-400 font-bold">Free</span>
+                          <span className="font-bold" style={{ color: 'var(--color-emerald)' }}>Free</span>
                         ) : (
                           <div>
-                            <div>${p.monthlyPriceDollars.toFixed(2)}/mo</div>
-                            <div className="text-slate-400 text-[10px]">${p.annualPriceDollars.toFixed(2)}/yr</div>
+                            <div>{currencySymbol}{Number(p.monthlyPriceDollars || 0).toFixed(2)}/mo</div>
+                            <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                              {currencySymbol}{Number(p.annualPriceDollars || 0).toFixed(2)}/yr
+                            </div>
                           </div>
                         )}
                       </td>
 
                       <td className="p-3.5">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-500 border border-amber-500/20 font-mono">
-                          <Coins className="h-3 w-3" /> +{(p.tokenLimit ?? 500).toLocaleString()} {tokenSymbol}
+                        <span 
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black border font-mono shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <Coins className="h-3 w-3 text-amber-500" /> +{Number(p.tokenLimit ?? 500).toLocaleString()} {tokenSymbol}
                         </span>
                       </td>
 
@@ -680,7 +846,7 @@ export default function AdminPlansPage() {
                           <button
                             type="button"
                             onClick={() => handleEdit(p)}
-                            className="px-3 py-1.5 rounded-lg border text-xs font-bold transition hover:opacity-80 cursor-pointer flex items-center gap-1"
+                            className="px-3 py-1.5 rounded-lg border text-xs font-bold transition hover:opacity-80 cursor-pointer flex items-center gap-1 shadow-xs"
                             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
                           >
                             <Edit3 className="h-3.5 w-3.5" />
@@ -692,7 +858,7 @@ export default function AdminPlansPage() {
                               type="button"
                               disabled={deletingId === p.id}
                               onClick={() => handleDeletePlan(p)}
-                              className="px-2.5 py-1.5 rounded-lg border text-xs font-bold transition hover:bg-red-950/20 text-red-400 border-red-900/40 hover:text-red-300 cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                              className="px-2.5 py-1.5 rounded-lg border text-xs font-bold transition hover:bg-red-500/10 text-red-400 border-red-500/30 hover:text-red-300 cursor-pointer disabled:opacity-50 flex items-center gap-1 shadow-xs"
                               style={{ backgroundColor: 'var(--color-inner-dark)' }}
                               title={t('deletePlan', 'Delete Plan')}
                             >

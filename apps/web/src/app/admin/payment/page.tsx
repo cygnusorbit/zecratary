@@ -1,4 +1,4 @@
-// Generated / Cleaned by AI Collaborator
+// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -10,7 +10,7 @@ import {
   PlusCircle, X, User as UserIcon, Activity, Calendar,
   Pencil, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   ShieldAlert, Ban, ArrowUpRight, AlertTriangle, Repeat, RotateCcw,
-  ShieldCheck, CheckCheck, Columns3
+  ShieldCheck, CheckCheck, Columns3, Coins
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -69,6 +69,7 @@ interface PlanOption {
   priceDollars: number;
   interval?: string;
   isFree?: boolean;
+  tokenLimit?: number;
 }
 
 interface AppUser {
@@ -97,6 +98,7 @@ const DEFAULT_COLUMNS = {
   plan: true,
   amount: true,
   status: true,
+  recurring: true,
   date: true,
   expiryDate: true,
   actions: true,
@@ -217,6 +219,7 @@ export default function AdminPaymentPage() {
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
   const [refundingTxId, setRefundingTxId] = useState<string | null>(null);
+  const [togglingTxId, setTogglingTxId] = useState<string | null>(null);
 
   // Table Column Visibility State
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(DEFAULT_COLUMNS);
@@ -330,22 +333,23 @@ export default function AdminPaymentPage() {
   };
 
   const activeColumnCount = useMemo(() => {
-    let count = 1; // Checkbox column is always present
+    let count = 1;
     if (visibleColumns.customer) count++;
     if (visibleColumns.plan) count++;
     if (visibleColumns.amount) count++;
     if (visibleColumns.status) count++;
+    if (visibleColumns.recurring) count++;
     if (visibleColumns.date) count++;
     if (visibleColumns.expiryDate) count++;
     if (visibleColumns.actions) count++;
     return count;
   }, [visibleColumns]);
 
-  // Add Payment Modal States
+  // Modal States
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
-  const [selectedPlanSlug, setSelectedPlanSlug] = useState('nutrition-pro-monthly');
-  const [paymentAmount, setPaymentAmount] = useState<number>(8.99);
+  const [selectedPlanSlug, setSelectedPlanSlug] = useState('');
+  const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentGateway, setPaymentGateway] = useState<'stripe' | 'paypal' | 'manual'>('stripe');
   const [paymentStatus, setPaymentStatus] = useState<'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled'>('succeeded');
   const [paymentDate, setPaymentDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
@@ -355,9 +359,9 @@ export default function AdminPaymentPage() {
   const [syncUserPlan, setSyncUserPlan] = useState(true);
   const [modalError, setModalError] = useState('');
   const [addGatewayTxId, setAddGatewayTxId] = useState('');
-  const [addGatewayConfirmed, setAddGatewayConfirmed] = useState(false);
+  const [addGatewayConfirmed, setAddGatewayConfirmed] = useState(true);
 
-  // Modify (Edit) Modal States
+  // Edit Modal States
   const [editingTx, setEditingTx] = useState<PaymentTransaction | null>(null);
   const [editCustomerName, setEditCustomerName] = useState('');
   const [editCustomerEmail, setEditCustomerEmail] = useState('');
@@ -374,7 +378,7 @@ export default function AdminPaymentPage() {
   const [editGatewayTxId, setEditGatewayTxId] = useState('');
   const [editGatewayConfirmed, setEditGatewayConfirmed] = useState(false);
 
-  // Confirm Gateway Payment Modal States
+  // Confirm Gateway Modal States
   const [confirmingTx, setConfirmingTx] = useState<PaymentTransaction | null>(null);
   const [confirmGatewayTxId, setConfirmGatewayTxId] = useState('');
   const [confirmAmount, setConfirmAmount] = useState<number>(0);
@@ -389,26 +393,28 @@ export default function AdminPaymentPage() {
     }
   }, [feedback]);
 
-  const applySavedTheme = useCallback(() => {
+  // Clean, Non-Looping Theme Synchronization
+  const handleModeChange = useCallback(() => {
     try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      const root = typeof document !== 'undefined' ? document.documentElement : null;
+      const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
+      setIsDayMode(Boolean(day));
     } catch (_) {}
   }, []);
 
   useEffect(() => {
-    applySavedTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('storage', applySavedTheme);
+    handleModeChange();
+    window.addEventListener('zecratary_theme_mode_changed', handleModeChange);
+    window.addEventListener('zecratary_theme_changed', handleModeChange);
+    window.addEventListener('storage', handleModeChange);
 
     return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('storage', applySavedTheme);
+      window.removeEventListener('zecratary_theme_mode_changed', handleModeChange);
+      window.removeEventListener('zecratary_theme_changed', handleModeChange);
+      window.removeEventListener('storage', handleModeChange);
     };
-  }, [applySavedTheme]);
+  }, [handleModeChange]);
 
   const getCurrencySymbol = useCallback((currencyCode?: string) => {
     const code = currencyCode || configRef.current?.currency || 'USD';
@@ -435,6 +441,7 @@ export default function AdminPaymentPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
+  // Synchronize ONLY Plans with actual price (> 0) from /admin/plans
   const loadPlans = useCallback(async (currencyOverride?: string) => {
     let parsedPlans: PlanOption[] = [];
     const symbol = getCurrencySymbol(currencyOverride || configRef.current.currency);
@@ -446,135 +453,71 @@ export default function AdminPaymentPage() {
         const data = await res.json();
         const list = Array.isArray(data)
           ? data
-          : (data.plans || data.packages || data.configs || data.subscriptionPlans || data.data);
+          : (data.configs || data.plans || data.packages || data.subscriptionPlans || data.data);
         if (Array.isArray(list) && list.length > 0) {
           rawPlansList = [...list];
         }
       }
     } catch (_) {}
 
-    if (rawPlansList.length === 0) {
-      try {
-        const res = await fetch('/api/plans?t=' + Date.now(), { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          const list = Array.isArray(data)
-            ? data
-            : (data.plans || data.packages || data.configs || data.subscriptionPlans || data.data);
-          if (Array.isArray(list) && list.length > 0) {
-            rawPlansList = [...list];
-          }
-        }
-      } catch (_) {}
-    }
-
-    try {
-      const serverData = await fetchServerAdminSettings();
-      const settingsPlans = serverData?.subscriptionPlans || serverData?.settings?.subscriptionPlans;
-      if (Array.isArray(settingsPlans) && settingsPlans.length > 0) {
-        const existingIds = new Set(rawPlansList.map((p: any) => String(p.slug || p.id || '').toLowerCase()));
-        settingsPlans.forEach((sp: any) => {
-          const idKey = String(sp.slug || sp.id || '').toLowerCase();
-          if (!existingIds.has(idKey)) {
-            rawPlansList.push(sp);
-            existingIds.add(idKey);
-          }
-        });
-      }
-    } catch (_) {}
-
     if (rawPlansList.length > 0) {
       rawPlansList.forEach((cfg: any) => {
         if (!cfg) return;
-        const rawSlug = String(cfg.slug || cfg.id || 'plan').toLowerCase().trim();
-        const baseSlug = rawSlug.replace(/-(monthly|annual)$/, '');
-        const rawName = String(cfg.name || baseSlug || 'Plan').trim();
+        const rawSlug = String(cfg.slug || cfg.id || '').toLowerCase().trim();
+        const baseSlug = rawSlug.replace(/-(monthly|annual|free)$/, '');
+        const rawName = String(cfg.name || baseSlug || '').trim();
         const baseName = rawName.replace(/\s*\((Monthly|Annual|Free)\)/i, '').trim();
 
-        const isZeroCost = Boolean(
-          cfg.isFree === true ||
-          cfg.is_free === true ||
-          cfg.free === true ||
-          baseSlug === 'taster' ||
-          baseSlug === 'free' ||
-          (Number(cfg.price) === 0 && Number(cfg.priceCents || cfg.price_cents || 0) === 0 && Number(cfg.monthlyPriceDollars || cfg.monthly_price_dollars || 0) === 0 && Number(cfg.annualPriceDollars || cfg.annual_price_dollars || 0) === 0)
+        // Check if plan is explicitly free or has no positive pricing
+        const isFreeTier = Boolean(
+          cfg.isFree === true || cfg.is_free === true || cfg.free === true ||
+          baseSlug === 'taster' || baseSlug === 'free'
         );
+        if (isFreeTier) return; // Do NOT add free plans into payment recording dropdown
 
-        if (isZeroCost) {
+        const tokenLimit = cfg.tokenLimit !== undefined 
+          ? Number(cfg.tokenLimit) 
+          : (cfg.token_limit !== undefined ? Number(cfg.token_limit) : 500);
+
+        const monthlyPrice = Number(cfg.monthlyPriceDollars ?? cfg.monthly_price_dollars ?? (cfg.interval === 'MONTH' ? cfg.price : 0) ?? 0);
+        const annualPrice = Number(cfg.annualPriceDollars ?? cfg.annual_price_dollars ?? (cfg.interval === 'YEAR' ? cfg.price : 0) ?? 0);
+
+        // ONLY add Monthly if explicitly priced > 0
+        if (monthlyPrice > 0) {
           parsedPlans.push({
-            id: cfg.id || baseSlug,
-            name: `${baseName} (Free)`,
-            slug: baseSlug,
-            priceFormatted: 'Free',
-            priceDollars: 0,
-            interval: 'MONTH',
-            isFree: true,
-          });
-        } else {
-          let monthlyPrice = Number(
-            cfg.monthlyPriceDollars ??
-            cfg.monthly_price_dollars ??
-            (cfg.priceCents ? cfg.priceCents / 100 : undefined) ??
-            (cfg.price_cents ? cfg.price_cents / 100 : undefined) ??
-            (String(cfg.interval || '').toLowerCase().includes('year') ? undefined : cfg.price) ??
-            0
-          );
-
-          let annualPrice = Number(
-            cfg.annualPriceDollars ??
-            cfg.annual_price_dollars ??
-            (String(cfg.interval || '').toLowerCase().includes('year') ? cfg.price : undefined) ??
-            0
-          );
-
-          const flatPrice = Number(cfg.price ?? (cfg.priceCents ? cfg.priceCents / 100 : (cfg.price_cents ? cfg.price_cents / 100 : 0)));
-          if (monthlyPrice === 0 && annualPrice === 0 && flatPrice > 0) {
-            if (String(cfg.interval || '').toLowerCase().includes('year') || rawSlug.includes('annual')) {
-              annualPrice = flatPrice;
-              monthlyPrice = Number((flatPrice / 10).toFixed(2));
-            } else {
-              monthlyPrice = flatPrice;
-              annualPrice = Number((flatPrice * 10).toFixed(2));
-            }
-          }
-
-          if (monthlyPrice > 0 && annualPrice === 0) {
-            annualPrice = Number((monthlyPrice * 10).toFixed(2));
-          }
-          if (annualPrice > 0 && monthlyPrice === 0) {
-            monthlyPrice = Number((annualPrice / 10).toFixed(2));
-          }
-          if (monthlyPrice === 0 && annualPrice === 0) {
-            monthlyPrice = 8.99;
-            annualPrice = 59.99;
-          }
-
-          parsedPlans.push({
-            id: `${cfg.id || baseSlug}-monthly`,
+            id: cfg.monthlyPlanId || `${cfg.id || baseSlug}-monthly`,
             name: `${baseName} (Monthly)`,
             slug: `${baseSlug}-monthly`,
             priceFormatted: `${symbol}${monthlyPrice.toFixed(2)}/mo`,
             priceDollars: monthlyPrice,
             interval: 'MONTH',
             isFree: false,
+            tokenLimit
           });
+        }
 
+        // ONLY add Annual if explicitly priced > 0
+        if (annualPrice > 0) {
           parsedPlans.push({
-            id: `${cfg.id || baseSlug}-annual`,
+            id: cfg.annualPlanId || `${cfg.id || baseSlug}-annual`,
             name: `${baseName} (Annual)`,
             slug: `${baseSlug}-annual`,
             priceFormatted: `${symbol}${annualPrice.toFixed(2)}/yr`,
             priceDollars: annualPrice,
             interval: 'YEAR',
             isFree: false,
+            tokenLimit
           });
         }
       });
     }
 
+    // Filter strictly for options with valid positive price
+    const validPricedPlans = parsedPlans.filter((p) => p.priceDollars > 0 && !p.isFree);
+
     const uniquePlans: PlanOption[] = [];
     const seenSlugs = new Set<string>();
-    for (const p of parsedPlans) {
+    for (const p of validPricedPlans) {
       if (!seenSlugs.has(p.slug)) {
         seenSlugs.add(p.slug);
         uniquePlans.push(p);
@@ -582,9 +525,8 @@ export default function AdminPaymentPage() {
     }
 
     const fallbackList: PlanOption[] = uniquePlans.length > 0 ? uniquePlans : [
-      { id: 'taster', name: 'Taster (Free)', slug: 'taster', priceFormatted: 'Free', priceDollars: 0, isFree: true },
-      { id: 'nutrition-pro-monthly', name: 'Nutrition Pro (Monthly)', slug: 'nutrition-pro-monthly', priceFormatted: `${symbol}8.99/mo`, priceDollars: 8.99, interval: 'MONTH' },
-      { id: 'nutrition-pro-annual', name: 'Nutrition Pro (Annual)', slug: 'nutrition-pro-annual', priceFormatted: `${symbol}59.99/yr`, priceDollars: 59.99, interval: 'YEAR' },
+      { id: 'nutrition-pro-monthly', name: 'Nutrition Pro (Monthly)', slug: 'nutrition-pro-monthly', priceFormatted: `${symbol}8.99/mo`, priceDollars: 8.99, interval: 'MONTH', tokenLimit: 500 },
+      { id: 'nutrition-pro-annual', name: 'Nutrition Pro (Annual)', slug: 'nutrition-pro-annual', priceFormatted: `${symbol}59.99/yr`, priceDollars: 59.99, interval: 'YEAR', tokenLimit: 500 },
     ];
 
     setAvailablePlans(fallbackList);
@@ -599,6 +541,8 @@ export default function AdminPaymentPage() {
       }
 
       const uEmail = (u.email || '').toLowerCase().trim();
+      const currentBase = currentPlan.replace(/-(monthly|annual|free)$/, '');
+
       const userTx = txList.find((tx) => {
         const txEmail = (tx.customerEmail || '').toLowerCase().trim();
         const matchesEmail = txEmail === uEmail && txEmail !== '';
@@ -607,8 +551,12 @@ export default function AdminPaymentPage() {
         const isValidStatus = isSucceeded(statusLower) || isCanceled(statusLower);
         const notExpired = !tx.expiryDate || new Date(tx.expiryDate).getTime() > now.getTime();
         
-        const matchesPlan = (tx.planSlug && sanitizeSinglePlan(tx.planSlug) === currentPlan) || 
-                            (tx.planName && tx.planName.toLowerCase().includes(currentPlan.replace(/-/g, ' ')));
+        const txSlug = sanitizeSinglePlan(tx.planSlug);
+        const txBase = txSlug.replace(/-(monthly|annual|free)$/, '');
+
+        const matchesPlan = (txSlug === currentPlan) || 
+                            (txBase === currentBase && currentBase !== '') ||
+                            (tx.planName && tx.planName.toLowerCase().includes(currentBase.replace(/-/g, ' ')));
         return matchesEmail && isValidStatus && matchesPlan && notExpired;
       });
 
@@ -717,75 +665,139 @@ export default function AdminPaymentPage() {
     return registeredUsers.find((u) => u.id === selectedUserId) || null;
   }, [registeredUsers, selectedUserId]);
 
+  // Plan Transition and Exclusivity Analyzer: Enforces No Concurrent Monthly & Annual for Same Plan
   const planTransitionInfo = useMemo(() => {
     if (!showAddModal || !selectedUserId || !currentSelectedUser) return null;
 
-    const currentPlan = sanitizeSinglePlan(currentSelectedUser.subscriptionPlan);
-    const chosenPlan = sanitizeSinglePlan(selectedPlanSlug);
+    // Resolve user's current active transaction plan if active in history
+    const userEmailClean = (currentSelectedUser.email || '').toLowerCase().trim();
+    const activeTx = transactionsRef.current.find(
+      (t) => (t.customerEmail || '').toLowerCase().trim() === userEmailClean && isSucceeded(t.status)
+    );
 
-    const getBase = (slug: string) => slug.replace(/-monthly$/, '').replace(/-annual$/, '');
-    const currentBase = getBase(currentPlan);
-    const chosenBase = getBase(chosenPlan);
+    const activePlanSlug = sanitizeSinglePlan(activeTx?.planSlug || currentSelectedUser.subscriptionPlan || 'taster');
+    const chosenPlanSlug = sanitizeSinglePlan(selectedPlanSlug);
 
-    if (currentPlan === chosenPlan && chosenPlan !== 'taster' && chosenPlan !== 'free') {
+    const getBase = (slug: string) => slug.replace(/-(monthly|annual|free)$/, '');
+    const activeBase = getBase(activePlanSlug);
+    const chosenBase = getBase(chosenPlanSlug);
+
+    const activeInterval = (activePlanSlug.includes('annual') || (activeTx && activeTx.recurringInterval === 'YEAR')) ? 'YEAR' : 'MONTH';
+    const chosenInterval = (chosenPlanSlug.includes('annual') || chosenPlanSlug.includes('yr')) ? 'YEAR' : 'MONTH';
+
+    const matchedChosen = availablePlans.find((p) => p.slug === chosenPlanSlug);
+    const matchedActive = availablePlans.find((p) => p.slug === activePlanSlug);
+
+    // Case 1: Same Plan and Same Interval -> Subscription Renewal
+    if (activePlanSlug === chosenPlanSlug && chosenPlanSlug !== 'taster' && chosenPlanSlug !== 'free') {
+      const intervalName = chosenInterval === 'YEAR' ? 'Annual' : 'Monthly';
       return {
-        isDuplicate: true,
-        isTransition: false,
-        isDowngradeToFree: false,
-        message: `User "${currentSelectedUser.name}" already has active plan "${chosenPlan}". Adding duplicate same plan is not allowed.`
+        isRenewal: true,
+        isIntervalSwitch: false,
+        isPlanSwitch: false,
+        isUpgrade: false,
+        isDowngrade: false,
+        fromPlan: matchedActive?.name || activePlanSlug,
+        toPlan: matchedChosen?.name || chosenPlanSlug,
+        message: `User "${currentSelectedUser.name}" currently holds "${matchedActive?.name || chosenPlanSlug}". Recording this payment will renew their ${intervalName} subscription and extend active validity.`
       };
     }
 
-    if (currentPlan !== 'taster' && currentPlan !== 'free' && (chosenPlan === 'taster' || chosenPlan === 'free')) {
-      const activeTx = transactionsRef.current.find(
-        (t) => (t.customerEmail || '').toLowerCase().trim() === (currentSelectedUser.email || '').toLowerCase().trim() && (isSucceeded(t.status) || isCanceled(t.status))
-      );
-      const hasExpiry = Boolean(activeTx?.expiryDate && new Date(activeTx.expiryDate).getTime() > Date.now());
+    // Case 2: Same Plan, Different Interval -> Mutual Exclusivity Switch (Monthly <-> Annual Upgrade or Downgrade)
+    if (activeBase === chosenBase && activePlanSlug !== 'taster' && chosenPlanSlug !== 'taster' && activeInterval !== chosenInterval) {
+      const isUpgrade = chosenInterval === 'YEAR' && activeInterval === 'MONTH';
+      const fromIntervalName = activeInterval === 'YEAR' ? 'Annual' : 'Monthly';
+      const toIntervalName = chosenInterval === 'YEAR' ? 'Annual' : 'Monthly';
+
       return {
-        isDuplicate: false,
-        isTransition: true,
-        isDowngradeToFree: true,
-        from: currentPlan,
-        to: 'Free (Taster)',
-        message: hasExpiry
-          ? `Downgrading "${currentSelectedUser.name}" to Free Plan. Recurring will be turned OFF, the transaction status will turn to "cancelled", and the current plan "${currentPlan}" will remain ACTIVE until expired (${new Date(activeTx!.expiryDate!).toLocaleDateString()}).`
-          : `Reverting "${currentSelectedUser.name}" to Free Plan immediately.`
+        isRenewal: false,
+        isIntervalSwitch: true,
+        isPlanSwitch: false,
+        isUpgrade,
+        isDowngrade: !isUpgrade,
+        fromPlan: `${activeBase} (${fromIntervalName})`,
+        toPlan: `${chosenBase} (${toIntervalName})`,
+        fromInterval: fromIntervalName,
+        toInterval: toIntervalName,
+        message: isUpgrade
+          ? `Plan Upgrade (${fromIntervalName} → ${toIntervalName}): User cannot hold both Monthly and Annual subscriptions for ${activeBase}. The previous ${fromIntervalName} plan will be automatically CANCELLED (Status: Cancelled, Recurring: OFF) and replaced with this Annual plan.`
+          : `Plan Downgrade (${fromIntervalName} → ${toIntervalName}): User cannot hold both Monthly and Annual subscriptions for ${activeBase}. The previous ${fromIntervalName} plan will be automatically CANCELLED (Status: Cancelled, Recurring: OFF) and replaced with this Monthly plan.`
       };
     }
 
-    if (currentBase === chosenBase && currentPlan !== 'taster' && chosenPlan !== 'taster') {
-      const fromInterval = currentPlan.includes('annual') ? 'Annual' : 'Monthly';
-      const toInterval = chosenPlan.includes('annual') ? 'Annual' : 'Monthly';
+    // Case 3: Completely Different Plan -> Plan Switch (Upgrade / Downgrade)
+    if (activePlanSlug !== 'taster' && chosenPlanSlug !== 'taster' && activeBase !== chosenBase) {
       return {
-        isDuplicate: false,
-        isTransition: true,
-        isDowngradeToFree: false,
-        from: fromInterval,
-        to: toInterval,
-        message: `Switching "${currentSelectedUser.name}" on plan "${currentBase}" from ${fromInterval} to ${toInterval}. The previous transaction will be cancelled & new payment recorded.`
-      };
-    }
-
-    if (currentPlan !== 'taster' && chosenPlan !== 'taster' && currentBase !== chosenBase) {
-      return {
-        isDuplicate: false,
-        isTransition: true,
-        isDowngradeToFree: false,
-        from: currentPlan,
-        to: chosenPlan,
-        message: `Upgrading/downgrading "${currentSelectedUser.name}" from "${currentPlan}" to "${chosenPlan}". Previous payment transaction will be refunded.`
+        isRenewal: false,
+        isIntervalSwitch: false,
+        isPlanSwitch: true,
+        isUpgrade: (matchedChosen?.priceDollars || 0) >= (matchedActive?.priceDollars || 0),
+        isDowngrade: (matchedChosen?.priceDollars || 0) < (matchedActive?.priceDollars || 0),
+        fromPlan: matchedActive?.name || activePlanSlug,
+        toPlan: matchedChosen?.name || chosenPlanSlug,
+        message: `Plan Switch: Switching "${currentSelectedUser.name}" from "${matchedActive?.name || activePlanSlug}" to "${matchedChosen?.name || chosenPlanSlug}". Previous plan subscription will be automatically CANCELLED.`
       };
     }
 
     return null;
-  }, [showAddModal, selectedUserId, currentSelectedUser, selectedPlanSlug]);
+  }, [showAddModal, selectedUserId, currentSelectedUser, selectedPlanSlug, availablePlans]);
 
-  const paidSubscriptionPlans = useMemo(() => {
-    const paid = availablePlans.filter(
-      (p) => !p.isFree && p.slug !== 'taster' && p.slug !== 'free'
+  // TOGGLE RECURRING HANDLER
+  const handleToggleRecurring = async (tx: PaymentTransaction) => {
+    const nextState = !tx.isRecurring;
+    setTogglingTxId(tx.id);
+
+    setTransactions((prev) =>
+      prev.map((tItem) =>
+        tItem.id === tx.id
+          ? { ...tItem, isRecurring: nextState, autoRenew: nextState }
+          : tItem
+      )
     );
-    return paid.length > 0 ? paid : availablePlans;
-  }, [availablePlans]);
+
+    const updatedTx: PaymentTransaction = {
+      ...tx,
+      isRecurring: nextState,
+      autoRenew: nextState,
+    };
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_transaction', transaction: updatedTx }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to update recurring setting');
+      }
+
+      setFeedback({
+        type: 'success',
+        msg: nextState
+          ? t('recurringTurnedOnMsg', `Recurring renewal turned ON for ${tx.customerName} (${tx.planName})`)
+          : t('recurringTurnedOffMsg', `Recurring renewal turned OFF for ${tx.customerName} (${tx.planName})`),
+      });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+      }
+    } catch (err: any) {
+      setTransactions((prev) =>
+        prev.map((tItem) =>
+          tItem.id === tx.id
+            ? { ...tItem, isRecurring: tx.isRecurring, autoRenew: tx.autoRenew }
+            : tItem
+        )
+      );
+      setFeedback({
+        type: 'error',
+        msg: err.message || 'Failed to update recurring status.',
+      });
+    } finally {
+      setTogglingTxId(null);
+    }
+  };
 
   // TRIGGER GATEWAY REFUND HANDLER
   const handleRefundTransaction = async (tx: PaymentTransaction) => {
@@ -904,31 +916,39 @@ export default function AdminPaymentPage() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        const fallbackRes = await fetch('/api/admin/payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'update_transaction', id: confirmingTx.id, transaction: updatedTx }),
-        });
-        const fallbackData = await fallbackRes.json();
-        if (!fallbackRes.ok || !fallbackData.success) {
-          throw new Error(fallbackData.error || data.error || 'Failed to confirm transaction with gateway.');
-        }
+        throw new Error(data.error || 'Failed to confirm transaction with gateway.');
       }
 
-      if (confirmSyncPlan && singlePlanSlug) {
-        const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
-        if (targetUser) {
-          await fetch('/api/admin/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              ...targetUser, 
-              subscriptionPlan: singlePlanSlug,
-              planExpiryDate: finalExpiryDate,
-              expiryDate: finalExpiryDate
-            }),
-          }).catch(() => {});
-        }
+      const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
+
+      if (confirmSyncPlan && singlePlanSlug && targetUser) {
+        await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            ...targetUser, 
+            subscriptionPlan: singlePlanSlug,
+            planExpiryDate: finalExpiryDate,
+            expiryDate: finalExpiryDate
+          }),
+        }).catch(() => {});
+      }
+
+      // Credit tokens associated with plan in /admin/plans
+      const matchedPlan = availablePlans.find((p) => p.slug === singlePlanSlug);
+      if (matchedPlan?.tokenLimit && matchedPlan.tokenLimit > 0 && targetUser) {
+        await fetch('/api/tokens', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'grant',
+            userId: targetUser.id,
+            email: cleanEmail,
+            amount: matchedPlan.tokenLimit,
+            type: 'plan_purchase',
+            description: `Token grant for confirming ${confirmingTx.planName}`
+          })
+        }).catch(() => {});
       }
 
       await fetchData();
@@ -937,6 +957,8 @@ export default function AdminPaymentPage() {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
         window.dispatchEvent(new Event('zecratary_users_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_tokens_updated'));
+        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
       }
 
       setConfirmingTx(null);
@@ -991,48 +1013,28 @@ export default function AdminPaymentPage() {
     const target = registeredUsers.find((u) => u.id === userId);
     if (target) {
       const userPlan = sanitizeSinglePlan(target.subscriptionPlan);
-      if (selectedPlanSlug === userPlan && userPlan !== 'taster') {
-        let alternativeSlug = '';
-        if (userPlan.endsWith('-monthly')) {
-          alternativeSlug = userPlan.replace(/-monthly$/, '-annual');
-        } else if (userPlan.endsWith('-annual')) {
-          alternativeSlug = userPlan.replace(/-annual$/, '-monthly');
-        } else {
-          alternativeSlug = `${userPlan}-annual`;
-        }
-        const matched = paidSubscriptionPlans.find((p) => p.slug === alternativeSlug) ||
-                        paidSubscriptionPlans.find((p) => p.slug !== userPlan);
-        if (matched) {
-          setSelectedPlanSlug(matched.slug);
-          setPaymentAmount(matched.priceDollars);
-          setPaymentExpiryDate(calculateDefaultExpiry(paymentDate, matched.interval));
-        }
+      // Intelligently default to the user's active plan if available and has a price, or the first available plan with price
+      const matched = availablePlans.find((p) => p.slug === userPlan && p.priceDollars > 0) ||
+                      availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === userPlan.replace(/-(monthly|annual)$/, '') && p.priceDollars > 0) ||
+                      availablePlans[0];
+      if (matched && matched.priceDollars > 0) {
+        setSelectedPlanSlug(matched.slug);
+        setPaymentAmount(matched.priceDollars);
+        setPaymentExpiryDate(calculateDefaultExpiry(paymentDate, matched.interval));
       }
     }
   };
 
+  // Sync plan and price cleanly
   const handlePlanSelectChange = (slug: string) => {
     const singleSlug = sanitizeSinglePlan(slug);
     setSelectedPlanSlug(singleSlug);
     const matched = availablePlans.find((p) => p.slug === singleSlug);
-    if (matched) {
+    if (matched && matched.priceDollars > 0) {
       setPaymentAmount(matched.priceDollars);
-      const isFree = Boolean(matched.isFree || singleSlug === 'taster' || singleSlug === 'free' || matched.priceDollars === 0);
-      if (isFree) {
-        setIsPaymentRecurring(false);
-        const existingTx = transactionsRef.current.find(
-          (t) => (t.customerEmail || '').toLowerCase().trim() === (currentSelectedUser?.email || '').toLowerCase().trim() && (isSucceeded(t.status) || isCanceled(t.status))
-        );
-        if (existingTx?.expiryDate && new Date(existingTx.expiryDate).getTime() > Date.now()) {
-          setPaymentExpiryDate(new Date(existingTx.expiryDate).toISOString().slice(0, 10));
-        } else {
-          setPaymentExpiryDate('');
-        }
-      } else {
-        setIsPaymentRecurring(true);
-        const calculatedExpiry = calculateDefaultExpiry(paymentDate, matched.interval);
-        setPaymentExpiryDate(calculatedExpiry);
-      }
+      setIsPaymentRecurring(true);
+      const calculatedExpiry = calculateDefaultExpiry(paymentDate, matched.interval);
+      setPaymentExpiryDate(calculatedExpiry);
     }
   };
 
@@ -1044,20 +1046,24 @@ export default function AdminPaymentPage() {
     }
   };
 
+  // Validates selectedPlanSlug against availablePlans (strictly plans with price)
   useEffect(() => {
-    if (paidSubscriptionPlans.length > 0) {
-      const exists = paidSubscriptionPlans.some((p) => p.slug === selectedPlanSlug);
+    if (availablePlans.length > 0) {
+      const exists = availablePlans.some((p) => p.slug === selectedPlanSlug && p.priceDollars > 0);
       if (!exists) {
-        const first = paidSubscriptionPlans[0];
-        setSelectedPlanSlug(first.slug);
-        setPaymentAmount(first.priceDollars);
-        setPaymentExpiryDate(calculateDefaultExpiry(paymentDate, first.interval));
+        const first = availablePlans.find((p) => p.priceDollars > 0) || availablePlans[0];
+        if (first) {
+          setSelectedPlanSlug(first.slug);
+          setPaymentAmount(first.priceDollars);
+          setPaymentExpiryDate(calculateDefaultExpiry(paymentDate, first.interval));
+        }
       }
     }
-  }, [paidSubscriptionPlans, selectedPlanSlug, paymentDate]);
+  }, [availablePlans, selectedPlanSlug, paymentDate]);
 
-  const handleOpenAddModal = () => {
+  const handleOpenAddModal = async () => {
     loadPlans();
+    await loadUsers();
     setModalError('');
     const today = new Date().toISOString().slice(0, 10);
     setPaymentDate(today);
@@ -1067,23 +1073,17 @@ export default function AdminPaymentPage() {
       setSelectedUserId(targetUser.id);
     }
 
-    const userCurrentPlan = targetUser ? sanitizeSinglePlan(targetUser.subscriptionPlan) : 'taster';
+    const userCurrentPlan = targetUser ? sanitizeSinglePlan(targetUser.subscriptionPlan) : '';
     
-    let initialPlan = paidSubscriptionPlans.find((p) => p.slug !== userCurrentPlan) || paidSubscriptionPlans[0];
-    if (userCurrentPlan.endsWith('-monthly')) {
-      const annualSlug = userCurrentPlan.replace(/-monthly$/, '-annual');
-      const foundAnnual = paidSubscriptionPlans.find((p) => p.slug === annualSlug);
-      if (foundAnnual) initialPlan = foundAnnual;
-    } else if (userCurrentPlan.endsWith('-annual')) {
-      const monthlySlug = userCurrentPlan.replace(/-annual$/, '-monthly');
-      const foundMonthly = paidSubscriptionPlans.find((p) => p.slug === monthlySlug);
-      if (foundMonthly) initialPlan = foundMonthly;
-    }
+    // Choose active user plan if available and priced, or first available plan with price
+    const matchedPlan = availablePlans.find((p) => p.slug === userCurrentPlan && p.priceDollars > 0) ||
+                        availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === userCurrentPlan.replace(/-(monthly|annual)$/, '') && p.priceDollars > 0) ||
+                        availablePlans[0];
 
-    const initialSlug = sanitizeSinglePlan(initialPlan?.slug || 'nutrition-pro-monthly');
+    const initialSlug = sanitizeSinglePlan(matchedPlan?.slug || 'nutrition-pro-monthly');
     setSelectedPlanSlug(initialSlug);
-    setPaymentAmount(initialPlan?.priceDollars || 8.99);
-    setPaymentExpiryDate(calculateDefaultExpiry(today, initialPlan?.interval || 'MONTH'));
+    setPaymentAmount(matchedPlan?.priceDollars || 8.99);
+    setPaymentExpiryDate(calculateDefaultExpiry(today, matchedPlan?.interval || 'MONTH'));
     setIsPaymentRecurring(true);
 
     if (config.activeGateway === 'paypal' && (config.paypal.enabled || config.activeGateway === 'paypal')) {
@@ -1096,7 +1096,7 @@ export default function AdminPaymentPage() {
     setFailureReason('');
     setSyncUserPlan(true);
     setAddGatewayTxId('');
-    setAddGatewayConfirmed(false);
+    setAddGatewayConfirmed(true);
     setShowAddModal(true);
   };
 
@@ -1106,8 +1106,15 @@ export default function AdminPaymentPage() {
     setEditingTx(tx);
     setEditCustomerName(tx.customerName || '');
     setEditCustomerEmail(tx.customerEmail || '');
-    setEditPlanSlug(sanitizeSinglePlan(tx.planSlug || ''));
-    setEditPlanName(tx.planName || '');
+
+    const rawSlug = sanitizeSinglePlan(tx.planSlug || '');
+    const matched = availablePlans.find((p) => p.slug === rawSlug) ||
+                    availablePlans.find((p) => p.id === tx.planSlug) ||
+                    availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === rawSlug.replace(/-(monthly|annual)$/, ''));
+
+    const resolvedSlug = matched ? matched.slug : rawSlug;
+    setEditPlanSlug(resolvedSlug);
+    setEditPlanName(matched ? matched.name : (tx.planName || ''));
     setEditAmount(parseAmount(tx.amount));
     setEditGateway(tx.gateway || 'stripe');
     setEditStatus(isSucceeded(tx.status) ? 'succeeded' : isFailed(tx.status) ? 'failed' : isRefunded(tx.status) ? 'refunded' : isCanceled(tx.status) ? 'canceled' : 'pending');
@@ -1124,7 +1131,7 @@ export default function AdminPaymentPage() {
     const singleSlug = sanitizeSinglePlan(slug);
     setEditPlanSlug(singleSlug);
     const matched = availablePlans.find((p) => p.slug === singleSlug);
-    if (matched) {
+    if (matched && matched.priceDollars > 0) {
       setEditPlanName(matched.name);
       setEditAmount(matched.priceDollars);
       if (matched.interval && !editExpiryDate) {
@@ -1221,7 +1228,8 @@ export default function AdminPaymentPage() {
     const singlePlanSlug = sanitizeSinglePlan(editPlanSlug);
     const cleanEmail = editCustomerEmail.trim().toLowerCase();
 
-    if (isSucceeded(normalizedStatus) && !isSucceeded(editingTx.status) && !editGatewayConfirmed) {
+    // Enforce gateway verification for automated processors, permit manual
+    if (isSucceeded(normalizedStatus) && !isSucceeded(editingTx.status) && editGateway !== 'manual' && !editGatewayConfirmed) {
       setModalError(t('requireGatewayConfirmToUpdateSucceeded', 'Confirmation required: You must confirm the transaction amount from the payment gateway to mark status as Succeeded.'));
       return;
     }
@@ -1260,11 +1268,15 @@ export default function AdminPaymentPage() {
     };
 
     try {
-      await fetch('/api/admin/payment', {
+      const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'update_transaction', transaction: updatedTx }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to update transaction');
+      }
 
       if (isStatusCanceled) {
         const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
@@ -1407,11 +1419,6 @@ export default function AdminPaymentPage() {
     e.preventDefault();
     setModalError('');
 
-    if (planTransitionInfo?.isDuplicate) {
-      setModalError(planTransitionInfo.message);
-      return;
-    }
-
     const targetUser = registeredUsers.find((u) => u.id === selectedUserId);
     if (!targetUser) {
       setModalError(t('selectValidUserError', 'Please select a valid user.'));
@@ -1426,14 +1433,11 @@ export default function AdminPaymentPage() {
     const cleanAmount = parseAmount(paymentAmount);
     const normalizedStatus = paymentStatus.toLowerCase();
 
-    if (isSucceeded(normalizedStatus) && !addGatewayConfirmed) {
+    // Enforce gateway verification for automated processors, permit manual
+    if (isSucceeded(normalizedStatus) && paymentGateway !== 'manual' && !addGatewayConfirmed) {
       setModalError(t('requireGatewayConfirmToAddSucceeded', 'Confirmation required: Please verify and confirm the transaction amount from the payment gateway to record as Succeeded.'));
       return;
     }
-
-    const isDowngradingToFree = Boolean(
-      singlePlanSlug === 'taster' || singlePlanSlug === 'free' || matchedPlan?.isFree
-    );
 
     const formattedCreatedAt = paymentDate 
       ? new Date(`${paymentDate}T12:00:00Z`).toISOString() 
@@ -1445,88 +1449,37 @@ export default function AdminPaymentPage() {
 
     const detectedInterval = (matchedPlan?.interval || (singlePlanSlug.includes('annual') ? 'YEAR' : 'MONTH')) as any;
 
-    if (isDowngradingToFree) {
-      const activeUserTxs = transactionsRef.current.filter(
-        (tItem) => (tItem.customerEmail || '').toLowerCase().trim() === customerEmail && (isSucceeded(tItem.status) || isCanceled(tItem.status))
-      );
-      
-      let preservedExpiry: string | undefined = undefined;
-      for (const oldTx of activeUserTxs) {
-        if (oldTx.expiryDate && new Date(oldTx.expiryDate).getTime() > Date.now()) {
-          preservedExpiry = oldTx.expiryDate;
-        }
-        const cancelledTx: PaymentTransaction = { 
-          ...oldTx, 
-          status: 'canceled', 
-          isRecurring: false,
-          autoRenew: false,
-          expiryDate: oldTx.expiryDate || formattedExpiryDate 
-        };
-        await fetch('/api/admin/payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'cancel_transaction', transaction: cancelledTx, id: oldTx.id }),
-        }).catch(() => {});
-      }
-
-      if (preservedExpiry) {
-        await fetch('/api/admin/users', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            ...targetUser, 
-            subscriptionPlan: targetUser.subscriptionPlan || 'nutrition-pro-monthly',
-            planExpiryDate: preservedExpiry,
-            expiryDate: preservedExpiry
-          }),
-        }).catch(() => {});
-      } else {
-        await fetch('/api/admin/users', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            ...targetUser, 
-            subscriptionPlan: 'taster',
-            planExpiryDate: null,
-            expiryDate: null
-          }),
-        }).catch(() => {});
-      }
-
-      await fetchData();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
-      setShowAddModal(false);
-      setFeedback({
-        type: 'success',
-        msg: preservedExpiry
-          ? `Downgraded to Free Plan. Recurring turned OFF, status set to "cancelled". Current plan remains ACTIVE until ${new Date(preservedExpiry).toLocaleDateString()}.`
-          : `Reverted ${customerName} to default Free (Taster) plan.`,
-      });
-      return;
-    }
-
+    // Mutual Exclusivity: Automatically CANCEL previous subscriptions when upgrading, downgrading, or switching intervals
     if (isSucceeded(normalizedStatus)) {
-      const existingUserTxs = transactionsRef.current.filter(
-        (tItem) => (tItem.customerEmail || '').toLowerCase().trim() === customerEmail && isSucceeded(tItem.status)
+      const isSwitchOrUpgradeDowngrade = Boolean(
+        planTransitionInfo?.isIntervalSwitch || planTransitionInfo?.isPlanSwitch
       );
-      for (const oldTx of existingUserTxs) {
-        const cancelledTx: PaymentTransaction = { 
+
+      const existingUserActiveTxs = transactionsRef.current.filter((tItem) => {
+        const matchesEmail = (tItem.customerEmail || '').toLowerCase().trim() === customerEmail;
+        return matchesEmail && (isSucceeded(tItem.status) || isPending(tItem.status));
+      });
+
+      for (const oldTx of existingUserActiveTxs) {
+        // If switching between Monthly & Annual or switching plans, cancel previous plan completely!
+        const shouldCancelStatus = isSwitchOrUpgradeDowngrade || (oldTx.planSlug !== singlePlanSlug);
+        
+        const updatedOldTx: PaymentTransaction = { 
           ...oldTx, 
-          status: 'refunded', 
+          status: shouldCancelStatus ? 'canceled' : oldTx.status,
           isRecurring: false,
           autoRenew: false,
-          expiryDate: new Date().toISOString() 
+          expiryDate: shouldCancelStatus ? new Date().toISOString() : oldTx.expiryDate
         };
+
         await fetch('/api/admin/payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'update_transaction', transaction: cancelledTx }),
+          body: JSON.stringify({ 
+            action: shouldCancelStatus ? 'cancel_transaction' : 'update_transaction', 
+            transaction: updatedOldTx, 
+            id: oldTx.id 
+          }),
         }).catch(() => {});
       }
     }
@@ -1554,13 +1507,20 @@ export default function AdminPaymentPage() {
     };
 
     try {
-      await fetch('/api/admin/payment', {
+      const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'add_transaction', transaction: newTx }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to record transaction in database');
+      }
 
-      const finalPlanToSync = (syncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) ? singlePlanSlug : 'taster';
+      // Update user plan entitlement in PostgreSQL
+      const finalPlanToSync = (syncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) 
+        ? singlePlanSlug 
+        : (targetUser.subscriptionPlan || 'taster');
 
       await fetch('/api/admin/users', {
         method: 'POST',
@@ -1568,10 +1528,26 @@ export default function AdminPaymentPage() {
         body: JSON.stringify({ 
           ...targetUser, 
           subscriptionPlan: finalPlanToSync,
-          planExpiryDate: formattedExpiryDate,
-          expiryDate: formattedExpiryDate
+          planExpiryDate: formattedExpiryDate || null,
+          expiryDate: formattedExpiryDate || null
         }),
       }).catch(() => {});
+
+      // Credit tokens associated with this plan in /admin/plans
+      if (isSucceeded(normalizedStatus) && matchedPlan?.tokenLimit && matchedPlan.tokenLimit > 0) {
+        await fetch('/api/tokens', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'grant',
+            userId: targetUser.id,
+            email: customerEmail,
+            amount: matchedPlan.tokenLimit,
+            type: 'plan_purchase',
+            description: `Token grant for purchasing ${planName}`
+          })
+        }).catch(() => {});
+      }
 
       await fetchData();
 
@@ -1579,13 +1555,18 @@ export default function AdminPaymentPage() {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
         window.dispatchEvent(new Event('zecratary_users_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_tokens_updated'));
+        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
       }
 
       setShowAddModal(false);
+      const isRenewal = planTransitionInfo?.isRenewal;
       const isSwitched = planTransitionInfo?.isTransition;
       setFeedback({
         type: 'success',
-        msg: isSwitched 
+        msg: isRenewal
+          ? `Successfully renewed ${planName} for ${customerName} (Payment: ${activeCurrencySymbol}${cleanAmount.toFixed(2)}, Recurring: ${isPaymentRecurring ? 'ON' : 'OFF'})!`
+          : isSwitched 
           ? `Successfully updated plan to ${planName} for ${customerName} (Recurring: ${isPaymentRecurring ? 'ON' : 'OFF'})!`
           : `Payment of ${activeCurrencySymbol}${cleanAmount.toFixed(2)} recorded for ${customerName} (${planName}, Recurring: ${isPaymentRecurring ? 'ON' : 'OFF'})!`,
       });
@@ -1651,6 +1632,7 @@ export default function AdminPaymentPage() {
     );
   };
 
+  // Metrics hook evaluated safely before the return statement
   const metrics = useMemo(() => {
     const succeeded = transactions.filter((t) => isSucceeded(t.status));
     const failed = transactions.filter((t) => isFailed(t.status));
@@ -1800,37 +1782,6 @@ export default function AdminPaymentPage() {
         input[type="date"].payment-input {
           color-scheme: ${isDayMode ? 'light' : 'dark'};
         }
-
-        ${!isDayMode ? `
-        .payment-input[type="date"]::-webkit-calendar-picker-indicator,
-        input[type="date"].payment-input::-webkit-calendar-picker-indicator {
-          cursor: pointer;
-          opacity: 0.95;
-          filter: brightness(0) invert(1) drop-shadow(0 0 1px rgba(255, 255, 255, 0.6));
-          transition: opacity 0.2s, transform 0.15s, filter 0.2s;
-        }
-
-        .payment-input[type="date"]::-webkit-calendar-picker-indicator:hover,
-        input[type="date"].payment-input::-webkit-calendar-picker-indicator:hover {
-          opacity: 1;
-          transform: scale(1.15);
-          filter: brightness(0) invert(1) drop-shadow(0 0 3px rgba(255, 255, 255, 0.9));
-        }
-        ` : `
-        .payment-input[type="date"]::-webkit-calendar-picker-indicator,
-        input[type="date"].payment-input::-webkit-calendar-picker-indicator {
-          cursor: pointer;
-          opacity: 0.8;
-          filter: none;
-          transition: opacity 0.2s, transform 0.15s;
-        }
-
-        .payment-input[type="date"]::-webkit-calendar-picker-indicator:hover,
-        input[type="date"].payment-input::-webkit-calendar-picker-indicator:hover {
-          opacity: 1;
-          transform: scale(1.15);
-        }
-        `}
       `}} />
 
       {/* HEADER & TOP NAV */}
@@ -1915,211 +1866,192 @@ export default function AdminPaymentPage() {
         </div>
       )}
 
-      {activeTab === 'history' ? (
-        <div className="space-y-6">
-          {/* GATEWAY STATUS & MONITOR BAR */}
-          <div
-            className="p-3 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
+      {/* TAB 1: PAYMENT HISTORY CONTAINER */}
+      <div className={activeTab === 'history' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
+        {/* GATEWAY STATUS & MONITOR BAR */}
+        <div
+          className="p-3 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 font-bold" style={{ color: 'var(--color-text)' }}>
+              <Activity className="h-4 w-4 text-emerald-500 animate-pulse" /> {t('gatewayEngine', 'Gateway Engine')}
+            </span>
+            <span 
+              className="font-extrabold uppercase px-2.5 py-0.5 rounded text-[11px] border"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              {config.activeGateway}
+            </span>
+            <span 
+              className="font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald)',
+                color: config.testMode ? '#fbbf24' : 'var(--color-emerald)'
+              }}
+            >
+              {config.testMode ? t('sandboxTest', 'Sandbox Test') : t('liveProduction', 'Live Production')}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-4 font-semibold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+            <div>
+              {t('currencyLabel', 'Currency:')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{config.currency} ({activeCurrencySymbol})</span>
+            </div>
+            <div>
+              {t('stripeLabel', 'Stripe:')}{' '}
+              <span className={`font-bold ${config.stripeConnected ? 'text-[var(--color-emerald)]' : ''}`} style={{ color: config.stripeConnected ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
+                {config.stripeConnected ? t('connectedStatus', 'Connected') : t('notConnectedStatus', 'Not Connected')}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('settings')}
+              className="font-bold text-[11px] hover:underline transition cursor-pointer"
+              style={{ color: 'var(--color-primary)' }}
+            >
+              {t('changeCurrencyKeys', 'Change currency & keys')}
+            </button>
+          </div>
+        </div>
+
+        {/* KPI STATS TILES */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+          <div 
+            className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)'
             }}
           >
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1.5 font-bold" style={{ color: 'var(--color-text)' }}>
-                <Activity className="h-4 w-4 text-emerald-500 animate-pulse" /> {t('gatewayEngine', 'Gateway Engine')}
-              </span>
-              <span 
-                className="font-extrabold uppercase px-2.5 py-0.5 rounded text-[11px] border"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                {config.activeGateway}
-              </span>
-              <span 
-                className="font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald)',
-                  color: config.testMode ? '#fbbf24' : 'var(--color-emerald)'
-                }}
-              >
-                {config.testMode ? t('sandboxTest', 'Sandbox Test') : t('liveProduction', 'Live Production')}
-              </span>
+            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('totalRevenueTitle', 'Total Revenue')}
             </div>
+            <div className="text-xl font-black flex items-baseline gap-1" style={{ color: 'var(--color-text)' }}>
+              <span>{activeCurrencySymbol}{metrics.totalRevenue.toFixed(2)}</span>
+              <span className="text-[10px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{config.currency}</span>
+            </div>
+          </div>
 
-            <div className="flex items-center gap-4 font-semibold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-              <div>
-                {t('currencyLabel', 'Currency:')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{config.currency} ({activeCurrencySymbol})</span>
-              </div>
-              <div>
-                {t('stripeLabel', 'Stripe:')}{' '}
-                <span className={`font-bold ${config.stripeConnected ? 'text-[var(--color-emerald)]' : ''}`} style={{ color: config.stripeConnected ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
-                  {config.stripeConnected ? t('connectedStatus', 'Connected') : t('notConnectedStatus', 'Not Connected')}
-                </span>
-              </div>
+          <div 
+            className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('successfulPaymentsTitle', 'Successful')}
+            </div>
+            <div 
+              className="text-xl font-black flex items-center gap-1.5"
+              style={{ color: 'var(--color-emerald)' }}
+            >
+              {metrics.succeededCount}
+              <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+            </div>
+          </div>
+
+          <div 
+            className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('cancelledTitle', 'Cancelled')}
+            </div>
+            <div className="text-xl font-black flex items-center gap-1.5" style={{ color: '#fb923c' }}>
+              {metrics.canceledCount}
+              <Ban className="h-4 w-4 text-orange-500" />
+            </div>
+          </div>
+
+          <div 
+            className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('refundedTitle', 'Refunded')}
+            </div>
+            <div className="text-xl font-black flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
+              {metrics.refundedCount}
+              <ArrowDownLeft className="h-4 w-4" />
+            </div>
+          </div>
+
+          <div 
+            className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('failedPaymentsTitle', 'Failed')}
+            </div>
+            <div className="text-xl font-black flex items-center gap-1.5 text-red-500">
+              {metrics.failedCount}
+              <XCircle className="h-4 w-4 text-red-500" />
+            </div>
+          </div>
+        </div>
+
+        {/* SEARCH, FILTERS, TABLE COLUMNS & BULK ACTIONS BAR */}
+        <div 
+          className="border p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div className="relative w-full md:w-80">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} />
+            <input
+              type="text"
+              placeholder={t('searchPaymentPlaceholder', 'Search by customer name, email, or plan...')}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="payment-input w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none transition font-medium"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            {selectedTxIds.length > 0 && (
               <button
                 type="button"
-                onClick={() => setActiveTab('settings')}
-                className="font-bold text-[11px] hover:underline transition cursor-pointer"
-                style={{ color: 'var(--color-primary)' }}
+                onClick={handleBulkDeleteUsers}
+                className="px-3.5 py-2 text-white font-bold rounded-xl transition flex items-center gap-1.5 text-xs shadow-md bg-red-600 hover:bg-red-700 animate-in fade-in cursor-pointer"
               >
-                {t('changeCurrencyKeys', 'Change currency & keys')}
+                <Trash2 className="h-3.5 w-3.5" />
+                {t('removeUsersBtn', 'Remove Selected')} ({selectedTxIds.length})
               </button>
-            </div>
-          </div>
+            )}
 
-          {/* KPI STATS TILES */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-            <div 
-              className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('totalRevenueTitle', 'Total Revenue')}
-              </div>
-              <div className="text-xl font-black flex items-baseline gap-1" style={{ color: 'var(--color-text)' }}>
-                <span>{activeCurrencySymbol}{metrics.totalRevenue.toFixed(2)}</span>
-                <span className="text-[10px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{config.currency}</span>
-              </div>
-            </div>
-
-            <div 
-              className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('successfulPaymentsTitle', 'Successful')}
-              </div>
-              <div 
-                className="text-xl font-black flex items-center gap-1.5"
-                style={{ color: 'var(--color-emerald)' }}
-              >
-                {metrics.succeededCount}
-                <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-              </div>
-            </div>
-
-            <div 
-              className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('cancelledTitle', 'Cancelled')}
-              </div>
-              <div className="text-xl font-black flex items-center gap-1.5" style={{ color: '#fb923c' }}>
-                {metrics.canceledCount}
-                <Ban className="h-4 w-4 text-orange-500" />
-              </div>
-            </div>
-
-            <div 
-              className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('refundedTitle', 'Refunded')}
-              </div>
-              <div className="text-xl font-black flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
-                {metrics.refundedCount}
-                <ArrowDownLeft className="h-4 w-4" />
-              </div>
-            </div>
-
-            <div 
-              className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('failedPaymentsTitle', 'Failed')}
-              </div>
-              <div className="text-xl font-black flex items-center gap-1.5 text-red-500">
-                {metrics.failedCount}
-                <XCircle className="h-4 w-4 text-red-500" />
-              </div>
-            </div>
-          </div>
-
-          {/* SEARCH, FILTERS, TABLE COLUMNS & BULK ACTIONS BAR */}
-          <div 
-            className="border p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="relative w-full md:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} />
-              <input
-                type="text"
-                placeholder={t('searchPaymentPlaceholder', 'Search by customer name, email, or plan...')}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="payment-input w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none transition font-medium"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-              {selectedTxIds.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleBulkDeleteUsers}
-                  className="px-3.5 py-2 text-white font-bold rounded-xl transition flex items-center gap-1.5 text-xs shadow-md bg-red-600 hover:bg-red-700 animate-in fade-in cursor-pointer"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  {t('removeUsersBtn', 'Remove Selected')} ({selectedTxIds.length})
-                </button>
-              )}
-
-              <div className="flex items-center gap-1.5">
-                <Filter className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} />
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as any)}
-                  className="border rounded-xl px-3 py-2 text-xs font-semibold outline-none cursor-pointer transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allStatuses', 'All Statuses')}</option>
-                  <option value="succeeded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusSucceeded', 'Succeeded')}</option>
-                  <option value="canceled" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusCanceled', 'Cancelled')}</option>
-                  <option value="failed" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusFailed', 'Failed')}</option>
-                  <option value="refunded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusRefunded', 'Refunded')}</option>
-                  <option value="pending" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusPending', 'Pending')}</option>
-                </select>
-              </div>
-
+            <div className="flex items-center gap-1.5">
+              <Filter className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} />
               <select
-                value={gatewayFilter}
-                onChange={(e) => setGatewayFilter(e.target.value as any)}
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
                 className="border rounded-xl px-3 py-2 text-xs font-semibold outline-none cursor-pointer transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -2127,566 +2059,636 @@ export default function AdminPaymentPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allGateways', 'All Gateways')}</option>
-                <option value="stripe" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayStripe', 'Stripe')}</option>
-                <option value="paypal" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayPaypal', 'PayPal')}</option>
-                <option value="manual" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayManual', 'Manual')}</option>
+                <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allStatuses', 'All Statuses')}</option>
+                <option value="succeeded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusSucceeded', 'Succeeded')}</option>
+                <option value="canceled" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusCanceled', 'Cancelled')}</option>
+                <option value="failed" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusFailed', 'Failed')}</option>
+                <option value="refunded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusRefunded', 'Refunded')}</option>
+                <option value="pending" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusPending', 'Pending')}</option>
               </select>
+            </div>
 
-              <select
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                className="border rounded-xl px-2.5 py-2 text-xs font-semibold outline-none cursor-pointer transition"
+            <select
+              value={gatewayFilter}
+              onChange={(e) => setGatewayFilter(e.target.value as any)}
+              className="border rounded-xl px-3 py-2 text-xs font-semibold outline-none cursor-pointer transition"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allGateways', 'All Gateways')}</option>
+              <option value="stripe" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayStripe', 'Stripe')}</option>
+              <option value="paypal" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayPaypal', 'PayPal')}</option>
+              <option value="manual" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayManual', 'Manual')}</option>
+            </select>
+
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="border rounded-xl px-2.5 py-2 text-xs font-semibold outline-none cursor-pointer transition"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)'
+              }}
+            >
+              <option value={5} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage5', '5 per page')}</option>
+              <option value={10} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage10', '10 per page')}</option>
+              <option value={20} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage20', '20 per page')}</option>
+              <option value={50} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage50', '50 per page')}</option>
+            </select>
+
+            {/* TABLE COLUMN SHOW / HIDE POPUP TOGGLE */}
+            <div className="relative" ref={columnPopupRef}>
+              <button
+                type="button"
+                onClick={() => setShowColumnPopup(!showColumnPopup)}
+                className="border rounded-xl px-3 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: showColumnPopup ? 'var(--color-primary)' : 'var(--color-border)',
+                  color: showColumnPopup ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                }}
+                title={t('customizeColumnsTooltip', 'Show / Hide Table Columns')}
+              >
+                <Columns3 className="h-3.5 w-3.5" style={{ color: showColumnPopup ? 'var(--color-primary)' : undefined }} />
+                <span className="hidden sm:inline">{t('columnsBtn', 'Columns')}</span>
+              </button>
+
+              {showColumnPopup && (
+                <div
+                  className="absolute right-0 mt-2 w-56 rounded-2xl border shadow-2xl p-3.5 z-50 text-xs animate-in fade-in transition-colors duration-200"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  <div 
+                    className="flex items-center justify-between pb-2.5 border-b mb-2"
+                    style={{ borderColor: 'var(--color-border)' }}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-xs">
+                      <Columns3 className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                      <span>{t('tableColumnsTitle', 'Table Columns')}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={resetColumnVisibility}
+                      className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
+                    >
+                      {t('resetColumnsBtn', 'Reset')}
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {[
+                      { key: 'customer', label: t('customerCol', 'Customer') },
+                      { key: 'plan', label: t('planCol', 'Plan') },
+                      { key: 'amount', label: t('amountCol', 'Amount') },
+                      { key: 'status', label: t('statusCol', 'Status') },
+                      { key: 'recurring', label: t('recurringCol', 'Recurring') },
+                      { key: 'date', label: t('dateCol', 'Date') },
+                      { key: 'expiryDate', label: t('expiryDateCol', 'Expiry Date') },
+                      { key: 'actions', label: t('actionsCol', 'Actions') },
+                    ].map((col) => {
+                      const isChecked = visibleColumns[col.key] !== false;
+                      return (
+                        <label
+                          key={col.key}
+                          className="flex items-center justify-between px-2.5 py-1.5 rounded-xl cursor-pointer transition select-none hover:bg-emerald-500/10"
+                        >
+                          <span className="font-medium text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                            {col.label}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleColumnVisibility(col.key)}
+                            className="w-3.5 h-3.5 rounded cursor-pointer accent-[#E05638]"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ACTIVE MULTI-SELECT BANNER */}
+        {selectedTxIds.length > 0 && (
+          <div
+            className="p-3 px-4 rounded-2xl border flex items-center justify-between text-xs animate-in fade-in"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'rgba(239, 68, 68, 0.4)',
+              color: '#ef4444'
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-red-500" />
+              <span>
+                <strong>{selectedTxIds.length}</strong> {t('userRecordsSelected', 'user record(s) selected')}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedTxIds([])}
+                className="px-3 py-1 rounded-lg border transition font-medium cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
+                }}
+              >
+                {t('clearSelection', 'Clear')}
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDeleteUsers}
+                className="px-3 py-1 text-white font-bold rounded-lg shadow transition flex items-center gap-1.5 cursor-pointer bg-red-600 hover:bg-red-700"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> {t('removeSelected', 'Remove')}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* TRANSACTIONS TABLE WITH DYNAMIC VISIBLE COLUMNS */}
+        <div 
+          className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead 
+                className="font-bold uppercase tracking-wider border-b transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text-secondary)'
                 }}
               >
-                <option value={5} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage5', '5 per page')}</option>
-                <option value={10} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage10', '10 per page')}</option>
-                <option value={20} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage20', '20 per page')}</option>
-                <option value={50} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage50', '50 per page')}</option>
-              </select>
-
-              {/* TABLE COLUMN SHOW / HIDE POPUP TOGGLE */}
-              <div className="relative" ref={columnPopupRef}>
-                <button
-                  type="button"
-                  onClick={() => setShowColumnPopup(!showColumnPopup)}
-                  className="border rounded-xl px-3 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: showColumnPopup ? 'var(--color-primary)' : 'var(--color-border)',
-                    color: showColumnPopup ? 'var(--color-primary)' : 'var(--color-text-secondary)'
-                  }}
-                  title={t('customizeColumnsTooltip', 'Show / Hide Table Columns')}
-                >
-                  <Columns3 className="h-3.5 w-3.5" style={{ color: showColumnPopup ? 'var(--color-primary)' : undefined }} />
-                  <span className="hidden sm:inline">{t('columnsBtn', 'Columns')}</span>
-                </button>
-
-                {showColumnPopup && (
-                  <div
-                    className="absolute right-0 mt-2 w-56 rounded-2xl border shadow-2xl p-3.5 z-50 text-xs animate-in fade-in transition-colors duration-200"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <div 
-                      className="flex items-center justify-between pb-2.5 border-b mb-2"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    >
-                      <div className="flex items-center gap-1.5 font-bold text-xs">
-                        <Columns3 className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                        <span>{t('tableColumnsTitle', 'Table Columns')}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={resetColumnVisibility}
-                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
-                      >
-                        {t('resetColumnsBtn', 'Reset')}
-                      </button>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      {[
-                        { key: 'customer', label: t('customerCol', 'Customer') },
-                        { key: 'plan', label: t('planCol', 'Plan') },
-                        { key: 'amount', label: t('amountCol', 'Amount') },
-                        { key: 'status', label: t('statusCol', 'Status') },
-                        { key: 'date', label: t('dateCol', 'Date') },
-                        { key: 'expiryDate', label: t('expiryDateCol', 'Expiry Date') },
-                        { key: 'actions', label: t('actionsCol', 'Actions') },
-                      ].map((col) => {
-                        const isChecked = visibleColumns[col.key] !== false;
-                        return (
-                          <label
-                            key={col.key}
-                            className="flex items-center justify-between px-2.5 py-1.5 rounded-xl cursor-pointer transition select-none hover:bg-emerald-500/10"
-                          >
-                            <span className="font-medium text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                              {col.label}
-                            </span>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleColumnVisibility(col.key)}
-                              className="w-3.5 h-3.5 rounded cursor-pointer accent-[#E05638]"
-                            />
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ACTIVE MULTI-SELECT BANNER */}
-          {selectedTxIds.length > 0 && (
-            <div
-              className="p-3 px-4 rounded-2xl border flex items-center justify-between text-xs animate-in fade-in"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'rgba(239, 68, 68, 0.4)',
-                color: '#ef4444'
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-red-500" />
-                <span>
-                  <strong>{selectedTxIds.length}</strong> {t('userRecordsSelected', 'user record(s) selected')}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedTxIds([])}
-                  className="px-3 py-1 rounded-lg border transition font-medium cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
-                  }}
-                >
-                  {t('clearSelection', 'Clear')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleBulkDeleteUsers}
-                  className="px-3 py-1 text-white font-bold rounded-lg shadow transition flex items-center gap-1.5 cursor-pointer bg-red-600 hover:bg-red-700"
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> {t('removeSelected', 'Remove')}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* TRANSACTIONS TABLE WITH DYNAMIC VISIBLE COLUMNS */}
-          <div 
-            className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead 
-                  className="font-bold uppercase tracking-wider border-b transition-colors duration-200"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
-                  }}
-                >
+                <tr>
+                  <th className="px-4 py-3.5 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllCurrentPageSelected}
+                      onChange={handleToggleSelectAll}
+                      className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
+                      title="Select All On Current Page"
+                    />
+                  </th>
+                  {visibleColumns.customer && <th className="px-5 py-3.5">{t('customerCol', 'Customer')}</th>}
+                  {visibleColumns.plan && <th className="px-5 py-3.5">{t('planCol', 'Plan')}</th>}
+                  {visibleColumns.amount && <th className="px-5 py-3.5">{t('amountCol', 'Amount')}</th>}
+                  {visibleColumns.status && <th className="px-5 py-3.5">{t('statusCol', 'Status')}</th>}
+                  {visibleColumns.recurring && <th className="px-5 py-3.5">{t('recurringCol', 'Recurring')}</th>}
+                  {visibleColumns.date && <th className="px-5 py-3.5">{t('dateCol', 'Date')}</th>}
+                  {visibleColumns.expiryDate && <th className="px-5 py-3.5">{t('expiryDateCol', 'Expiry Date')}</th>}
+                  {visibleColumns.actions && <th className="px-5 py-3.5 text-right">{t('actionsCol', 'Actions')}</th>}
+                </tr>
+              </thead>
+              <tbody 
+                className="divide-y transition-colors duration-200"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                {paginatedTransactions.length === 0 ? (
                   <tr>
-                    <th className="px-4 py-3.5 w-10 text-center">
-                      <input
-                        type="checkbox"
-                        checked={isAllCurrentPageSelected}
-                        onChange={handleToggleSelectAll}
-                        className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
-                        title="Select All On Current Page"
-                      />
-                    </th>
-                    {visibleColumns.customer && <th className="px-5 py-3.5">{t('customerCol', 'Customer')}</th>}
-                    {visibleColumns.plan && <th className="px-5 py-3.5">{t('planCol', 'Plan')}</th>}
-                    {visibleColumns.amount && <th className="px-5 py-3.5">{t('amountCol', 'Amount')}</th>}
-                    {visibleColumns.status && <th className="px-5 py-3.5">{t('statusCol', 'Status')}</th>}
-                    {visibleColumns.date && <th className="px-5 py-3.5">{t('dateCol', 'Date')}</th>}
-                    {visibleColumns.expiryDate && <th className="px-5 py-3.5">{t('expiryDateCol', 'Expiry Date')}</th>}
-                    {visibleColumns.actions && <th className="px-5 py-3.5 text-right">{t('actionsCol', 'Actions')}</th>}
+                    <td colSpan={activeColumnCount} className="text-center py-10 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('noTransactionsFound', 'No payment transactions found matching your criteria.')}
+                    </td>
                   </tr>
-                </thead>
-                <tbody 
-                  className="divide-y transition-colors duration-200"
-                  style={{ borderColor: 'var(--color-border)' }}
-                >
-                  {paginatedTransactions.length === 0 ? (
-                    <tr>
-                      <td colSpan={activeColumnCount} className="text-center py-10 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('noTransactionsFound', 'No payment transactions found matching your criteria.')}
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedTransactions.map((tx) => {
-                      const txSymbol = getCurrencySymbol(tx.currency || config.currency);
-                      const isRowSelected = selectedTxIds.includes(tx.id);
-                      const isTxRefunding = refundingTxId === tx.id;
-                      const isTxCanceled = isCanceled(tx.status);
-                      const isTxRefunded = isRefunded(tx.status);
-                      const isTxSucceeded = isSucceeded(tx.status);
+                ) : (
+                  paginatedTransactions.map((tx) => {
+                    const txSymbol = getCurrencySymbol(tx.currency || config.currency);
+                    const isRowSelected = selectedTxIds.includes(tx.id);
+                    const isTxRefunding = refundingTxId === tx.id;
+                    const isTxToggling = togglingTxId === tx.id;
+                    const isTxCanceled = isCanceled(tx.status);
+                    const isTxRefunded = isRefunded(tx.status);
+                    const isTxSucceeded = isSucceeded(tx.status);
+                    const isRecurringActive = Boolean(tx.isRecurring ?? true);
 
-                      return (
-                        <tr 
-                          key={tx.id} 
-                          className="transition"
-                          style={{
-                            backgroundColor: isRowSelected ? 'var(--color-inner-dark)' : 'transparent'
-                          }}
-                        >
-                          <td className="px-4 py-3.5 text-center">
-                            <input
-                              type="checkbox"
-                              checked={isRowSelected}
-                              onChange={() => handleToggleSelectRow(tx.id)}
-                              className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
-                            />
+                    return (
+                      <tr 
+                        key={tx.id} 
+                        className="transition"
+                        style={{
+                          backgroundColor: isRowSelected ? 'var(--color-inner-dark)' : 'transparent'
+                        }}
+                      >
+                        <td className="px-4 py-3.5 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isRowSelected}
+                            onChange={() => handleToggleSelectRow(tx.id)}
+                            className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
+                          />
+                        </td>
+
+                        {visibleColumns.customer && (
+                          <td className="px-5 py-3.5">
+                            <div className="font-bold" style={{ color: 'var(--color-text)' }}>{tx.customerName || 'Customer'}</div>
+                            <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{tx.customerEmail || ''}</div>
                           </td>
+                        )}
 
-                          {visibleColumns.customer && (
-                            <td className="px-5 py-3.5">
-                              <div className="font-bold" style={{ color: 'var(--color-text)' }}>{tx.customerName || 'Customer'}</div>
-                              <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{tx.customerEmail || ''}</div>
-                            </td>
-                          )}
+                        {visibleColumns.plan && (
+                          <td className="px-5 py-3.5 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                            {tx.planName || tx.planSlug || 'Plan'}
+                          </td>
+                        )}
 
-                          {visibleColumns.plan && (
-                            <td className="px-5 py-3.5 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                              {tx.planName || tx.planSlug || 'Plan'}
-                            </td>
-                          )}
+                        {visibleColumns.amount && (
+                          <td className="px-5 py-3.5 font-bold whitespace-nowrap" style={{ color: 'var(--color-text)' }}>
+                            {txSymbol}{parseAmount(tx.amount).toFixed(2)}{' '}
+                            <span className="text-[10px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>{tx.currency || config.currency}</span>
+                          </td>
+                        )}
 
-                          {visibleColumns.amount && (
-                            <td className="px-5 py-3.5 font-bold whitespace-nowrap" style={{ color: 'var(--color-text)' }}>
-                              {txSymbol}{parseAmount(tx.amount).toFixed(2)}{' '}
-                              <span className="text-[10px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>{tx.currency || config.currency}</span>
-                            </td>
-                          )}
+                        {visibleColumns.status && (
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            {isSucceeded(tx.status) && (
+                              <span 
+                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-emerald)',
+                                  color: 'var(--color-emerald)'
+                                }}
+                                title={tx.gatewayTransactionId ? `Gateway Ref: ${tx.gatewayTransactionId}` : 'Confirmed Payment'}
+                              >
+                                <CheckCircle2 className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {t('statusSucceeded', 'Succeeded')}
+                              </span>
+                            )}
+                            {isCanceled(tx.status) && (
+                              <span 
+                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: '#f97316',
+                                  color: '#f97316'
+                                }}
+                              >
+                                <Ban className="h-3 w-3 text-orange-500" /> {t('statusCanceled', 'Cancelled')}
+                              </span>
+                            )}
+                            {isFailed(tx.status) && (
+                              <span 
+                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs cursor-help"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'rgba(239, 68, 68, 0.4)',
+                                  color: '#ef4444'
+                                }}
+                                title={tx.failureReason || 'Declined by payment processor'}
+                              >
+                                <XCircle className="h-3 w-3 text-red-500" /> {t('statusFailed', 'Failed')}
+                              </span>
+                            )}
+                            {isRefunded(tx.status) && (
+                              <span 
+                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: '#f59e0b',
+                                  color: '#f59e0b'
+                                }}
+                              >
+                                <ArrowDownLeft className="h-3 w-3 text-amber-500" /> {t('statusRefunded', 'Refunded')}
+                              </span>
+                            )}
+                            {isPending(tx.status) && (
+                              <span 
+                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                              >
+                                <RefreshCw className="h-3 w-3 animate-spin" /> {t('statusPending', 'Pending')}
+                              </span>
+                            )}
+                          </td>
+                        )}
 
-                          {visibleColumns.status && (
-                            <td className="px-5 py-3.5 whitespace-nowrap">
-                              {isSucceeded(tx.status) && (
-                                <span 
-                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
+                        {visibleColumns.recurring && (
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={isRecurringActive}
+                                disabled={isTxToggling || isTxCanceled || isTxRefunded}
+                                onClick={() => handleToggleRecurring(tx)}
+                                title={
+                                  (isTxCanceled || isTxRefunded) 
+                                    ? t('cancelledNoRecurring', 'Plan is canceled/refunded') 
+                                    : isRecurringActive 
+                                    ? t('clickTurnRecurringOff', 'Click to turn recurring OFF') 
+                                    : t('clickTurnRecurringOn', 'Click to turn recurring ON')
+                                }
+                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-xs disabled:opacity-40 disabled:cursor-not-allowed ${
+                                  isRecurringActive 
+                                    ? 'bg-[var(--color-emerald)]' 
+                                    : 'bg-slate-700'
+                                }`}
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                                    isRecurringActive ? 'translate-x-4' : 'translate-x-0'
+                                  }`}
+                                />
+                              </button>
+
+                              <span 
+                                className="text-[10px] font-black uppercase tracking-wider"
+                                style={{
+                                  color: isRecurringActive 
+                                    ? 'var(--color-emerald)' 
+                                    : 'var(--color-text-secondary)'
+                                }}
+                              >
+                                {isRecurringActive 
+                                  ? (tx.recurringInterval === 'YEAR' ? t('annualRecurring', 'Annual') : t('monthlyRecurring', 'Monthly'))
+                                  : t('offLabel', 'OFF')}
+                              </span>
+                            </div>
+                          </td>
+                        )}
+                        
+                        {visibleColumns.date && (
+                          <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                            {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '-'}
+                          </td>
+                        )}
+                        
+                        {visibleColumns.expiryDate && (
+                          <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                            {tx.expiryDate ? (() => {
+                              const exp = new Date(tx.expiryDate);
+                              const now = new Date();
+                              const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                              const expMidnight = new Date(exp.getFullYear(), exp.getMonth(), exp.getDate());
+                              const diffDays = Math.ceil((expMidnight.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
+
+                              let badgeStyle = {
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-emerald)',
+                                color: 'var(--color-emerald)'
+                              };
+                              let badgeNotice = '';
+
+                              if (diffDays < 0) {
+                                badgeStyle = {
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'rgba(239, 68, 68, 0.4)',
+                                  color: '#ef4444'
+                                };
+                                badgeNotice = t('expiredBadge', 'EXPIRED');
+                              } else if (diffDays <= 7) {
+                                badgeStyle = {
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'rgba(245, 158, 11, 0.4)',
+                                  color: '#f59e0b'
+                                };
+                              }
+
+                              return (
+                                <span
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold text-[11px] transition shadow-xs"
+                                  style={badgeStyle}
+                                  title={badgeNotice ? `${exp.toLocaleDateString()} (${badgeNotice})` : exp.toLocaleDateString()}
+                                >
+                                  <Calendar className="h-3 w-3 shrink-0" />
+                                  {exp.toLocaleDateString()}
+                                  {badgeNotice && (
+                                    <span className="text-[9px] font-extrabold uppercase px-1 py-0.2 rounded border border-current/30 leading-none">
+                                      {badgeNotice}
+                                    </span>
+                                  )}
+                                </span>
+                              );
+                            })() : (
+                              <span className="text-[11px] italic font-normal" style={{ color: 'var(--color-text-secondary)' }}>
+                                {t('lifetimeNone', 'Lifetime / None')}
+                              </span>
+                            )}
+                          </td>
+                        )}
+
+                        {visibleColumns.actions && (
+                          <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {!isTxSucceeded && !isTxRefunded && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenConfirmModal(tx)}
+                                  className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer"
                                   style={{
                                     backgroundColor: 'var(--color-inner-dark)',
                                     borderColor: 'var(--color-emerald)',
                                     color: 'var(--color-emerald)'
                                   }}
-                                  title={tx.gatewayTransactionId ? `Gateway Ref: ${tx.gatewayTransactionId}` : 'Confirmed Payment'}
+                                  title={t('confirmPaymentTooltip', 'Confirm payment amount from gateway to mark Succeeded')}
                                 >
-                                  <CheckCircle2 className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {t('statusSucceeded', 'Succeeded')}
-                                </span>
-                              )}
-                              {isCanceled(tx.status) && (
-                                <span 
-                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                  style={{
-                                    backgroundColor: 'var(--color-inner-dark)',
-                                    borderColor: '#f97316',
-                                    color: '#f97316'
-                                  }}
-                                >
-                                  <Ban className="h-3 w-3 text-orange-500" /> {t('statusCanceled', 'Cancelled')}
-                                </span>
-                              )}
-                              {isFailed(tx.status) && (
-                                <span 
-                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs cursor-help"
-                                  style={{
-                                    backgroundColor: 'var(--color-inner-dark)',
-                                    borderColor: 'rgba(239, 68, 68, 0.4)',
-                                    color: '#ef4444'
-                                  }}
-                                  title={tx.failureReason || 'Declined by payment processor'}
-                                >
-                                  <XCircle className="h-3 w-3 text-red-500" /> {t('statusFailed', 'Failed')}
-                                </span>
-                              )}
-                              {isRefunded(tx.status) && (
-                                <span 
-                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                  style={{
-                                    backgroundColor: 'var(--color-inner-dark)',
-                                    borderColor: '#f59e0b',
-                                    color: '#f59e0b'
-                                  }}
-                                >
-                                  <ArrowDownLeft className="h-3 w-3 text-amber-500" /> {t('statusRefunded', 'Refunded')}
-                                </span>
-                              )}
-                              {isPending(tx.status) && (
-                                <span 
-                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                  style={{
-                                    backgroundColor: 'var(--color-inner-dark)',
-                                    borderColor: 'var(--color-border)',
-                                    color: 'var(--color-text-secondary)'
-                                  }}
-                                >
-                                  <RefreshCw className="h-3 w-3 animate-spin" /> {t('statusPending', 'Pending')}
-                                </span>
-                              )}
-                            </td>
-                          )}
-                          
-                          {visibleColumns.date && (
-                            <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
-                              {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '-'}
-                            </td>
-                          )}
-                          
-                          {visibleColumns.expiryDate && (
-                            <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
-                              {tx.expiryDate ? (() => {
-                                const exp = new Date(tx.expiryDate);
-                                const now = new Date();
-                                const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                                const expMidnight = new Date(exp.getFullYear(), exp.getMonth(), exp.getDate());
-                                const diffDays = Math.ceil((expMidnight.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
-
-                                let badgeStyle = {
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-emerald)',
-                                  color: 'var(--color-emerald)'
-                                };
-                                let badgeNotice = '';
-
-                                if (diffDays < 0) {
-                                  badgeStyle = {
-                                    backgroundColor: 'var(--color-inner-dark)',
-                                    borderColor: 'rgba(239, 68, 68, 0.4)',
-                                    color: '#ef4444'
-                                  };
-                                  badgeNotice = t('expiredBadge', 'EXPIRED');
-                                } else if (diffDays <= 7) {
-                                  badgeStyle = {
-                                    backgroundColor: 'var(--color-inner-dark)',
-                                    borderColor: 'rgba(245, 158, 11, 0.4)',
-                                    color: '#f59e0b'
-                                  };
-                                }
-
-                                return (
-                                  <span
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold text-[11px] transition shadow-xs"
-                                    style={badgeStyle}
-                                    title={badgeNotice ? `${exp.toLocaleDateString()} (${badgeNotice})` : exp.toLocaleDateString()}
-                                  >
-                                    <Calendar className="h-3 w-3 shrink-0" />
-                                    {exp.toLocaleDateString()}
-                                    {badgeNotice && (
-                                      <span className="text-[9px] font-extrabold uppercase px-1 py-0.2 rounded border border-current/30 leading-none">
-                                        {badgeNotice}
-                                      </span>
-                                    )}
-                                  </span>
-                                );
-                              })() : (
-                                <span className="text-[11px] italic font-normal" style={{ color: 'var(--color-text-secondary)' }}>
-                                  {t('lifetimeNone', 'Lifetime / None')}
-                                </span>
-                              )}
-                            </td>
-                          )}
-
-                          {visibleColumns.actions && (
-                            <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                              <div className="flex items-center justify-end gap-1.5">
-                                {!isTxSucceeded && !isTxRefunded && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenConfirmModal(tx)}
-                                    className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer"
-                                    style={{
-                                      backgroundColor: 'var(--color-inner-dark)',
-                                      borderColor: 'var(--color-emerald)',
-                                      color: 'var(--color-emerald)'
-                                    }}
-                                    title={t('confirmPaymentTooltip', 'Confirm payment amount from gateway to mark Succeeded')}
-                                  >
-                                    <ShieldCheck className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
-                                  </button>
-                                )}
-
-                                <button
-                                  type="button"
-                                  disabled={isTxRefunded}
-                                  onClick={() => handleOpenEditModal(tx)}
-                                  className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                    isTxRefunded
-                                      ? 'opacity-30 cursor-not-allowed'
-                                      : 'cursor-pointer'
-                                  }`}
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: 'var(--color-text)'
-                                  }}
-                                  title={isTxRefunded ? t('cannotModifyRefundedTooltip', 'Cannot modify refunded payment') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
-                                >
-                                  <Pencil 
-                                    className="h-3.5 w-3.5" 
-                                    style={{ color: isTxRefunded ? 'var(--color-text-secondary)' : 'var(--color-primary)' }} 
-                                  />
+                                  <ShieldCheck className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
                                 </button>
+                              )}
 
-                                <button
-                                  type="button"
-                                  disabled={isTxRefunded || isTxRefunding || isFailed(tx.status)}
-                                  onClick={() => handleRefundTransaction(tx)}
-                                  className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                    isTxRefunded || isFailed(tx.status)
-                                      ? 'opacity-30 cursor-not-allowed'
-                                      : 'cursor-pointer'
-                                  }`}
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: '#f59e0b'
-                                  }}
-                                  title={
-                                    isTxRefunded
-                                      ? t('alreadyRefundedTooltip', 'Payment already refunded')
-                                      : t('refundPaymentTooltip', 'Trigger payment gateway refund')
-                                }
-                                >
-                                  {isTxRefunding ? (
-                                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-500" />
-                                  ) : (
-                                    <RotateCcw className="h-3.5 w-3.5 text-amber-500" />
-                                  )}
-                                </button>
-
-                                <button
-                                  type="button"
-                                  disabled={isTxCanceled || isTxRefunded}
-                                  onClick={() => handleCancelPlan(tx)}
-                                  className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                    isTxCanceled || isTxRefunded
+                              <button
+                                type="button"
+                                disabled={isTxRefunded}
+                                onClick={() => handleOpenEditModal(tx)}
+                                className={`p-1.5 rounded-lg border transition shadow-xs ${
+                                  isTxRefunded
                                     ? 'opacity-30 cursor-not-allowed'
                                     : 'cursor-pointer'
-                                  }`}
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: '#f97316'
-                                  }}
-                                  title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan renewal & keep active until expiry')}
-                                >
-                                  <XCircle className="h-3.5 w-3.5 text-orange-500" />
-                                </button>
+                                }`}
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text)'
+                                }}
+                                title={isTxRefunded ? t('cannotModifyRefundedTooltip', 'Cannot modify refunded payment') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
+                              >
+                                <Pencil 
+                                  className="h-3.5 w-3.5" 
+                                  style={{ color: isTxRefunded ? 'var(--color-text-secondary)' : 'var(--color-primary)' }} 
+                                />
+                              </button>
 
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteTransaction(tx.id, tx.customerName)}
-                                  className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: 'var(--color-text-secondary)'
-                                  }}
-                                  title={t('deletePaymentTooltip', 'Delete payment record permanently')}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                              <button
+                                type="button"
+                                disabled={isTxRefunded || isTxRefunding || isFailed(tx.status)}
+                                onClick={() => handleRefundTransaction(tx)}
+                                className={`p-1.5 rounded-lg border transition shadow-xs ${
+                                  isTxRefunded || isFailed(tx.status)
+                                    ? 'opacity-30 cursor-not-allowed'
+                                    : 'cursor-pointer'
+                                }`}
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: '#f59e0b'
+                                }}
+                                title={
+                                  isTxRefunded
+                                    ? t('alreadyRefundedTooltip', 'Payment already refunded')
+                                    : t('refundPaymentTooltip', 'Trigger payment gateway refund')
+                              }
+                              >
+                                {isTxRefunding ? (
+                                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-500" />
+                                ) : (
+                                  <RotateCcw className="h-3.5 w-3.5 text-amber-500" />
+                                )}
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={isTxCanceled || isTxRefunded}
+                                onClick={() => handleCancelPlan(tx)}
+                                className={`p-1.5 rounded-lg border transition shadow-xs ${
+                                  isTxCanceled || isTxRefunded
+                                  ? 'opacity-30 cursor-not-allowed'
+                                  : 'cursor-pointer'
+                                }`}
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: '#f97316'
+                                }}
+                                title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan renewal & keep active until expiry')}
+                              >
+                                <XCircle className="h-3.5 w-3.5 text-orange-500" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTransaction(tx.id, tx.customerName)}
+                                className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                                title={t('deletePaymentTooltip', 'Delete payment record permanently')}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* PAGINATION CONTROLS */}
+          <div 
+            className="px-5 py-3.5 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('showing', 'Showing')}{' '}
+              <span className="font-bold" style={{ color: 'var(--color-text)' }}>
+                {filteredTransactions.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
+              </span>{' '}
+              {t('to', 'to')}{' '}
+              <span className="font-bold" style={{ color: 'var(--color-text)' }}>
+                {Math.min(currentPage * pageSize, filteredTransactions.length)}
+              </span>{' '}
+              {t('of', 'of')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{filteredTransactions.length}</span> {t('resultsSuffix', 'results')}
             </div>
 
-            {/* PAGINATION CONTROLS */}
-            <div 
-              className="px-5 py-3.5 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('showing', 'Showing')}{' '}
-                <span className="font-bold" style={{ color: 'var(--color-text)' }}>
-                  {filteredTransactions.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
-                </span>{' '}
-                {t('to', 'to')}{' '}
-                <span className="font-bold" style={{ color: 'var(--color-text)' }}>
-                  {Math.min(currentPage * pageSize, filteredTransactions.length)}
-                </span>{' '}
-                {t('of', 'of')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{filteredTransactions.length}</span> {t('resultsSuffix', 'results')}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(1)}
+                className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                title={t('firstPageTooltip', 'First Page')}
+              >
+                <ChevronsLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                title={t('previousPageTooltip', 'Previous Page')}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+
+              <div className="px-3 py-1 font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                {t('page', 'Page')} {currentPage} {t('of', 'of')} {totalPages}
               </div>
 
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage(1)}
-                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  title={t('firstPageTooltip', 'First Page')}
-                >
-                  <ChevronsLeft className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  title={t('previousPageTooltip', 'Previous Page')}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-
-                <div className="px-3 py-1 font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                  {t('page', 'Page')} {currentPage} {t('of', 'of')} {totalPages}
-                </div>
-
-                <button
-                  type="button"
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  title={t('nextPageTooltip', 'Next Page')}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage(totalPages)}
-                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  title={t('lastPageTooltip', 'Last Page')}
-                >
-                  <ChevronsRight className="h-4 w-4" />
-                </button>
-              </div>
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                title={t('nextPageTooltip', 'Next Page')}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage(totalPages)}
+                className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                title={t('lastPageTooltip', 'Last Page')}
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </button>
             </div>
           </div>
         </div>
-      ) : (
-        /* GATEWAY SETTINGS FORM */
-        <form onSubmit={handleSaveSettings} className="space-y-6">
+      </div>
+
+      {/* TAB 2: GATEWAY SETTINGS CONTAINER */}
+      <div className={activeTab === 'settings' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
+        <form onSubmit={handleSaveSettings} className="space-y-6" autoComplete="off" role="presentation">
           <div 
             className="border p-6 rounded-3xl shadow-sm transition-colors duration-200"
             style={{
@@ -2901,6 +2903,19 @@ export default function AdminPaymentPage() {
                   <div className="relative">
                     <input
                       type={visibleFields['stripePublishable'] ? 'text' : 'password'}
+                      id="cfg_stripe_publishable_key"
+                      name="cfg_stripe_publishable_key"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      role="presentation"
+                      readOnly
+                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                       value={config.stripe.publishableKey}
                       onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
                       placeholder="pk_test_... / pk_live_..."
@@ -2910,8 +2925,6 @@ export default function AdminPaymentPage() {
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
@@ -2931,6 +2944,19 @@ export default function AdminPaymentPage() {
                   <div className="relative">
                     <input
                       type={visibleFields['stripeSecret'] ? 'text' : 'password'}
+                      id="cfg_stripe_secret_key"
+                      name="cfg_stripe_secret_key"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      role="presentation"
+                      readOnly
+                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                       value={config.stripe.secretKey}
                       onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
                       placeholder="sk_test_... / sk_live_..."
@@ -2940,8 +2966,6 @@ export default function AdminPaymentPage() {
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
@@ -2961,6 +2985,19 @@ export default function AdminPaymentPage() {
                   <div className="relative">
                     <input
                       type={visibleFields['stripeWebhook'] ? 'text' : 'password'}
+                      id="cfg_stripe_webhook_secret"
+                      name="cfg_stripe_webhook_secret"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      role="presentation"
+                      readOnly
+                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                       value={config.stripe.webhookSecret}
                       onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
                       placeholder="whsec_..."
@@ -2970,8 +3007,6 @@ export default function AdminPaymentPage() {
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
@@ -3014,6 +3049,19 @@ export default function AdminPaymentPage() {
                   <div className="relative">
                     <input
                       type={visibleFields['paypalClientId'] ? 'text' : 'password'}
+                      id="cfg_paypal_client_id"
+                      name="cfg_paypal_client_id"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      role="presentation"
+                      readOnly
+                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                       value={config.paypal.clientId}
                       onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
                       placeholder="PayPal Client ID"
@@ -3023,8 +3071,6 @@ export default function AdminPaymentPage() {
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
@@ -3044,6 +3090,19 @@ export default function AdminPaymentPage() {
                   <div className="relative">
                     <input
                       type={visibleFields['paypalSecret'] ? 'text' : 'password'}
+                      id="cfg_paypal_secret_key"
+                      name="cfg_paypal_secret_key"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      role="presentation"
+                      readOnly
+                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                       value={config.paypal.clientSecret}
                       onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
                       placeholder="PayPal Client Secret"
@@ -3053,8 +3112,6 @@ export default function AdminPaymentPage() {
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
@@ -3074,6 +3131,19 @@ export default function AdminPaymentPage() {
                   <div className="relative">
                     <input
                       type={visibleFields['paypalWebhook'] ? 'text' : 'password'}
+                      id="cfg_paypal_webhook_id"
+                      name="cfg_paypal_webhook_id"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      role="presentation"
+                      readOnly
+                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                       value={config.paypal.webhookId}
                       onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, webhookId: e.target.value } })}
                       placeholder="PayPal Webhook ID"
@@ -3083,8 +3153,6 @@ export default function AdminPaymentPage() {
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
@@ -3126,7 +3194,11 @@ export default function AdminPaymentPage() {
             </button>
           </div>
         </form>
-      )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ROOT LEVEL MODALS (Guaranteed visibility across all tabs)                  */}
+      {/* ========================================================================= */}
 
       {/* CONFIRM PAYMENT FROM GATEWAY MODAL */}
       {confirmingTx && (
@@ -3166,7 +3238,6 @@ export default function AdminPaymentPage() {
               </p>
             </div>
 
-            {/* Summary Details Box */}
             <div 
               className="p-3.5 rounded-2xl border space-y-2 transition-colors duration-200"
               style={{
@@ -3325,11 +3396,11 @@ export default function AdminPaymentPage() {
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
+            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
@@ -3337,8 +3408,9 @@ export default function AdminPaymentPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowAddModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
+              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 color: 'var(--color-text)'
@@ -3359,18 +3431,18 @@ export default function AdminPaymentPage() {
               </p>
             </div>
 
-            {planTransitionInfo?.isTransition && (
+            {planTransitionInfo?.isRenewal && (
               <div 
                 className="p-3.5 rounded-xl border flex items-start gap-2.5 animate-in fade-in shadow-xs"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'rgba(59, 130, 246, 0.4)',
-                  color: '#3b82f6'
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
                 }}
               >
-                <AlertTriangle className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <div className="font-bold">{t('planChangeNotice', 'Plan Upgrade / Downgrade Notice:')}</div>
+                  <div className="font-bold">Subscription Renewal Notice:</div>
                   <div className="text-[11px] leading-relaxed">
                     {planTransitionInfo.message}
                   </div>
@@ -3378,19 +3450,46 @@ export default function AdminPaymentPage() {
               </div>
             )}
 
-            {planTransitionInfo?.isDuplicate && (
+            {planTransitionInfo?.isIntervalSwitch && (
               <div 
-                className="p-3.5 rounded-xl border flex items-start gap-2.5 animate-in fade-in shadow-xs"
+                className="p-3.5 rounded-2xl border flex items-start gap-2.5 animate-in fade-in shadow-xs"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'rgba(239, 68, 68, 0.4)',
-                  color: '#ef4444'
+                  borderColor: planTransitionInfo.isUpgrade ? 'var(--color-emerald)' : '#f59e0b',
+                  color: planTransitionInfo.isUpgrade ? 'var(--color-emerald)' : '#f59e0b'
                 }}
               >
-                <Ban className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                {planTransitionInfo.isUpgrade ? (
+                  <ArrowUpRight className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+                ) : (
+                  <ArrowDownLeft className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                )}
                 <div className="space-y-1">
-                  <div className="font-bold">{t('duplicatePlanWarningNotice', 'Duplicate Plan Warning:')}</div>
-                  <div className="text-[11px] leading-relaxed">
+                  <div className="font-bold flex items-center gap-1.5 text-xs">
+                    {planTransitionInfo.isUpgrade 
+                      ? `Plan Upgrade (${planTransitionInfo.fromInterval} → ${planTransitionInfo.toInterval})` 
+                      : `Plan Downgrade (${planTransitionInfo.fromInterval} → ${planTransitionInfo.toInterval})`}
+                  </div>
+                  <div className="text-[11px] leading-relaxed font-normal" style={{ color: 'var(--color-text)' }}>
+                    {planTransitionInfo.message}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {planTransitionInfo?.isPlanSwitch && (
+              <div 
+                className="p-3.5 rounded-2xl border flex items-start gap-2.5 animate-in fade-in shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'rgba(59, 130, 246, 0.4)',
+                  color: '#3b82f6'
+                }}
+              >
+                <Zap className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold text-xs">{t('planChangeNotice', 'Plan Switch Notice:')}</div>
+                  <div className="text-[11px] leading-relaxed font-normal" style={{ color: 'var(--color-text)' }}>
                     {planTransitionInfo.message}
                   </div>
                 </div>
@@ -3450,7 +3549,7 @@ export default function AdminPaymentPage() {
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold transition cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: planTransitionInfo?.isDuplicate ? '#ef4444' : 'var(--color-border)',
+                    borderColor: 'var(--color-border)',
                     color: 'var(--color-text)'
                   }}
                 >
@@ -3460,9 +3559,6 @@ export default function AdminPaymentPage() {
                     </option>
                   ))}
                 </select>
-                <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('planChangeRuleNote', 'Selecting an upgraded or downgraded plan will automatically cancel and refund any previous active paid subscription.')}
-                </p>
               </div>
 
               {/* RECURRING SLIDE BUTTON */}
@@ -3634,8 +3730,8 @@ export default function AdminPaymentPage() {
                 )}
               </div>
 
-              {/* GATEWAY PAYMENT AMOUNT CONFIRMATION SECTION */}
-              {isSucceeded(paymentStatus) && (
+              {/* GATEWAY PAYMENT AMOUNT CONFIRMATION SECTION (Automated Gateways Only) */}
+              {isSucceeded(paymentStatus) && paymentGateway !== 'manual' && (
                 <div 
                   className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
                   style={{
@@ -3708,19 +3804,29 @@ export default function AdminPaymentPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={registeredUsers.length === 0 || Boolean(planTransitionInfo?.isDuplicate)}
+                  disabled={registeredUsers.length === 0}
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{
-                    backgroundColor: planTransitionInfo?.isDuplicate ? '#991b1b' : 'var(--color-primary)'
+                    backgroundColor: 'var(--color-primary)'
                   }}
                 >
-                  {planTransitionInfo?.isDuplicate ? (
+                  {planTransitionInfo?.isRenewal ? (
                     <>
-                      <Ban className="h-4 w-4" /> {t('duplicatePlanBtn', 'Duplicate Plan Exists')}
+                      <RotateCcw className="h-4 w-4" /> Record Renewal & Extend
                     </>
-                  ) : planTransitionInfo?.isTransition ? (
+                  ) : planTransitionInfo?.isIntervalSwitch ? (
+                    planTransitionInfo.isUpgrade ? (
+                      <>
+                        <ArrowUpRight className="h-4 w-4" /> Upgrade to Annual & Cancel Previous
+                      </>
+                    ) : (
+                      <>
+                        <ArrowDownLeft className="h-4 w-4" /> Downgrade to Monthly & Cancel Previous
+                      </>
+                    )
+                  ) : planTransitionInfo?.isPlanSwitch ? (
                     <>
-                      <Zap className="h-4 w-4" /> {t('switchPlanBtn', 'Switch Plan & Record')}
+                      <Zap className="h-4 w-4" /> Switch Plan & Cancel Previous
                     </>
                   ) : (
                     <>
@@ -3738,11 +3844,11 @@ export default function AdminPaymentPage() {
       {editingTx && (
         <div 
           onClick={() => setEditingTx(null)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
+            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
@@ -3750,8 +3856,9 @@ export default function AdminPaymentPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setEditingTx(null)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
+              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 color: 'var(--color-text)'
@@ -4001,7 +4108,7 @@ export default function AdminPaymentPage() {
               </div>
 
               {/* CONFIRMATION CHECK FOR ADVANCING TO SUCCEEDED */}
-              {isSucceeded(editStatus) && !isSucceeded(editingTx.status) && (
+              {isSucceeded(editStatus) && !isSucceeded(editingTx.status) && editGateway !== 'manual' && (
                 <div 
                   className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
                   style={{

@@ -1,10 +1,10 @@
 [
   {
-    "id": "tx_mucs8bcn24x",
+    "id": "tx_mudkicvbsch",
     "customerName": "System Administrator",
     "customerEmail": "admin@zecratary.com",
-    "planName": "max (Monthly)",
-    "planSlug": "max-monthly",
+    "planName": "Pro Plan (Monthly)",
+    "planSlug": "pro-plan-monthly",
     "amount": 8.99,
     "currency": "USD",
     "gateway": "stripe",
@@ -13,11 +13,10 @@
     "isRecurring": true,
     "recurringInterval": "MONTH",
     "autoRenew": true,
-    "createdAt": "2026-09-22T12:00:00.000Z",
-    "expiryDate": "2026-10-22T23:59:59.000Z",
-    "gatewayTransactionId": "1111",
+    "createdAt": "2026-09-23T12:00:00.000Z",
+    "expiryDate": "2026-10-23T23:59:59.000Z",
     "confirmedAmount": 8.99,
-    "confirmedAt": "2026-09-22T14:41:31.511Z"
+    "confirmedAt": "2026-09-23T03:53:09.287Z"
   },
   {
     "id": "tx_mu588unam40",
