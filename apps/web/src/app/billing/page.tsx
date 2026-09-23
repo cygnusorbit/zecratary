@@ -24,7 +24,10 @@ import {
   Zap,
   FileText,
   Printer,
-  X
+  X,
+  Clock,
+  Lock,
+  Gift
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { getCurrentUser } from '@/lib/auth';
@@ -67,6 +70,19 @@ interface TokenIdentity {
   tokenSymbol: string;
 }
 
+interface TokenRewardInfo {
+  monthlyTokens: number;
+  tokenSymbol: string;
+  tokenName: string;
+  currentCycle: string;
+  lastGrantCycle: string | null;
+  lastGrantDate: string | null;
+  nextGrantDate: string;
+  isPaid: boolean;
+  receivedThisMonth: boolean;
+  status: 'active_paid' | 'paused_unpaid' | 'received_this_month' | 'eligible';
+}
+
 export default function UserBillingPage() {
   const langContext = useTranslation();
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
@@ -74,12 +90,14 @@ export default function UserBillingPage() {
   const [activeTab, setActiveTab] = useState<'history' | 'methods' | 'subscriptions'>('history');
   const [loading, setLoading] = useState<boolean>(true);
   const [processing, setProcessing] = useState<boolean>(false);
+  const [claimingTokens, setClaimingTokens] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   const [user, setUser] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [plans, setPlans] = useState<PlanCatalog[]>([]);
   const [tokenIdentity, setTokenIdentity] = useState<TokenIdentity>({ tokenName: 'Tokens', tokenSymbol: '🪙' });
+  const [tokenRewardInfo, setTokenRewardInfo] = useState<TokenRewardInfo | null>(null);
   const [gatewayConfig, setGatewayConfig] = useState<any>({
     activeGateway: 'stripe',
     currency: 'USD',
@@ -150,6 +168,9 @@ export default function UserBillingPage() {
           setPlans(data.plans || []);
           if (data.tokenIdentity) {
             setTokenIdentity(data.tokenIdentity);
+          }
+          if (data.tokenRewardInfo) {
+            setTokenRewardInfo(data.tokenRewardInfo);
           }
           if (data.user?.payment_method) {
             setSelectedMethod(data.user.payment_method);
@@ -344,13 +365,44 @@ export default function UserBillingPage() {
     }
   };
 
+  // Claim Monthly Tokens Manual Trigger
+  const handleClaimMonthlyTokens = async () => {
+    if (!user) return;
+    setClaimingTokens(true);
+    try {
+      const res = await fetch('/api/billing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'claim_monthly_tokens',
+          email: user.email
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ type: 'success', msg: data.message || 'Monthly tokens credited successfully!' });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+        }
+        await fetchData();
+      } else {
+        throw new Error(data.error || 'Cannot claim monthly tokens');
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', msg: err.message || 'Token grant failed' });
+    } finally {
+      setClaimingTokens(false);
+    }
+  };
+
   const handleSwitchPlan = async (plan: PlanCatalog, interval: 'MONTH' | 'YEAR') => {
     const amount = interval === 'YEAR' ? plan.annualPrice : plan.monthlyPrice;
     const planSlugWithInterval = plan.slug === 'taster' ? 'taster' : `${plan.slug}-${interval.toLowerCase()}`;
     const planDisplayName = plan.slug === 'taster' ? 'Taster (Free)' : `${plan.name} (${interval === 'YEAR' ? 'Annual' : 'Monthly'})`;
     const tokensCredited = plan.tokenLimit ?? (plan.slug === 'taster' ? 50 : 500);
 
-    const tokenMsg = tokensCredited > 0 ? ` (+${tokensCredited.toLocaleString()} ${tokenIdentity.tokenSymbol})` : '';
+    const tokenMsg = tokensCredited > 0 ? ` (+${tokensCredited.toLocaleString()} ${tokenIdentity.tokenSymbol}/mo while PAID)` : '';
     const confirmPrompt = `${t('confirmSwitchPlanPrompt', 'Purchase and activate')} ${planDisplayName} for ${gatewayConfig.currencySymbol}${amount.toFixed(2)}${tokenMsg}?`;
     if (!window.confirm(confirmPrompt)) return;
 
@@ -528,6 +580,70 @@ export default function UserBillingPage() {
               <span className="font-bold text-sm block" style={{ color: 'var(--color-text)' }}>
                 {activeTransaction?.expiryDate ? new Date(activeTransaction.expiryDate).toLocaleDateString() : 'Lifetime / Free'}
               </span>
+            </div>
+          </div>
+        )}
+
+        {/* MONTHLY TOKEN REWARD STATUS BANNER (Applies to all plans, stop if payment not PAID) */}
+        {tokenRewardInfo && (
+          <div 
+            className="p-5 rounded-3xl border shadow-lg relative overflow-hidden transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: tokenRewardInfo.isPaid ? 'var(--color-border)' : 'rgba(239, 68, 68, 0.4)'
+            }}
+          >
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1.5 flex-1">
+                <div className="flex items-center gap-2">
+                  <Coins className="h-5 w-5 text-amber-500" />
+                  <h3 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                    Monthly Plan Token Allowance ({tokenRewardInfo.monthlyTokens.toLocaleString()} {tokenRewardInfo.tokenSymbol} / mo)
+                  </h3>
+                  {tokenRewardInfo.isPaid ? (
+                    tokenRewardInfo.receivedThisMonth ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' }}>
+                        <CheckCircle className="w-3 h-3" /> Received for {tokenRewardInfo.currentCycle}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                        <Gift className="w-3 h-3" /> Eligible for {tokenRewardInfo.currentCycle}
+                      </span>
+                    )
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                      <Lock className="w-3 h-3" /> Token Reward Stopped (Unpaid)
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tokenRewardInfo.isPaid ? (
+                    tokenRewardInfo.receivedThisMonth ? (
+                      <>You have received your monthly token reward for cycle <strong style={{ color: 'var(--color-text)' }}>{tokenRewardInfo.currentCycle}</strong>. Plan rewards are issued once per calendar month. Next reward scheduled on <strong style={{ color: 'var(--color-text)' }}>{new Date(tokenRewardInfo.nextGrantDate).toLocaleDateString()}</strong>.</>
+                    ) : (
+                      <>Your subscription payment is active and verified! Your monthly token reward for <strong style={{ color: 'var(--color-text)' }}>{tokenRewardInfo.currentCycle}</strong> is ready to be credited.</>
+                    )
+                  ) : (
+                    <span className="text-rose-400 font-semibold">
+                      Your subscription is currently not in PAID status. Token rewards are automatically stopped until an active payment transaction succeeds.
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              {tokenRewardInfo.isPaid && !tokenRewardInfo.receivedThisMonth && (
+                <button
+                  type="button"
+                  onClick={handleClaimMonthlyTokens}
+                  disabled={claimingTokens}
+                  className="px-4 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-2 shadow-md transition cursor-pointer disabled:opacity-50 shrink-0"
+                  style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
+                >
+                  {claimingTokens ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Coins className="w-4 h-4" />}
+                  <span>Claim Monthly Tokens (+{tokenRewardInfo.monthlyTokens} {tokenRewardInfo.tokenSymbol})</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1034,7 +1150,7 @@ export default function UserBillingPage() {
                       }}
                     >
                       <th className="p-4">{t('colPackage', 'Package')}</th>
-                      <th className="p-4">{t('colTokenAllowance', 'AI Token Grant')}</th>
+                      <th className="p-4">{t('colTokenAllowance', 'Monthly Token Reward')}</th>
                       <th className="p-4">{t('colDescription', 'Features / Overview')}</th>
                       <th className="p-4">{t('colMonthlyPricing', 'Monthly')}</th>
                       <th className="p-4">{t('colAnnualPricing', 'Annual')}</th>
@@ -1071,10 +1187,15 @@ export default function UserBillingPage() {
                             </td>
 
                             <td className="p-4">
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
-                                <Coins className="h-3.5 w-3.5" />
-                                <span>+{(plan.tokenLimit ?? (isFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol}</span>
-                              </span>
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
+                                  <Coins className="h-3.5 w-3.5" />
+                                  <span>+{(plan.tokenLimit ?? (isFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol}</span>
+                                </span>
+                                <span className="block text-[10px] opacity-60" style={{ color: 'var(--color-text-secondary)' }}>
+                                  1x / month while PAID
+                                </span>
+                              </div>
                             </td>
 
                             <td className="p-4 text-xs opacity-75 max-w-sm space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
