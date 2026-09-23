@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.6.8",
+  "version": "7.6.9",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.6.8",
+  "version": "7.6.9",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -46376,7 +46376,7 @@ export async function POST(req: Request) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { grantPlanTokensOnPurchase, getTokenSettings } from '@/lib/tokenService';
+import { grantMonthlyPlanTokenReward, getTokenSettings } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
@@ -46391,6 +46391,8 @@ async function ensureBillingSchema() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_interval VARCHAR(32) DEFAULT 'MONTH';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expiry_date TIMESTAMPTZ;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance NUMERIC DEFAULT 100;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_token_grant_date TIMESTAMPTZ;
 
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(128) PRIMARY KEY,
@@ -46425,7 +46427,7 @@ export async function GET(req: NextRequest) {
     let userRow: any = null;
     if (email) {
       const uRows = await query(
-        `SELECT id, name, email, role, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, plan_expiry_date, payment_method, token_balance, created_at 
+        `SELECT id, name, email, role, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, plan_expiry_date, payment_method, token_balance, last_token_grant_cycle, last_token_grant_date, created_at 
          FROM users 
          WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
         [email]
@@ -46436,7 +46438,7 @@ export async function GET(req: NextRequest) {
 
     if (!userRow) {
       const anyUserRows = await query(
-        `SELECT id, name, email, role, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, plan_expiry_date, payment_method, token_balance, created_at 
+        `SELECT id, name, email, role, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, plan_expiry_date, payment_method, token_balance, last_token_grant_cycle, last_token_grant_date, created_at 
          FROM users 
          ORDER BY CASE WHEN LOWER(role) = 'admin' THEN 1 ELSE 0 END, created_at ASC LIMIT 1`
       ).catch(() => []);
@@ -46457,7 +46459,9 @@ export async function GET(req: NextRequest) {
           plan_interval: 'MONTH',
           plan_expiry_date: null,
           payment_method: 'stripe',
-          token_balance: 100
+          token_balance: 100,
+          last_token_grant_cycle: null,
+          last_token_grant_date: null
         };
         email = userRow.email;
       }
@@ -46524,7 +46528,7 @@ export async function GET(req: NextRequest) {
     };
     gatewayConfig.currencySymbol = symbols[gatewayConfig.currency] || '$';
 
-    // 3. Fetch Token Identity
+    // 3. Fetch Token Identity & Settings
     let tokenIdentity = { tokenName: 'Tokens', tokenSymbol: '🪙' };
     try {
       const tSettings = await getTokenSettings();
@@ -46568,34 +46572,56 @@ export async function GET(req: NextRequest) {
       }
     } catch (_) {}
 
-    if (plans.length === 0) {
-      plans = [
-        {
-          id: 'preset_taster',
-          name: 'Taster',
-          slug: 'taster',
-          monthlyPrice: 0,
-          annualPrice: 0,
-          tokenLimit: 50,
-          description: 'Starter tier with essential recipe creation and AI tools',
-          features: ['5 AI recipes / mo', 'Personal library (25 recipes)', 'Smart repurposing'],
-          isFree: true
-        },
-        {
-          id: 'plan_nutrition_pro',
-          name: 'Nutrition Pro',
-          slug: 'nutrition-pro',
-          monthlyPrice: 8.99,
-          annualPrice: 59.99,
-          tokenLimit: 500,
-          monthlyBadge: 'Popular',
-          annualBadge: 'Best Value',
-          description: 'Full AI capabilities, macro calculation, and high token quotas',
-          features: ['Unlimited AI recipes', 'Macro tracking', '500 AI tokens credited per cycle', 'Priority processing'],
-          isFree: false
+    // 5. Evaluate "Once a Month" & "Stop if Not PAID" Rule Status
+    const now = new Date();
+    const currentCycle = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const userPlanSlug = (userRow.subscription_plan || 'taster').toLowerCase().trim();
+    const isFreePlan = userPlanSlug.includes('taster') || userPlanSlug.includes('free');
+
+    // Strict PAID verification: check if there's an active transaction with status 'succeeded' or 'paid'
+    const hasActivePaidTx = transactions.some(
+      (tx: any) => (tx.status === 'succeeded' || tx.status === 'paid') &&
+                   (!tx.expiryDate || new Date(tx.expiryDate).getTime() > Date.now())
+    );
+
+    const isPaid = isFreePlan || hasActivePaidTx;
+    const lastGrantCycle = userRow.last_token_grant_cycle || null;
+    const lastGrantDate = userRow.last_token_grant_date ? new Date(userRow.last_token_grant_date).toISOString() : null;
+    const receivedThisMonth = lastGrantCycle === currentCycle;
+
+    // Automatic Once-a-Month Fulfillment if PAID and not yet granted for this month
+    if (isPaid && !receivedThisMonth && !isFreePlan) {
+      try {
+        const grantRes = await grantMonthlyPlanTokenReward(userRow.email);
+        if (grantRes.success) {
+          userRow.token_balance = grantRes.newBalance;
+          userRow.last_token_grant_cycle = currentCycle;
+          userRow.last_token_grant_date = new Date().toISOString();
         }
-      ];
+      } catch (_) {}
     }
+
+    // Determine current plan's monthly token quota
+    const matchedPlan = plans.find((p: any) => userPlanSlug.includes(p.slug));
+    const monthlyTokensAllowance = matchedPlan ? matchedPlan.tokenLimit : (isFreePlan ? 50 : 500);
+
+    // Compute next reward date: 1st of next month
+    const nextGrantDate = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+
+    const tokenRewardInfo = {
+      monthlyTokens: monthlyTokensAllowance,
+      tokenSymbol: tokenIdentity.tokenSymbol,
+      tokenName: tokenIdentity.tokenName,
+      currentCycle,
+      lastGrantCycle: userRow.last_token_grant_cycle || null,
+      lastGrantDate: userRow.last_token_grant_date || null,
+      nextGrantDate,
+      isPaid,
+      receivedThisMonth: userRow.last_token_grant_cycle === currentCycle,
+      status: !isPaid 
+        ? 'paused_unpaid' 
+        : (userRow.last_token_grant_cycle === currentCycle ? 'received_this_month' : 'eligible')
+    };
 
     return NextResponse.json({
       success: true,
@@ -46603,7 +46629,8 @@ export async function GET(req: NextRequest) {
       transactions,
       gatewayConfig,
       tokenIdentity,
-      plans
+      plans,
+      tokenRewardInfo
     }, {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
     });
@@ -46630,7 +46657,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, message: 'Payment method successfully updated.' });
     }
 
-    // 2. Cancel Subscription Renewal
+    // 2. Cancel Subscription Renewal (Stop Future Auto-Renew)
     if (action === 'cancel_subscription') {
       await query(`
         UPDATE payment_transactions
@@ -46643,7 +46670,7 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: 'Auto-renewal cancelled. You will continue to have paid access until your current billing period ends.'
+        message: 'Auto-renewal cancelled. You will continue to have access until your current paid billing period ends.'
       });
     }
 
@@ -46666,7 +46693,24 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 4. Upgrade / Downgrade / Switch Plan
+    // 4. Claim Monthly Token Reward (Strict Once-a-Month & PAID verification)
+    if (action === 'claim_monthly_tokens') {
+      const grantResult = await grantMonthlyPlanTokenReward(email);
+      if (!grantResult.success) {
+        return NextResponse.json({
+          success: false,
+          error: grantResult.reason || 'Could not claim monthly tokens.'
+        }, { status: 400 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Successfully received ${grantResult.tokensGranted.toLocaleString()} monthly reward tokens for cycle ${grantResult.cycle}!`,
+        newBalance: grantResult.newBalance
+      });
+    }
+
+    // 5. Upgrade / Downgrade / Switch Plan
     if (action === 'change_plan') {
       const rawPlanSlug = String(body.planSlug || 'taster').toLowerCase().trim();
       const cleanBase = rawPlanSlug.replace(/-(monthly|annual|year)$/i, '');
@@ -46704,13 +46748,6 @@ export async function POST(req: NextRequest) {
           WHERE LOWER(TRIM(email)) = $1
         `, [email]);
 
-        try {
-          await grantPlanTokensOnPurchase(email, 'taster', {
-            planName: 'Taster (Free)',
-            customTokens: customTokens || 50
-          });
-        } catch (_) {}
-
         return NextResponse.json({ success: true, message: 'Switched to free plan tier (Taster).' });
       }
 
@@ -46724,7 +46761,7 @@ export async function POST(req: NextRequest) {
 
       const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
 
-      // Insert fresh Succeeded Payment Transaction
+      // Insert Succeeded Payment Transaction (Status = succeeded / PAID)
       await query(`
         INSERT INTO payment_transactions (
           id, customer_name, customer_email, plan_name, plan_slug, amount,
@@ -46749,16 +46786,15 @@ export async function POST(req: NextRequest) {
         WHERE LOWER(TRIM(email)) = $5
       `, [finalPlanSlug, planName, interval, expDate.toISOString(), email]);
 
-      // Grant Tokens to PostgreSQL balance and log audit record
+      // Grant tokens once for the current monthly cycle (stops if not paid)
       let tokenGrantResult = null;
       try {
-        tokenGrantResult = await grantPlanTokensOnPurchase(email, finalPlanSlug, {
-          orderId: txId,
-          planName,
-          customTokens: customTokens > 0 ? customTokens : undefined
+        tokenGrantResult = await grantMonthlyPlanTokenReward(email, {
+          customTokens: customTokens > 0 ? customTokens : undefined,
+          orderId: txId
         });
       } catch (tokenErr) {
-        console.warn('[grantPlanTokensOnPurchase error]:', tokenErr);
+        console.warn('[grantMonthlyPlanTokenReward on change_plan warning]:', tokenErr);
       }
 
       return NextResponse.json({
@@ -50442,7 +50478,10 @@ import {
   Zap,
   FileText,
   Printer,
-  X
+  X,
+  Clock,
+  Lock,
+  Gift
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { getCurrentUser } from '@/lib/auth';
@@ -50485,6 +50524,19 @@ interface TokenIdentity {
   tokenSymbol: string;
 }
 
+interface TokenRewardInfo {
+  monthlyTokens: number;
+  tokenSymbol: string;
+  tokenName: string;
+  currentCycle: string;
+  lastGrantCycle: string | null;
+  lastGrantDate: string | null;
+  nextGrantDate: string;
+  isPaid: boolean;
+  receivedThisMonth: boolean;
+  status: 'active_paid' | 'paused_unpaid' | 'received_this_month' | 'eligible';
+}
+
 export default function UserBillingPage() {
   const langContext = useTranslation();
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
@@ -50492,12 +50544,14 @@ export default function UserBillingPage() {
   const [activeTab, setActiveTab] = useState<'history' | 'methods' | 'subscriptions'>('history');
   const [loading, setLoading] = useState<boolean>(true);
   const [processing, setProcessing] = useState<boolean>(false);
+  const [claimingTokens, setClaimingTokens] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   const [user, setUser] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [plans, setPlans] = useState<PlanCatalog[]>([]);
   const [tokenIdentity, setTokenIdentity] = useState<TokenIdentity>({ tokenName: 'Tokens', tokenSymbol: '🪙' });
+  const [tokenRewardInfo, setTokenRewardInfo] = useState<TokenRewardInfo | null>(null);
   const [gatewayConfig, setGatewayConfig] = useState<any>({
     activeGateway: 'stripe',
     currency: 'USD',
@@ -50568,6 +50622,9 @@ export default function UserBillingPage() {
           setPlans(data.plans || []);
           if (data.tokenIdentity) {
             setTokenIdentity(data.tokenIdentity);
+          }
+          if (data.tokenRewardInfo) {
+            setTokenRewardInfo(data.tokenRewardInfo);
           }
           if (data.user?.payment_method) {
             setSelectedMethod(data.user.payment_method);
@@ -50762,13 +50819,44 @@ export default function UserBillingPage() {
     }
   };
 
+  // Claim Monthly Tokens Manual Trigger
+  const handleClaimMonthlyTokens = async () => {
+    if (!user) return;
+    setClaimingTokens(true);
+    try {
+      const res = await fetch('/api/billing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'claim_monthly_tokens',
+          email: user.email
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ type: 'success', msg: data.message || 'Monthly tokens credited successfully!' });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+        }
+        await fetchData();
+      } else {
+        throw new Error(data.error || 'Cannot claim monthly tokens');
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', msg: err.message || 'Token grant failed' });
+    } finally {
+      setClaimingTokens(false);
+    }
+  };
+
   const handleSwitchPlan = async (plan: PlanCatalog, interval: 'MONTH' | 'YEAR') => {
     const amount = interval === 'YEAR' ? plan.annualPrice : plan.monthlyPrice;
     const planSlugWithInterval = plan.slug === 'taster' ? 'taster' : `${plan.slug}-${interval.toLowerCase()}`;
     const planDisplayName = plan.slug === 'taster' ? 'Taster (Free)' : `${plan.name} (${interval === 'YEAR' ? 'Annual' : 'Monthly'})`;
     const tokensCredited = plan.tokenLimit ?? (plan.slug === 'taster' ? 50 : 500);
 
-    const tokenMsg = tokensCredited > 0 ? ` (+${tokensCredited.toLocaleString()} ${tokenIdentity.tokenSymbol})` : '';
+    const tokenMsg = tokensCredited > 0 ? ` (+${tokensCredited.toLocaleString()} ${tokenIdentity.tokenSymbol}/mo while PAID)` : '';
     const confirmPrompt = `${t('confirmSwitchPlanPrompt', 'Purchase and activate')} ${planDisplayName} for ${gatewayConfig.currencySymbol}${amount.toFixed(2)}${tokenMsg}?`;
     if (!window.confirm(confirmPrompt)) return;
 
@@ -50946,6 +51034,70 @@ export default function UserBillingPage() {
               <span className="font-bold text-sm block" style={{ color: 'var(--color-text)' }}>
                 {activeTransaction?.expiryDate ? new Date(activeTransaction.expiryDate).toLocaleDateString() : 'Lifetime / Free'}
               </span>
+            </div>
+          </div>
+        )}
+
+        {/* MONTHLY TOKEN REWARD STATUS BANNER (Applies to all plans, stop if payment not PAID) */}
+        {tokenRewardInfo && (
+          <div 
+            className="p-5 rounded-3xl border shadow-lg relative overflow-hidden transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: tokenRewardInfo.isPaid ? 'var(--color-border)' : 'rgba(239, 68, 68, 0.4)'
+            }}
+          >
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1.5 flex-1">
+                <div className="flex items-center gap-2">
+                  <Coins className="h-5 w-5 text-amber-500" />
+                  <h3 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                    Monthly Plan Token Allowance ({tokenRewardInfo.monthlyTokens.toLocaleString()} {tokenRewardInfo.tokenSymbol} / mo)
+                  </h3>
+                  {tokenRewardInfo.isPaid ? (
+                    tokenRewardInfo.receivedThisMonth ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' }}>
+                        <CheckCircle className="w-3 h-3" /> Received for {tokenRewardInfo.currentCycle}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                        <Gift className="w-3 h-3" /> Eligible for {tokenRewardInfo.currentCycle}
+                      </span>
+                    )
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                      <Lock className="w-3 h-3" /> Token Reward Stopped (Unpaid)
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tokenRewardInfo.isPaid ? (
+                    tokenRewardInfo.receivedThisMonth ? (
+                      <>You have received your monthly token reward for cycle <strong style={{ color: 'var(--color-text)' }}>{tokenRewardInfo.currentCycle}</strong>. Plan rewards are issued once per calendar month. Next reward scheduled on <strong style={{ color: 'var(--color-text)' }}>{new Date(tokenRewardInfo.nextGrantDate).toLocaleDateString()}</strong>.</>
+                    ) : (
+                      <>Your subscription payment is active and verified! Your monthly token reward for <strong style={{ color: 'var(--color-text)' }}>{tokenRewardInfo.currentCycle}</strong> is ready to be credited.</>
+                    )
+                  ) : (
+                    <span className="text-rose-400 font-semibold">
+                      Your subscription is currently not in PAID status. Token rewards are automatically stopped until an active payment transaction succeeds.
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              {tokenRewardInfo.isPaid && !tokenRewardInfo.receivedThisMonth && (
+                <button
+                  type="button"
+                  onClick={handleClaimMonthlyTokens}
+                  disabled={claimingTokens}
+                  className="px-4 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-2 shadow-md transition cursor-pointer disabled:opacity-50 shrink-0"
+                  style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
+                >
+                  {claimingTokens ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Coins className="w-4 h-4" />}
+                  <span>Claim Monthly Tokens (+{tokenRewardInfo.monthlyTokens} {tokenRewardInfo.tokenSymbol})</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -51452,7 +51604,7 @@ export default function UserBillingPage() {
                       }}
                     >
                       <th className="p-4">{t('colPackage', 'Package')}</th>
-                      <th className="p-4">{t('colTokenAllowance', 'AI Token Grant')}</th>
+                      <th className="p-4">{t('colTokenAllowance', 'Monthly Token Reward')}</th>
                       <th className="p-4">{t('colDescription', 'Features / Overview')}</th>
                       <th className="p-4">{t('colMonthlyPricing', 'Monthly')}</th>
                       <th className="p-4">{t('colAnnualPricing', 'Annual')}</th>
@@ -51489,10 +51641,15 @@ export default function UserBillingPage() {
                             </td>
 
                             <td className="p-4">
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
-                                <Coins className="h-3.5 w-3.5" />
-                                <span>+{(plan.tokenLimit ?? (isFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol}</span>
-                              </span>
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
+                                  <Coins className="h-3.5 w-3.5" />
+                                  <span>+{(plan.tokenLimit ?? (isFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol}</span>
+                                </span>
+                                <span className="block text-[10px] opacity-60" style={{ color: 'var(--color-text-secondary)' }}>
+                                  1x / month while PAID
+                                </span>
+                              </div>
                             </td>
 
                             <td className="p-4 text-xs opacity-75 max-w-sm space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
@@ -54893,7 +55050,8 @@ export async function initTokenTables(): Promise<void> {
     await query(`
       ALTER TABLE users 
       ADD COLUMN IF NOT EXISTS token_balance INTEGER DEFAULT 100,
-      ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50);
+      ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS last_token_grant_date TIMESTAMPTZ;
     `);
 
     await query(`
@@ -54983,7 +55141,6 @@ export async function saveTokenSettings(settings: Partial<TokenSettings>): Promi
     merged.isEnabled
   ]);
 
-  // Synchronize planAllocations directly to subscription_plans in PostgreSQL
   if (merged.planAllocations && typeof merged.planAllocations === 'object') {
     for (const [slug, amount] of Object.entries(merged.planAllocations)) {
       const num = Math.max(0, Number(amount));
@@ -55098,77 +55255,100 @@ export async function deductUserTokens({
   };
 }
 
-export async function addTokensToUser({
-  userId,
-  userEmail,
-  amount,
-  type,
-  description
-}: {
-  userId?: string | null;
-  userEmail?: string | null;
-  amount: number;
-  type: string;
-  description: string;
-}): Promise<number | null> {
-  await initTokenTables();
-  let userRow: any = null;
-  if (userId) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    if (rows.length > 0) userRow = rows[0];
-  }
-  if (!userRow && userEmail) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
-    if (rows.length > 0) userRow = rows[0];
-  }
-
-  if (!userRow) return null;
-
-  const updateRes = await query(`
-    UPDATE users 
-    SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
-    WHERE id = $2 
-    RETURNING token_balance
-  `, [amount, userRow.id]);
-
-  const newBalance = Number(updateRes[0].token_balance);
-  const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-
-  await query(`
-    INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-  `, [txId, userRow.id, userRow.email, amount, newBalance, type, description]);
-
-  return newBalance;
-}
-
-export async function grantPlanTokensOnPurchase(
+/**
+ * Grants the plan's monthly token reward ONCE per calendar month cycle (YYYY-MM).
+ * Enforces Rule: STOP getting tokens if payment status is NOT PAID (or is lapsed/refunded/canceled).
+ */
+export async function grantMonthlyPlanTokenReward(
   userEmailOrId: string,
-  planSlug: string,
-  options?: { customTokens?: number; orderId?: string; isAnnual?: boolean; planName?: string }
-): Promise<{ success: boolean; tokensGranted: number; newBalance: number; error?: string }> {
+  options?: { force?: boolean; source?: string; customTokens?: number; orderId?: string }
+): Promise<{
+  success: boolean;
+  tokensGranted: number;
+  newBalance: number;
+  reason?: string;
+  cycle?: string;
+  isPaid?: boolean;
+}> {
   try {
     await initTokenTables();
     const cleanIdent = String(userEmailOrId || '').trim();
-    if (!cleanIdent) return { success: false, tokensGranted: 0, newBalance: 0, error: 'User identifier required' };
+    if (!cleanIdent) {
+      return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User identifier required' };
+    }
 
+    // 1. Fetch User from PostgreSQL
     const userRows = await query(`
-      SELECT id, email, token_balance, subscription_plan 
+      SELECT id, email, token_balance, subscription_plan, plan_slug, plan_name, plan_interval, plan_expiry_date, last_token_grant_cycle, last_token_grant_date
       FROM users 
       WHERE LOWER(email) = LOWER($1) OR id = $1 
       LIMIT 1
     `, [cleanIdent]);
 
     if (!userRows || userRows.length === 0) {
-      return { success: false, tokensGranted: 0, newBalance: 0, error: 'User not found in database' };
+      return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User not found in database' };
     }
 
     const user = userRows[0];
-    const cleanPlanSlug = String(planSlug || user.subscription_plan || 'taster').toLowerCase().trim();
-    const baseSlug = cleanPlanSlug.replace(/-(monthly|annual|free)$/i, '');
+    const userEmail = (user.email || '').toLowerCase().trim();
+    const rawPlanSlug = String(user.plan_slug || user.subscription_plan || 'taster').toLowerCase().trim();
+    const baseSlug = rawPlanSlug.replace(/-(monthly|annual|year|free)$/i, '');
+    const isFreeTier = baseSlug === 'taster' || baseSlug === 'free';
 
+    // 2. Strict Verification: "stop get Token if payment not PAID"
+    let isPaymentPaid = false;
+    let activeTx: any = null;
+
+    if (isFreeTier) {
+      // Free tier is active by default
+      isPaymentPaid = true;
+    } else {
+      // For paid plans, verify there is an active transaction in payment_transactions with status 'succeeded' or 'paid'
+      const txRows = await query(`
+        SELECT id, plan_name, plan_slug, amount, status, expiry_date, created_at
+        FROM payment_transactions
+        WHERE LOWER(TRIM(customer_email)) = $1
+          AND status IN ('succeeded', 'paid')
+          AND (expiry_date IS NULL OR expiry_date > NOW())
+        ORDER BY created_at DESC LIMIT 1
+      `, [userEmail]);
+
+      const txList = Array.isArray(txRows) ? txRows : (txRows?.rows || []);
+      if (txList.length > 0) {
+        activeTx = txList[0];
+        isPaymentPaid = true;
+      }
+    }
+
+    if (!isPaymentPaid) {
+      return {
+        success: false,
+        tokensGranted: 0,
+        newBalance: Number(user.token_balance || 0),
+        isPaid: false,
+        reason: 'Payment is not in PAID status. Token rewards are stopped until an active subscription payment succeeds.'
+      };
+    }
+
+    // 3. Strict Verification: "Plan with Token reward only receive token once a month, apply to all plan"
+    const now = new Date();
+    const currentCycle = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const lastCycle = user.last_token_grant_cycle;
+
+    if (lastCycle === currentCycle && !options?.force) {
+      return {
+        success: false,
+        tokensGranted: 0,
+        newBalance: Number(user.token_balance || 0),
+        isPaid: true,
+        cycle: currentCycle,
+        reason: `Monthly token reward for cycle ${currentCycle} has already been credited. Tokens are issued once a month.`
+      };
+    }
+
+    // 4. Resolve Tokens To Grant from subscription_plans
     let tokensToGrant = options?.customTokens ?? 0;
-    let resolvedPlanName = options?.planName || '';
+    let resolvedPlanName = user.plan_name || rawPlanSlug;
 
     if (!tokensToGrant || tokensToGrant <= 0) {
       const planRows = await query(`
@@ -55176,59 +55356,83 @@ export async function grantPlanTokensOnPurchase(
         FROM subscription_plans 
         WHERE LOWER(slug) = LOWER($1) OR LOWER(id) = LOWER($1) OR LOWER(slug) = LOWER($2)
         LIMIT 1
-      `, [cleanPlanSlug, baseSlug]);
+      `, [rawPlanSlug, baseSlug]);
 
-      if (planRows && planRows.length > 0) {
-        const p = planRows[0];
-        tokensToGrant = Number(p.token_limit ?? p.monthly_tokens ?? 500);
-        if (!resolvedPlanName) resolvedPlanName = p.name || cleanPlanSlug;
+      const pList = Array.isArray(planRows) ? planRows : (planRows?.rows || []);
+      if (pList.length > 0) {
+        const p = pList[0];
+        tokensToGrant = Number(p.token_limit ?? p.monthly_tokens ?? (isFreeTier ? 50 : 500));
+        if (p.name) resolvedPlanName = p.name;
       } else {
         const settings = await getTokenSettings();
         const alloc = settings.planAllocations || {};
-        tokensToGrant = Number(alloc[cleanPlanSlug] ?? alloc[baseSlug] ?? (cleanPlanSlug.includes('pro') ? 500 : 50));
+        tokensToGrant = Number(alloc[rawPlanSlug] ?? alloc[baseSlug] ?? (isFreeTier ? 50 : 500));
       }
     }
 
-    if (!resolvedPlanName) {
-      resolvedPlanName = cleanPlanSlug.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
-    }
-
     if (tokensToGrant <= 0) {
-      tokensToGrant = cleanPlanSlug.includes('free') || cleanPlanSlug === 'taster' ? 50 : 500;
+      tokensToGrant = isFreeTier ? 50 : 500;
     }
 
     const settings = await getTokenSettings();
     const symbol = settings.tokenSymbol || '🪙';
 
-    const updateResult = await query(`
-      UPDATE users
-      SET 
-        token_balance = COALESCE(token_balance, 0) + $1,
-        subscription_plan = $2,
-        updated_at = NOW()
+    // 5. Atomically update user balance and record monthly grant cycle
+    const updateRes = await query(`
+      UPDATE users 
+      SET token_balance = COALESCE(token_balance, 0) + $1,
+          last_token_grant_cycle = $2,
+          last_token_grant_date = NOW(),
+          updated_at = NOW()
       WHERE id = $3
       RETURNING token_balance
-    `, [tokensToGrant, cleanPlanSlug, user.id]);
+    `, [tokensToGrant, currentCycle, user.id]);
 
-    const newBalance = Number(updateResult[0]?.token_balance ?? ((user.token_balance || 0) + tokensToGrant));
-    const txId = 'tx_plan_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-    const description = `Plan Purchase: ${resolvedPlanName} (+${tokensToGrant.toLocaleString()} ${symbol})${options?.orderId ? ` [Order: ${options.orderId}]` : ''}`;
+    const updatedRows = Array.isArray(updateRes) ? updateRes : (updateRes?.rows || []);
+    const newBalance = Number(updatedRows[0]?.token_balance ?? (Number(user.token_balance || 0) + tokensToGrant));
+
+    // 6. Log transaction into token_transactions
+    const txId = 'tx_grant_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+    const description = `Monthly Plan Token Reward: ${resolvedPlanName} (+${tokensToGrant.toLocaleString()} ${symbol}) [Cycle: ${currentCycle}]${options?.orderId ? ` [Order: ${options.orderId}]` : activeTx?.id ? ` [Order: ${activeTx.id}]` : ''}`;
 
     await query(`
       INSERT INTO token_transactions 
       (id, user_id, user_email, amount, balance_after, type, description, created_at)
-      VALUES ($1, $2, $3, $4, $5, 'plan_purchase', $6, NOW())
-    `, [txId, user.id, user.email, tokensToGrant, newBalance, description]);
+      VALUES ($1, $2, $3, $4, $5, 'plan_monthly_grant', $6, NOW())
+    `, [txId, user.id, userEmail, tokensToGrant, newBalance, description]);
 
     return {
       success: true,
       tokensGranted: tokensToGrant,
-      newBalance
+      newBalance,
+      cycle: currentCycle,
+      isPaid: true
     };
   } catch (err: any) {
-    console.error('grantPlanTokensOnPurchase error:', err);
-    return { success: false, tokensGranted: 0, newBalance: 0, error: err.message };
+    console.error('grantMonthlyPlanTokenReward error:', err);
+    return { success: false, tokensGranted: 0, newBalance: 0, reason: err.message };
   }
+}
+
+/**
+ * Backward-compatible alias that adheres to the once-a-month and PAID status guards
+ */
+export async function grantPlanTokensOnPurchase(
+  userEmailOrId: string,
+  planSlug: string,
+  options?: { customTokens?: number; orderId?: string; isAnnual?: boolean; planName?: string }
+): Promise<{ success: boolean; tokensGranted: number; newBalance: number; error?: string }> {
+  const result = await grantMonthlyPlanTokenReward(userEmailOrId, {
+    customTokens: options?.customTokens,
+    orderId: options?.orderId
+  });
+
+  return {
+    success: result.success,
+    tokensGranted: result.tokensGranted,
+    newBalance: result.newBalance,
+    error: result.reason
+  };
 }
 
 ```
