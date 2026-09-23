@@ -41,7 +41,8 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
-  ExternalLink
+  ExternalLink,
+  Layers
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -866,7 +867,7 @@ export default function Sidebar() {
 
                 <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
                   <Link
-                    href="/billing"
+                    href="/subscriptions"
                     onClick={() => setShowTopUpMobileMenu(false)}
                     className="text-xs font-bold hover:underline"
                     style={{ color: 'var(--color-primary)' }}
@@ -957,6 +958,15 @@ export default function Sidebar() {
                 >
                   <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" />
                   <span>{t('myWallet') || 'Store Wallet'}</span>
+                </Link>
+
+                <Link
+                  href="/subscriptions"
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                >
+                  <Layers className="h-3.5 w-3.5" style={iconStyle} />
+                  <span>{t('subscriptions') || 'Subscriptions'}</span>
                 </Link>
 
                 <Link
@@ -1374,7 +1384,7 @@ export default function Sidebar() {
                 {/* Footer Links */}
                 <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
                   <Link
-                    href="/billing"
+                    href="/subscriptions"
                     onClick={() => setShowTopUpMenu(false)}
                     className="flex items-center justify-between text-xs font-bold hover:underline"
                     style={{ color: 'var(--color-primary)' }}
@@ -1546,6 +1556,16 @@ export default function Sidebar() {
                   >
                     <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
                     <span>{t('myWallet') || 'Store Wallet'}</span>
+                  </Link>
+
+                  <Link
+                    href="/subscriptions"
+                    onClick={() => setShowProfileMenu(false)}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <Layers className="h-4 w-4" style={iconStyle} />
+                    <span>{t('subscriptions') || 'Subscriptions'}</span>
                   </Link>
 
                   <Link
@@ -1845,6 +1865,12 @@ export default function Sidebar() {
           <Link href="/wallet" className={navClass('/wallet')} title={t('wallet') || 'Wallet'}>
             <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('wallet') || 'Wallet'}</span>}
+          </Link>
+
+          {/* SUBSCRIPTIONS */}
+          <Link href="/subscriptions" className={navClass('/subscriptions')} title={t('subscriptions') || 'Subscriptions'}>
+            <Layers className="h-4 w-4 shrink-0" style={iconStyle} />
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptions') || 'Subscriptions'}</span>}
           </Link>
 
           {/* BILLING */}
