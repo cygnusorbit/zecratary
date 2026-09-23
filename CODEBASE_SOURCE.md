@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.6.9",
+  "version": "7.7.0",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.6.9",
+  "version": "7.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -39023,6 +39023,8 @@ export async function PUT(req: NextRequest) {
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 function normalizeTx(tx: any) {
   if (!tx || typeof tx !== 'object') return tx;
   const customerEmail = (tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
@@ -39033,7 +39035,7 @@ function normalizeTx(tx: any) {
   const expiryDate = tx.expiry_date || tx.expiryDate || null;
   const isRecurring = tx.is_recurring !== undefined ? Boolean(tx.is_recurring) : (tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true);
   const recurringInterval = (tx.recurring_interval || tx.recurringInterval || (planSlug.includes('annual') || planSlug.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
-  const autoRenew = tx.auto_renew !== undefined ? Boolean(tx.auto_renew) : (tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true);
+  const autoRenew = tx.auto_renew !== undefined ? Boolean(tx.auto_renew) : (tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : isRecurring);
   const testMode = tx.test_mode !== undefined ? Boolean(tx.test_mode) : Boolean(tx.testMode);
   const failureReason = tx.failure_reason || tx.failureReason || null;
   const gatewayTransactionId = tx.gateway_transaction_id || tx.gatewayTransactionId || null;
@@ -39078,7 +39080,35 @@ function normalizeTx(tx: any) {
   };
 }
 
+async function ensureTableAndCleanDuplicates() {
+  try {
+    await query(`
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT TRUE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(32) DEFAULT 'MONTH';
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway_transaction_id VARCHAR(255);
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC(10, 2);
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+
+      -- Sanitize historical records: Any prior transaction superseded by a newer upgrade/downgrade must be 'canceled', not 'refunded'
+      UPDATE payment_transactions p1
+      SET status = 'canceled',
+          is_recurring = FALSE,
+          auto_renew = FALSE,
+          updated_at = NOW()
+      WHERE status = 'refunded'
+        AND EXISTS (
+          SELECT 1 FROM payment_transactions p2
+          WHERE LOWER(TRIM(p2.customer_email)) = LOWER(TRIM(p1.customer_email))
+            AND p2.created_at > p1.created_at
+            AND p2.status IN ('succeeded', 'paid', 'active')
+        );
+    `).catch(() => {});
+  } catch (_) {}
+}
+
 export async function GET() {
+  await ensureTableAndCleanDuplicates();
   try {
     const txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
@@ -39109,6 +39139,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  await ensureTableAndCleanDuplicates();
   try {
     const body = await req.json();
 
@@ -39119,7 +39150,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // Add Transaction: Record payment, cancel prior active transactions (Rule 3), and update PostgreSQL users table
+    // Add Transaction: Record payment, cancel prior active transactions with status 'canceled' (NOT 'refunded')
     if (body.action === 'add_transaction') {
       const rawTx = body.transaction || body;
       if (!rawTx) {
@@ -39130,11 +39161,14 @@ export async function POST(req: Request) {
       const isSucceeded = tx.status === 'succeeded' || tx.status === 'paid';
       const isFree = tx.planSlug === 'taster' || tx.planSlug === 'free' || tx.amount === 0;
 
-      // 1. Enforce Rule 3: Mark previous active succeeded transactions as refunded/cancelled upon upgrade/downgrade
-      if (tx.customerEmail) {
+      // RULE: Any upgrade or downgrade MUST label prior transactions as "canceled".
+      // "refunded" status can ONLY be done manually by admin.
+      if (tx.customerEmail && isSucceeded) {
         await query(
           `UPDATE payment_transactions
-           SET status = 'refunded',
+           SET status = 'canceled',
+               is_recurring = FALSE,
+               auto_renew = FALSE,
                expiry_date = NOW(),
                updated_at = NOW()
            WHERE LOWER(TRIM(customer_email)) = $1
@@ -39144,7 +39178,7 @@ export async function POST(req: Request) {
         ).catch(() => {});
       }
 
-      // 2. Insert new transaction into payment_transactions
+      // Insert new transaction into payment_transactions
       await query(
         `INSERT INTO payment_transactions (
           id, customer_name, customer_email, plan_name, plan_slug,
@@ -39195,7 +39229,7 @@ export async function POST(req: Request) {
         ]
       );
 
-      // 3. Atomically synchronize user plan in PostgreSQL users table
+      // Atomically synchronize user plan in PostgreSQL users table
       if (tx.customerEmail) {
         if (isSucceeded && !isFree) {
           await query(
@@ -39210,7 +39244,7 @@ export async function POST(req: Request) {
              WHERE LOWER(TRIM(email)) = $5`,
             [tx.planSlug, tx.planName, tx.recurringInterval, tx.expiryDate, tx.customerEmail]
           ).catch(() => {});
-        } else if (isFree || tx.status === 'refunded') {
+        } else if (isFree) {
           await query(
             `UPDATE users 
              SET subscription_plan = 'taster',
@@ -39226,10 +39260,131 @@ export async function POST(req: Request) {
         }
       }
 
-      return NextResponse.json({ success: true, message: 'Transaction recorded and user plan synchronized', transaction: tx });
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Transaction recorded and prior subscription cancelled successfully', 
+        transaction: tx 
+      });
     }
 
-    // Update Transaction
+    // Cancel User Transactions (Called on upgrade/downgrade/switch): strictly set status to 'canceled'
+    if (body.action === 'cancel_user_transactions') {
+      const email = (body.email || body.customerEmail || body.customer_email || '').toLowerCase().trim();
+      const preserveExpiry = body.preserveExpiry !== undefined ? Boolean(body.preserveExpiry) : false;
+      if (email) {
+        if (preserveExpiry) {
+          await query(`
+            UPDATE payment_transactions
+            SET status = 'canceled',
+                is_recurring = FALSE,
+                auto_renew = FALSE,
+                updated_at = NOW()
+            WHERE LOWER(TRIM(customer_email)) = $1 
+              AND LOWER(status) IN ('succeeded', 'paid', 'active')
+              AND (expiry_date IS NOT NULL AND expiry_date > NOW())
+          `, [email]).catch(() => {});
+
+          await query(`
+            UPDATE payment_transactions
+            SET status = 'canceled',
+                is_recurring = FALSE,
+                auto_renew = FALSE,
+                expiry_date = NOW(),
+                updated_at = NOW()
+            WHERE LOWER(TRIM(customer_email)) = $1 
+              AND LOWER(status) IN ('succeeded', 'paid', 'active')
+              AND (expiry_date IS NULL OR expiry_date <= NOW())
+          `, [email]).catch(() => {});
+        } else {
+          await query(`
+            UPDATE payment_transactions
+            SET status = 'canceled',
+                is_recurring = FALSE,
+                auto_renew = FALSE,
+                expiry_date = NOW(),
+                updated_at = NOW()
+            WHERE LOWER(TRIM(customer_email)) = $1 
+              AND LOWER(status) IN ('succeeded', 'paid', 'active')
+          `, [email]).catch(() => {});
+        }
+        return NextResponse.json({ success: true, message: 'Prior transactions cancelled in PostgreSQL.' });
+      }
+    }
+
+    // Manual Cancel Action
+    if (body.action === 'cancel_transaction') {
+      const rawTx = body.transaction || body;
+      const txId = body.id || rawTx.id;
+      if (!txId) {
+        return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+      }
+      const tx = normalizeTx(rawTx);
+
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'canceled', is_recurring = FALSE, auto_renew = FALSE, expiry_date = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [tx.expiryDate || new Date().toISOString(), txId]
+      );
+
+      return NextResponse.json({ success: true, message: 'Subscription cancelled successfully.' });
+    }
+
+    // Manual Admin Refund Action (ONLY manually by admin)
+    if (body.action === 'refund_transaction') {
+      const rawTx = body.transaction || body;
+      const txId = body.id || rawTx.id;
+      if (!txId) {
+        return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+      }
+      const tx = normalizeTx(rawTx);
+
+      // 1. Manually set status to 'refunded'
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'refunded', is_recurring = FALSE, auto_renew = FALSE, expiry_date = NOW(), updated_at = NOW()
+         WHERE id = $1`,
+        [txId]
+      );
+
+      // 2. Immediately revoke privileges and revert to free tier if no other active paid transaction exists
+      if (tx.customerEmail) {
+        const otherTx = await query(
+          `SELECT plan_slug, plan_name, recurring_interval, expiry_date 
+           FROM payment_transactions 
+           WHERE LOWER(TRIM(customer_email)) = $1 
+             AND status IN ('succeeded', 'paid') 
+             AND (expiry_date IS NULL OR expiry_date > NOW())
+           ORDER BY created_at DESC LIMIT 1`,
+          [tx.customerEmail]
+        ).catch(() => ({ rows: [] }));
+
+        const activeRow = Array.isArray(otherTx) ? otherTx[0] : otherTx?.rows?.[0];
+        if (activeRow) {
+          await query(
+            `UPDATE users 
+             SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
+             WHERE LOWER(TRIM(email)) = $5`,
+            [activeRow.plan_slug, activeRow.plan_name, activeRow.recurring_interval, activeRow.expiry_date, tx.customerEmail]
+          ).catch(() => {});
+        } else {
+          await query(
+            `UPDATE users 
+             SET subscription_plan = 'taster', plan_slug = 'taster', plan_name = 'Taster (Free)', plan_interval = 'MONTH', plan_expiry_date = NULL, updated_at = NOW()
+             WHERE LOWER(TRIM(email)) = $1`,
+            [tx.customerEmail]
+          ).catch(() => {});
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Payment refunded successfully by administrator.',
+        transaction: { ...tx, status: 'refunded', isRecurring: false, autoRenew: false }
+      });
+    }
+
+    // Manual Edit / Update Transaction by Admin
     if (body.action === 'update_transaction') {
       const rawTx = body.transaction || body;
       if (!rawTx || !rawTx.id) {
@@ -39270,7 +39425,7 @@ export async function POST(req: Request) {
 
       // Reconcile user plan in PostgreSQL
       if (tx.customerEmail) {
-        if (tx.status === 'succeeded') {
+        if (tx.status === 'succeeded' || tx.status === 'paid') {
           await query(
             `UPDATE users 
              SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
@@ -39278,12 +39433,11 @@ export async function POST(req: Request) {
             [tx.planSlug, tx.planName, tx.recurringInterval, tx.expiryDate, tx.customerEmail]
           ).catch(() => {});
         } else if (tx.status === 'refunded') {
-          // Check if user has any other active succeeded transaction
           const otherTx = await query(
             `SELECT plan_slug, plan_name, recurring_interval, expiry_date 
              FROM payment_transactions 
              WHERE LOWER(TRIM(customer_email)) = $1 
-               AND status = 'succeeded' 
+               AND status IN ('succeeded', 'paid') 
                AND (expiry_date IS NULL OR expiry_date > NOW())
              ORDER BY created_at DESC LIMIT 1`,
             [tx.customerEmail]
@@ -39308,11 +39462,11 @@ export async function POST(req: Request) {
         }
       }
 
-      return NextResponse.json({ success: true, message: 'Transaction updated and plan reconciled', transaction: tx });
+      return NextResponse.json({ success: true, message: 'Transaction updated in database', transaction: tx });
     }
 
-    // Refund / Cancel / Confirm
-    if (body.action === 'refund_transaction' || body.action === 'cancel_transaction' || body.action === 'confirm_payment') {
+    // Confirm Payment
+    if (body.action === 'confirm_payment') {
       const rawTx = body.transaction || body;
       const txId = body.id || rawTx.id;
       if (!txId) {
@@ -39320,18 +39474,16 @@ export async function POST(req: Request) {
       }
 
       const tx = normalizeTx(rawTx);
-      const newStatus = body.action === 'confirm_payment' ? 'succeeded' : 'refunded';
 
       await query(
         `UPDATE payment_transactions 
-         SET status = $1, is_recurring = $2, auto_renew = $3, expiry_date = $4,
-             confirmed_amount = $5, confirmed_at = $6, gateway_transaction_id = $7, updated_at = NOW()
-         WHERE id = $8`,
+         SET status = 'succeeded', is_recurring = $1, auto_renew = $2, expiry_date = $3,
+             confirmed_amount = $4, confirmed_at = $5, gateway_transaction_id = $6, updated_at = NOW()
+         WHERE id = $7`,
         [
-          newStatus,
           tx.isRecurring,
           tx.autoRenew,
-          body.action === 'confirm_payment' ? tx.expiryDate : new Date().toISOString(),
+          tx.expiryDate,
           tx.confirmedAmount,
           tx.confirmedAt,
           tx.gatewayTransactionId,
@@ -39339,40 +39491,10 @@ export async function POST(req: Request) {
         ]
       );
 
-      // Reconcile user plan in PostgreSQL
-      if (tx.customerEmail) {
-        const otherTx = await query(
-          `SELECT plan_slug, plan_name, recurring_interval, expiry_date 
-           FROM payment_transactions 
-           WHERE LOWER(TRIM(customer_email)) = $1 
-             AND status = 'succeeded' 
-             AND (expiry_date IS NULL OR expiry_date > NOW())
-           ORDER BY created_at DESC LIMIT 1`,
-          [tx.customerEmail]
-        ).catch(() => ({ rows: [] }));
-
-        const activeRow = Array.isArray(otherTx) ? otherTx[0] : otherTx?.rows?.[0];
-        if (activeRow) {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $5`,
-            [activeRow.plan_slug, activeRow.plan_name, activeRow.recurring_interval, activeRow.expiry_date, tx.customerEmail]
-          ).catch(() => {});
-        } else {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = 'taster', plan_slug = 'taster', plan_name = 'Taster (Free)', plan_interval = 'MONTH', plan_expiry_date = NULL, updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $1`,
-            [tx.customerEmail]
-          ).catch(() => {});
-        }
-      }
-
       return NextResponse.json({ 
         success: true, 
-        message: body.action === 'confirm_payment' ? 'Payment confirmed' : 'Transaction refunded / cancelled',
-        transaction: { ...tx, status: newStatus } 
+        message: 'Payment verified and confirmed as Succeeded',
+        transaction: { ...tx, status: 'succeeded' } 
       });
     }
 
@@ -46726,7 +46848,7 @@ export async function POST(req: NextRequest) {
       // Rule 3: Mark prior active transactions as refunded/cancelled in PostgreSQL
       await query(`
         UPDATE payment_transactions
-        SET status = 'refunded',
+        SET status = 'canceled',
             auto_renew = FALSE,
             is_recurring = FALSE,
             expiry_date = NOW(),
