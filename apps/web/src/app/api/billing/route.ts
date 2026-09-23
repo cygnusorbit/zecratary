@@ -350,7 +350,7 @@ export async function POST(req: NextRequest) {
       // Rule 3: Mark prior active transactions as refunded/cancelled in PostgreSQL
       await query(`
         UPDATE payment_transactions
-        SET status = 'refunded',
+        SET status = 'canceled',
             auto_renew = FALSE,
             is_recurring = FALSE,
             expiry_date = NOW(),
