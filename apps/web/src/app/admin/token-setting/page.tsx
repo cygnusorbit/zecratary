@@ -361,13 +361,46 @@ export default function AdminTokenSettingPage() {
         throw new Error(data.error || 'Failed to delete transaction');
       }
 
+      // Synchronize localStorage if currently logged-in user was affected
+      if (Array.isArray(data.affectedUsers) && data.affectedUsers.length > 0) {
+        try {
+          const rawCurrent = localStorage.getItem('zecratary_current_user');
+          if (rawCurrent) {
+            const parsed = JSON.parse(rawCurrent);
+            const found = data.affectedUsers.find((u: any) => 
+              (u.id && u.id === parsed.id) || 
+              (u.email && parsed.email && u.email.toLowerCase() === parsed.email.toLowerCase())
+            );
+            if (found) {
+              parsed.token_balance = found.newBalance;
+              parsed.tokenBalance = found.newBalance;
+              localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
+            }
+          }
+          const rawUser = localStorage.getItem('zecratary_user');
+          if (rawUser) {
+            const parsed = JSON.parse(rawUser);
+            const found = data.affectedUsers.find((u: any) => 
+              (u.id && u.id === parsed.id) || 
+              (u.email && parsed.email && u.email.toLowerCase() === parsed.email.toLowerCase())
+            );
+            if (found) {
+              parsed.token_balance = found.newBalance;
+              parsed.tokenBalance = found.newBalance;
+              localStorage.setItem('zecratary_user', JSON.stringify(parsed));
+            }
+          }
+        } catch (_) {}
+      }
+
       setSelectedTxIds(prev => prev.filter(item => item !== id));
-      setSuccessMsg(t('tokenTxDeletedSuccess', 'Transaction record deleted successfully from PostgreSQL.'));
+      setSuccessMsg(data.message || t('tokenTxDeletedSuccess', 'Transaction record deleted and user token balance updated successfully.'));
       await fetchTransactions(txPage, txLimit);
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
       }
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
@@ -397,14 +430,47 @@ export default function AdminTokenSettingPage() {
         throw new Error(data.error || 'Failed to delete selected transactions');
       }
 
+      // Synchronize localStorage if currently logged-in user was affected
+      if (Array.isArray(data.affectedUsers) && data.affectedUsers.length > 0) {
+        try {
+          const rawCurrent = localStorage.getItem('zecratary_current_user');
+          if (rawCurrent) {
+            const parsed = JSON.parse(rawCurrent);
+            const found = data.affectedUsers.find((u: any) => 
+              (u.id && u.id === parsed.id) || 
+              (u.email && parsed.email && u.email.toLowerCase() === parsed.email.toLowerCase())
+            );
+            if (found) {
+              parsed.token_balance = found.newBalance;
+              parsed.tokenBalance = found.newBalance;
+              localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
+            }
+          }
+          const rawUser = localStorage.getItem('zecratary_user');
+          if (rawUser) {
+            const parsed = JSON.parse(rawUser);
+            const found = data.affectedUsers.find((u: any) => 
+              (u.id && u.id === parsed.id) || 
+              (u.email && parsed.email && u.email.toLowerCase() === parsed.email.toLowerCase())
+            );
+            if (found) {
+              parsed.token_balance = found.newBalance;
+              parsed.tokenBalance = found.newBalance;
+              localStorage.setItem('zecratary_user', JSON.stringify(parsed));
+            }
+          }
+        } catch (_) {}
+      }
+
       const count = selectedTxIds.length;
       setSelectedTxIds([]);
-      setSuccessMsg(t('bulkTokenTxDeletedSuccess', `Successfully deleted ${count} transaction record(s) from PostgreSQL.`));
+      setSuccessMsg(data.message || t('bulkTokenTxDeletedSuccess', `Successfully deleted ${count} transaction record(s) and updated user token balance(s).`));
       await fetchTransactions(txPage, txLimit);
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
       }
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {

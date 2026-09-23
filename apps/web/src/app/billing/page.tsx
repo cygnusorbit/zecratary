@@ -195,12 +195,14 @@ export default function UserBillingPage() {
     window.addEventListener('zecratary_plans_updated', handleSyncEvents);
     window.addEventListener('zecratary_users_updated', handleSyncEvents);
     window.addEventListener('zecratary_token_settings_updated', handleSyncEvents);
+    window.addEventListener('zecratary_tokens_updated', handleSyncEvents);
 
     return () => {
       window.removeEventListener('zecratary_payment_updated', handleSyncEvents);
       window.removeEventListener('zecratary_plans_updated', handleSyncEvents);
       window.removeEventListener('zecratary_users_updated', handleSyncEvents);
       window.removeEventListener('zecratary_token_settings_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_tokens_updated', handleSyncEvents);
     };
   }, [fetchData]);
 

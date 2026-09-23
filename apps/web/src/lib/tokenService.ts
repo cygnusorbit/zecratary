@@ -32,6 +32,14 @@ export interface DeductionResult {
   tokenSymbol?: string;
 }
 
+export interface AffectedUserBalance {
+  id: string;
+  email: string;
+  oldBalance: number;
+  newBalance: number;
+  adjustedTokens: number;
+}
+
 const DEFAULT_SETTINGS: TokenSettings = {
   id: 'primary_token_settings',
   tokenName: 'Foodie Token',
@@ -295,10 +303,6 @@ export async function deductUserTokens({
   };
 }
 
-/**
- * Grants the plan's monthly token reward ONCE per calendar month cycle (YYYY-MM).
- * Enforces Rule: STOP getting tokens if payment status is NOT PAID (or is lapsed/refunded/canceled).
- */
 export async function grantMonthlyPlanTokenReward(
   userEmailOrId: string,
   options?: { force?: boolean; source?: string; customTokens?: number; orderId?: string }
@@ -317,7 +321,6 @@ export async function grantMonthlyPlanTokenReward(
       return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User identifier required' };
     }
 
-    // 1. Fetch User from PostgreSQL
     const userRows = await query(`
       SELECT id, email, token_balance, subscription_plan, plan_slug, plan_name, plan_interval, plan_expiry_date, last_token_grant_cycle, last_token_grant_date
       FROM users 
@@ -335,15 +338,12 @@ export async function grantMonthlyPlanTokenReward(
     const baseSlug = rawPlanSlug.replace(/-(monthly|annual|year|free)$/i, '');
     const isFreeTier = baseSlug === 'taster' || baseSlug === 'free';
 
-    // 2. Strict Verification: "stop get Token if payment not PAID"
     let isPaymentPaid = false;
     let activeTx: any = null;
 
     if (isFreeTier) {
-      // Free tier is active by default
       isPaymentPaid = true;
     } else {
-      // For paid plans, verify there is an active transaction in payment_transactions with status 'succeeded' or 'paid'
       const txRows = await query(`
         SELECT id, plan_name, plan_slug, amount, status, expiry_date, created_at
         FROM payment_transactions
@@ -370,7 +370,6 @@ export async function grantMonthlyPlanTokenReward(
       };
     }
 
-    // 3. Strict Verification: "Plan with Token reward only receive token once a month, apply to all plan"
     const now = new Date();
     const currentCycle = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const lastCycle = user.last_token_grant_cycle;
@@ -386,7 +385,6 @@ export async function grantMonthlyPlanTokenReward(
       };
     }
 
-    // 4. Resolve Tokens To Grant from subscription_plans
     let tokensToGrant = options?.customTokens ?? 0;
     let resolvedPlanName = user.plan_name || rawPlanSlug;
 
@@ -417,7 +415,6 @@ export async function grantMonthlyPlanTokenReward(
     const settings = await getTokenSettings();
     const symbol = settings.tokenSymbol || '🪙';
 
-    // 5. Atomically update user balance and record monthly grant cycle
     const updateRes = await query(`
       UPDATE users 
       SET token_balance = COALESCE(token_balance, 0) + $1,
@@ -431,7 +428,6 @@ export async function grantMonthlyPlanTokenReward(
     const updatedRows = Array.isArray(updateRes) ? updateRes : (updateRes?.rows || []);
     const newBalance = Number(updatedRows[0]?.token_balance ?? (Number(user.token_balance || 0) + tokensToGrant));
 
-    // 6. Log transaction into token_transactions
     const txId = 'tx_grant_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
     const description = `Monthly Plan Token Reward: ${resolvedPlanName} (+${tokensToGrant.toLocaleString()} ${symbol}) [Cycle: ${currentCycle}]${options?.orderId ? ` [Order: ${options.orderId}]` : activeTx?.id ? ` [Order: ${activeTx.id}]` : ''}`;
 
@@ -454,9 +450,6 @@ export async function grantMonthlyPlanTokenReward(
   }
 }
 
-/**
- * Backward-compatible alias that adheres to the once-a-month and PAID status guards
- */
 export async function grantPlanTokensOnPurchase(
   userEmailOrId: string,
   planSlug: string,
@@ -472,5 +465,104 @@ export async function grantPlanTokensOnPurchase(
     tokensGranted: result.tokensGranted,
     newBalance: result.newBalance,
     error: result.reason
+  };
+}
+
+/**
+ * Deletes token transactions and atomically adjusts the user's token balance in PostgreSQL.
+ * If transaction was a credit (+tokens), tokens are removed: newBalance = max(0, oldBalance - amount)
+ * If transaction was a debit (-tokens), deduction is undone: newBalance = oldBalance + abs(amount)
+ */
+export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Promise<{
+  success: boolean;
+  deletedCount: number;
+  affectedUsers: AffectedUserBalance[];
+  error?: string;
+}> {
+  await initTokenTables();
+  if (!ids || ids.length === 0) {
+    return { success: false, deletedCount: 0, affectedUsers: [], error: 'No transaction ID(s) provided' };
+  }
+
+  // 1. Fetch transactions before deleting
+  const txRows = await query(`
+    SELECT id, user_id, user_email, amount, type, description 
+    FROM token_transactions 
+    WHERE id = ANY($1)
+  `, [ids]);
+  const rawTxs = Array.isArray(txRows) ? txRows : (txRows?.rows || []);
+
+  if (rawTxs.length === 0) {
+    return { success: false, deletedCount: 0, affectedUsers: [], error: 'No matching transaction records found' };
+  }
+
+  // 2. Aggregate adjustments per user
+  const userAdjustments = new Map<string, { userId: string; userEmail: string; netAmount: number; types: string[] }>();
+
+  for (const tx of rawTxs) {
+    const email = (tx.user_email || '').toLowerCase().trim();
+    const uId = (tx.user_id || '').trim();
+    const key = email || uId;
+    if (!key) continue;
+
+    const amt = Number(tx.amount || 0);
+    const existing = userAdjustments.get(key) || { userId: uId, userEmail: email, netAmount: 0, types: [] };
+    existing.netAmount += amt;
+    existing.types.push(tx.type);
+    if (!existing.userId && uId) existing.userId = uId;
+    if (!existing.userEmail && email) existing.userEmail = email;
+    userAdjustments.set(key, existing);
+  }
+
+  // 3. Atomically update users.token_balance in PostgreSQL
+  const affectedUsers: AffectedUserBalance[] = [];
+
+  for (const [, adj] of userAdjustments.entries()) {
+    const uRes = await query(`
+      SELECT id, email, token_balance, last_token_grant_cycle 
+      FROM users 
+      WHERE (id = $1 AND $1 != '') OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+      LIMIT 1
+    `, [adj.userId, adj.userEmail]);
+    const uList = Array.isArray(uRes) ? uRes : (uRes?.rows || []);
+
+    if (uList.length > 0) {
+      const u = uList[0];
+      const oldBalance = Number(u.token_balance ?? 0);
+      // Reversal: newBalance = max(0, oldBalance - netAmount)
+      const newBalance = Math.max(0, oldBalance - adj.netAmount);
+
+      await query(`
+        UPDATE users 
+        SET token_balance = $1, updated_at = NOW() 
+        WHERE id = $2
+      `, [newBalance, u.id]);
+
+      // If a monthly grant was deleted, reset cycle so it can be reclaimed if desired
+      if (adj.types.includes('plan_monthly_grant')) {
+        await query(`
+          UPDATE users 
+          SET last_token_grant_cycle = NULL, updated_at = NOW() 
+          WHERE id = $1
+        `, [u.id]).catch(() => {});
+      }
+
+      affectedUsers.push({
+        id: u.id,
+        email: u.email,
+        oldBalance,
+        newBalance,
+        adjustedTokens: -adj.netAmount
+      });
+    }
+  }
+
+  // 4. Delete transactions from PostgreSQL token_transactions
+  await query(`DELETE FROM token_transactions WHERE id = ANY($1)`, [ids]);
+
+  return {
+    success: true,
+    deletedCount: rawTxs.length,
+    affectedUsers
   };
 }

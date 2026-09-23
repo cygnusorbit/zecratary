@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { initTokenTables } from '@/lib/tokenService';
+import { initTokenTables, deleteTokenTransactionsAndSyncBalance } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
@@ -105,7 +105,6 @@ export async function GET(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    await initTokenTables();
     const { searchParams } = new URL(req.url);
     let id = searchParams.get('id');
     let ids: string[] = [];
@@ -127,12 +126,18 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'No transaction ID(s) provided for deletion' }, { status: 400 });
     }
 
-    await query(`DELETE FROM token_transactions WHERE id = ANY($1)`, [ids]);
+    // Atomically delete transactions and adjust user token balance in PostgreSQL
+    const result = await deleteTokenTransactionsAndSyncBalance(ids);
+
+    if (!result.success) {
+      return NextResponse.json({ success: false, error: result.error || 'Failed to delete transaction(s)' }, { status: 400 });
+    }
 
     return NextResponse.json({
       success: true,
-      message: `Successfully deleted ${ids.length} transaction record(s) from PostgreSQL.`,
-      deletedCount: ids.length
+      message: `Successfully deleted ${result.deletedCount} transaction record(s). User token balance(s) updated in PostgreSQL.`,
+      deletedCount: result.deletedCount,
+      affectedUsers: result.affectedUsers
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
