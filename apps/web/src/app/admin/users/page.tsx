@@ -227,7 +227,7 @@ export default function AdminUserManagementPage() {
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
-      const res = await fetch('/api/admin/users', { cache: 'no-store' });
+      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
@@ -243,7 +243,7 @@ export default function AdminUserManagementPage() {
               createdAt: '2026-01-01T00:00:00.000Z'
             };
             list.unshift(rootAdmin);
-            await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rootAdmin) }).catch(() => {});
+            await fetch('/api/admin/users?t=' + Date.now(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rootAdmin) }).catch(() => {});
           }
           const freshList = list;
           setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
@@ -518,7 +518,7 @@ export default function AdminUserManagementPage() {
     try {
       await syncUserPlanWithPaymentLedger(cleanEmail, assignedPlan, planName, priceDollars, interval);
 
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users?t=' + Date.now(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newUser),
@@ -602,7 +602,7 @@ export default function AdminUserManagementPage() {
     try {
       await syncUserPlanWithPaymentLedger(cleanEmail, assignedPlan, planName, priceDollars, interval);
 
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users?t=' + Date.now(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedUser),
@@ -879,6 +879,21 @@ export default function AdminUserManagementPage() {
               </tbody>
             </table>
           </div>
+          {/* Admin Pagination */}
+          {processedAdmins.length > ITEMS_PER_PAGE && (
+            <div className="px-5 py-3.5 border-t flex items-center justify-between text-xs transition-colors" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              <span>Showing {adminStartIndex + 1} to {adminEndIndex} of {processedAdmins.length} admins</span>
+              <div className="flex items-center gap-1.5">
+                <button type="button" disabled={adminCurrentPage <= 1} onClick={() => setAdminCurrentPage(p => Math.max(1, p - 1))} className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="font-bold px-2" style={{ color: 'var(--color-text)' }}>Page {adminCurrentPage} of {adminTotalPages}</span>
+                <button type="button" disabled={adminCurrentPage >= adminTotalPages} onClick={() => setAdminCurrentPage(p => Math.min(adminTotalPages, p + 1))} className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -978,6 +993,27 @@ export default function AdminUserManagementPage() {
                 )}
               </tbody>
             </table>
+          </div>
+          {/* Standard User Pagination */}
+          <div className="px-5 py-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            <div>
+              {processedStandardUsers.length === 0 ? 'Showing 0 standard users' : (
+                <>Showing <span className="font-bold" style={{ color: 'var(--color-text)' }}>{userStartIndex + 1}</span> to <span className="font-bold" style={{ color: 'var(--color-text)' }}>{userEndIndex}</span> of <span className="font-bold" style={{ color: 'var(--color-text)' }}>{processedStandardUsers.length}</span> standard users</>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button type="button" disabled={userCurrentPage <= 1} onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))} className={`p-2 rounded-xl border flex items-center justify-center transition ${userCurrentPage <= 1 ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:opacity-80'}`} style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              {Array.from({ length: userTotalPages }, (_, i) => i + 1).map(pageNum => (
+                <button key={pageNum} type="button" onClick={() => setUserCurrentPage(pageNum)} className="min-w-[34px] h-[34px] rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer" style={userCurrentPage === pageNum ? { backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)', color: '#ffffff' } : { backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                  {pageNum}
+                </button>
+              ))}
+              <button type="button" disabled={userCurrentPage >= userTotalPages} onClick={() => setUserCurrentPage(p => Math.min(userTotalPages, p + 1))} className={`p-2 rounded-xl border flex items-center justify-center transition ${userCurrentPage >= userTotalPages ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:opacity-80'}`} style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>

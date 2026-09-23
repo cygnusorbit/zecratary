@@ -9,6 +9,13 @@ async function ensureBillingSchema() {
     await query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method VARCHAR(64) DEFAULT 'stripe';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_slug VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_name VARCHAR(255) DEFAULT 'Taster (Free)';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_interval VARCHAR(32) DEFAULT 'MONTH';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expiry_date TIMESTAMPTZ;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance NUMERIC DEFAULT 100;
+
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(128) PRIMARY KEY,
         customer_name VARCHAR(255),
@@ -37,47 +44,64 @@ export async function GET(req: NextRequest) {
   await ensureBillingSchema();
   try {
     const { searchParams } = new URL(req.url);
-    let email = searchParams.get('email');
+    let email = searchParams.get('email') || req.headers.get('x-user-email');
 
-    // Default to first non-admin user if email is not provided
-    if (!email) {
-      const uRows = await query(`
-        SELECT email FROM users 
-        WHERE role != 'admin' 
-        ORDER BY created_at ASC LIMIT 1
-      `);
-      email = uRows.length > 0 ? uRows[0].email : 'user@foodieprep.com';
+    let userRow: any = null;
+    if (email) {
+      const uRows = await query(
+        `SELECT id, name, email, role, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, plan_expiry_date, payment_method, token_balance, created_at 
+         FROM users 
+         WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
+        [email]
+      ).catch(() => []);
+      if (Array.isArray(uRows) && uRows.length > 0) userRow = uRows[0];
+      else if (uRows?.rows && uRows.rows.length > 0) userRow = uRows.rows[0];
     }
+
+    if (!userRow) {
+      const anyUserRows = await query(
+        `SELECT id, name, email, role, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, plan_expiry_date, payment_method, token_balance, created_at 
+         FROM users 
+         ORDER BY CASE WHEN LOWER(role) = 'admin' THEN 1 ELSE 0 END, created_at ASC LIMIT 1`
+      ).catch(() => []);
+      const rows = Array.isArray(anyUserRows) ? anyUserRows : (anyUserRows?.rows || []);
+      if (rows.length > 0) {
+        userRow = rows[0];
+        email = userRow.email;
+      } else {
+        userRow = {
+          id: 'usr_default',
+          name: 'Logged-in User',
+          email: 'jordan@example.com',
+          role: 'user',
+          subscription_plan: 'taster',
+          subscription_tier: 'taster',
+          plan_slug: 'taster',
+          plan_name: 'Taster (Free)',
+          plan_interval: 'MONTH',
+          plan_expiry_date: null,
+          payment_method: 'stripe',
+          token_balance: 100
+        };
+        email = userRow.email;
+      }
+    }
+
     const cleanEmail = (email || '').toLowerCase().trim();
 
-    // 1. Fetch User Record
-    const userRows = await query(`
-      SELECT id, name, email, role, subscription_plan, payment_method, token_balance, created_at 
-      FROM users 
-      WHERE LOWER(email) = $1 LIMIT 1
-    `, [cleanEmail]);
+    // 1. Fetch User Transactions
+    const txRows = await query(
+      `SELECT * FROM payment_transactions 
+       WHERE LOWER(TRIM(customer_email)) = $1 
+       ORDER BY created_at DESC`,
+      [cleanEmail]
+    ).catch(() => []);
+    const rawTxs = Array.isArray(txRows) ? txRows : (txRows?.rows || []);
 
-    const user = userRows.length > 0 ? userRows[0] : {
-      id: 'usr_default',
-      name: 'Logged-in User',
-      email: cleanEmail,
-      role: 'user',
-      subscription_plan: 'taster',
-      payment_method: 'stripe',
-      token_balance: 100
-    };
-
-    // 2. Fetch User Payment Transactions from PostgreSQL
-    const txRows = await query(`
-      SELECT * FROM payment_transactions 
-      WHERE LOWER(customer_email) = $1 
-      ORDER BY created_at DESC
-    `, [cleanEmail]);
-
-    const transactions = txRows.map((r: any) => ({
+    const transactions = rawTxs.map((r: any) => ({
       id: r.id,
-      customerName: r.customer_name || user.name,
-      customerEmail: r.customer_email || user.email,
+      customerName: r.customer_name || userRow.name,
+      customerEmail: r.customer_email || userRow.email,
       planName: r.plan_name || 'Subscription',
       planSlug: r.plan_slug || '',
       amount: Number(r.amount) || 0,
@@ -93,7 +117,7 @@ export async function GET(req: NextRequest) {
       createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
     }));
 
-    // 3. Fetch Admin Gateway & Currency Settings from PostgreSQL
+    // 2. Fetch Gateway & Currency Settings
     let gatewayConfig = {
       activeGateway: 'stripe',
       currency: 'USD',
@@ -105,25 +129,26 @@ export async function GET(req: NextRequest) {
     };
 
     try {
-      const settingsRows = await query(`SELECT key, value FROM admin_settings WHERE key IN ('paymentSettings', 'currency', 'systemSettings')`);
-      for (const row of settingsRows) {
-        if (row.key === 'paymentSettings') {
-          const val = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings LIMIT 1`);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      if (sRow) {
+        if (sRow.payment_settings) {
+          const val = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
           gatewayConfig = { ...gatewayConfig, ...val };
-        } else if (row.key === 'currency') {
-          gatewayConfig.currency = typeof row.value === 'string' ? row.value : row.value?.value || 'USD';
+        }
+        if (sRow.currency) {
+          gatewayConfig.currency = sRow.currency;
         }
       }
     } catch (_) {}
 
-    // Currency symbol mapping
     const symbols: Record<string, string> = {
       USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
       JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
     };
     gatewayConfig.currencySymbol = symbols[gatewayConfig.currency] || '$';
 
-    // 4. Fetch Token Identity
+    // 3. Fetch Token Identity
     let tokenIdentity = { tokenName: 'Tokens', tokenSymbol: '🪙' };
     try {
       const tSettings = await getTokenSettings();
@@ -133,22 +158,20 @@ export async function GET(req: NextRequest) {
       }
     } catch (_) {}
 
-    // 5. Fetch Available Subscription Plans Dynamically from PostgreSQL (subscription_plans)
+    // 4. Fetch Available Subscription Plans from PostgreSQL
     let plans: any[] = [];
     try {
       const planRows = await query(`
         SELECT 
           id, name, slug, plan_group_id, monthly_plan_id, annual_plan_id,
           monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge, trial_badge,
-          description_monthly, description_annual, features, token_limit,
-          ai_recipe_limit, recipe_library_limit, social_scrape_limit, can_view_macros,
-          allowed_ai_models, is_free, is_default
+          description_monthly, description_annual, features, token_limit, is_free, is_default
         FROM subscription_plans
         ORDER BY is_free DESC, monthly_price_dollars ASC
       `);
-
-      if (planRows && planRows.length > 0) {
-        plans = planRows.map((p: any) => ({
+      const pList = Array.isArray(planRows) ? planRows : (planRows?.rows || []);
+      if (pList && pList.length > 0) {
+        plans = pList.map((p: any) => ({
           id: p.id,
           name: p.name || p.slug,
           slug: p.slug,
@@ -163,18 +186,12 @@ export async function GET(req: NextRequest) {
           description: p.description_monthly || p.description_annual || 'Full plan access',
           features: Array.isArray(p.features) ? p.features : (typeof p.features === 'string' ? JSON.parse(p.features) : []),
           tokenLimit: Number(p.token_limit ?? 500),
-          aiRecipeLimit: Number(p.ai_recipe_limit ?? 50),
-          recipeLibraryLimit: Number(p.recipe_library_limit ?? 250),
-          socialScrapeLimit: Number(p.social_scrape_limit ?? 20),
-          canViewMacros: Boolean(p.can_view_macros),
-          allowedAiModels: p.allowed_ai_models || 'gemini-1.5-flash,gpt-3.5-turbo',
           isFree: Boolean(p.is_free),
           isDefault: Boolean(p.is_default)
         }));
       }
     } catch (_) {}
 
-    // Dynamic fallback if plans table is currently empty
     if (plans.length === 0) {
       plans = [
         {
@@ -206,7 +223,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      user,
+      user: userRow,
       transactions,
       gatewayConfig,
       tokenIdentity,
@@ -230,18 +247,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Email address is required.' }, { status: 400 });
     }
 
-    // ACTION 1: Update Preferred Payment Method
+    // 1. Update Preferred Payment Method
     if (action === 'update_payment_method') {
       const method = body.paymentMethod || 'stripe';
-      await query(`
-        UPDATE users 
-        SET payment_method = $1, updated_at = NOW() 
-        WHERE LOWER(email) = $2
-      `, [method, email]);
+      await query(`UPDATE users SET payment_method = $1, updated_at = NOW() WHERE LOWER(TRIM(email)) = $2`, [method, email]);
       return NextResponse.json({ success: true, message: 'Payment method successfully updated.' });
     }
 
-    // ACTION 2: Cancel Subscription Renewal
+    // 2. Cancel Subscription Renewal
     if (action === 'cancel_subscription') {
       await query(`
         UPDATE payment_transactions
@@ -249,44 +262,72 @@ export async function POST(req: NextRequest) {
             is_recurring = FALSE,
             status = 'canceled',
             updated_at = NOW()
-        WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
+        WHERE LOWER(TRIM(customer_email)) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
       `, [email]);
 
       return NextResponse.json({
         success: true,
-        message: 'Subscription renewal cancelled. Access remains active until the end of your billing cycle.'
+        message: 'Auto-renewal cancelled. You will continue to have paid access until your current billing period ends.'
       });
     }
 
-    // ACTION 3: Purchase / Upgrade / Switch Plan
+    // 3. Reactivate / Resume Subscription Renewal
+    if (action === 'resume_subscription' || action === 'reactivate_subscription') {
+      await query(`
+        UPDATE payment_transactions
+        SET auto_renew = TRUE,
+            is_recurring = TRUE,
+            status = 'succeeded',
+            updated_at = NOW()
+        WHERE LOWER(TRIM(customer_email)) = $1 
+          AND (expiry_date IS NULL OR expiry_date > NOW())
+          AND LOWER(status) = 'canceled'
+      `, [email]);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Auto-renewal has been successfully reactivated!'
+      });
+    }
+
+    // 4. Upgrade / Downgrade / Switch Plan
     if (action === 'change_plan') {
-      const newPlanSlug = String(body.planSlug || 'taster').toLowerCase().trim();
-      const planName = body.planName || 'Plan';
-      const amount = Number(body.amount || 0);
+      const rawPlanSlug = String(body.planSlug || 'taster').toLowerCase().trim();
+      const cleanBase = rawPlanSlug.replace(/-(monthly|annual|year)$/i, '');
+      const isFree = cleanBase === 'taster' || cleanBase === 'free' || Number(body.amount) === 0;
       const interval = body.interval === 'YEAR' ? 'YEAR' : 'MONTH';
+      const finalPlanSlug = isFree ? 'taster' : (rawPlanSlug.includes('-') ? rawPlanSlug : `${cleanBase}-${interval.toLowerCase()}`);
+      const planName = body.planName || (isFree ? 'Taster (Free)' : cleanBase);
+      const amount = isFree ? 0 : Number(body.amount || 0);
       const gateway = body.gateway || 'stripe';
       const currency = body.currency || 'USD';
       const customTokens = Number(body.tokenLimit ?? 0);
 
-      // 1. Mark prior active transactions as refunded/cancelled in PostgreSQL
+      // Rule 3: Mark prior active transactions as refunded/cancelled in PostgreSQL
       await query(`
         UPDATE payment_transactions
         SET status = 'refunded',
             auto_renew = FALSE,
             is_recurring = FALSE,
+            expiry_date = NOW(),
             updated_at = NOW()
-        WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
+        WHERE LOWER(TRIM(customer_email)) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
       `, [email]);
 
-      // 2. Handle Revert to Free Plan
-      if (newPlanSlug === 'taster' || newPlanSlug === 'free' || amount === 0) {
+      if (isFree) {
+        // Revert to Free Plan in users table
         await query(`
           UPDATE users 
-          SET subscription_plan = 'taster', updated_at = NOW() 
-          WHERE LOWER(email) = $1
+          SET subscription_plan = 'taster',
+              subscription_tier = 'taster',
+              plan_slug = 'taster',
+              plan_name = 'Taster (Free)',
+              plan_interval = 'MONTH',
+              plan_expiry_date = NULL,
+              updated_at = NOW() 
+          WHERE LOWER(TRIM(email)) = $1
         `, [email]);
 
-        // Grant free plan tokens
         try {
           await grantPlanTokensOnPurchase(email, 'taster', {
             planName: 'Taster (Free)',
@@ -297,7 +338,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, message: 'Switched to free plan tier (Taster).' });
       }
 
-      // 3. Compute Expiry Date (1 Month or 1 Year)
+      // Compute expiration date
       const expDate = new Date();
       if (interval === 'YEAR') {
         expDate.setFullYear(expDate.getFullYear() + 1);
@@ -307,7 +348,7 @@ export async function POST(req: NextRequest) {
 
       const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
 
-      // 4. Record Succeeded Payment Transaction in PostgreSQL
+      // Insert fresh Succeeded Payment Transaction
       await query(`
         INSERT INTO payment_transactions (
           id, customer_name, customer_email, plan_name, plan_slug, amount,
@@ -315,27 +356,33 @@ export async function POST(req: NextRequest) {
           auto_renew, expiry_date, created_at, updated_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'succeeded', FALSE, TRUE, $9, TRUE, $10, NOW(), NOW())
       `, [
-        txId, body.userName || 'User', email, planName, newPlanSlug,
+        txId, body.userName || 'Subscriber', email, planName, finalPlanSlug,
         amount, currency, gateway, interval, expDate.toISOString()
       ]);
 
-      // 5. Update users table subscription_plan
+      // Atomically synchronize users table
       await query(`
         UPDATE users 
-        SET subscription_plan = $1, updated_at = NOW() 
-        WHERE LOWER(email) = $2
-      `, [newPlanSlug, email]);
+        SET subscription_plan = $1,
+            subscription_tier = $1,
+            plan_slug = $1,
+            plan_name = $2,
+            plan_interval = $3,
+            plan_expiry_date = $4,
+            updated_at = NOW() 
+        WHERE LOWER(TRIM(email)) = $5
+      `, [finalPlanSlug, planName, interval, expDate.toISOString(), email]);
 
-      // 6. Grant Tokens and Record Audit Ledger Transaction on /admin/token-setting
+      // Grant Tokens to PostgreSQL balance and log audit record
       let tokenGrantResult = null;
       try {
-        tokenGrantResult = await grantPlanTokensOnPurchase(email, newPlanSlug, {
+        tokenGrantResult = await grantPlanTokensOnPurchase(email, finalPlanSlug, {
           orderId: txId,
           planName,
           customTokens: customTokens > 0 ? customTokens : undefined
         });
       } catch (tokenErr) {
-        console.warn('grantPlanTokensOnPurchase warning:', tokenErr);
+        console.warn('[grantPlanTokensOnPurchase error]:', tokenErr);
       }
 
       return NextResponse.json({

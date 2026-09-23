@@ -551,12 +551,12 @@ export default function AdminPaymentPage() {
         const isValidStatus = isSucceeded(statusLower) || isCanceled(statusLower);
         const notExpired = !tx.expiryDate || new Date(tx.expiryDate).getTime() > now.getTime();
         
-        const txSlug = sanitizeSinglePlan(tx.planSlug);
+        const txSlug = sanitizeSinglePlan((tx.planSlug || tx.plan_slug || 'taster'));
         const txBase = txSlug.replace(/-(monthly|annual|free)$/, '');
 
         const matchesPlan = (txSlug === currentPlan) || 
                             (txBase === currentBase && currentBase !== '') ||
-                            (tx.planName && tx.planName.toLowerCase().includes(currentBase.replace(/-/g, ' ')));
+                            (tx.planName && (tx.planName || tx.plan_name || '').toLowerCase().includes(currentBase.replace(/-/g, ' ')));
         return matchesEmail && isValidStatus && matchesPlan && notExpired;
       });
 
@@ -1107,9 +1107,9 @@ export default function AdminPaymentPage() {
     setEditCustomerName(tx.customerName || '');
     setEditCustomerEmail(tx.customerEmail || '');
 
-    const rawSlug = sanitizeSinglePlan(tx.planSlug || '');
+    const rawSlug = sanitizeSinglePlan((tx.planSlug || tx.plan_slug || 'taster') || '');
     const matched = availablePlans.find((p) => p.slug === rawSlug) ||
-                    availablePlans.find((p) => p.id === tx.planSlug) ||
+                    availablePlans.find((p) => p.id === (tx.planSlug || tx.plan_slug || 'taster')) ||
                     availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === rawSlug.replace(/-(monthly|annual)$/, ''));
 
     const resolvedSlug = matched ? matched.slug : rawSlug;
@@ -1177,7 +1177,7 @@ export default function AdminPaymentPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               ...targetUser, 
-              subscriptionPlan: targetUser.subscriptionPlan || tx.planSlug, 
+              subscriptionPlan: targetUser.subscriptionPlan || (tx.planSlug || tx.plan_slug || 'taster'), 
               planExpiryDate: tx.expiryDate, 
               expiryDate: tx.expiryDate 
             }),
@@ -2304,7 +2304,7 @@ export default function AdminPaymentPage() {
 
                         {visibleColumns.plan && (
                           <td className="px-5 py-3.5 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                            {tx.planName || tx.planSlug || 'Plan'}
+                            {tx.planName || (tx.planSlug || tx.plan_slug || 'taster') || 'Plan'}
                           </td>
                         )}
 
