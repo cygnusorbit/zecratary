@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.6.7",
+  "version": "7.6.8",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.6.7",
+  "version": "7.6.8",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -20827,12 +20827,12 @@ export default function AdminPaymentPage() {
         const isValidStatus = isSucceeded(statusLower) || isCanceled(statusLower);
         const notExpired = !tx.expiryDate || new Date(tx.expiryDate).getTime() > now.getTime();
         
-        const txSlug = sanitizeSinglePlan(tx.planSlug);
+        const txSlug = sanitizeSinglePlan((tx.planSlug || tx.plan_slug || 'taster'));
         const txBase = txSlug.replace(/-(monthly|annual|free)$/, '');
 
         const matchesPlan = (txSlug === currentPlan) || 
                             (txBase === currentBase && currentBase !== '') ||
-                            (tx.planName && tx.planName.toLowerCase().includes(currentBase.replace(/-/g, ' ')));
+                            (tx.planName && (tx.planName || tx.plan_name || '').toLowerCase().includes(currentBase.replace(/-/g, ' ')));
         return matchesEmail && isValidStatus && matchesPlan && notExpired;
       });
 
@@ -21383,9 +21383,9 @@ export default function AdminPaymentPage() {
     setEditCustomerName(tx.customerName || '');
     setEditCustomerEmail(tx.customerEmail || '');
 
-    const rawSlug = sanitizeSinglePlan(tx.planSlug || '');
+    const rawSlug = sanitizeSinglePlan((tx.planSlug || tx.plan_slug || 'taster') || '');
     const matched = availablePlans.find((p) => p.slug === rawSlug) ||
-                    availablePlans.find((p) => p.id === tx.planSlug) ||
+                    availablePlans.find((p) => p.id === (tx.planSlug || tx.plan_slug || 'taster')) ||
                     availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === rawSlug.replace(/-(monthly|annual)$/, ''));
 
     const resolvedSlug = matched ? matched.slug : rawSlug;
@@ -21453,7 +21453,7 @@ export default function AdminPaymentPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               ...targetUser, 
-              subscriptionPlan: targetUser.subscriptionPlan || tx.planSlug, 
+              subscriptionPlan: targetUser.subscriptionPlan || (tx.planSlug || tx.plan_slug || 'taster'), 
               planExpiryDate: tx.expiryDate, 
               expiryDate: tx.expiryDate 
             }),
@@ -22580,7 +22580,7 @@ export default function AdminPaymentPage() {
 
                         {visibleColumns.plan && (
                           <td className="px-5 py-3.5 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                            {tx.planName || tx.planSlug || 'Plan'}
+                            {tx.planName || (tx.planSlug || tx.plan_slug || 'taster') || 'Plan'}
                           </td>
                         )}
 
@@ -27648,7 +27648,7 @@ export default function AdminUserManagementPage() {
     setIsLoading(true);
     purgeLegacyBrowserAdminStorage();
     try {
-      const res = await fetch('/api/admin/users', { cache: 'no-store' });
+      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
@@ -27664,7 +27664,7 @@ export default function AdminUserManagementPage() {
               createdAt: '2026-01-01T00:00:00.000Z'
             };
             list.unshift(rootAdmin);
-            await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rootAdmin) }).catch(() => {});
+            await fetch('/api/admin/users?t=' + Date.now(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rootAdmin) }).catch(() => {});
           }
           const freshList = list;
           setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
@@ -27939,7 +27939,7 @@ export default function AdminUserManagementPage() {
     try {
       await syncUserPlanWithPaymentLedger(cleanEmail, assignedPlan, planName, priceDollars, interval);
 
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users?t=' + Date.now(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newUser),
@@ -28023,7 +28023,7 @@ export default function AdminUserManagementPage() {
     try {
       await syncUserPlanWithPaymentLedger(cleanEmail, assignedPlan, planName, priceDollars, interval);
 
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users?t=' + Date.now(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedUser),
@@ -28300,6 +28300,21 @@ export default function AdminUserManagementPage() {
               </tbody>
             </table>
           </div>
+          {/* Admin Pagination */}
+          {processedAdmins.length > ITEMS_PER_PAGE && (
+            <div className="px-5 py-3.5 border-t flex items-center justify-between text-xs transition-colors" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              <span>Showing {adminStartIndex + 1} to {adminEndIndex} of {processedAdmins.length} admins</span>
+              <div className="flex items-center gap-1.5">
+                <button type="button" disabled={adminCurrentPage <= 1} onClick={() => setAdminCurrentPage(p => Math.max(1, p - 1))} className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="font-bold px-2" style={{ color: 'var(--color-text)' }}>Page {adminCurrentPage} of {adminTotalPages}</span>
+                <button type="button" disabled={adminCurrentPage >= adminTotalPages} onClick={() => setAdminCurrentPage(p => Math.min(adminTotalPages, p + 1))} className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -28399,6 +28414,27 @@ export default function AdminUserManagementPage() {
                 )}
               </tbody>
             </table>
+          </div>
+          {/* Standard User Pagination */}
+          <div className="px-5 py-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            <div>
+              {processedStandardUsers.length === 0 ? 'Showing 0 standard users' : (
+                <>Showing <span className="font-bold" style={{ color: 'var(--color-text)' }}>{userStartIndex + 1}</span> to <span className="font-bold" style={{ color: 'var(--color-text)' }}>{userEndIndex}</span> of <span className="font-bold" style={{ color: 'var(--color-text)' }}>{processedStandardUsers.length}</span> standard users</>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button type="button" disabled={userCurrentPage <= 1} onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))} className={`p-2 rounded-xl border flex items-center justify-center transition ${userCurrentPage <= 1 ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:opacity-80'}`} style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              {Array.from({ length: userTotalPages }, (_, i) => i + 1).map(pageNum => (
+                <button key={pageNum} type="button" onClick={() => setUserCurrentPage(pageNum)} className="min-w-[34px] h-[34px] rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer" style={userCurrentPage === pageNum ? { backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)', color: '#ffffff' } : { backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                  {pageNum}
+                </button>
+              ))}
+              <button type="button" disabled={userCurrentPage >= userTotalPages} onClick={() => setUserCurrentPage(p => Math.min(userTotalPages, p + 1))} className={`p-2 rounded-xl border flex items-center justify-center transition ${userCurrentPage >= userTotalPages ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:opacity-80'}`} style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -38987,121 +39023,68 @@ export async function PUT(req: NextRequest) {
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
-async function ensurePaymentSchema() {
-  try {
-    // 1. Drop foreign key constraint on plan_slug to decouple financial ledger from mutable plan catalog
-    await query(`
-      DO $$ 
-      DECLARE 
-          r RECORD;
-      BEGIN 
-          BEGIN
-            ALTER TABLE payment_transactions DROP CONSTRAINT IF EXISTS payment_transactions_plan_slug_fkey;
-          EXCEPTION WHEN OTHERS THEN NULL;
-          END;
-          
-          FOR r IN (
-              SELECT conname 
-              FROM pg_constraint 
-              WHERE conrelid = 'payment_transactions'::regclass 
-                AND contype = 'f' 
-                AND conname LIKE '%plan_slug%'
-          ) LOOP
-              BEGIN
-                EXECUTE 'ALTER TABLE payment_transactions DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
-              EXCEPTION WHEN OTHERS THEN NULL;
-              END;
-          END LOOP;
-      END $$;
-    `).catch(() => {});
+function normalizeTx(tx: any) {
+  if (!tx || typeof tx !== 'object') return tx;
+  const customerEmail = (tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
+  const customerName = tx.customer_name || tx.customerName || 'Customer';
+  const planSlug = (tx.plan_slug || tx.planSlug || 'taster').toLowerCase().trim();
+  const planName = tx.plan_name || tx.planName || 'Plan';
+  const createdAt = tx.created_at || tx.createdAt || new Date().toISOString();
+  const expiryDate = tx.expiry_date || tx.expiryDate || null;
+  const isRecurring = tx.is_recurring !== undefined ? Boolean(tx.is_recurring) : (tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true);
+  const recurringInterval = (tx.recurring_interval || tx.recurringInterval || (planSlug.includes('annual') || planSlug.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
+  const autoRenew = tx.auto_renew !== undefined ? Boolean(tx.auto_renew) : (tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true);
+  const testMode = tx.test_mode !== undefined ? Boolean(tx.test_mode) : Boolean(tx.testMode);
+  const failureReason = tx.failure_reason || tx.failureReason || null;
+  const gatewayTransactionId = tx.gateway_transaction_id || tx.gatewayTransactionId || null;
+  const confirmedAmount = tx.confirmed_amount !== undefined ? tx.confirmed_amount : (tx.confirmedAmount !== undefined ? tx.confirmedAmount : null);
+  const confirmedAt = tx.confirmed_at || tx.confirmedAt || null;
 
-    // 2. Ensure payment_transactions table exists with all standard columns
-    await query(`
-      CREATE TABLE IF NOT EXISTS payment_transactions (
-        id VARCHAR(255) PRIMARY KEY,
-        customer_name TEXT,
-        customer_email TEXT,
-        plan_name TEXT,
-        plan_slug TEXT,
-        amount NUMERIC DEFAULT 0,
-        currency VARCHAR(10) DEFAULT 'USD',
-        gateway VARCHAR(50) DEFAULT 'stripe',
-        status VARCHAR(50) DEFAULT 'succeeded',
-        test_mode BOOLEAN DEFAULT false,
-        failure_reason TEXT,
-        is_recurring BOOLEAN DEFAULT true,
-        recurring_interval VARCHAR(20) DEFAULT 'MONTH',
-        auto_renew BOOLEAN DEFAULT true,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW(),
-        expiry_date TIMESTAMPTZ,
-        gateway_transaction_id TEXT,
-        confirmed_amount NUMERIC,
-        confirmed_at TIMESTAMPTZ
-      );
-    `);
-
-    // 3. Add any missing columns safely
-    await query(`
-      DO $$ 
-      BEGIN 
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_name TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_email TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_name TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_slug TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS amount NUMERIC DEFAULT 0; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway VARCHAR(50) DEFAULT 'stripe'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'succeeded'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS test_mode BOOLEAN DEFAULT false; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT true; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(20) DEFAULT 'MONTH'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT true; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway_transaction_id TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
-      END $$;
-    `);
-
-    // 4. One-time database cleanup: Cancel older duplicate interval records so users never have both Monthly & Annual active simultaneously
-    await query(`
-      DO $$
-      BEGIN
-        UPDATE payment_transactions p1
-        SET status = 'canceled', is_recurring = false, auto_renew = false, updated_at = NOW()
-        FROM payment_transactions p2
-        WHERE LOWER(p1.customer_email) = LOWER(p2.customer_email)
-          AND p1.id != p2.id
-          AND p1.status = 'succeeded'
-          AND p2.status = 'succeeded'
-          AND regexp_replace(p1.plan_slug, '-(monthly|annual|free)$', '') = regexp_replace(p2.plan_slug, '-(monthly|annual|free)$', '')
-          AND (
-            p1.created_at < p2.created_at 
-            OR (p1.created_at = p2.created_at AND p1.id < p2.id)
-          );
-      EXCEPTION WHEN OTHERS THEN NULL;
-      END $$;
-    `).catch(() => {});
-  } catch (e) {
-    console.warn('[Payment API] Schema check warning:', e);
-  }
+  return {
+    ...tx,
+    id: tx.id,
+    customerName,
+    customer_name: customerName,
+    customerEmail,
+    customer_email: customerEmail,
+    planName,
+    plan_name: planName,
+    planSlug,
+    plan_slug: planSlug,
+    amount: Number(tx.amount || 0),
+    currency: tx.currency || 'USD',
+    gateway: tx.gateway || 'stripe',
+    status: tx.status || 'succeeded',
+    testMode,
+    test_mode: testMode,
+    failureReason,
+    failure_reason: failureReason,
+    isRecurring,
+    is_recurring: isRecurring,
+    recurringInterval,
+    recurring_interval: recurringInterval,
+    autoRenew,
+    auto_renew: autoRenew,
+    createdAt,
+    created_at: createdAt,
+    expiryDate,
+    expiry_date: expiryDate,
+    gatewayTransactionId,
+    gateway_transaction_id: gatewayTransactionId,
+    confirmedAmount: confirmedAmount !== null ? Number(confirmedAmount) : null,
+    confirmed_amount: confirmedAmount !== null ? Number(confirmedAmount) : null,
+    confirmedAt,
+    confirmed_at: confirmedAt
+  };
 }
 
 export async function GET() {
   try {
-    await ensurePaymentSchema();
-
-    let txRes = await query(
+    const txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
-    ).catch(async () => {
-      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
-    });
-
-    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+    ).catch(() => ({ rows: [] }));
+    const rawList = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+    const transactions = rawList.map(normalizeTx);
 
     let settings = null;
     try {
@@ -39127,7 +39110,6 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    await ensurePaymentSchema();
     const body = await req.json();
 
     if (body.action === 'connect_stripe') {
@@ -39137,170 +39119,124 @@ export async function POST(req: Request) {
       });
     }
 
-    // Add Transaction
+    // Add Transaction: Record payment, cancel prior active transactions (Rule 3), and update PostgreSQL users table
     if (body.action === 'add_transaction') {
-      const tx = body.transaction;
-      if (!tx) {
+      const rawTx = body.transaction || body;
+      if (!rawTx) {
         return NextResponse.json({ success: false, error: 'Transaction object required' }, { status: 400 });
       }
 
-      const txId = String(tx.id || ('tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5)));
-      const customerName = String(tx.customerName || 'Customer');
-      const customerEmail = String(tx.customerEmail || '').toLowerCase().trim();
-      const planName = String(tx.planName || 'Plan');
-      let rawSlug = String(tx.planSlug || 'taster');
-      const baseSlug = rawSlug.replace(/-(monthly|annual|free)$/, '');
-      const amount = Number(tx.amount || 0);
-      const currency = String(tx.currency || 'USD');
-      const gateway = String(tx.gateway || 'stripe');
-      const status = String(tx.status || 'succeeded').toLowerCase();
-      const testMode = Boolean(tx.testMode);
-      const failureReason = tx.failureReason || null;
-      const isRecurring = tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true;
-      const recurringInterval = String(tx.recurringInterval || 'MONTH');
-      const autoRenew = tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true;
-      const createdAt = tx.createdAt ? new Date(tx.createdAt).toISOString() : new Date().toISOString();
-      const expiryDate = tx.expiryDate ? new Date(tx.expiryDate).toISOString() : null;
-      const gatewayTxId = tx.gatewayTransactionId ? String(tx.gatewayTransactionId).trim() : null;
-      const confirmedAmount = tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : (status === 'succeeded' ? amount : null);
-      const confirmedAt = tx.confirmedAt ? new Date(tx.confirmedAt).toISOString() : (status === 'succeeded' ? new Date().toISOString() : null);
+      const tx = normalizeTx(rawTx);
+      const isSucceeded = tx.status === 'succeeded' || tx.status === 'paid';
+      const isFree = tx.planSlug === 'taster' || tx.planSlug === 'free' || tx.amount === 0;
 
-      // Resolve valid slug target for PostgreSQL compatibility
-      let targetPlanSlug = rawSlug;
-      try {
-        const pCheck = await query(`SELECT slug FROM subscription_plans WHERE slug = $1 LIMIT 1`, [rawSlug]);
-        const existsExact = Array.isArray(pCheck) ? pCheck.length > 0 : (pCheck?.rows?.length > 0);
-        if (!existsExact) {
-          const bCheck = await query(`SELECT slug FROM subscription_plans WHERE slug = $1 LIMIT 1`, [baseSlug]);
-          const existsBase = Array.isArray(bCheck) ? bCheck.length > 0 : (bCheck?.rows?.length > 0);
-          if (existsBase) {
-            targetPlanSlug = baseSlug;
-          }
-        }
-      } catch (_) {}
-
-      // ENFORCE: User cannot have both Monthly & Annual active from the same plan!
-      // If adding a succeeded subscription, cancel previous active transactions for this user.
-      if (status === 'succeeded' && customerEmail) {
+      // 1. Enforce Rule 3: Mark previous active succeeded transactions as refunded/cancelled upon upgrade/downgrade
+      if (tx.customerEmail) {
         await query(
-          `UPDATE payment_transactions 
-           SET status = 'canceled', is_recurring = false, auto_renew = false, updated_at = NOW()
-           WHERE LOWER(customer_email) = LOWER($1) 
-             AND id != $2 
-             AND (status = 'succeeded' OR status = 'pending')`,
-          [customerEmail, txId]
+          `UPDATE payment_transactions
+           SET status = 'refunded',
+               expiry_date = NOW(),
+               updated_at = NOW()
+           WHERE LOWER(TRIM(customer_email)) = $1
+             AND id != $2
+             AND status IN ('succeeded', 'paid', 'active')`,
+          [tx.customerEmail, tx.id]
         ).catch(() => {});
       }
 
-      const checkRes = await query(`SELECT id FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]).catch(() => ({ rows: [] }));
-      const exists = Array.isArray(checkRes) ? checkRes.length > 0 : (checkRes?.rows?.length > 0);
+      // 2. Insert new transaction into payment_transactions
+      await query(
+        `INSERT INTO payment_transactions (
+          id, customer_name, customer_email, plan_name, plan_slug,
+          amount, currency, gateway, status, test_mode, failure_reason,
+          is_recurring, recurring_interval, auto_renew, created_at,
+          expiry_date, gateway_transaction_id, confirmed_amount, confirmed_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          customer_name = EXCLUDED.customer_name,
+          customer_email = EXCLUDED.customer_email,
+          plan_name = EXCLUDED.plan_name,
+          plan_slug = EXCLUDED.plan_slug,
+          amount = EXCLUDED.amount,
+          currency = EXCLUDED.currency,
+          gateway = EXCLUDED.gateway,
+          status = EXCLUDED.status,
+          test_mode = EXCLUDED.test_mode,
+          failure_reason = EXCLUDED.failure_reason,
+          is_recurring = EXCLUDED.is_recurring,
+          recurring_interval = EXCLUDED.recurring_interval,
+          auto_renew = EXCLUDED.auto_renew,
+          created_at = EXCLUDED.created_at,
+          expiry_date = EXCLUDED.expiry_date,
+          gateway_transaction_id = EXCLUDED.gateway_transaction_id,
+          confirmed_amount = EXCLUDED.confirmed_amount,
+          confirmed_at = EXCLUDED.confirmed_at,
+          updated_at = NOW()`,
+        [
+          tx.id || ('tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5)),
+          tx.customerName,
+          tx.customerEmail,
+          tx.planName,
+          tx.planSlug,
+          tx.amount,
+          tx.currency,
+          tx.gateway,
+          tx.status,
+          tx.testMode,
+          tx.failureReason,
+          tx.isRecurring,
+          tx.recurringInterval,
+          tx.autoRenew,
+          tx.createdAt,
+          tx.expiryDate,
+          tx.gatewayTransactionId,
+          tx.confirmedAmount,
+          tx.confirmedAt
+        ]
+      );
 
-      const runInsert = async (slugToUse: string) => {
-        return await query(
-          `INSERT INTO payment_transactions (
-            id, customer_name, customer_email, plan_name, plan_slug,
-            amount, currency, gateway, status, test_mode, failure_reason,
-            is_recurring, recurring_interval, auto_renew, created_at,
-            expiry_date, gateway_transaction_id, confirmed_amount, confirmed_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())`,
-          [
-            txId, customerName, customerEmail, planName, slugToUse,
-            amount, currency, gateway, status, testMode, failureReason,
-            isRecurring, recurringInterval, autoRenew, createdAt,
-            expiryDate, gatewayTxId, confirmedAmount, confirmedAt
-          ]
-        );
-      };
-
-      if (exists) {
-        await query(
-          `UPDATE payment_transactions 
-           SET customer_name = $1, customer_email = $2, plan_name = $3, plan_slug = $4,
-               amount = $5, currency = $6, gateway = $7, status = $8, failure_reason = $9,
-               is_recurring = $10, recurring_interval = $11, auto_renew = $12, created_at = $13,
-               expiry_date = $14, gateway_transaction_id = $15, confirmed_amount = $16,
-               confirmed_at = $17, updated_at = NOW()
-           WHERE id = $18`,
-          [
-            customerName, customerEmail, planName, targetPlanSlug, amount, currency, gateway,
-            status, failureReason, isRecurring, recurringInterval, autoRenew, createdAt,
-            expiryDate, gatewayTxId, confirmedAmount, confirmedAt, txId
-          ]
-        ).catch(async () => {
+      // 3. Atomically synchronize user plan in PostgreSQL users table
+      if (tx.customerEmail) {
+        if (isSucceeded && !isFree) {
           await query(
-            `UPDATE payment_transactions 
-             SET customer_name = $1, customer_email = $2, plan_name = $3, plan_slug = $4,
-                 amount = $5, status = $6, expiry_date = $7, updated_at = NOW()
-             WHERE id = $8`,
-            [customerName, customerEmail, planName, baseSlug, amount, status, expiryDate, txId]
+            `UPDATE users 
+             SET subscription_plan = $1,
+                 subscription_tier = $1,
+                 plan_slug = $1,
+                 plan_name = $2,
+                 plan_interval = $3,
+                 plan_expiry_date = $4,
+                 updated_at = NOW()
+             WHERE LOWER(TRIM(email)) = $5`,
+            [tx.planSlug, tx.planName, tx.recurringInterval, tx.expiryDate, tx.customerEmail]
           ).catch(() => {});
-        });
-      } else {
-        try {
-          await runInsert(targetPlanSlug);
-        } catch (insertErr: any) {
-          console.warn('[Payment API] Primary insert failed, retrying with base slug:', insertErr?.message || insertErr);
-          await query(`ALTER TABLE payment_transactions DROP CONSTRAINT IF EXISTS payment_transactions_plan_slug_fkey;`).catch(() => {});
-          try {
-            await runInsert(baseSlug);
-          } catch (retryErr) {
-            await query(
-              `INSERT INTO payment_transactions (
-                id, customer_name, customer_email, plan_name, plan_slug,
-                amount, currency, gateway, status, created_at, expiry_date
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-              [
-                txId, customerName, customerEmail, planName, baseSlug,
-                amount, currency, gateway, status, createdAt, expiryDate
-              ]
-            );
-          }
+        } else if (isFree || tx.status === 'refunded') {
+          await query(
+            `UPDATE users 
+             SET subscription_plan = 'taster',
+                 subscription_tier = 'taster',
+                 plan_slug = 'taster',
+                 plan_name = 'Taster (Free)',
+                 plan_interval = 'MONTH',
+                 plan_expiry_date = NULL,
+                 updated_at = NOW()
+             WHERE LOWER(TRIM(email)) = $1`,
+            [tx.customerEmail]
+          ).catch(() => {});
         }
       }
 
-      return NextResponse.json({
-        success: true,
-        message: 'Transaction recorded successfully',
-        transaction: {
-          ...tx,
-          id: txId,
-          customerName,
-          customerEmail,
-          planName,
-          planSlug: targetPlanSlug,
-          amount,
-          currency,
-          gateway,
-          status,
-          isRecurring,
-          autoRenew,
-          createdAt,
-          expiryDate
-        }
-      });
+      return NextResponse.json({ success: true, message: 'Transaction recorded and user plan synchronized', transaction: tx });
     }
 
     // Update Transaction
     if (body.action === 'update_transaction') {
-      const tx = body.transaction;
-      if (!tx || !tx.id) {
+      const rawTx = body.transaction || body;
+      if (!rawTx || !rawTx.id) {
         return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
       }
 
-      const cleanEmail = (tx.customerEmail || '').toLowerCase().trim();
-      const baseSlug = String(tx.planSlug || 'taster').replace(/-(monthly|annual|free)$/, '');
-
-      // If updating to succeeded, cancel conflicting active subscriptions for this customer
-      if (tx.status === 'succeeded' && cleanEmail) {
-        await query(
-          `UPDATE payment_transactions 
-           SET status = 'canceled', is_recurring = false, auto_renew = false, updated_at = NOW()
-           WHERE LOWER(customer_email) = LOWER($1) 
-             AND id != $2 
-             AND (status = 'succeeded' OR status = 'pending')`,
-          [cleanEmail, tx.id]
-        ).catch(() => {});
-      }
+      const tx = normalizeTx(rawTx);
 
       await query(
         `UPDATE payment_transactions 
@@ -39312,54 +39248,79 @@ export async function POST(req: Request) {
          WHERE id = $18`,
         [
           tx.customerName,
-          cleanEmail,
+          tx.customerEmail,
           tx.planName,
           tx.planSlug,
-          Number(tx.amount || 0),
+          tx.amount,
           tx.currency,
           tx.gateway,
           tx.status,
-          tx.failureReason || null,
-          Boolean(tx.isRecurring),
-          tx.recurringInterval || 'MONTH',
-          Boolean(tx.autoRenew),
+          tx.failureReason,
+          tx.isRecurring,
+          tx.recurringInterval,
+          tx.autoRenew,
           tx.createdAt,
-          tx.expiryDate || null,
-          tx.gatewayTransactionId || null,
-          tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : null,
-          tx.confirmedAt || null,
+          tx.expiryDate,
+          tx.gatewayTransactionId,
+          tx.confirmedAmount,
+          tx.confirmedAt,
           tx.id
         ]
-      ).catch(async () => {
-        await query(`ALTER TABLE payment_transactions DROP CONSTRAINT IF EXISTS payment_transactions_plan_slug_fkey;`).catch(() => {});
-        await query(
-          `UPDATE payment_transactions 
-           SET customer_name = $1, customer_email = $2, plan_name = $3, plan_slug = $4,
-               amount = $5, status = $6, expiry_date = $7, updated_at = NOW()
-           WHERE id = $8`,
-          [
-            tx.customerName,
-            cleanEmail,
-            tx.planName,
-            baseSlug,
-            Number(tx.amount || 0),
-            tx.status,
-            tx.expiryDate || null,
-            tx.id
-          ]
-        ).catch(() => {});
-      });
+      );
 
-      return NextResponse.json({ success: true, message: 'Transaction updated', transaction: tx });
+      // Reconcile user plan in PostgreSQL
+      if (tx.customerEmail) {
+        if (tx.status === 'succeeded') {
+          await query(
+            `UPDATE users 
+             SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
+             WHERE LOWER(TRIM(email)) = $5`,
+            [tx.planSlug, tx.planName, tx.recurringInterval, tx.expiryDate, tx.customerEmail]
+          ).catch(() => {});
+        } else if (tx.status === 'refunded') {
+          // Check if user has any other active succeeded transaction
+          const otherTx = await query(
+            `SELECT plan_slug, plan_name, recurring_interval, expiry_date 
+             FROM payment_transactions 
+             WHERE LOWER(TRIM(customer_email)) = $1 
+               AND status = 'succeeded' 
+               AND (expiry_date IS NULL OR expiry_date > NOW())
+             ORDER BY created_at DESC LIMIT 1`,
+            [tx.customerEmail]
+          ).catch(() => ({ rows: [] }));
+
+          const activeRow = Array.isArray(otherTx) ? otherTx[0] : otherTx?.rows?.[0];
+          if (activeRow) {
+            await query(
+              `UPDATE users 
+               SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
+               WHERE LOWER(TRIM(email)) = $5`,
+              [activeRow.plan_slug, activeRow.plan_name, activeRow.recurring_interval, activeRow.expiry_date, tx.customerEmail]
+            ).catch(() => {});
+          } else {
+            await query(
+              `UPDATE users 
+               SET subscription_plan = 'taster', plan_slug = 'taster', plan_name = 'Taster (Free)', plan_interval = 'MONTH', plan_expiry_date = NULL, updated_at = NOW()
+               WHERE LOWER(TRIM(email)) = $1`,
+              [tx.customerEmail]
+            ).catch(() => {});
+          }
+        }
+      }
+
+      return NextResponse.json({ success: true, message: 'Transaction updated and plan reconciled', transaction: tx });
     }
 
     // Refund / Cancel / Confirm
     if (body.action === 'refund_transaction' || body.action === 'cancel_transaction' || body.action === 'confirm_payment') {
-      const tx = body.transaction || {};
-      const txId = body.id || tx.id;
+      const rawTx = body.transaction || body;
+      const txId = body.id || rawTx.id;
       if (!txId) {
         return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
       }
+
+      const tx = normalizeTx(rawTx);
+      const newStatus = body.action === 'confirm_payment' ? 'succeeded' : 'refunded';
 
       await query(
         `UPDATE payment_transactions 
@@ -39367,28 +39328,51 @@ export async function POST(req: Request) {
              confirmed_amount = $5, confirmed_at = $6, gateway_transaction_id = $7, updated_at = NOW()
          WHERE id = $8`,
         [
-          tx.status,
-          Boolean(tx.isRecurring),
-          Boolean(tx.autoRenew),
-          tx.expiryDate || null,
-          tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : null,
-          tx.confirmedAt || null,
-          tx.gatewayTransactionId || null,
+          newStatus,
+          tx.isRecurring,
+          tx.autoRenew,
+          body.action === 'confirm_payment' ? tx.expiryDate : new Date().toISOString(),
+          tx.confirmedAmount,
+          tx.confirmedAt,
+          tx.gatewayTransactionId,
           txId
         ]
-      ).catch(async () => {
-        await query(
-          `UPDATE payment_transactions 
-           SET status = $1, expiry_date = $2, updated_at = NOW()
-           WHERE id = $3`,
-          [tx.status, tx.expiryDate || null, txId]
-        ).catch(() => {});
-      });
+      );
+
+      // Reconcile user plan in PostgreSQL
+      if (tx.customerEmail) {
+        const otherTx = await query(
+          `SELECT plan_slug, plan_name, recurring_interval, expiry_date 
+           FROM payment_transactions 
+           WHERE LOWER(TRIM(customer_email)) = $1 
+             AND status = 'succeeded' 
+             AND (expiry_date IS NULL OR expiry_date > NOW())
+           ORDER BY created_at DESC LIMIT 1`,
+          [tx.customerEmail]
+        ).catch(() => ({ rows: [] }));
+
+        const activeRow = Array.isArray(otherTx) ? otherTx[0] : otherTx?.rows?.[0];
+        if (activeRow) {
+          await query(
+            `UPDATE users 
+             SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
+             WHERE LOWER(TRIM(email)) = $5`,
+            [activeRow.plan_slug, activeRow.plan_name, activeRow.recurring_interval, activeRow.expiry_date, tx.customerEmail]
+          ).catch(() => {});
+        } else {
+          await query(
+            `UPDATE users 
+             SET subscription_plan = 'taster', plan_slug = 'taster', plan_name = 'Taster (Free)', plan_interval = 'MONTH', plan_expiry_date = NULL, updated_at = NOW()
+             WHERE LOWER(TRIM(email)) = $1`,
+            [tx.customerEmail]
+          ).catch(() => {});
+        }
+      }
 
       return NextResponse.json({ 
         success: true, 
-        message: body.action === 'refund_transaction' ? 'Transaction refunded' : body.action === 'cancel_transaction' ? 'Transaction cancelled' : 'Payment confirmed',
-        transaction: tx 
+        message: body.action === 'confirm_payment' ? 'Payment confirmed' : 'Transaction refunded / cancelled',
+        transaction: { ...tx, status: newStatus } 
       });
     }
 
@@ -39419,7 +39403,6 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    await ensurePaymentSchema();
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
 
@@ -40894,98 +40877,400 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+function getDiskUserPaths(): string[] {
+  return [
+    path.join(process.cwd(), 'data', 'users.json'),
+    path.join(process.cwd(), 'data', 'users.json.bak'),
+    path.join(process.cwd(), 'apps', 'web', 'data', 'users.json'),
+    path.join(process.cwd(), 'apps', 'web', 'data', 'users.json.bak'),
+    path.join(process.cwd(), 'apps', 'web', 'apps', 'web', 'data', 'users.json'),
+    path.join(process.cwd(), 'src', 'data', 'users.json'),
+    path.join(process.cwd(), 'apps', 'web', 'src', 'data', 'users.json')
+  ];
+}
+
+async function ensureUsersTableAndMigrate() {
   try {
+    // 1. Ensure table and all schema columns exist
     await query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS prompt_tokens INTEGER DEFAULT 0;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS completion_tokens INTEGER DEFAULT 0;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS request_count INTEGER DEFAULT 0;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS token_usage JSONB DEFAULT '{}'::jsonb;
-    `);
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(128) PRIMARY KEY,
+        name VARCHAR(255),
+        email VARCHAR(255) UNIQUE,
+        password VARCHAR(255),
+        role VARCHAR(64) DEFAULT 'user',
+        subscription_plan VARCHAR(128) DEFAULT 'taster',
+        subscription_tier VARCHAR(128) DEFAULT 'taster',
+        plan_slug VARCHAR(128) DEFAULT 'taster',
+        plan_name VARCHAR(255) DEFAULT 'Taster (Free)',
+        plan_interval VARCHAR(32) DEFAULT 'MONTH',
+        plan_expiry_date TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
 
-    const rows = await query('SELECT * FROM users ORDER BY created_at DESC');
+      CREATE TABLE IF NOT EXISTS deleted_users (
+        email VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(128),
+        deleted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
 
-    const formatted = rows.map((u: any) => {
-      const tu = u.token_usage || {};
-      const pTokens = Number(tu.promptTokens ?? u.prompt_tokens ?? 0);
-      const cTokens = Number(tu.completionTokens ?? u.completion_tokens ?? 0);
-      const tTokens = Number(tu.totalTokens ?? u.total_tokens ?? (pTokens + cTokens));
-      const reqCount = Number(tu.requestCount ?? u.request_count ?? 0);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS password VARCHAR(255);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(64) DEFAULT 'user';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_slug VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_name VARCHAR(255) DEFAULT 'Taster (Free)';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_interval VARCHAR(32) DEFAULT 'MONTH';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expiry_date TIMESTAMPTZ;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+      CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    `).catch(() => {});
+
+    // 2. Fetch deleted tombstone
+    let deletedEmails = new Set<string>();
+    try {
+      const deletedRows = await query('SELECT LOWER(TRIM(email)) AS email FROM deleted_users');
+      const dArr = Array.isArray(deletedRows) ? deletedRows : (deletedRows?.rows || []);
+      deletedEmails = new Set(dArr.map((r: any) => r.email));
+    } catch (_) {}
+
+    // 3. Harvest user profiles from disk
+    const usersToInsert = new Map<string, any>();
+
+    // Baseline root admin
+    usersToInsert.set('admin@zecratary.com', {
+      id: 'usr_admin_1',
+      name: 'System Administrator',
+      email: 'admin@zecratary.com',
+      password: '$2a$10$DefaultHashedPasswordPlaceholderForDemoOnly',
+      role: 'admin',
+      subscriptionPlan: 'nutrition-pro-annual',
+      planName: 'Nutrition Pro (Annual)',
+      planInterval: 'YEAR',
+      createdAt: '2026-01-01T00:00:00.000Z'
+    });
+
+    const defaultSeedUsers = [
+      {
+        id: 'usr_user_1',
+        name: 'Jordan Smith',
+        email: 'jordan@example.com',
+        role: 'user',
+        subscriptionPlan: 'taster',
+        planName: 'Taster (Free)',
+        planInterval: 'MONTH',
+        createdAt: '2026-01-05T08:30:00.000Z'
+      },
+      {
+        id: 'usr_user_2',
+        name: 'Sarah Johnson',
+        email: 'sarah@example.com',
+        role: 'user',
+        subscriptionPlan: 'nutrition-pro-monthly',
+        planName: 'Nutrition Pro (Monthly)',
+        planInterval: 'MONTH',
+        createdAt: '2026-01-10T11:15:00.000Z'
+      },
+      {
+        id: 'usr_user_3',
+        name: 'Michael Chang',
+        email: 'michael@example.com',
+        role: 'user',
+        subscriptionPlan: 'nutrition-pro-annual',
+        planName: 'Nutrition Pro (Annual)',
+        planInterval: 'YEAR',
+        createdAt: '2026-01-15T14:45:00.000Z'
+      },
+      {
+        id: 'usr_user_4',
+        name: 'Elena Rostova',
+        email: 'elena@example.com',
+        role: 'user',
+        subscriptionPlan: 'taster',
+        planName: 'Taster (Free)',
+        planInterval: 'MONTH',
+        createdAt: '2026-01-20T16:20:00.000Z'
+      }
+    ];
+
+    for (const dUser of defaultSeedUsers) {
+      const em = dUser.email.toLowerCase().trim();
+      if (!deletedEmails.has(em)) {
+        usersToInsert.set(em, dUser);
+      }
+    }
+
+    for (const p of getDiskUserPaths()) {
+      try {
+        if (fs.existsSync(p)) {
+          const raw = fs.readFileSync(p, 'utf-8');
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            for (const u of list) {
+              if (u && u.email) {
+                const em = u.email.toLowerCase().trim();
+                if (!deletedEmails.has(em)) {
+                  usersToInsert.set(em, {
+                    id: u.id || ('usr_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)),
+                    name: u.name || em.split('@')[0],
+                    email: em,
+                    password: u.password || '$2a$10$DefaultHashedPasswordPlaceholderForDemoOnly',
+                    role: (u.role || 'user').toLowerCase(),
+                    subscriptionPlan: u.subscriptionPlan || u.subscription_plan || u.planSlug || 'taster',
+                    planName: u.planName || u.plan_name || 'Taster (Free)',
+                    planInterval: u.planInterval || u.plan_interval || 'MONTH',
+                    createdAt: u.createdAt || u.created_at || new Date().toISOString()
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 4. Upsert into PostgreSQL users table
+    for (const u of Array.from(usersToInsert.values())) {
+      const cleanEmail = u.email.toLowerCase().trim();
+      await query(`
+        INSERT INTO users (
+          id, name, email, password, role, subscription_plan, subscription_tier, plan_slug,
+          plan_name, plan_interval, plan_expiry_date, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $6, $6, $7, $8, $9, COALESCE($10::timestamptz, NOW()), NOW())
+        ON CONFLICT (email) DO UPDATE SET
+          name = COALESCE(NULLIF(users.name, ''), EXCLUDED.name),
+          role = COALESCE(NULLIF(users.role, ''), EXCLUDED.role),
+          subscription_plan = COALESCE(NULLIF(users.subscription_plan, ''), EXCLUDED.subscription_plan),
+          updated_at = NOW()
+      `, [
+        u.id || ('usr_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)),
+        u.name || 'User',
+        cleanEmail,
+        u.password || '$2a$10$DefaultHashedPasswordPlaceholderForDemoOnly',
+        (u.role || 'user').toLowerCase(),
+        u.subscriptionPlan || 'taster',
+        u.planName || (u.subscriptionPlan === 'taster' ? 'Taster (Free)' : u.subscriptionPlan),
+        u.planInterval || 'MONTH',
+        u.planExpiryDate || null,
+        u.createdAt || new Date().toISOString()
+      ]).catch(() => {});
+    }
+
+    // 5. Populate any customer accounts from payment_transactions into users
+    await query(`
+      INSERT INTO users (
+        id, name, email, role, subscription_plan, subscription_tier, plan_slug,
+        plan_name, plan_interval, plan_expiry_date, created_at, updated_at
+      )
+      SELECT 
+        'usr_' || SUBSTRING(MD5(customer_email) FROM 1 FOR 10),
+        COALESCE(NULLIF(customer_name, ''), SPLIT_PART(customer_email, '@', 1)),
+        LOWER(TRIM(customer_email)),
+        'user',
+        COALESCE(NULLIF(plan_slug, ''), 'taster'),
+        COALESCE(NULLIF(plan_slug, ''), 'taster'),
+        COALESCE(NULLIF(plan_slug, ''), 'taster'),
+        COALESCE(NULLIF(plan_name, ''), 'Taster (Free)'),
+        COALESCE(NULLIF(recurring_interval, ''), 'MONTH'),
+        expiry_date,
+        created_at,
+        NOW()
+      FROM payment_transactions
+      WHERE customer_email IS NOT NULL AND TRIM(customer_email) != ''
+      ON CONFLICT (email) DO NOTHING;
+    `).catch(() => {});
+  } catch (err) {
+    console.error('[ensureUsersTableAndMigrate Error]:', err);
+  }
+}
+
+export async function GET() {
+  await ensureUsersTableAndMigrate();
+  try {
+    // 1. Fetch users from PostgreSQL with defensive fallback
+    let rawUsers: any[] = [];
+    try {
+      const uRes = await query(`
+        SELECT 
+          id, name, email, password, role, subscription_plan, subscription_tier,
+          plan_slug, plan_name, plan_interval, plan_expiry_date, created_at, updated_at
+        FROM users 
+        ORDER BY 
+          CASE WHEN LOWER(role) = 'admin' THEN 0 ELSE 1 END,
+          created_at DESC
+      `);
+      rawUsers = Array.isArray(uRes) ? uRes : (uRes?.rows || []);
+    } catch (_) {
+      const fallbackRes = await query(`SELECT * FROM users ORDER BY created_at DESC`).catch(() => []);
+      rawUsers = Array.isArray(fallbackRes) ? fallbackRes : (fallbackRes?.rows || []);
+    }
+
+    // 2. Fetch latest active succeeded transactions from payment_transactions
+    let rawTxs: any[] = [];
+    try {
+      const txRes = await query(`
+        SELECT customer_email, plan_slug, plan_name, recurring_interval, expiry_date, status, created_at
+        FROM payment_transactions 
+        WHERE status IN ('succeeded', 'paid', 'active') 
+          AND (expiry_date IS NULL OR expiry_date > NOW())
+        ORDER BY created_at DESC
+      `).catch(() => []);
+      rawTxs = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+    } catch (_) {}
+
+    const activeTxMap = new Map<string, any>();
+    rawTxs.forEach((tx: any) => {
+      const email = (tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
+      if (email && !activeTxMap.has(email)) {
+        activeTxMap.set(email, tx);
+      }
+    });
+
+    const users = rawUsers.map((u: any) => {
+      const email = (u.email || '').toLowerCase().trim();
+      const activeTx = activeTxMap.get(email);
+      const isAdmin = (u.role || '').toLowerCase() === 'admin';
+
+      let effectivePlan = (u.subscription_plan || u.subscriptionPlan || u.plan_slug || 'taster').toLowerCase().trim();
+      let effectivePlanName = u.plan_name || u.planName || (effectivePlan === 'taster' ? 'Taster (Free)' : effectivePlan);
+      let effectiveInterval = (u.plan_interval || u.planInterval || (effectivePlan.includes('annual') ? 'YEAR' : 'MONTH')).toUpperCase();
+      let effectiveExpiry = u.plan_expiry_date || u.planExpiryDate || null;
+
+      if (activeTx) {
+        effectivePlan = (activeTx.plan_slug || activeTx.planSlug || effectivePlan).toLowerCase().trim();
+        effectivePlanName = activeTx.plan_name || activeTx.planName || effectivePlanName;
+        effectiveInterval = (activeTx.recurring_interval || activeTx.recurringInterval || (effectivePlan.includes('annual') ? 'YEAR' : 'MONTH')).toUpperCase();
+        effectiveExpiry = activeTx.expiry_date || activeTx.expiryDate || effectiveExpiry;
+      } else if (!isAdmin && effectivePlan !== 'taster' && !effectivePlan.includes('free')) {
+        if (effectiveExpiry && new Date(effectiveExpiry).getTime() < Date.now()) {
+          effectivePlan = 'taster';
+          effectivePlanName = 'Taster (Free)';
+          effectiveInterval = 'MONTH';
+          effectiveExpiry = null;
+        }
+      }
 
       return {
         id: u.id,
-        name: u.name,
+        name: u.name || 'User',
         email: u.email,
-        role: u.role,
-        subscriptionPlan: u.subscription_plan || 'taster',
-        planSlug: u.subscription_plan || 'taster',
-        planExpiryDate: u.plan_expiry_date,
-        createdAt: u.created_at,
-        linkedProviders: Array.isArray(u.linked_providers) ? u.linked_providers : [],
-        promptTokens: pTokens,
-        prompt_tokens: pTokens,
-        completionTokens: cTokens,
-        completion_tokens: cTokens,
-        totalTokens: tTokens,
-        total_tokens: tTokens,
-        requestCount: reqCount,
-        request_count: reqCount,
-        tokenUsage: {
-          promptTokens: pTokens,
-          completionTokens: cTokens,
-          totalTokens: tTokens,
-          requestCount: reqCount
-        },
-        token_usage: {
-          promptTokens: pTokens,
-          completionTokens: cTokens,
-          totalTokens: tTokens,
-          requestCount: reqCount
-        }
+        password: u.password,
+        role: (u.role || 'user').toLowerCase(),
+        subscriptionPlan: effectivePlan,
+        subscription_plan: effectivePlan,
+        subscriptionTier: effectivePlan,
+        planSlug: effectivePlan,
+        plan_slug: effectivePlan,
+        planName: effectivePlanName,
+        plan_name: effectivePlanName,
+        planInterval: effectiveInterval,
+        plan_interval: effectiveInterval,
+        planExpiryDate: effectiveExpiry,
+        plan_expiry_date: effectiveExpiry,
+        expiryDate: effectiveExpiry,
+        createdAt: u.created_at || u.createdAt || new Date().toISOString(),
+        updatedAt: u.updated_at || u.updatedAt || new Date().toISOString()
       };
     });
 
-    return NextResponse.json({ success: true, users: formatted }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json(
+      { success: true, users },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } }
+    );
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
+  await ensureUsersTableAndMigrate();
   try {
     const body = await req.json();
-    const { id, name, email, role, subscriptionPlan, planExpiryDate, linkedProviders, password } = body;
-
-    if (!email) {
-      return NextResponse.json({ success: false, error: 'Email is required.' }, { status: 400 });
+    if (!body || !body.email) {
+      return NextResponse.json({ success: false, error: 'User email is required.' }, { status: 400 });
     }
 
-    const cleanEmail = email.toLowerCase().trim();
-    const cleanId = id || 'usr_' + Date.now().toString(36);
-    const cleanPlan = (subscriptionPlan || 'taster').toLowerCase().trim();
+    const cleanEmail = body.email.toLowerCase().trim();
+    const id = body.id || ('usr_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+    const name = body.name || 'User';
+    const password = body.password || '$2a$10$DefaultHashedPasswordPlaceholderForDemoOnly';
+    const role = (body.role || 'user').toLowerCase();
+    const subscriptionPlan = (body.subscriptionPlan || body.planSlug || body.subscription_plan || 'taster').toLowerCase().trim();
+    const planName = body.planName || body.plan_name || (subscriptionPlan === 'taster' ? 'Taster (Free)' : subscriptionPlan);
+    const planInterval = (body.planInterval || body.plan_interval || (subscriptionPlan.includes('annual') ? 'YEAR' : 'MONTH')).toUpperCase();
+    const planExpiryDate = body.planExpiryDate || body.expiryDate || null;
+
+    await query('DELETE FROM deleted_users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1))', [cleanEmail]).catch(() => {});
 
     await query(`
-      INSERT INTO users (id, name, email, role, subscription_plan, plan_expiry_date, linked_providers, password, created_at, updated_at)
-      VALUES ($1, $2, $3, COALESCE($4, 'user'), $5, $6, $7::jsonb, $8, NOW(), NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        name = COALESCE(EXCLUDED.name, users.name),
-        email = COALESCE(EXCLUDED.email, users.email),
-        role = COALESCE(EXCLUDED.role, users.role),
-        subscription_plan = COALESCE(EXCLUDED.subscription_plan, users.subscription_plan),
-        plan_expiry_date = COALESCE(EXCLUDED.plan_expiry_date, users.plan_expiry_date),
-        linked_providers = COALESCE(EXCLUDED.linked_providers, users.linked_providers),
-        password = COALESCE(EXCLUDED.password, users.password),
+      INSERT INTO users (
+        id, name, email, password, role, subscription_plan, subscription_tier, plan_slug,
+        plan_name, plan_interval, plan_expiry_date, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $6, $6, $7, $8, $9, COALESCE($10::timestamptz, NOW()), NOW())
+      ON CONFLICT (email) DO UPDATE SET
+        name = EXCLUDED.name,
+        password = COALESCE(NULLIF(EXCLUDED.password, ''), users.password),
+        role = EXCLUDED.role,
+        subscription_plan = EXCLUDED.subscription_plan,
+        subscription_tier = EXCLUDED.subscription_tier,
+        plan_slug = EXCLUDED.plan_slug,
+        plan_name = EXCLUDED.plan_name,
+        plan_interval = EXCLUDED.plan_interval,
+        plan_expiry_date = EXCLUDED.plan_expiry_date,
         updated_at = NOW()
-    `, [
-      cleanId, name || '', cleanEmail, role || 'user', cleanPlan,
-      planExpiryDate || null, JSON.stringify(linkedProviders || []), password || null
-    ]);
+    `, [id, name, cleanEmail, password, role, subscriptionPlan, planName, planInterval, planExpiryDate, body.createdAt || null]);
 
-    return NextResponse.json({ success: true, message: 'User updated in PostgreSQL.' });
+    return await GET();
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let email = searchParams.get('email');
+
+    if (!id && !email) {
+      try {
+        const body = await req.json();
+        id = body?.id;
+        email = body?.email;
+      } catch (_) {}
+    }
+
+    if (!id && !email) {
+      return NextResponse.json({ success: false, error: 'User ID or Email is required for deletion.' }, { status: 400 });
+    }
+
+    const cleanEmail = (email || '').toLowerCase().trim();
+    const cleanId = (id || '').trim();
+
+    if (cleanId === 'usr_admin_1' || cleanEmail === 'admin@zecratary.com') {
+      return NextResponse.json(
+        { success: false, error: 'Cannot delete the primary system administrator.' },
+        { status: 403 }
+      );
+    }
+
+    await query(`
+      INSERT INTO deleted_users (email, user_id, deleted_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (email) DO UPDATE SET deleted_at = NOW();
+    `, [cleanEmail || cleanId, cleanId || cleanEmail]).catch(() => {});
+
+    await query('DELETE FROM users WHERE id = $1 OR LOWER(TRIM(email)) = LOWER(TRIM($2))', [cleanId, cleanEmail]);
+
+    return await GET();
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -46100,6 +46385,13 @@ async function ensureBillingSchema() {
     await query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method VARCHAR(64) DEFAULT 'stripe';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_slug VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_name VARCHAR(255) DEFAULT 'Taster (Free)';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_interval VARCHAR(32) DEFAULT 'MONTH';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expiry_date TIMESTAMPTZ;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance NUMERIC DEFAULT 100;
+
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(128) PRIMARY KEY,
         customer_name VARCHAR(255),
@@ -46128,47 +46420,64 @@ export async function GET(req: NextRequest) {
   await ensureBillingSchema();
   try {
     const { searchParams } = new URL(req.url);
-    let email = searchParams.get('email');
+    let email = searchParams.get('email') || req.headers.get('x-user-email');
 
-    // Default to first non-admin user if email is not provided
-    if (!email) {
-      const uRows = await query(`
-        SELECT email FROM users 
-        WHERE role != 'admin' 
-        ORDER BY created_at ASC LIMIT 1
-      `);
-      email = uRows.length > 0 ? uRows[0].email : 'user@foodieprep.com';
+    let userRow: any = null;
+    if (email) {
+      const uRows = await query(
+        `SELECT id, name, email, role, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, plan_expiry_date, payment_method, token_balance, created_at 
+         FROM users 
+         WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
+        [email]
+      ).catch(() => []);
+      if (Array.isArray(uRows) && uRows.length > 0) userRow = uRows[0];
+      else if (uRows?.rows && uRows.rows.length > 0) userRow = uRows.rows[0];
     }
+
+    if (!userRow) {
+      const anyUserRows = await query(
+        `SELECT id, name, email, role, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, plan_expiry_date, payment_method, token_balance, created_at 
+         FROM users 
+         ORDER BY CASE WHEN LOWER(role) = 'admin' THEN 1 ELSE 0 END, created_at ASC LIMIT 1`
+      ).catch(() => []);
+      const rows = Array.isArray(anyUserRows) ? anyUserRows : (anyUserRows?.rows || []);
+      if (rows.length > 0) {
+        userRow = rows[0];
+        email = userRow.email;
+      } else {
+        userRow = {
+          id: 'usr_default',
+          name: 'Logged-in User',
+          email: 'jordan@example.com',
+          role: 'user',
+          subscription_plan: 'taster',
+          subscription_tier: 'taster',
+          plan_slug: 'taster',
+          plan_name: 'Taster (Free)',
+          plan_interval: 'MONTH',
+          plan_expiry_date: null,
+          payment_method: 'stripe',
+          token_balance: 100
+        };
+        email = userRow.email;
+      }
+    }
+
     const cleanEmail = (email || '').toLowerCase().trim();
 
-    // 1. Fetch User Record
-    const userRows = await query(`
-      SELECT id, name, email, role, subscription_plan, payment_method, token_balance, created_at 
-      FROM users 
-      WHERE LOWER(email) = $1 LIMIT 1
-    `, [cleanEmail]);
+    // 1. Fetch User Transactions
+    const txRows = await query(
+      `SELECT * FROM payment_transactions 
+       WHERE LOWER(TRIM(customer_email)) = $1 
+       ORDER BY created_at DESC`,
+      [cleanEmail]
+    ).catch(() => []);
+    const rawTxs = Array.isArray(txRows) ? txRows : (txRows?.rows || []);
 
-    const user = userRows.length > 0 ? userRows[0] : {
-      id: 'usr_default',
-      name: 'Logged-in User',
-      email: cleanEmail,
-      role: 'user',
-      subscription_plan: 'taster',
-      payment_method: 'stripe',
-      token_balance: 100
-    };
-
-    // 2. Fetch User Payment Transactions from PostgreSQL
-    const txRows = await query(`
-      SELECT * FROM payment_transactions 
-      WHERE LOWER(customer_email) = $1 
-      ORDER BY created_at DESC
-    `, [cleanEmail]);
-
-    const transactions = txRows.map((r: any) => ({
+    const transactions = rawTxs.map((r: any) => ({
       id: r.id,
-      customerName: r.customer_name || user.name,
-      customerEmail: r.customer_email || user.email,
+      customerName: r.customer_name || userRow.name,
+      customerEmail: r.customer_email || userRow.email,
       planName: r.plan_name || 'Subscription',
       planSlug: r.plan_slug || '',
       amount: Number(r.amount) || 0,
@@ -46184,7 +46493,7 @@ export async function GET(req: NextRequest) {
       createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
     }));
 
-    // 3. Fetch Admin Gateway & Currency Settings from PostgreSQL
+    // 2. Fetch Gateway & Currency Settings
     let gatewayConfig = {
       activeGateway: 'stripe',
       currency: 'USD',
@@ -46196,25 +46505,26 @@ export async function GET(req: NextRequest) {
     };
 
     try {
-      const settingsRows = await query(`SELECT key, value FROM admin_settings WHERE key IN ('paymentSettings', 'currency', 'systemSettings')`);
-      for (const row of settingsRows) {
-        if (row.key === 'paymentSettings') {
-          const val = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings LIMIT 1`);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      if (sRow) {
+        if (sRow.payment_settings) {
+          const val = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
           gatewayConfig = { ...gatewayConfig, ...val };
-        } else if (row.key === 'currency') {
-          gatewayConfig.currency = typeof row.value === 'string' ? row.value : row.value?.value || 'USD';
+        }
+        if (sRow.currency) {
+          gatewayConfig.currency = sRow.currency;
         }
       }
     } catch (_) {}
 
-    // Currency symbol mapping
     const symbols: Record<string, string> = {
       USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
       JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
     };
     gatewayConfig.currencySymbol = symbols[gatewayConfig.currency] || '$';
 
-    // 4. Fetch Token Identity
+    // 3. Fetch Token Identity
     let tokenIdentity = { tokenName: 'Tokens', tokenSymbol: '🪙' };
     try {
       const tSettings = await getTokenSettings();
@@ -46224,22 +46534,20 @@ export async function GET(req: NextRequest) {
       }
     } catch (_) {}
 
-    // 5. Fetch Available Subscription Plans Dynamically from PostgreSQL (subscription_plans)
+    // 4. Fetch Available Subscription Plans from PostgreSQL
     let plans: any[] = [];
     try {
       const planRows = await query(`
         SELECT 
           id, name, slug, plan_group_id, monthly_plan_id, annual_plan_id,
           monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge, trial_badge,
-          description_monthly, description_annual, features, token_limit,
-          ai_recipe_limit, recipe_library_limit, social_scrape_limit, can_view_macros,
-          allowed_ai_models, is_free, is_default
+          description_monthly, description_annual, features, token_limit, is_free, is_default
         FROM subscription_plans
         ORDER BY is_free DESC, monthly_price_dollars ASC
       `);
-
-      if (planRows && planRows.length > 0) {
-        plans = planRows.map((p: any) => ({
+      const pList = Array.isArray(planRows) ? planRows : (planRows?.rows || []);
+      if (pList && pList.length > 0) {
+        plans = pList.map((p: any) => ({
           id: p.id,
           name: p.name || p.slug,
           slug: p.slug,
@@ -46254,18 +46562,12 @@ export async function GET(req: NextRequest) {
           description: p.description_monthly || p.description_annual || 'Full plan access',
           features: Array.isArray(p.features) ? p.features : (typeof p.features === 'string' ? JSON.parse(p.features) : []),
           tokenLimit: Number(p.token_limit ?? 500),
-          aiRecipeLimit: Number(p.ai_recipe_limit ?? 50),
-          recipeLibraryLimit: Number(p.recipe_library_limit ?? 250),
-          socialScrapeLimit: Number(p.social_scrape_limit ?? 20),
-          canViewMacros: Boolean(p.can_view_macros),
-          allowedAiModels: p.allowed_ai_models || 'gemini-1.5-flash,gpt-3.5-turbo',
           isFree: Boolean(p.is_free),
           isDefault: Boolean(p.is_default)
         }));
       }
     } catch (_) {}
 
-    // Dynamic fallback if plans table is currently empty
     if (plans.length === 0) {
       plans = [
         {
@@ -46297,7 +46599,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      user,
+      user: userRow,
       transactions,
       gatewayConfig,
       tokenIdentity,
@@ -46321,18 +46623,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Email address is required.' }, { status: 400 });
     }
 
-    // ACTION 1: Update Preferred Payment Method
+    // 1. Update Preferred Payment Method
     if (action === 'update_payment_method') {
       const method = body.paymentMethod || 'stripe';
-      await query(`
-        UPDATE users 
-        SET payment_method = $1, updated_at = NOW() 
-        WHERE LOWER(email) = $2
-      `, [method, email]);
+      await query(`UPDATE users SET payment_method = $1, updated_at = NOW() WHERE LOWER(TRIM(email)) = $2`, [method, email]);
       return NextResponse.json({ success: true, message: 'Payment method successfully updated.' });
     }
 
-    // ACTION 2: Cancel Subscription Renewal
+    // 2. Cancel Subscription Renewal
     if (action === 'cancel_subscription') {
       await query(`
         UPDATE payment_transactions
@@ -46340,44 +46638,72 @@ export async function POST(req: NextRequest) {
             is_recurring = FALSE,
             status = 'canceled',
             updated_at = NOW()
-        WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
+        WHERE LOWER(TRIM(customer_email)) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
       `, [email]);
 
       return NextResponse.json({
         success: true,
-        message: 'Subscription renewal cancelled. Access remains active until the end of your billing cycle.'
+        message: 'Auto-renewal cancelled. You will continue to have paid access until your current billing period ends.'
       });
     }
 
-    // ACTION 3: Purchase / Upgrade / Switch Plan
+    // 3. Reactivate / Resume Subscription Renewal
+    if (action === 'resume_subscription' || action === 'reactivate_subscription') {
+      await query(`
+        UPDATE payment_transactions
+        SET auto_renew = TRUE,
+            is_recurring = TRUE,
+            status = 'succeeded',
+            updated_at = NOW()
+        WHERE LOWER(TRIM(customer_email)) = $1 
+          AND (expiry_date IS NULL OR expiry_date > NOW())
+          AND LOWER(status) = 'canceled'
+      `, [email]);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Auto-renewal has been successfully reactivated!'
+      });
+    }
+
+    // 4. Upgrade / Downgrade / Switch Plan
     if (action === 'change_plan') {
-      const newPlanSlug = String(body.planSlug || 'taster').toLowerCase().trim();
-      const planName = body.planName || 'Plan';
-      const amount = Number(body.amount || 0);
+      const rawPlanSlug = String(body.planSlug || 'taster').toLowerCase().trim();
+      const cleanBase = rawPlanSlug.replace(/-(monthly|annual|year)$/i, '');
+      const isFree = cleanBase === 'taster' || cleanBase === 'free' || Number(body.amount) === 0;
       const interval = body.interval === 'YEAR' ? 'YEAR' : 'MONTH';
+      const finalPlanSlug = isFree ? 'taster' : (rawPlanSlug.includes('-') ? rawPlanSlug : `${cleanBase}-${interval.toLowerCase()}`);
+      const planName = body.planName || (isFree ? 'Taster (Free)' : cleanBase);
+      const amount = isFree ? 0 : Number(body.amount || 0);
       const gateway = body.gateway || 'stripe';
       const currency = body.currency || 'USD';
       const customTokens = Number(body.tokenLimit ?? 0);
 
-      // 1. Mark prior active transactions as refunded/cancelled in PostgreSQL
+      // Rule 3: Mark prior active transactions as refunded/cancelled in PostgreSQL
       await query(`
         UPDATE payment_transactions
         SET status = 'refunded',
             auto_renew = FALSE,
             is_recurring = FALSE,
+            expiry_date = NOW(),
             updated_at = NOW()
-        WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
+        WHERE LOWER(TRIM(customer_email)) = $1 AND LOWER(status) IN ('succeeded', 'paid', 'active')
       `, [email]);
 
-      // 2. Handle Revert to Free Plan
-      if (newPlanSlug === 'taster' || newPlanSlug === 'free' || amount === 0) {
+      if (isFree) {
+        // Revert to Free Plan in users table
         await query(`
           UPDATE users 
-          SET subscription_plan = 'taster', updated_at = NOW() 
-          WHERE LOWER(email) = $1
+          SET subscription_plan = 'taster',
+              subscription_tier = 'taster',
+              plan_slug = 'taster',
+              plan_name = 'Taster (Free)',
+              plan_interval = 'MONTH',
+              plan_expiry_date = NULL,
+              updated_at = NOW() 
+          WHERE LOWER(TRIM(email)) = $1
         `, [email]);
 
-        // Grant free plan tokens
         try {
           await grantPlanTokensOnPurchase(email, 'taster', {
             planName: 'Taster (Free)',
@@ -46388,7 +46714,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, message: 'Switched to free plan tier (Taster).' });
       }
 
-      // 3. Compute Expiry Date (1 Month or 1 Year)
+      // Compute expiration date
       const expDate = new Date();
       if (interval === 'YEAR') {
         expDate.setFullYear(expDate.getFullYear() + 1);
@@ -46398,7 +46724,7 @@ export async function POST(req: NextRequest) {
 
       const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
 
-      // 4. Record Succeeded Payment Transaction in PostgreSQL
+      // Insert fresh Succeeded Payment Transaction
       await query(`
         INSERT INTO payment_transactions (
           id, customer_name, customer_email, plan_name, plan_slug, amount,
@@ -46406,27 +46732,33 @@ export async function POST(req: NextRequest) {
           auto_renew, expiry_date, created_at, updated_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'succeeded', FALSE, TRUE, $9, TRUE, $10, NOW(), NOW())
       `, [
-        txId, body.userName || 'User', email, planName, newPlanSlug,
+        txId, body.userName || 'Subscriber', email, planName, finalPlanSlug,
         amount, currency, gateway, interval, expDate.toISOString()
       ]);
 
-      // 5. Update users table subscription_plan
+      // Atomically synchronize users table
       await query(`
         UPDATE users 
-        SET subscription_plan = $1, updated_at = NOW() 
-        WHERE LOWER(email) = $2
-      `, [newPlanSlug, email]);
+        SET subscription_plan = $1,
+            subscription_tier = $1,
+            plan_slug = $1,
+            plan_name = $2,
+            plan_interval = $3,
+            plan_expiry_date = $4,
+            updated_at = NOW() 
+        WHERE LOWER(TRIM(email)) = $5
+      `, [finalPlanSlug, planName, interval, expDate.toISOString(), email]);
 
-      // 6. Grant Tokens and Record Audit Ledger Transaction on /admin/token-setting
+      // Grant Tokens to PostgreSQL balance and log audit record
       let tokenGrantResult = null;
       try {
-        tokenGrantResult = await grantPlanTokensOnPurchase(email, newPlanSlug, {
+        tokenGrantResult = await grantPlanTokensOnPurchase(email, finalPlanSlug, {
           orderId: txId,
           planName,
           customTokens: customTokens > 0 ? customTokens : undefined
         });
       } catch (tokenErr) {
-        console.warn('grantPlanTokensOnPurchase warning:', tokenErr);
+        console.warn('[grantPlanTokensOnPurchase error]:', tokenErr);
       }
 
       return NextResponse.json({
@@ -50107,9 +50439,13 @@ import {
   Building,
   Check,
   Coins,
-  Zap
+  Zap,
+  FileText,
+  Printer,
+  X
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
+import { getCurrentUser } from '@/lib/auth';
 
 interface Transaction {
   id: string;
@@ -50184,6 +50520,9 @@ export default function UserBillingPage() {
   const [planPage, setPlanPage] = useState(1);
   const [planPageSize, setPlanPageSize] = useState(4);
 
+  // Receipt Modal State
+  const [viewingReceipt, setViewingReceipt] = useState<Transaction | null>(null);
+
   // Theme Sync
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
@@ -50206,10 +50545,15 @@ export default function UserBillingPage() {
       let emailParam = '';
       if (typeof window !== 'undefined') {
         try {
-          const storedUser = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
-          if (storedUser) {
-            const parsed = JSON.parse(storedUser);
-            if (parsed?.email) emailParam = `?email=${encodeURIComponent(parsed.email)}`;
+          const authUser = getCurrentUser();
+          if (authUser?.email) {
+            emailParam = `?email=${encodeURIComponent(authUser.email)}`;
+          } else {
+            const rawStored = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
+            if (rawStored) {
+              const parsed = JSON.parse(rawStored);
+              if (parsed?.email) emailParam = `?email=${encodeURIComponent(parsed.email)}`;
+            }
           }
         } catch (_) {}
       }
@@ -50384,7 +50728,40 @@ export default function UserBillingPage() {
     }
   };
 
-  // Handle Switch Plan with Dynamic Token Grant & PostgreSQL sync
+  const handleResumeSubscription = async () => {
+    setProcessing(true);
+    try {
+      const res = await fetch('/api/billing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'resume_subscription',
+          email: user?.email
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('renewalResumedSuccess', 'Auto-renewal reactivated successfully!') 
+        });
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+        }
+
+        await fetchData();
+      } else {
+        throw new Error(data.error || 'Failed to reactivate subscription');
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', msg: err.message || 'Failed to reactivate subscription' });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleSwitchPlan = async (plan: PlanCatalog, interval: 'MONTH' | 'YEAR') => {
     const amount = interval === 'YEAR' ? plan.annualPrice : plan.monthlyPrice;
     const planSlugWithInterval = plan.slug === 'taster' ? 'taster' : `${plan.slug}-${interval.toLowerCase()}`;
@@ -50417,7 +50794,6 @@ export default function UserBillingPage() {
       if (data.success) {
         setFeedback({ type: 'success', msg: data.message || `Switched plan to ${planDisplayName}` });
 
-        // Update local session cache if present
         try {
           const raw = localStorage.getItem('zecratary_current_user');
           if (raw) {
@@ -50449,43 +50825,56 @@ export default function UserBillingPage() {
     const s = (status || '').toLowerCase();
     if (s === 'succeeded' || s === 'successful' || s === 'paid' || s === 'completed') {
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
-          <CheckCircle className="w-3.5 h-3.5" style={{ color: 'var(--color-emerald)' }} />
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' }}>
+          <CheckCircle className="w-3.5 h-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
           {t('statusSucceeded', 'Succeeded')}
         </span>
       );
     }
     if (s === 'canceled' || s === 'cancelled') {
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-500/10 text-orange-500 border border-orange-500/20">
-          <Ban className="w-3.5 h-3.5 text-orange-500" />
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-500/10 text-orange-400 border border-orange-500/20">
+          <Ban className="w-3.5 h-3.5 text-orange-400" />
           {t('statusCanceled', 'Canceled')}
         </span>
       );
     }
     if (s === 'refunded') {
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20">
-          <RefreshCw className="w-3.5 h-3.5 text-amber-500" />
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
           {t('statusRefunded', 'Refunded')}
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-500 border border-rose-500/20">
-        <XCircle className="w-3.5 h-3.5 text-rose-500" />
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+        <XCircle className="w-3.5 h-3.5 text-rose-400" />
         {status}
       </span>
     );
   };
 
   const isCurrentPlan = (planSlug: string, interval?: 'MONTH' | 'YEAR') => {
-    const userPlan = (user?.subscription_plan || '').toLowerCase().trim();
-    if (!interval) {
-      return userPlan.includes(planSlug.toLowerCase().trim());
+    const cleanPlanSlug = (planSlug || '').toLowerCase().trim().replace(/-(monthly|annual|year)$/i, '');
+    const userPlan = (user?.subscription_plan || user?.plan_slug || '').toLowerCase().trim();
+    const cleanUserBase = userPlan.replace(/-(monthly|annual|year)$/i, '');
+
+    if (cleanPlanSlug === 'taster' || cleanPlanSlug === 'free') {
+      return cleanUserBase === 'taster' || cleanUserBase === 'free' || !cleanUserBase;
     }
-    const expected = planSlug === 'taster' ? 'taster' : `${planSlug}-${interval.toLowerCase()}`;
-    return userPlan === expected || userPlan === planSlug;
+
+    const userInterval = (user?.plan_interval || (userPlan.includes('annual') || userPlan.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
+
+    if (!interval) {
+      return cleanUserBase === cleanPlanSlug;
+    }
+
+    const isMatchingBase = cleanUserBase === cleanPlanSlug;
+    const isMatchingInterval = (interval === 'YEAR' && (userInterval === 'YEAR' || userInterval === 'ANNUAL' || userPlan.includes('annual') || userPlan.includes('year'))) ||
+                               (interval === 'MONTH' && (userInterval === 'MONTH' || (!userPlan.includes('annual') && !userPlan.includes('year'))));
+
+    return isMatchingBase && isMatchingInterval;
   };
 
   return (
@@ -50502,7 +50891,7 @@ export default function UserBillingPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight flex items-center gap-3">
-              <CreditCard className="h-7 w-7" style={{ color: 'var(--color-emerald)' }} />
+              <CreditCard className="h-7 w-7" style={{ color: 'var(--color-emerald, #10b981)' }} />
               {t('billingAndSubscriptionTitle', 'Billing & Subscriptions')}
             </h1>
             <p className="text-sm opacity-70 mt-1" style={{ color: 'var(--color-text-secondary)' }}>
@@ -50520,11 +50909,46 @@ export default function UserBillingPage() {
                 color: 'var(--color-text)'
               }}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald)' }} />
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald, #10b981)' }} />
               {t('refreshBtn', 'Refresh')}
             </button>
           </div>
         </div>
+
+        {/* Quick User Entitlement Summary Strip */}
+        {user && (
+          <div 
+            className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-2xl border shadow-sm text-xs"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div>
+              <span className="block opacity-60 uppercase text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>Account User</span>
+              <span className="font-bold text-sm truncate block" style={{ color: 'var(--color-text)' }}>{user.name || user.email}</span>
+            </div>
+            <div>
+              <span className="block opacity-60 uppercase text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>Subscription Plan</span>
+              <span className="font-bold text-sm capitalize block" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                {user.subscription_plan?.replace(/-/g, ' ') || 'Taster (Free)'}
+              </span>
+            </div>
+            <div>
+              <span className="block opacity-60 uppercase text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>Token Balance</span>
+              <span className="font-bold text-sm flex items-center gap-1" style={{ color: '#f59e0b' }}>
+                <Coins className="w-3.5 h-3.5" />
+                <span>{Number(user.token_balance || 0).toLocaleString()} {tokenIdentity.tokenSymbol}</span>
+              </span>
+            </div>
+            <div>
+              <span className="block opacity-60 uppercase text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>Next Renewal</span>
+              <span className="font-bold text-sm block" style={{ color: 'var(--color-text)' }}>
+                {activeTransaction?.expiryDate ? new Date(activeTransaction.expiryDate).toLocaleDateString() : 'Lifetime / Free'}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Feedback Alert */}
         {feedback && (
@@ -50532,11 +50956,15 @@ export default function UserBillingPage() {
             className="p-4 rounded-2xl border flex items-center gap-3 text-sm font-medium animate-in fade-in transition"
             style={{
               backgroundColor: 'var(--color-inner-dark)',
-              borderColor: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
-              color: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
+              borderColor: feedback.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444',
+              color: feedback.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444'
             }}
           >
-            {feedback.type === 'success' ? <CheckCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--color-emerald)' }} /> : <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />}
+            {feedback.type === 'success' ? (
+              <CheckCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
+            )}
             <span>{feedback.msg}</span>
           </div>
         )}
@@ -50552,8 +50980,8 @@ export default function UserBillingPage() {
               activeTab === 'history' ? '' : 'border-transparent opacity-60 hover:opacity-100'
             }`}
             style={{
-              borderColor: activeTab === 'history' ? 'var(--color-emerald)' : 'transparent',
-              color: activeTab === 'history' ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+              borderColor: activeTab === 'history' ? 'var(--color-emerald, #10b981)' : 'transparent',
+              color: activeTab === 'history' ? 'var(--color-emerald, #10b981)' : 'var(--color-text-secondary)'
             }}
           >
             <DollarSign className="w-4 h-4" />
@@ -50565,8 +50993,8 @@ export default function UserBillingPage() {
               activeTab === 'methods' ? '' : 'border-transparent opacity-60 hover:opacity-100'
             }`}
             style={{
-              borderColor: activeTab === 'methods' ? 'var(--color-emerald)' : 'transparent',
-              color: activeTab === 'methods' ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+              borderColor: activeTab === 'methods' ? 'var(--color-emerald, #10b981)' : 'transparent',
+              color: activeTab === 'methods' ? 'var(--color-emerald, #10b981)' : 'var(--color-text-secondary)'
             }}
           >
             <CreditCard className="w-4 h-4" />
@@ -50578,8 +51006,8 @@ export default function UserBillingPage() {
               activeTab === 'subscriptions' ? '' : 'border-transparent opacity-60 hover:opacity-100'
             }`}
             style={{
-              borderColor: activeTab === 'subscriptions' ? 'var(--color-emerald)' : 'transparent',
-              color: activeTab === 'subscriptions' ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+              borderColor: activeTab === 'subscriptions' ? 'var(--color-emerald, #10b981)' : 'transparent',
+              color: activeTab === 'subscriptions' ? 'var(--color-emerald, #10b981)' : 'var(--color-text-secondary)'
             }}
           >
             <Layers className="w-4 h-4" />
@@ -50676,18 +51104,19 @@ export default function UserBillingPage() {
                     <th className="p-4">{t('colGateway', 'Gateway')}</th>
                     <th className="p-4">{t('colStatus', 'Status')}</th>
                     <th className="p-4">{t('colExpiry', 'Billing Expiry')}</th>
+                    <th className="p-4 text-right">{t('colReceipt', 'Receipt')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
                   {paginatedTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center opacity-50" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={7} className="p-8 text-center opacity-50" style={{ color: 'var(--color-text-secondary)' }}>
                         {t('noTransactionsFound', 'No payment records found matching your query.')}
                       </td>
                     </tr>
                   ) : (
                     paginatedTransactions.map((tx) => (
-                      <tr key={tx.id} className="transition" style={{ backgroundColor: 'transparent' }}>
+                      <tr key={tx.id} className="transition hover:bg-white/[0.02]">
                         <td className="p-4 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                           {new Date(tx.createdAt).toLocaleDateString()}
                         </td>
@@ -50695,7 +51124,7 @@ export default function UserBillingPage() {
                           {tx.planName}
                           <span className="block text-xs font-mono opacity-50" style={{ color: 'var(--color-text-secondary)' }}>{tx.id}</span>
                         </td>
-                        <td className="p-4 font-bold" style={{ color: 'var(--color-emerald)' }}>
+                        <td className="p-4 font-bold" style={{ color: 'var(--color-emerald, #10b981)' }}>
                           {gatewayConfig.currencySymbol}{tx.amount.toFixed(2)} <span className="text-xs font-normal opacity-70" style={{ color: 'var(--color-text-secondary)' }}>{tx.currency}</span>
                         </td>
                         <td className="p-4 uppercase text-xs font-semibold tracking-wider" style={{ color: 'var(--color-text)' }}>
@@ -50706,6 +51135,21 @@ export default function UserBillingPage() {
                         </td>
                         <td className="p-4 text-xs opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
                           {tx.expiryDate ? new Date(tx.expiryDate).toLocaleDateString() : '—'}
+                        </td>
+                        <td className="p-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setViewingReceipt(tx)}
+                            className="p-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1.5 ml-auto cursor-pointer shadow-xs hover:opacity-85"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          >
+                            <FileText className="w-3.5 h-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                            <span>Invoice</span>
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -50755,7 +51199,7 @@ export default function UserBillingPage() {
           >
             <div>
               <h2 className="text-lg font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <CreditCard className="w-5 h-5" style={{ color: 'var(--color-emerald)' }} />
+                <CreditCard className="w-5 h-5" style={{ color: 'var(--color-emerald, #10b981)' }} />
                 {t('selectPaymentMethodTitle', 'Choose Preferred Payment Method')}
               </h2>
               <p className="text-xs opacity-70 mt-1" style={{ color: 'var(--color-text-secondary)' }}>
@@ -50768,19 +51212,17 @@ export default function UserBillingPage() {
                 <div
                   onClick={() => setSelectedMethod('stripe')}
                   className={`p-5 rounded-2xl border-2 transition cursor-pointer relative flex flex-col justify-between gap-4 ${
-                    selectedMethod === 'stripe'
-                      ? 'shadow-md'
-                      : 'opacity-80 hover:opacity-100'
+                    selectedMethod === 'stripe' ? 'shadow-md' : 'opacity-80 hover:opacity-100'
                   }`}
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: selectedMethod === 'stripe' ? 'var(--color-emerald)' : 'var(--color-border)'
+                    borderColor: selectedMethod === 'stripe' ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
                   }}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
                       <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-500">
-                        <CreditCard className="w-6 h-6" style={{ color: 'var(--color-emerald)' }} />
+                        <CreditCard className="w-6 h-6" style={{ color: 'var(--color-emerald, #10b981)' }} />
                       </div>
                       <div>
                         <div className="font-black text-sm" style={{ color: 'var(--color-text)' }}>Stripe / Credit Card</div>
@@ -50788,7 +51230,7 @@ export default function UserBillingPage() {
                       </div>
                     </div>
                     {selectedMethod === 'stripe' && (
-                      <div className="w-5 h-5 rounded-full flex items-center justify-center text-white" style={{ backgroundColor: 'var(--color-emerald)' }}>
+                      <div className="w-5 h-5 rounded-full flex items-center justify-center text-white" style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}>
                         <Check className="w-3 h-3 stroke-[3]" style={{ color: '#ffffff' }} />
                       </div>
                     )}
@@ -50803,13 +51245,11 @@ export default function UserBillingPage() {
                 <div
                   onClick={() => setSelectedMethod('paypal')}
                   className={`p-5 rounded-2xl border-2 transition cursor-pointer relative flex flex-col justify-between gap-4 ${
-                    selectedMethod === 'paypal'
-                      ? 'shadow-md'
-                      : 'opacity-80 hover:opacity-100'
+                    selectedMethod === 'paypal' ? 'shadow-md' : 'opacity-80 hover:opacity-100'
                   }`}
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: selectedMethod === 'paypal' ? 'var(--color-emerald)' : 'var(--color-border)'
+                    borderColor: selectedMethod === 'paypal' ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
                   }}
                 >
                   <div className="flex items-start justify-between">
@@ -50823,7 +51263,7 @@ export default function UserBillingPage() {
                       </div>
                     </div>
                     {selectedMethod === 'paypal' && (
-                      <div className="w-5 h-5 rounded-full flex items-center justify-center text-white" style={{ backgroundColor: 'var(--color-emerald)' }}>
+                      <div className="w-5 h-5 rounded-full flex items-center justify-center text-white" style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}>
                         <Check className="w-3 h-3 stroke-[3]" style={{ color: '#ffffff' }} />
                       </div>
                     )}
@@ -50838,13 +51278,11 @@ export default function UserBillingPage() {
                 <div
                   onClick={() => setSelectedMethod('manual')}
                   className={`p-5 rounded-2xl border-2 transition cursor-pointer relative flex flex-col justify-between gap-4 ${
-                    selectedMethod === 'manual'
-                      ? 'shadow-md'
-                      : 'opacity-80 hover:opacity-100'
+                    selectedMethod === 'manual' ? 'shadow-md' : 'opacity-80 hover:opacity-100'
                   }`}
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: selectedMethod === 'manual' ? 'var(--color-emerald)' : 'var(--color-border)'
+                    borderColor: selectedMethod === 'manual' ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
                   }}
                 >
                   <div className="flex items-start justify-between">
@@ -50858,7 +51296,7 @@ export default function UserBillingPage() {
                       </div>
                     </div>
                     {selectedMethod === 'manual' && (
-                      <div className="w-5 h-5 rounded-full flex items-center justify-center text-white" style={{ backgroundColor: 'var(--color-emerald)' }}>
+                      <div className="w-5 h-5 rounded-full flex items-center justify-center text-white" style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}>
                         <Check className="w-3 h-3 stroke-[3]" style={{ color: '#ffffff' }} />
                       </div>
                     )}
@@ -50876,7 +51314,7 @@ export default function UserBillingPage() {
                 onClick={handleSavePaymentMethod}
                 disabled={processing}
                 className="px-6 py-3 rounded-2xl text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition shadow-lg cursor-pointer disabled:opacity-50"
-                style={{ backgroundColor: 'var(--color-emerald)' }}
+                style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
               >
                 {processing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" style={{ color: '#ffffff' }} />}
                 {t('savePaymentMethodBtn', 'Save Payment Method')}
@@ -50898,7 +51336,7 @@ export default function UserBillingPage() {
             >
               <div className="space-y-2">
                 <div className="flex items-center gap-3">
-                  <span className="text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full border shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
+                  <span className="text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full border shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' }}>
                     {t('activePlanBadge', 'Current Active Plan')}
                   </span>
                   {activeTransaction?.autoRenew && (
@@ -50916,7 +51354,7 @@ export default function UserBillingPage() {
                   {user?.subscription_plan?.replace(/-/g, ' ') || 'Taster (Free)'}
                 </h2>
                 <p className="text-xs opacity-70 flex items-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-                  <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--color-emerald)' }} />
+                  <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
                   {activeTransaction?.expiryDate
                     ? `${t('billingPeriodEnds', 'Current period ends on')} ${new Date(activeTransaction.expiryDate).toLocaleDateString()}`
                     : t('freeTierNoExpiry', 'Free Tier — No expiration date')}
@@ -50935,6 +51373,19 @@ export default function UserBillingPage() {
                     {t('cancelPlanRenewalBtn', 'Cancel Renewal')}
                   </button>
                 )}
+
+                {activeTransaction && activeTransaction.status === 'canceled' && (
+                  <button
+                    type="button"
+                    onClick={handleResumeSubscription}
+                    disabled={processing}
+                    className="px-4 py-2.5 rounded-xl border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 font-bold text-xs flex items-center gap-2 transition cursor-pointer"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    {t('resumePlanRenewalBtn', 'Reactivate Auto-Renew')}
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => {
@@ -50942,7 +51393,7 @@ export default function UserBillingPage() {
                     if (el) el.scrollIntoView({ behavior: 'smooth' });
                   }}
                   className="px-5 py-2.5 rounded-xl text-white font-bold text-xs flex items-center gap-2 transition shadow-lg cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-emerald)' }}
+                  style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
                 >
                   <ArrowUpRight className="w-4 h-4" style={{ color: '#ffffff' }} />
                   {t('upgradeOrDowngradeBtn', 'Change Plan Tier')}
@@ -51022,12 +51473,12 @@ export default function UserBillingPage() {
                         const isFree = plan.slug === 'taster' || plan.isFree || (plan.monthlyPrice === 0 && plan.annualPrice === 0);
 
                         return (
-                          <tr key={plan.id} className="transition" style={{ backgroundColor: 'transparent' }}>
+                          <tr key={plan.id} className="transition hover:bg-white/[0.02]">
                             <td className="p-4 font-bold" style={{ color: 'var(--color-text)' }}>
                               <div className="flex items-center gap-2">
                                 <span>{plan.name}</span>
                                 {plan.annualBadge && (
-                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-primary/10 text-primary border border-primary/20">
+                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase border border-amber-500/20 bg-amber-500/10 text-amber-400">
                                     {plan.annualBadge}
                                   </span>
                                 )}
@@ -51038,7 +51489,7 @@ export default function UserBillingPage() {
                             </td>
 
                             <td className="p-4">
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-500 border border-amber-500/20 font-mono">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
                                 <Coins className="h-3.5 w-3.5" />
                                 <span>+{(plan.tokenLimit ?? (isFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol}</span>
                               </span>
@@ -51084,11 +51535,11 @@ export default function UserBillingPage() {
                                     }`}
                                     style={monthlyActive ? {
                                       backgroundColor: 'var(--color-inner-dark)',
-                                      color: 'var(--color-emerald)',
-                                      borderColor: 'var(--color-emerald)'
+                                      color: 'var(--color-emerald, #10b981)',
+                                      borderColor: 'var(--color-emerald, #10b981)'
                                     } : {
-                                      borderColor: 'var(--color-emerald)',
-                                      color: 'var(--color-emerald)'
+                                      borderColor: 'var(--color-emerald, #10b981)',
+                                      color: 'var(--color-emerald, #10b981)'
                                     }}
                                   >
                                     {monthlyActive ? t('activeLabel', 'Active') : t('downgradeToFreeBtn', 'Switch to Free')}
@@ -51106,11 +51557,11 @@ export default function UserBillingPage() {
                                       }`}
                                       style={monthlyActive ? {
                                         backgroundColor: 'var(--color-inner-dark)',
-                                        color: 'var(--color-emerald)',
-                                        borderColor: 'var(--color-emerald)'
+                                        color: 'var(--color-emerald, #10b981)',
+                                        borderColor: 'var(--color-emerald, #10b981)'
                                       } : {
-                                        borderColor: 'var(--color-emerald)',
-                                        color: 'var(--color-emerald)'
+                                        borderColor: 'var(--color-emerald, #10b981)',
+                                        color: 'var(--color-emerald, #10b981)'
                                       }}
                                     >
                                       {monthlyActive ? t('monthlyActive', 'Monthly Active') : t('chooseMonthlyBtn', 'Monthly')}
@@ -51125,7 +51576,7 @@ export default function UserBillingPage() {
                                           : 'text-white shadow-md'
                                       }`}
                                       style={{
-                                        backgroundColor: 'var(--color-emerald)'
+                                        backgroundColor: 'var(--color-emerald, #10b981)'
                                       }}
                                     >
                                       {annualActive ? t('annualActive', 'Annual Active') : t('chooseAnnualBtn', 'Annual')}
@@ -51174,6 +51625,98 @@ export default function UserBillingPage() {
         )}
 
       </div>
+
+      {/* RECEIPT / INVOICE MODAL */}
+      {viewingReceipt && (
+        <div 
+          onClick={() => setViewingReceipt(null)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-lg w-full p-6 sm:p-8 space-y-6 shadow-2xl relative cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button 
+              onClick={() => setViewingReceipt(null)}
+              className="absolute top-5 right-5 p-1.5 rounded-lg border transition cursor-pointer"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="border-b pb-4 space-y-1" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                <span className="font-mono text-xs uppercase tracking-wider opacity-60">Payment Receipt</span>
+              </div>
+              <h3 className="text-xl font-black">{viewingReceipt.planName}</h3>
+              <p className="text-xs font-mono opacity-50">Transaction ID: {viewingReceipt.id}</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div>
+                <span className="opacity-50 block uppercase text-[10px] font-bold">Billing Customer</span>
+                <span className="font-semibold block">{viewingReceipt.customerName || user?.name || 'Subscriber'}</span>
+                <span className="font-mono opacity-70 block">{viewingReceipt.customerEmail}</span>
+              </div>
+              <div>
+                <span className="opacity-50 block uppercase text-[10px] font-bold">Payment Date</span>
+                <span className="font-semibold block">{new Date(viewingReceipt.createdAt).toLocaleString()}</span>
+              </div>
+              <div>
+                <span className="opacity-50 block uppercase text-[10px] font-bold">Payment Gateway</span>
+                <span className="font-semibold block uppercase">{viewingReceipt.gateway}</span>
+              </div>
+              <div>
+                <span className="opacity-50 block uppercase text-[10px] font-bold">Payment Status</span>
+                <div className="mt-0.5">{statusBadge(viewingReceipt.status)}</div>
+              </div>
+              <div>
+                <span className="opacity-50 block uppercase text-[10px] font-bold">Billing Interval</span>
+                <span className="font-semibold block">{viewingReceipt.recurringInterval || 'Monthly'}</span>
+              </div>
+              <div>
+                <span className="opacity-50 block uppercase text-[10px] font-bold">Access Valid Until</span>
+                <span className="font-semibold block">
+                  {viewingReceipt.expiryDate ? new Date(viewingReceipt.expiryDate).toLocaleDateString() : 'N/A'}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+              <span className="font-bold text-xs uppercase tracking-wider">Total Amount Paid</span>
+              <span className="text-xl font-black" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                {gatewayConfig.currencySymbol}{viewingReceipt.amount.toFixed(2)} {viewingReceipt.currency}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-4 py-2 rounded-xl border text-xs font-bold flex items-center gap-2 transition cursor-pointer hover:opacity-80"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print Invoice</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewingReceipt(null)}
+                className="px-5 py-2 rounded-xl text-white text-xs font-bold transition cursor-pointer"
+                style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
