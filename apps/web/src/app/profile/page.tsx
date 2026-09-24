@@ -8,7 +8,7 @@ import {
   AlertCircle, Calendar, LogOut, Check,
   Zap, Sparkles, RefreshCw, Shield,
   Clock, Coins, Link2, Unlink, ArrowRight,
-  Wallet, Plus, Receipt
+  Wallet, Plus, Receipt, ArrowDownLeft, ArrowUpRight, Activity
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -25,6 +25,12 @@ interface ExtendedUser extends User {
   linked_providers?: SocialProvider[];
   provider?: string;
   authProvider?: string;
+  auth_provider?: string;
+  social_provider?: string;
+  login_method?: string;
+  google_id?: string;
+  facebook_id?: string;
+  apple_id?: string;
   token_balance?: number;
   wallet_balance?: number;
   planExpiryDate?: string;
@@ -41,6 +47,99 @@ const sanitizeSinglePlan = (planInput?: string | string[]): string => {
   if (Array.isArray(planInput)) raw = planInput[0] ? String(planInput[0]).trim() : '';
   else raw = String(planInput).trim();
   return raw.toLowerCase().replace(/[^a-z0-9-]/g, '');
+};
+
+const detectUserSocialProviders = (u: any): SocialProvider[] => {
+  if (!u) return [];
+  const providers = new Set<SocialProvider>();
+
+  const parseProviderList = (val: any) => {
+    if (!val) return;
+    if (Array.isArray(val)) {
+      val.forEach((p: any) => {
+        const low = String(p).toLowerCase().trim();
+        if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
+      });
+      return;
+    }
+    if (typeof val === 'string') {
+      let str = val.trim();
+      if (str.startsWith('{') && str.endsWith('}')) {
+        str = str.slice(1, -1);
+      }
+      if (str.startsWith('[') && str.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(str);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((p: any) => {
+              const low = String(p).toLowerCase().trim();
+              if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
+            });
+            return;
+          }
+        } catch (_) {}
+      }
+      str.split(',').forEach(item => {
+        const clean = item.replace(/["'{}]/g, '').toLowerCase().trim();
+        if (clean === 'google' || clean === 'facebook' || clean === 'apple') {
+          providers.add(clean as SocialProvider);
+        }
+      });
+    }
+  };
+
+  parseProviderList(u.linkedProviders);
+  parseProviderList(u.linked_providers);
+
+  const mainProv = String(
+    u.provider || u.authProvider || u.auth_provider || 
+    u.socialProvider || u.social_provider || 
+    u.oauthProvider || u.oauth_provider || 
+    u.loginMethod || u.login_method || ''
+  ).toLowerCase();
+  if (mainProv.includes('google')) providers.add('google');
+  if (mainProv.includes('facebook')) providers.add('facebook');
+  if (mainProv.includes('apple')) providers.add('apple');
+
+  const uid = String(u.id || '').toLowerCase();
+  if (uid.startsWith('usr_g_') || uid.startsWith('usr_goog') || uid.startsWith('g_') || uid.includes('google')) providers.add('google');
+  if (uid.startsWith('usr_fb_') || uid.startsWith('usr_f_') || uid.startsWith('fb_') || uid.includes('facebook')) providers.add('facebook');
+  if (uid.startsWith('usr_apple') || uid.startsWith('usr_a_') || uid.startsWith('apple_') || uid.includes('apple')) providers.add('apple');
+
+  if (u.googleId || u.google_id || u.google_sub) providers.add('google');
+  if (u.facebookId || u.facebook_id || u.facebook_sub) providers.add('facebook');
+  if (u.appleId || u.apple_id || u.apple_sub) providers.add('apple');
+
+  return Array.from(providers);
+};
+
+const getActiveLoginProvider = (u: any): SocialProvider | null => {
+  if (!u) return null;
+  const mainProv = String(
+    u.provider || u.authProvider || u.auth_provider || 
+    u.socialProvider || u.social_provider || 
+    u.oauthProvider || u.oauth_provider || 
+    u.loginMethod || u.login_method || ''
+  ).toLowerCase();
+  if (mainProv.includes('google')) return 'google';
+  if (mainProv.includes('facebook')) return 'facebook';
+  if (mainProv.includes('apple')) return 'apple';
+
+  const uid = String(u.id || '').toLowerCase();
+  if (uid.startsWith('usr_g_') || uid.startsWith('usr_goog') || uid.startsWith('g_') || uid.includes('google')) return 'google';
+  if (uid.startsWith('usr_fb_') || uid.startsWith('usr_f_') || uid.startsWith('fb_') || uid.includes('facebook')) return 'facebook';
+  if (uid.startsWith('usr_apple') || uid.startsWith('usr_a_') || uid.startsWith('apple_') || uid.includes('apple')) return 'apple';
+
+  if (u.googleId || u.google_id || u.google_sub) return 'google';
+  if (u.facebookId || u.facebook_id || u.facebook_sub) return 'facebook';
+  if (u.appleId || u.apple_id || u.apple_sub) return 'apple';
+
+  const detected = detectUserSocialProviders(u);
+  if (detected.length > 0 && (!u.password || u.password === '')) {
+    return detected[0];
+  }
+
+  return null;
 };
 
 export default function ProfilePage() {
@@ -135,6 +234,8 @@ export default function ProfilePage() {
         if (data.success) {
           if (typeof data.wallet_balance === 'number') {
             setOwnerWalletBalance(data.wallet_balance);
+          } else if (typeof data.balance === 'number') {
+            setOwnerWalletBalance(data.balance);
           } else if (data.user && typeof data.user.wallet_balance !== 'undefined') {
             setOwnerWalletBalance(parseFloat(data.user.wallet_balance || 0));
           }
@@ -202,20 +303,21 @@ export default function ProfilePage() {
         }
       } catch (_) {}
 
-      // Normalize social providers
-      const socialSet = new Set<SocialProvider>();
-      (freshUser.linkedProviders || freshUser.linked_providers || []).forEach((p: any) => {
-        if (['google', 'facebook', 'apple'].includes(String(p).toLowerCase())) {
-          socialSet.add(String(p).toLowerCase() as SocialProvider);
-        }
-      });
-      if (freshUser.id?.includes('google')) socialSet.add('google');
-      if (freshUser.id?.includes('facebook')) socialSet.add('facebook');
-      if (freshUser.id?.includes('apple')) socialSet.add('apple');
+      // Robust social provider detection
+      const detectedSocial = detectUserSocialProviders(freshUser);
+      const activeSocial = getActiveLoginProvider(freshUser);
+      if (activeSocial && !detectedSocial.includes(activeSocial)) {
+        detectedSocial.push(activeSocial);
+      }
 
-      freshUser.linkedProviders = Array.from(socialSet);
+      freshUser.linkedProviders = detectedSocial;
+      freshUser.linked_providers = detectedSocial;
+      if (activeSocial && !freshUser.provider && !freshUser.authProvider) {
+        freshUser.provider = activeSocial;
+        freshUser.authProvider = activeSocial;
+      }
+
       currentUserRef.current = freshUser;
-
       setUserState(freshUser);
       setName(freshUser.name || '');
       setEmail(freshUser.email || '');
@@ -303,13 +405,15 @@ export default function ProfilePage() {
     setError('');
     setSuccessMsg('');
 
-    const isLinked = Boolean(user.linkedProviders?.includes(provider));
+    const activeLogin = getActiveLoginProvider(user);
+    const isPrimary = activeLogin === provider;
+    const isLinked = Boolean(user.linkedProviders?.includes(provider)) || isPrimary;
     let updatedLinked = [...(user.linkedProviders || [])];
     const provName = provider.charAt(0).toUpperCase() + provider.slice(1);
 
     if (isLinked) {
-      if (updatedLinked.length === 1 && !user.password) {
-        setError(t('cannotUnlinkOnlyLogin', `Cannot unlink ${provName}: this is your only login method. Please set a password first.`));
+      if ((isPrimary || updatedLinked.length === 1) && !user.password) {
+        setError(t('cannotUnlinkOnlyLogin', `Cannot unlink ${provName}: this is your active login method. Please set a password first.`));
         setProcessingSocial(null);
         return;
       }
@@ -372,6 +476,7 @@ export default function ProfilePage() {
   const cleanPlanSlug = sanitizeSinglePlan(user.subscriptionPlan || 'taster');
   const isFreePlan = cleanPlanSlug === 'taster' || cleanPlanSlug === 'free' || cleanPlanSlug.includes('free');
   const activeExpiryDate = user.planExpiryDate || user.expiryDate;
+  const activeLoginProvider = getActiveLoginProvider(user);
 
   return (
     <div 
@@ -429,6 +534,185 @@ export default function ProfilePage() {
         </div>
       )}
 
+      {/* ========================================================================= */}
+      {/* 🚀 HIGH-VISIBILITY EXECUTIVE SUMMARY KPI BANNER                           */}
+      {/* ========================================================================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in">
+        {/* KPI 1: AI Token Spendable Balance */}
+        <div 
+          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500">
+                <Coins className="h-4 w-4" />
+              </div>
+              <span className="text-xs font-bold opacity-80">{tokenIdentity.tokenName} {t('balanceLabel', 'Balance')}</span>
+            </div>
+            <Link 
+              href="/transactions?tab=tokens" 
+              className="text-[11px] font-bold text-amber-500 hover:underline flex items-center gap-0.5"
+            >
+              <span>{t('ledgerShort', 'Ledger')}</span>
+              <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+          
+          <div>
+            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
+              <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
+                {ownerTokenBalance.toLocaleString()}
+              </span>
+              <span className="text-sm font-bold text-amber-500 font-mono">
+                {tokenIdentity.tokenSymbol}
+              </span>
+            </div>
+            <p className="text-[10px] opacity-60 mt-0.5">
+              {t('spendableTokensSub', 'Available for AI Chat & recipe parsing')}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1 border-t border-[var(--color-border)] text-[10px] font-mono">
+            <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
+              <ArrowDownLeft className="h-3 w-3" /> -{tokenStats.totalDeducted.toLocaleString()}
+            </span>
+            <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+              <ArrowUpRight className="h-3 w-3" /> +{tokenStats.totalGranted.toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+        {/* KPI 2: Store Wallet Balance */}
+        <div 
+          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-[var(--color-primary)]">
+                <Wallet className="h-4 w-4" />
+              </div>
+              <span className="text-xs font-bold opacity-80">{t('storeCreditLabel', 'Store Credit')}</span>
+            </div>
+            <Link 
+              href="/wallet" 
+              className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-0.5"
+            >
+              <Plus className="h-3 w-3" />
+              <span>{t('topUp', 'Top Up')}</span>
+            </Link>
+          </div>
+
+          <div>
+            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
+              <span className="text-2xl sm:text-3xl font-black font-mono text-[var(--color-primary)]">
+                {walletSymbol}{ownerWalletBalance.toFixed(2)}
+              </span>
+              <span className="text-xs font-bold opacity-60 font-mono">
+                {walletCurrency}
+              </span>
+            </div>
+            <p className="text-[10px] opacity-60 mt-0.5">
+              {t('storeCreditSub', 'Spendable for token bundles & plans')}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1 border-t border-[var(--color-border)] text-[10px] font-mono">
+            <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+              <ArrowUpRight className="h-3 w-3" /> +{walletSymbol}{walletStats.totalDeposited.toFixed(2)}
+            </span>
+            <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
+              <ArrowDownLeft className="h-3 w-3" /> -{walletSymbol}{walletStats.totalSpent.toFixed(2)}
+            </span>
+          </div>
+        </div>
+
+        {/* KPI 3: Membership Plan & Health */}
+        <div 
+          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                {isFreePlan ? <Sparkles className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
+              </div>
+              <span className="text-xs font-bold opacity-80">{t('membershipTierLabel', 'Membership Tier')}</span>
+            </div>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border uppercase ${
+              isFreePlan ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-primary/10 text-primary border-primary/30'
+            }`}>
+              {t('activeStatus', 'Active')}
+            </span>
+          </div>
+
+          <div>
+            <div className="text-2xl sm:text-3xl font-black tracking-tight uppercase">
+              {cleanPlanSlug}
+            </div>
+            <p className="text-[10px] opacity-60 mt-0.5">
+              {user.role === 'admin' ? t('adminRoleLabel', 'Administrator Account') : t('standardUserLabel', 'Standard User Plan')}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between pt-1 border-t border-[var(--color-border)] text-[10px]">
+            <div className="flex items-center gap-1 opacity-70">
+              <Calendar className="h-3 w-3 text-[var(--color-primary)]" />
+              <span suppressHydrationWarning>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Active'}</span>
+            </div>
+            {activeExpiryDate ? (
+              <span className="text-emerald-400 font-semibold" suppressHydrationWarning>
+                Exp: {new Date(activeExpiryDate).toLocaleDateString()}
+              </span>
+            ) : (
+              <span className="text-emerald-400 font-semibold">Lifetime Access</span>
+            )}
+          </div>
+        </div>
+
+        {/* KPI 4: Total Activity & Ledger Events */}
+        <div 
+          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                <Activity className="h-4 w-4" />
+              </div>
+              <span className="text-xs font-bold opacity-80">{t('totalActivityLabel', 'Total Activity')}</span>
+            </div>
+            <Link 
+              href="/transactions" 
+              className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-0.5"
+            >
+              <span>{t('viewAll', 'View All')}</span>
+              <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+
+          <div>
+            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
+              <span className="text-2xl sm:text-3xl font-black font-mono">
+                {(tokenStats.totalEvents + walletStats.totalEvents).toLocaleString()}
+              </span>
+              <span className="text-xs font-bold opacity-60">
+                {t('totalEventsUnit', 'records')}
+              </span>
+            </div>
+            <p className="text-[10px] opacity-60 mt-0.5">
+              {t('totalActivitySub', 'Combined token debits & store ledger')}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between pt-1 border-t border-[var(--color-border)] text-[10px] font-mono opacity-80">
+            <span className="text-amber-500">{tokenStats.totalEvents} {tokenIdentity.tokenName}</span>
+            <span className="text-[var(--color-primary)]">{walletStats.totalEvents} Wallet</span>
+          </div>
+        </div>
+      </div>
+
       {/* Profile Overview (Credentials, Token & Wallet Summary, Socials) */}
       <div className="space-y-6 animate-in fade-in">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -456,7 +740,7 @@ export default function ProfilePage() {
               <div className="text-left sm:text-right text-[11px] space-y-1 opacity-80">
                 <div className="flex sm:justify-end items-center gap-1.5">
                   <Calendar className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                  <span>{t('joinedPrefix', 'Joined: ')} {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : t('activeStatus', 'Active')}</span>
+                  <span suppressHydrationWarning>{t('joinedPrefix', 'Joined: ')} {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : t('activeStatus', 'Active')}</span>
                 </div>
                 <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
                   <span className="font-semibold">{t('activeMembershipLabel', 'Plan:')}</span>
@@ -470,7 +754,7 @@ export default function ProfilePage() {
                 {activeExpiryDate && (
                   <div className="flex sm:justify-end items-center gap-1 text-[10px] text-emerald-400 font-semibold pt-0.5">
                     <Clock className="h-3 w-3" />
-                    <span>Expires: {new Date(activeExpiryDate).toLocaleDateString()}</span>
+                    <span suppressHydrationWarning>Expires: {new Date(activeExpiryDate).toLocaleDateString()}</span>
                   </div>
                 )}
               </div>
@@ -574,20 +858,24 @@ export default function ProfilePage() {
 
               <div className="border rounded-2xl p-4 shadow-inner flex items-baseline justify-between bg-[var(--color-inner-dark)] border-[var(--color-border)]">
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">Spendable Balance</span>
-                  <div className="flex items-baseline gap-1.5 pt-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">{t('spendableBalanceLabel', 'Spendable Balance')}</span>
+                  <div className="flex items-baseline gap-1.5 pt-0.5" suppressHydrationWarning>
                     <span className="text-3xl font-black font-mono text-emerald-400">{ownerTokenBalance.toLocaleString()}</span>
                     <span className="text-sm font-bold text-amber-500 font-mono">{tokenIdentity.tokenSymbol}</span>
                   </div>
                 </div>
-                <div className="text-right text-[11px] font-mono opacity-70">
-                  <div>Used: -{tokenStats.totalDeducted}</div>
-                  <div>Added: +{tokenStats.totalGranted}</div>
+                <div className="flex flex-col items-end gap-1 font-mono text-[11px]">
+                  <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
+                    <ArrowDownLeft className="h-3 w-3" /> -{tokenStats.totalDeducted.toLocaleString()}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                    <ArrowUpRight className="h-3 w-3" /> +{tokenStats.totalGranted.toLocaleString()}
+                  </span>
                 </div>
               </div>
 
               <div className="flex justify-between items-center pt-1 text-xs">
-                <span className="opacity-70 text-[11px]">{tokenStats.totalEvents} recorded events</span>
+                <span className="opacity-70 text-[11px] font-mono">{tokenStats.totalEvents} {t('recordedEvents', 'recorded events')}</span>
                 <Link
                   href="/transactions?tab=tokens"
                   className="font-bold text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
@@ -608,27 +896,31 @@ export default function ProfilePage() {
                   <Wallet className="h-5 w-5 text-[var(--color-primary)]" />
                   <span>{t('storeWalletBalance', 'Store Wallet Balance')}</span>
                 </h3>
-                <Link href="/wallet" className="text-[10px] font-bold px-2 py-0.5 rounded-lg border bg-primary/10 text-primary border-primary/20 flex items-center gap-1 hover:underline">
-                  <Plus className="h-3 w-3" /> Top Up
+                <Link href="/wallet" className="text-[10px] font-bold px-2.5 py-1 rounded-lg border bg-primary/10 text-primary border-primary/20 flex items-center gap-1 hover:underline">
+                  <Plus className="h-3 w-3" /> {t('topUp', 'Top Up')}
                 </Link>
               </div>
 
               <div className="border rounded-2xl p-4 shadow-inner flex items-baseline justify-between bg-[var(--color-inner-dark)] border-[var(--color-border)]">
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">Store Credit</span>
-                  <div className="flex items-baseline gap-1.5 pt-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">{t('storeCreditLabel', 'Store Credit')}</span>
+                  <div className="flex items-baseline gap-1.5 pt-0.5" suppressHydrationWarning>
                     <span className="text-3xl font-black font-mono text-[var(--color-primary)]">{walletSymbol}{ownerWalletBalance.toFixed(2)}</span>
                     <span className="text-xs font-bold opacity-60 font-mono">{walletCurrency}</span>
                   </div>
                 </div>
-                <div className="text-right text-[11px] font-mono opacity-70">
-                  <div>Deposits: +{walletSymbol}{walletStats.totalDeposited.toFixed(2)}</div>
-                  <div>Spent: -{walletSymbol}{walletStats.totalSpent.toFixed(2)}</div>
+                <div className="flex flex-col items-end gap-1 font-mono text-[11px]">
+                  <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                    <ArrowUpRight className="h-3 w-3" /> +{walletSymbol}{walletStats.totalDeposited.toFixed(2)}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
+                    <ArrowDownLeft className="h-3 w-3" /> -{walletSymbol}{walletStats.totalSpent.toFixed(2)}
+                  </span>
                 </div>
               </div>
 
               <div className="flex justify-between items-center pt-1 text-xs">
-                <span className="opacity-70 text-[11px]">{walletStats.totalEvents} wallet transactions</span>
+                <span className="opacity-70 text-[11px] font-mono">{walletStats.totalEvents} {t('walletTransactionsCount', 'wallet transactions')}</span>
                 <Link
                   href="/transactions?tab=wallet"
                   className="font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer"
@@ -689,7 +981,8 @@ export default function ProfilePage() {
                 )
               }
             ].map(({ id: provId, name: provName, icon }) => {
-              const isLinked = Boolean(user.linkedProviders?.includes(provId));
+              const isPrimary = activeLoginProvider === provId;
+              const isLinked = Boolean(user.linkedProviders?.includes(provId)) || isPrimary;
               return (
                 <div 
                   key={provId}
@@ -700,7 +993,11 @@ export default function ProfilePage() {
                     <div>
                       <span className="block font-bold text-xs">{provName}</span>
                       <span className={`text-[10px] font-semibold ${isLinked ? 'text-emerald-400' : 'opacity-50'}`}>
-                        {isLinked ? t('linked', 'Connected') : t('notLinked', 'Not linked')}
+                        {isPrimary 
+                          ? (t('linkedLoginMethod', 'Linked (Login Method)'))
+                          : isLinked 
+                          ? (t('linked', 'Connected'))
+                          : (t('notLinked', 'Not linked'))}
                       </span>
                     </div>
                   </div>
