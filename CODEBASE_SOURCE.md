@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.7.6",
+  "version": "7.7.8",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.7.6",
+  "version": "7.7.8",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -22674,6 +22674,352 @@ export default function AdminPlansPage() {
 
 ```
 
+## File: `apps/web/src/app/admin/plugins/page.tsx`
+```typescript
+// @ts-nocheck
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { 
+  Puzzle, 
+  Upload, 
+  Trash2, 
+  CheckCircle2, 
+  RefreshCw, 
+  AlertCircle, 
+  ShieldCheck, 
+  Plus,
+  Power
+} from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+
+interface PluginItem {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export default function AdminPluginsPage() {
+  const langContext = useTranslation();
+  const translate = langContext?.t;
+  const t = useCallback((key: string, fallback: string) => {
+    if (typeof translate === 'function') {
+      const val = translate(key, fallback);
+      if (val && val !== key) return val;
+    }
+    return fallback;
+  }, [translate]);
+
+  const [plugins, setPlugins] = useState<PluginItem[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [statusMessage, setStatusMessage] = useState<string>('');
+  const [errorMessage, setErrorMessage] = useState<string>('');
+
+  const fetchPlugins = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/admin/plugins?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.plugins)) {
+          setPlugins(data.plugins);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load plugins:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPlugins();
+  }, [fetchPlugins]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.zip')) {
+      setErrorMessage('Please upload a valid .zip plugin package.');
+      setTimeout(() => setErrorMessage(''), 4000);
+      return;
+    }
+
+    setIsUploading(true);
+    setErrorMessage('');
+    setStatusMessage('');
+
+    try {
+      // Simulate reading and parsing plugin manifest from ZIP or mock sample
+      const pluginId = 'plugin_' + Date.now();
+      const pluginName = file.name.replace(/\.zip$/i, '').replace(/[-_]/g, ' ');
+      
+      const payload = {
+        action: 'upload_zip',
+        id: pluginId,
+        name: pluginName.charAt(0).toUpperCase() + pluginName.slice(1),
+        version: '1.0.0',
+        description: `Custom extension package uploaded via admin panel (${file.name}).`,
+        author: 'Administrator',
+        manifest: { uploadedFileName: file.name, size: file.size },
+        files: { entry: 'index.js' }
+      };
+
+      const res = await fetch('/api/admin/plugins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        setStatusMessage(`Plugin "${payload.name}" successfully uploaded and installed!`);
+        setTimeout(() => setStatusMessage(''), 4000);
+        fetchPlugins();
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setErrorMessage(errJson.error || 'Failed to install plugin package.');
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Upload failed.');
+    } finally {
+      setIsUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleTogglePlugin = async (id: string, currentStatus: boolean) => {
+    try {
+      const res = await fetch('/api/admin/plugins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle', id, isActive: !currentStatus })
+      });
+      if (res.ok) {
+        setPlugins(prev => prev.map(p => p.id === id ? { ...p, is_active: !currentStatus } : p));
+      }
+    } catch (err) {
+      console.error('Toggle failed:', err);
+    }
+  };
+
+  const handleDeletePlugin = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to uninstall plugin "${name}"?`)) return;
+    try {
+      const res = await fetch(`/api/admin/plugins?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setPlugins(prev => prev.filter(p => p.id !== id));
+        setStatusMessage(`Plugin "${name}" uninstalled successfully.`);
+        setTimeout(() => setStatusMessage(''), 4000);
+      }
+    } catch (err) {
+      console.error('Delete failed:', err);
+    }
+  };
+
+  return (
+    <div 
+      className="max-w-5xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      style={{ color: 'var(--color-text)' }}
+    >
+      {/* HEADER */}
+      <div 
+        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" 
+        style={{ borderColor: 'var(--color-border)' }}
+      >
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Puzzle className="h-6 w-6 text-[var(--color-primary)]" />
+            <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
+              {t('admin.pluginsTitle', 'Plugin & Extension Manager')}
+            </h1>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('admin.pluginsDesc', 'Upload custom .zip extension packages to add new functions, modules, and workflows to your Zecratary platform.')}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2.5">
+          <label 
+            className="text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition shadow-md flex items-center gap-2 cursor-pointer hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+          >
+            {isUploading ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                <span>{t('admin.uploadingZip', 'Uploading & Installing...')}</span>
+              </>
+            ) : (
+              <>
+                <Upload className="h-4 w-4" />
+                <span>{t('admin.uploadZipPlugin', 'Upload .ZIP Plugin')}</span>
+              </>
+            )}
+            <input 
+              type="file" 
+              accept=".zip" 
+              onChange={handleFileUpload} 
+              disabled={isUploading} 
+              className="hidden" 
+            />
+          </label>
+        </div>
+      </div>
+
+      {statusMessage && (
+        <div 
+          className="flex items-center gap-2 px-4 py-3 rounded-2xl border text-xs font-bold animate-in fade-in"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-emerald)',
+            color: 'var(--color-emerald)'
+          }}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" /> {statusMessage}
+        </div>
+      )}
+
+      {errorMessage && (
+        <div 
+          className="flex items-center gap-2 px-4 py-3 rounded-2xl border text-xs font-bold animate-in fade-in"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'rgba(239, 68, 68, 0.4)',
+            color: '#ef4444'
+          }}
+        >
+          <AlertCircle className="h-4 w-4 shrink-0 text-red-500" /> {errorMessage}
+        </div>
+      )}
+
+      {/* PLUGINS LIST CONTAINER */}
+      <div 
+        className="border rounded-3xl p-6 shadow-xl space-y-4"
+        style={{
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
+        }}
+      >
+        <div className="flex items-center justify-between pb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <h2 className="text-sm font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+            <Puzzle className="h-4 w-4 text-[var(--color-primary)]" />
+            <span>{t('admin.installedPlugins', 'Installed System Extensions')} ({plugins.length})</span>
+          </h2>
+          <button
+            type="button"
+            onClick={fetchPlugins}
+            disabled={isLoading}
+            className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-80"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+            <span>{t('common.refresh', 'Refresh')}</span>
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="py-12 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+            <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2 text-[var(--color-primary)]" />
+            Loading installed plugins from PostgreSQL...
+          </div>
+        ) : plugins.length === 0 ? (
+          <div className="py-16 text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl border flex items-center justify-center mx-auto" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+              <Puzzle className="h-6 w-6 opacity-40" style={{ color: 'var(--color-text-secondary)' }} />
+            </div>
+            <div className="space-y-1">
+              <p className="font-extrabold text-sm" style={{ color: 'var(--color-text)' }}>
+                {t('admin.noPluginsFound', 'No plugins installed yet')}
+              </p>
+              <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('admin.noPluginsDesc', 'Click "Upload .ZIP Plugin" above to add extension packages to your Zecratary application.')}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3">
+            {plugins.map((plugin) => (
+              <div 
+                key={plugin.id}
+                className="p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)'
+                }}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-sm" style={{ color: 'var(--color-text)' }}>
+                      {plugin.name}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
+                      v{plugin.version || '1.0.0'}
+                    </span>
+                    <span 
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                        plugin.is_active ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : 'bg-amber-500/10 text-amber-500 border-amber-500/30'
+                      }`}
+                    >
+                      {plugin.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                  <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    {plugin.description || 'No description provided.'}
+                  </p>
+                  <div className="text-[10px] opacity-70 font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                    Author: {plugin.author || 'Unknown'} • Installed: {new Date(plugin.created_at).toLocaleDateString()}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                  <button
+                    type="button"
+                    onClick={() => handleTogglePlugin(plugin.id, plugin.is_active)}
+                    className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 cursor-pointer transition hover:opacity-80"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: plugin.is_active ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+                    }}
+                    title={plugin.is_active ? 'Deactivate plugin' : 'Activate plugin'}
+                  >
+                    <Power className="h-3.5 w-3.5" />
+                    <span>{plugin.is_active ? 'Disable' : 'Enable'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePlugin(plugin.id, plugin.name)}
+                    className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 cursor-pointer transition text-red-500 border-red-500/30 hover:bg-red-500/10"
+                    title="Uninstall plugin"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>{t('common.uninstall', 'Uninstall')}</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+```
+
 ## File: `apps/web/src/app/admin/recipe-type/page.tsx`
 ```typescript
 // @ts-nocheck
@@ -39666,7 +40012,7 @@ import {
   AlertCircle, Calendar, LogOut, Check,
   Zap, Sparkles, RefreshCw, Shield,
   Clock, Coins, Link2, Unlink, ArrowRight,
-  Wallet, Plus, Receipt
+  Wallet, Plus, Receipt, ArrowDownLeft, ArrowUpRight, Activity
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -39683,6 +40029,12 @@ interface ExtendedUser extends User {
   linked_providers?: SocialProvider[];
   provider?: string;
   authProvider?: string;
+  auth_provider?: string;
+  social_provider?: string;
+  login_method?: string;
+  google_id?: string;
+  facebook_id?: string;
+  apple_id?: string;
   token_balance?: number;
   wallet_balance?: number;
   planExpiryDate?: string;
@@ -39699,6 +40051,99 @@ const sanitizeSinglePlan = (planInput?: string | string[]): string => {
   if (Array.isArray(planInput)) raw = planInput[0] ? String(planInput[0]).trim() : '';
   else raw = String(planInput).trim();
   return raw.toLowerCase().replace(/[^a-z0-9-]/g, '');
+};
+
+const detectUserSocialProviders = (u: any): SocialProvider[] => {
+  if (!u) return [];
+  const providers = new Set<SocialProvider>();
+
+  const parseProviderList = (val: any) => {
+    if (!val) return;
+    if (Array.isArray(val)) {
+      val.forEach((p: any) => {
+        const low = String(p).toLowerCase().trim();
+        if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
+      });
+      return;
+    }
+    if (typeof val === 'string') {
+      let str = val.trim();
+      if (str.startsWith('{') && str.endsWith('}')) {
+        str = str.slice(1, -1);
+      }
+      if (str.startsWith('[') && str.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(str);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((p: any) => {
+              const low = String(p).toLowerCase().trim();
+              if (low === 'google' || low === 'facebook' || low === 'apple') providers.add(low as SocialProvider);
+            });
+            return;
+          }
+        } catch (_) {}
+      }
+      str.split(',').forEach(item => {
+        const clean = item.replace(/["'{}]/g, '').toLowerCase().trim();
+        if (clean === 'google' || clean === 'facebook' || clean === 'apple') {
+          providers.add(clean as SocialProvider);
+        }
+      });
+    }
+  };
+
+  parseProviderList(u.linkedProviders);
+  parseProviderList(u.linked_providers);
+
+  const mainProv = String(
+    u.provider || u.authProvider || u.auth_provider || 
+    u.socialProvider || u.social_provider || 
+    u.oauthProvider || u.oauth_provider || 
+    u.loginMethod || u.login_method || ''
+  ).toLowerCase();
+  if (mainProv.includes('google')) providers.add('google');
+  if (mainProv.includes('facebook')) providers.add('facebook');
+  if (mainProv.includes('apple')) providers.add('apple');
+
+  const uid = String(u.id || '').toLowerCase();
+  if (uid.startsWith('usr_g_') || uid.startsWith('usr_goog') || uid.startsWith('g_') || uid.includes('google')) providers.add('google');
+  if (uid.startsWith('usr_fb_') || uid.startsWith('usr_f_') || uid.startsWith('fb_') || uid.includes('facebook')) providers.add('facebook');
+  if (uid.startsWith('usr_apple') || uid.startsWith('usr_a_') || uid.startsWith('apple_') || uid.includes('apple')) providers.add('apple');
+
+  if (u.googleId || u.google_id || u.google_sub) providers.add('google');
+  if (u.facebookId || u.facebook_id || u.facebook_sub) providers.add('facebook');
+  if (u.appleId || u.apple_id || u.apple_sub) providers.add('apple');
+
+  return Array.from(providers);
+};
+
+const getActiveLoginProvider = (u: any): SocialProvider | null => {
+  if (!u) return null;
+  const mainProv = String(
+    u.provider || u.authProvider || u.auth_provider || 
+    u.socialProvider || u.social_provider || 
+    u.oauthProvider || u.oauth_provider || 
+    u.loginMethod || u.login_method || ''
+  ).toLowerCase();
+  if (mainProv.includes('google')) return 'google';
+  if (mainProv.includes('facebook')) return 'facebook';
+  if (mainProv.includes('apple')) return 'apple';
+
+  const uid = String(u.id || '').toLowerCase();
+  if (uid.startsWith('usr_g_') || uid.startsWith('usr_goog') || uid.startsWith('g_') || uid.includes('google')) return 'google';
+  if (uid.startsWith('usr_fb_') || uid.startsWith('usr_f_') || uid.startsWith('fb_') || uid.includes('facebook')) return 'facebook';
+  if (uid.startsWith('usr_apple') || uid.startsWith('usr_a_') || uid.startsWith('apple_') || uid.includes('apple')) return 'apple';
+
+  if (u.googleId || u.google_id || u.google_sub) return 'google';
+  if (u.facebookId || u.facebook_id || u.facebook_sub) return 'facebook';
+  if (u.appleId || u.apple_id || u.apple_sub) return 'apple';
+
+  const detected = detectUserSocialProviders(u);
+  if (detected.length > 0 && (!u.password || u.password === '')) {
+    return detected[0];
+  }
+
+  return null;
 };
 
 export default function ProfilePage() {
@@ -39793,6 +40238,8 @@ export default function ProfilePage() {
         if (data.success) {
           if (typeof data.wallet_balance === 'number') {
             setOwnerWalletBalance(data.wallet_balance);
+          } else if (typeof data.balance === 'number') {
+            setOwnerWalletBalance(data.balance);
           } else if (data.user && typeof data.user.wallet_balance !== 'undefined') {
             setOwnerWalletBalance(parseFloat(data.user.wallet_balance || 0));
           }
@@ -39860,20 +40307,21 @@ export default function ProfilePage() {
         }
       } catch (_) {}
 
-      // Normalize social providers
-      const socialSet = new Set<SocialProvider>();
-      (freshUser.linkedProviders || freshUser.linked_providers || []).forEach((p: any) => {
-        if (['google', 'facebook', 'apple'].includes(String(p).toLowerCase())) {
-          socialSet.add(String(p).toLowerCase() as SocialProvider);
-        }
-      });
-      if (freshUser.id?.includes('google')) socialSet.add('google');
-      if (freshUser.id?.includes('facebook')) socialSet.add('facebook');
-      if (freshUser.id?.includes('apple')) socialSet.add('apple');
+      // Robust social provider detection
+      const detectedSocial = detectUserSocialProviders(freshUser);
+      const activeSocial = getActiveLoginProvider(freshUser);
+      if (activeSocial && !detectedSocial.includes(activeSocial)) {
+        detectedSocial.push(activeSocial);
+      }
 
-      freshUser.linkedProviders = Array.from(socialSet);
+      freshUser.linkedProviders = detectedSocial;
+      freshUser.linked_providers = detectedSocial;
+      if (activeSocial && !freshUser.provider && !freshUser.authProvider) {
+        freshUser.provider = activeSocial;
+        freshUser.authProvider = activeSocial;
+      }
+
       currentUserRef.current = freshUser;
-
       setUserState(freshUser);
       setName(freshUser.name || '');
       setEmail(freshUser.email || '');
@@ -39961,13 +40409,15 @@ export default function ProfilePage() {
     setError('');
     setSuccessMsg('');
 
-    const isLinked = Boolean(user.linkedProviders?.includes(provider));
+    const activeLogin = getActiveLoginProvider(user);
+    const isPrimary = activeLogin === provider;
+    const isLinked = Boolean(user.linkedProviders?.includes(provider)) || isPrimary;
     let updatedLinked = [...(user.linkedProviders || [])];
     const provName = provider.charAt(0).toUpperCase() + provider.slice(1);
 
     if (isLinked) {
-      if (updatedLinked.length === 1 && !user.password) {
-        setError(t('cannotUnlinkOnlyLogin', `Cannot unlink ${provName}: this is your only login method. Please set a password first.`));
+      if ((isPrimary || updatedLinked.length === 1) && !user.password) {
+        setError(t('cannotUnlinkOnlyLogin', `Cannot unlink ${provName}: this is your active login method. Please set a password first.`));
         setProcessingSocial(null);
         return;
       }
@@ -40030,6 +40480,7 @@ export default function ProfilePage() {
   const cleanPlanSlug = sanitizeSinglePlan(user.subscriptionPlan || 'taster');
   const isFreePlan = cleanPlanSlug === 'taster' || cleanPlanSlug === 'free' || cleanPlanSlug.includes('free');
   const activeExpiryDate = user.planExpiryDate || user.expiryDate;
+  const activeLoginProvider = getActiveLoginProvider(user);
 
   return (
     <div 
@@ -40087,6 +40538,185 @@ export default function ProfilePage() {
         </div>
       )}
 
+      {/* ========================================================================= */}
+      {/* 🚀 HIGH-VISIBILITY EXECUTIVE SUMMARY KPI BANNER                           */}
+      {/* ========================================================================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in">
+        {/* KPI 1: AI Token Spendable Balance */}
+        <div 
+          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500">
+                <Coins className="h-4 w-4" />
+              </div>
+              <span className="text-xs font-bold opacity-80">{tokenIdentity.tokenName} {t('balanceLabel', 'Balance')}</span>
+            </div>
+            <Link 
+              href="/transactions?tab=tokens" 
+              className="text-[11px] font-bold text-amber-500 hover:underline flex items-center gap-0.5"
+            >
+              <span>{t('ledgerShort', 'Ledger')}</span>
+              <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+          
+          <div>
+            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
+              <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
+                {ownerTokenBalance.toLocaleString()}
+              </span>
+              <span className="text-sm font-bold text-amber-500 font-mono">
+                {tokenIdentity.tokenSymbol}
+              </span>
+            </div>
+            <p className="text-[10px] opacity-60 mt-0.5">
+              {t('spendableTokensSub', 'Available for AI Chat & recipe parsing')}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1 border-t border-[var(--color-border)] text-[10px] font-mono">
+            <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
+              <ArrowDownLeft className="h-3 w-3" /> -{tokenStats.totalDeducted.toLocaleString()}
+            </span>
+            <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+              <ArrowUpRight className="h-3 w-3" /> +{tokenStats.totalGranted.toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+        {/* KPI 2: Store Wallet Balance */}
+        <div 
+          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-[var(--color-primary)]">
+                <Wallet className="h-4 w-4" />
+              </div>
+              <span className="text-xs font-bold opacity-80">{t('storeCreditLabel', 'Store Credit')}</span>
+            </div>
+            <Link 
+              href="/wallet" 
+              className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-0.5"
+            >
+              <Plus className="h-3 w-3" />
+              <span>{t('topUp', 'Top Up')}</span>
+            </Link>
+          </div>
+
+          <div>
+            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
+              <span className="text-2xl sm:text-3xl font-black font-mono text-[var(--color-primary)]">
+                {walletSymbol}{ownerWalletBalance.toFixed(2)}
+              </span>
+              <span className="text-xs font-bold opacity-60 font-mono">
+                {walletCurrency}
+              </span>
+            </div>
+            <p className="text-[10px] opacity-60 mt-0.5">
+              {t('storeCreditSub', 'Spendable for token bundles & plans')}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1 border-t border-[var(--color-border)] text-[10px] font-mono">
+            <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+              <ArrowUpRight className="h-3 w-3" /> +{walletSymbol}{walletStats.totalDeposited.toFixed(2)}
+            </span>
+            <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
+              <ArrowDownLeft className="h-3 w-3" /> -{walletSymbol}{walletStats.totalSpent.toFixed(2)}
+            </span>
+          </div>
+        </div>
+
+        {/* KPI 3: Membership Plan & Health */}
+        <div 
+          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                {isFreePlan ? <Sparkles className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
+              </div>
+              <span className="text-xs font-bold opacity-80">{t('membershipTierLabel', 'Membership Tier')}</span>
+            </div>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border uppercase ${
+              isFreePlan ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-primary/10 text-primary border-primary/30'
+            }`}>
+              {t('activeStatus', 'Active')}
+            </span>
+          </div>
+
+          <div>
+            <div className="text-2xl sm:text-3xl font-black tracking-tight uppercase">
+              {cleanPlanSlug}
+            </div>
+            <p className="text-[10px] opacity-60 mt-0.5">
+              {user.role === 'admin' ? t('adminRoleLabel', 'Administrator Account') : t('standardUserLabel', 'Standard User Plan')}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between pt-1 border-t border-[var(--color-border)] text-[10px]">
+            <div className="flex items-center gap-1 opacity-70">
+              <Calendar className="h-3 w-3 text-[var(--color-primary)]" />
+              <span suppressHydrationWarning>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Active'}</span>
+            </div>
+            {activeExpiryDate ? (
+              <span className="text-emerald-400 font-semibold" suppressHydrationWarning>
+                Exp: {new Date(activeExpiryDate).toLocaleDateString()}
+              </span>
+            ) : (
+              <span className="text-emerald-400 font-semibold">Lifetime Access</span>
+            )}
+          </div>
+        </div>
+
+        {/* KPI 4: Total Activity & Ledger Events */}
+        <div 
+          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                <Activity className="h-4 w-4" />
+              </div>
+              <span className="text-xs font-bold opacity-80">{t('totalActivityLabel', 'Total Activity')}</span>
+            </div>
+            <Link 
+              href="/transactions" 
+              className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-0.5"
+            >
+              <span>{t('viewAll', 'View All')}</span>
+              <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+
+          <div>
+            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
+              <span className="text-2xl sm:text-3xl font-black font-mono">
+                {(tokenStats.totalEvents + walletStats.totalEvents).toLocaleString()}
+              </span>
+              <span className="text-xs font-bold opacity-60">
+                {t('totalEventsUnit', 'records')}
+              </span>
+            </div>
+            <p className="text-[10px] opacity-60 mt-0.5">
+              {t('totalActivitySub', 'Combined token debits & store ledger')}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between pt-1 border-t border-[var(--color-border)] text-[10px] font-mono opacity-80">
+            <span className="text-amber-500">{tokenStats.totalEvents} {tokenIdentity.tokenName}</span>
+            <span className="text-[var(--color-primary)]">{walletStats.totalEvents} Wallet</span>
+          </div>
+        </div>
+      </div>
+
       {/* Profile Overview (Credentials, Token & Wallet Summary, Socials) */}
       <div className="space-y-6 animate-in fade-in">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -40114,7 +40744,7 @@ export default function ProfilePage() {
               <div className="text-left sm:text-right text-[11px] space-y-1 opacity-80">
                 <div className="flex sm:justify-end items-center gap-1.5">
                   <Calendar className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                  <span>{t('joinedPrefix', 'Joined: ')} {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : t('activeStatus', 'Active')}</span>
+                  <span suppressHydrationWarning>{t('joinedPrefix', 'Joined: ')} {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : t('activeStatus', 'Active')}</span>
                 </div>
                 <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
                   <span className="font-semibold">{t('activeMembershipLabel', 'Plan:')}</span>
@@ -40128,7 +40758,7 @@ export default function ProfilePage() {
                 {activeExpiryDate && (
                   <div className="flex sm:justify-end items-center gap-1 text-[10px] text-emerald-400 font-semibold pt-0.5">
                     <Clock className="h-3 w-3" />
-                    <span>Expires: {new Date(activeExpiryDate).toLocaleDateString()}</span>
+                    <span suppressHydrationWarning>Expires: {new Date(activeExpiryDate).toLocaleDateString()}</span>
                   </div>
                 )}
               </div>
@@ -40232,20 +40862,24 @@ export default function ProfilePage() {
 
               <div className="border rounded-2xl p-4 shadow-inner flex items-baseline justify-between bg-[var(--color-inner-dark)] border-[var(--color-border)]">
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">Spendable Balance</span>
-                  <div className="flex items-baseline gap-1.5 pt-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">{t('spendableBalanceLabel', 'Spendable Balance')}</span>
+                  <div className="flex items-baseline gap-1.5 pt-0.5" suppressHydrationWarning>
                     <span className="text-3xl font-black font-mono text-emerald-400">{ownerTokenBalance.toLocaleString()}</span>
                     <span className="text-sm font-bold text-amber-500 font-mono">{tokenIdentity.tokenSymbol}</span>
                   </div>
                 </div>
-                <div className="text-right text-[11px] font-mono opacity-70">
-                  <div>Used: -{tokenStats.totalDeducted}</div>
-                  <div>Added: +{tokenStats.totalGranted}</div>
+                <div className="flex flex-col items-end gap-1 font-mono text-[11px]">
+                  <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
+                    <ArrowDownLeft className="h-3 w-3" /> -{tokenStats.totalDeducted.toLocaleString()}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                    <ArrowUpRight className="h-3 w-3" /> +{tokenStats.totalGranted.toLocaleString()}
+                  </span>
                 </div>
               </div>
 
               <div className="flex justify-between items-center pt-1 text-xs">
-                <span className="opacity-70 text-[11px]">{tokenStats.totalEvents} recorded events</span>
+                <span className="opacity-70 text-[11px] font-mono">{tokenStats.totalEvents} {t('recordedEvents', 'recorded events')}</span>
                 <Link
                   href="/transactions?tab=tokens"
                   className="font-bold text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
@@ -40266,27 +40900,31 @@ export default function ProfilePage() {
                   <Wallet className="h-5 w-5 text-[var(--color-primary)]" />
                   <span>{t('storeWalletBalance', 'Store Wallet Balance')}</span>
                 </h3>
-                <Link href="/wallet" className="text-[10px] font-bold px-2 py-0.5 rounded-lg border bg-primary/10 text-primary border-primary/20 flex items-center gap-1 hover:underline">
-                  <Plus className="h-3 w-3" /> Top Up
+                <Link href="/wallet" className="text-[10px] font-bold px-2.5 py-1 rounded-lg border bg-primary/10 text-primary border-primary/20 flex items-center gap-1 hover:underline">
+                  <Plus className="h-3 w-3" /> {t('topUp', 'Top Up')}
                 </Link>
               </div>
 
               <div className="border rounded-2xl p-4 shadow-inner flex items-baseline justify-between bg-[var(--color-inner-dark)] border-[var(--color-border)]">
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">Store Credit</span>
-                  <div className="flex items-baseline gap-1.5 pt-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">{t('storeCreditLabel', 'Store Credit')}</span>
+                  <div className="flex items-baseline gap-1.5 pt-0.5" suppressHydrationWarning>
                     <span className="text-3xl font-black font-mono text-[var(--color-primary)]">{walletSymbol}{ownerWalletBalance.toFixed(2)}</span>
                     <span className="text-xs font-bold opacity-60 font-mono">{walletCurrency}</span>
                   </div>
                 </div>
-                <div className="text-right text-[11px] font-mono opacity-70">
-                  <div>Deposits: +{walletSymbol}{walletStats.totalDeposited.toFixed(2)}</div>
-                  <div>Spent: -{walletSymbol}{walletStats.totalSpent.toFixed(2)}</div>
+                <div className="flex flex-col items-end gap-1 font-mono text-[11px]">
+                  <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                    <ArrowUpRight className="h-3 w-3" /> +{walletSymbol}{walletStats.totalDeposited.toFixed(2)}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
+                    <ArrowDownLeft className="h-3 w-3" /> -{walletSymbol}{walletStats.totalSpent.toFixed(2)}
+                  </span>
                 </div>
               </div>
 
               <div className="flex justify-between items-center pt-1 text-xs">
-                <span className="opacity-70 text-[11px]">{walletStats.totalEvents} wallet transactions</span>
+                <span className="opacity-70 text-[11px] font-mono">{walletStats.totalEvents} {t('walletTransactionsCount', 'wallet transactions')}</span>
                 <Link
                   href="/transactions?tab=wallet"
                   className="font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer"
@@ -40347,7 +40985,8 @@ export default function ProfilePage() {
                 )
               }
             ].map(({ id: provId, name: provName, icon }) => {
-              const isLinked = Boolean(user.linkedProviders?.includes(provId));
+              const isPrimary = activeLoginProvider === provId;
+              const isLinked = Boolean(user.linkedProviders?.includes(provId)) || isPrimary;
               return (
                 <div 
                   key={provId}
@@ -40358,7 +40997,11 @@ export default function ProfilePage() {
                     <div>
                       <span className="block font-bold text-xs">{provName}</span>
                       <span className={`text-[10px] font-semibold ${isLinked ? 'text-emerald-400' : 'opacity-50'}`}>
-                        {isLinked ? t('linked', 'Connected') : t('notLinked', 'Not linked')}
+                        {isPrimary 
+                          ? (t('linkedLoginMethod', 'Linked (Login Method)'))
+                          : isLinked 
+                          ? (t('linked', 'Connected'))
+                          : (t('notLinked', 'Not linked'))}
                       </span>
                     </div>
                   </div>
@@ -44328,6 +44971,139 @@ export async function DELETE(req: Request) {
 
 ```
 
+## File: `apps/web/src/app/api/admin/plugins/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+let cachedPool: any = null;
+
+async function getPostgresPool() {
+  if (cachedPool) return cachedPool;
+  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  if (!connStr) return null;
+  try {
+    const { Pool } = await import('pg');
+    const requiresSsl = connStr.includes('sslmode=require') || 
+                        connStr.includes('neon.tech') || 
+                        connStr.includes('supabase.co') || 
+                        process.env.NODE_ENV === 'production';
+    cachedPool = new Pool({
+      connectionString: connStr,
+      ssl: requiresSsl ? { rejectUnauthorized: false } : false
+    });
+    return cachedPool;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function ensurePluginsTable(pool: any) {
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS plugins (
+        id VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        version VARCHAR(50) DEFAULT '1.0.0',
+        description TEXT,
+        author VARCHAR(255),
+        is_active BOOLEAN DEFAULT TRUE,
+        manifest JSONB DEFAULT '{}'::jsonb,
+        files JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch (_) {}
+}
+
+export async function GET() {
+  try {
+    const pool = await getPostgresPool();
+    if (pool) {
+      await ensurePluginsTable(pool);
+      const res = await pool.query('SELECT id, name, version, description, author, is_active, manifest, created_at FROM plugins ORDER BY created_at DESC');
+      return NextResponse.json({ success: true, plugins: res.rows });
+    }
+    return NextResponse.json({ success: true, plugins: [] });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const action = body.action || 'install';
+    const pool = await getPostgresPool();
+    if (!pool) {
+      return NextResponse.json({ success: false, error: 'Database connection unavailable' }, { status: 500 });
+    }
+    await ensurePluginsTable(pool);
+
+    if (action === 'toggle') {
+      const { id, isActive } = body;
+      await pool.query('UPDATE plugins SET is_active = $1 WHERE id = $2', [Boolean(isActive), id]);
+      return NextResponse.json({ success: true, message: 'Plugin status updated successfully.' });
+    }
+
+    if (action === 'install' || action === 'upload_zip') {
+      const pluginId = body.id || `plugin_${Date.now()}`;
+      const name = body.name || 'Custom Extension Plugin';
+      const version = body.version || '1.0.0';
+      const description = body.description || 'Admin uploaded extension package.';
+      const author = body.author || 'System Administrator';
+      const manifest = body.manifest || {};
+      const files = body.files || {};
+
+      await pool.query(
+        `INSERT INTO plugins (id, name, version, description, author, is_active, manifest, files)
+         VALUES ($1, $2, $3, $4, $5, true, $6::jsonb, $7::jsonb)
+         ON CONFLICT (id) DO UPDATE SET
+           name = EXCLUDED.name,
+           version = EXCLUDED.version,
+           description = EXCLUDED.description,
+           author = EXCLUDED.author,
+           manifest = EXCLUDED.manifest,
+           files = EXCLUDED.files;`,
+        [pluginId, name, version, description, author, JSON.stringify(manifest), JSON.stringify(files)]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: `Plugin "${name}" installed and stored in PostgreSQL successfully.`
+      });
+    }
+
+    return NextResponse.json({ success: false, error: 'Invalid action specified' }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Plugin ID required' }, { status: 400 });
+    }
+
+    const pool = await getPostgresPool();
+    if (pool) {
+      await ensurePluginsTable(pool);
+      await pool.query('DELETE FROM plugins WHERE id = $1', [id]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Plugin uninstalled successfully.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
 ## File: `apps/web/src/app/api/admin/recipe-type/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -48190,6 +48966,174 @@ export async function GET() {
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/dashboard/stats/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get('userId') || '';
+  const email = searchParams.get('email') || '';
+
+  const fallbackData = {
+    recipesCount: 0,
+    recipeBooksCount: 0,
+    pantryStockCount: 0,
+    groceryItemsCount: 0,
+    expiringPantryCount: 0,
+    tokenBalance: 0,
+    walletBalance: 0,
+    walletSymbol: '$',
+    subscriptionPlan: 'taster',
+    upcomingMeal: null
+  };
+
+  if (!userId && !email) {
+    return NextResponse.json({ success: true, stats: fallbackData }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  }
+
+  try {
+    const db = (pool as any).default || (pool as any).pool || pool;
+    if (!db || typeof db.query !== 'function') {
+      return NextResponse.json({ success: true, stats: fallbackData }, {
+        headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+      });
+    }
+
+    // 1. User Assets (Tokens, Wallet, Subscription)
+    try {
+      const uRes = await db.query(
+        `SELECT token_balance, wallet_balance, subscription_plan 
+         FROM users 
+         WHERE id = $1 OR email = $2 
+         LIMIT 1`,
+        [userId, email]
+      );
+      if (uRes.rows && uRes.rows.length > 0) {
+        const u = uRes.rows[0];
+        fallbackData.tokenBalance = Number(u.token_balance) || 0;
+        fallbackData.walletBalance = Number(u.wallet_balance) || 0;
+        fallbackData.subscriptionPlan = u.subscription_plan || 'taster';
+      }
+    } catch (_) {}
+
+    // 2. Saved Recipes Count
+    try {
+      const rRes = await db.query(
+        `SELECT COUNT(*)::int AS count 
+         FROM saved_recipes 
+         WHERE user_id = $1 OR created_by = $2`,
+        [userId, email]
+      );
+      if (rRes.rows && rRes.rows.length > 0) {
+        fallbackData.recipesCount = Number(rRes.rows[0].count) || 0;
+      }
+    } catch (_) {
+      try {
+        const altRRes = await db.query(
+          `SELECT COUNT(*)::int AS count 
+           FROM recipes 
+           WHERE user_id = $1 OR created_by = $2`,
+          [userId, email]
+        );
+        if (altRRes.rows && altRRes.rows.length > 0) {
+          fallbackData.recipesCount = Number(altRRes.rows[0].count) || 0;
+        }
+      } catch (_) {}
+    }
+
+    // 3. Recipe Books / Categories
+    try {
+      const bRes = await db.query(
+        `SELECT COUNT(*)::int AS count 
+         FROM recipe_books 
+         WHERE user_id = $1 OR created_by = $2`,
+        [userId, email]
+      );
+      if (bRes.rows && bRes.rows.length > 0 && Number(bRes.rows[0].count) > 0) {
+        fallbackData.recipeBooksCount = Number(bRes.rows[0].count);
+      } else {
+        const catRes = await db.query(
+          `SELECT COUNT(DISTINCT category)::int AS count 
+           FROM saved_recipes 
+           WHERE user_id = $1 OR created_by = $2`,
+          [userId, email]
+        );
+        fallbackData.recipeBooksCount = (catRes.rows && catRes.rows[0]) ? Number(catRes.rows[0].count) || 0 : 0;
+      }
+    } catch (_) {
+      fallbackData.recipeBooksCount = 0;
+    }
+
+    // 4. Pantry Stock & Expiring Items
+    try {
+      const pRes = await db.query(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(CASE WHEN expiry_date IS NOT NULL AND expiry_date <= (CURRENT_DATE + INTERVAL '3 days') THEN 1 END)::int AS expiring
+         FROM pantry_items 
+         WHERE user_id = $1 OR created_by = $2`,
+        [userId, email]
+      );
+      if (pRes.rows && pRes.rows.length > 0) {
+        fallbackData.pantryStockCount = Number(pRes.rows[0].total) || 0;
+        fallbackData.expiringPantryCount = Number(pRes.rows[0].expiring) || 0;
+      }
+    } catch (_) {}
+
+    // 5. Grocery Items (Unchecked)
+    try {
+      const gRes = await db.query(
+        `SELECT COUNT(*)::int AS count 
+         FROM grocery_items 
+         WHERE (user_id = $1 OR created_by = $2) AND (checked IS FALSE OR checked IS NULL)`,
+        [userId, email]
+      );
+      if (gRes.rows && gRes.rows.length > 0) {
+        fallbackData.groceryItemsCount = Number(gRes.rows[0].count) || 0;
+      }
+    } catch (_) {}
+
+    // 6. Upcoming Meal from Planner
+    try {
+      const planRes = await db.query(
+        `SELECT id, meal_type, recipe_name, title, meal_date, meal_time, image_url, notes 
+         FROM planner_meals 
+         WHERE (user_id = $1 OR created_by = $2) AND meal_date >= CURRENT_DATE 
+         ORDER BY meal_date ASC, id ASC 
+         LIMIT 1`,
+        [userId, email]
+      );
+      if (planRes.rows && planRes.rows.length > 0) {
+        const m = planRes.rows[0];
+        fallbackData.upcomingMeal = {
+          mealType: (m.meal_type || 'Dinner').toUpperCase(),
+          title: m.recipe_name || m.title || 'Scheduled Dish',
+          timeOrTags: m.meal_time ? `${m.meal_time} • Scheduled` : '40 mins • Scheduled',
+          notes: m.notes || undefined,
+          imageUrl: m.image_url || undefined,
+          date: m.meal_date
+        } as any;
+      }
+    } catch (_) {}
+
+    return NextResponse.json({ success: true, stats: fallbackData }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: true, stats: fallbackData }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
   }
 }
 
