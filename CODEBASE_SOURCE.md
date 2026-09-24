@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.7.4",
+  "version": "7.7.5",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.7.4",
+  "version": "7.7.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17259,13 +17259,13 @@ export default function AdminWalletSettingsPage() {
 ```typescript
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Bell, BellRing, Save, ArrowLeft, CheckCircle2, AlertCircle, RefreshCw,
   Mail, Smartphone, Calendar, ShoppingCart, ChefHat, Coins, Wallet,
   Sparkles, ShieldCheck, AlertTriangle, Send, Sliders, Info, ShieldAlert,
-  Clock, Check
+  Clock, Plus, Trash2, Edit3, X, Users, Megaphone, Volume2, ExternalLink
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -17292,7 +17292,48 @@ interface NotificationSettingsState {
   securityAlertsEnabled: boolean;
   weeklyDigestEnabled: boolean;
   maintenanceNoticeEnabled: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  soundEnabled: boolean;
+  retentionDays: number;
+  maxDailyAlerts: number;
 }
+
+interface CustomNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'urgent' | 'promo';
+  targetAudience: 'all' | 'subscribers' | 'free' | 'admins';
+  channels: {
+    inApp: boolean;
+    email: boolean;
+    push: boolean;
+  };
+  isActive: boolean;
+  actionUrl?: string;
+  actionLabel?: string;
+  sendCount: number;
+  sentAt?: string | null;
+  createdAt: string;
+}
+
+const EMPTY_CUSTOM_MODAL: Omit<CustomNotification, 'createdAt' | 'sendCount'> = {
+  id: '',
+  title: '',
+  message: '',
+  type: 'info',
+  targetAudience: 'all',
+  channels: {
+    inApp: true,
+    email: false,
+    push: false
+  },
+  isActive: true,
+  actionUrl: '',
+  actionLabel: ''
+};
 
 export default function AdminNotificationSettingsPage() {
   const { t } = useTranslation();
@@ -17303,9 +17344,10 @@ export default function AdminNotificationSettingsPage() {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Active sub-tab: 'all' | 'reminders' | 'tokens' | 'wallet' | 'system'
-  const [activeTab, setActiveTab] = useState<'all' | 'reminders' | 'tokens' | 'wallet' | 'system'>('all');
+  // Active sub-tab: 'all' | 'custom' | 'reminders' | 'tokens' | 'wallet' | 'system' | 'rules'
+  const [activeTab, setActiveTab] = useState<'all' | 'custom' | 'reminders' | 'tokens' | 'wallet' | 'system' | 'rules'>('custom');
 
+  // General Settings State
   const [settings, setSettings] = useState<NotificationSettingsState>({
     isEnabled: true,
     emailEnabled: true,
@@ -17328,16 +17370,32 @@ export default function AdminNotificationSettingsPage() {
     newUpdatesEnabled: true,
     securityAlertsEnabled: true,
     weeklyDigestEnabled: false,
-    maintenanceNoticeEnabled: true
+    maintenanceNoticeEnabled: true,
+    quietHoursEnabled: false,
+    quietHoursStart: '22:00',
+    quietHoursEnd: '07:00',
+    soundEnabled: true,
+    retentionDays: 30,
+    maxDailyAlerts: 5
   });
 
-  const fetchSettings = useCallback(async () => {
+  // Custom Notifications List & Modal State
+  const [customNotifications, setCustomNotifications] = useState<CustomNotification[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalForm, setModalForm] = useState<typeof EMPTY_CUSTOM_MODAL>(EMPTY_CUSTOM_MODAL);
+  const [savingCustom, setSavingCustom] = useState(false);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const fetchSettingsAndAlerts = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/admin/notification-settings', { cache: 'no-store' });
       const data = await res.json();
-      if (data.success && data.settings) {
-        setSettings(prev => ({ ...prev, ...data.settings }));
+      if (data.success) {
+        if (data.settings) setSettings(prev => ({ ...prev, ...data.settings }));
+        if (Array.isArray(data.customNotifications)) setCustomNotifications(data.customNotifications);
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to load notification settings');
@@ -17347,14 +17405,14 @@ export default function AdminNotificationSettingsPage() {
   }, []);
 
   useEffect(() => {
-    fetchSettings();
-  }, [fetchSettings]);
+    fetchSettingsAndAlerts();
+  }, [fetchSettingsAndAlerts]);
 
   const updateSetting = <K extends keyof NotificationSettingsState>(key: K, value: NotificationSettingsState[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
-  const handleSave = async () => {
+  const handleSaveSettings = async () => {
     setSaving(true);
     setErrorMsg('');
     setSuccessMsg('');
@@ -17400,7 +17458,7 @@ export default function AdminNotificationSettingsPage() {
         throw new Error(data.error || 'Test notification delivery failed');
       }
 
-      setSuccessMsg(t('testNotifSent', 'Test notification triggered! Check your top bar notification bell.'));
+      setSuccessMsg(t('testNotifSent', 'Test alert broadcasted! Check your top bar notification bell.'));
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('zecratary_new_notification', {
           detail: {
@@ -17419,7 +17477,159 @@ export default function AdminNotificationSettingsPage() {
     }
   };
 
-  // Reusable custom switch component that strictly avoids <form> submissions
+  // Custom Notifications Actions
+  const handleOpenCreateModal = () => {
+    setModalForm({
+      ...EMPTY_CUSTOM_MODAL,
+      id: `alert_${Date.now().toString(36)}`
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (item: CustomNotification) => {
+    setModalForm({
+      id: item.id,
+      title: item.title,
+      message: item.message,
+      type: item.type,
+      targetAudience: item.targetAudience,
+      channels: { ...item.channels },
+      isActive: item.isActive,
+      actionUrl: item.actionUrl || '',
+      actionLabel: item.actionLabel || ''
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleSaveCustomNotification = async () => {
+    if (!modalForm.title.trim() || !modalForm.message.trim()) {
+      setErrorMsg(t('titleMessageRequired', 'Alert title and message body are required.'));
+      return;
+    }
+
+    setSavingCustom(true);
+    setErrorMsg('');
+    try {
+      const res = await fetch('/api/admin/notification-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save_custom',
+          notification: modalForm
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed saving custom alert');
+      }
+
+      setSuccessMsg(t('customAlertSaved', 'Custom alert persisted to PostgreSQL!'));
+      setIsModalOpen(false);
+      await fetchSettingsAndAlerts();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to save custom alert');
+    } finally {
+      setSavingCustom(false);
+    }
+  };
+
+  const handleDeleteCustomNotification = async (id: string, title: string) => {
+    if (!confirm(t('confirmDeleteAlert', `Are you sure you want to delete custom alert "${title}"?`))) {
+      return;
+    }
+
+    setDeletingId(id);
+    setErrorMsg('');
+    try {
+      const res = await fetch('/api/admin/notification-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete_custom',
+          id
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed deleting custom alert');
+      }
+
+      setCustomNotifications(prev => prev.filter(c => c.id !== id));
+      setSuccessMsg(t('customAlertDeleted', 'Custom alert deleted successfully.'));
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to delete custom alert');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleSendAlertNow = async (item: CustomNotification) => {
+    setSendingId(item.id);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/admin/notification-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send_custom_now',
+          id: item.id
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to dispatch custom alert');
+      }
+
+      // Update state locally
+      setCustomNotifications(prev => prev.map(c => {
+        if (c.id === item.id) {
+          return {
+            ...c,
+            sendCount: (c.sendCount || 0) + 1,
+            sentAt: data.sentAt || new Date().toISOString()
+          };
+        }
+        return c;
+      }));
+
+      // Fire in-app event for immediate top-bar reflection
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_new_notification', {
+          detail: {
+            title: item.title,
+            message: item.message,
+            timestamp: new Date().toISOString(),
+            type: item.type,
+            actionUrl: item.actionUrl,
+            actionLabel: item.actionLabel
+          }
+        }));
+      }
+
+      setSuccessMsg(t('alertSentSuccess', `Alert "${item.title}" successfully dispatched to users now!`));
+      setTimeout(() => setSuccessMsg(''), 4500);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to dispatch alert');
+    } finally {
+      setSendingId(null);
+    }
+  };
+
+  const filteredCustomAlerts = useMemo(() => {
+    if (!searchQuery.trim()) return customNotifications;
+    const q = searchQuery.toLowerCase();
+    return customNotifications.filter(c => 
+      c.title.toLowerCase().includes(q) || 
+      c.message.toLowerCase().includes(q) ||
+      c.type.toLowerCase().includes(q)
+    );
+  }, [customNotifications, searchQuery]);
+
   const renderToggle = (
     label: string,
     description: string,
@@ -17472,6 +17682,21 @@ export default function AdminNotificationSettingsPage() {
     );
   };
 
+  const getTypeBadge = (type: CustomNotification['type']) => {
+    switch (type) {
+      case 'urgent':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-red-500/15 text-red-500 border border-red-500/30">Urgent</span>;
+      case 'warning':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-amber-500/15 text-amber-500 border border-amber-500/30">Warning</span>;
+      case 'success':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">Success</span>;
+      case 'promo':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-purple-500/15 text-purple-500 border border-purple-500/30">Promotion</span>;
+      default:
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-blue-500/15 text-blue-400 border border-blue-500/30">Info</span>;
+    }
+  };
+
   if (loading) {
     return (
       <div 
@@ -17507,11 +17732,21 @@ export default function AdminNotificationSettingsPage() {
             </h1>
           </div>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('adminNotifSubtitle', 'Configure reminders for meal planners, token depletion warnings, wallet balance limits, renewal notices, and updates.')}
+            {t('adminNotifSubtitle', 'Create custom alerts, broadcast notices now, and configure automated reminders for meal planning, token balances, and wallet funds.')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={handleOpenCreateModal}
+            className="px-3.5 py-2.5 rounded-xl border font-bold text-xs flex items-center gap-2 shadow-sm transition cursor-pointer hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <Plus className="h-4 w-4 text-emerald-500" />
+            <span>{t('createCustomAlertBtn', 'New Custom Alert')}</span>
+          </button>
+
           <button
             type="button"
             onClick={handleSendTestNotification}
@@ -17526,14 +17761,14 @@ export default function AdminNotificationSettingsPage() {
 
           <button
             type="button"
-            onClick={handleSave}
+            onClick={handleSaveSettings}
             disabled={saving}
             className="px-5 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
             {saving ? (
               <>
-                <RefreshCw className="h-4 w-4 animate-spin" /> {t('saving', 'Saving to PostgreSQL...')}
+                <RefreshCw className="h-4 w-4 animate-spin" /> {t('saving', 'Saving...')}
               </>
             ) : (
               <>
@@ -17565,70 +17800,34 @@ export default function AdminNotificationSettingsPage() {
         </div>
       )}
 
-      {/* Section 1: Master Dispatcher & Delivery Channels */}
-      <div 
-        className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-      >
-        <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-          <div className="flex items-center gap-2">
-            <Sliders className="h-4 w-4 text-amber-500" />
-            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-              {t('masterDispatchHeading', 'Master Dispatcher & Communication Channels')}
-            </h2>
-          </div>
-          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
-            <input
-              type="checkbox"
-              checked={settings.isEnabled}
-              onChange={(e) => updateSetting('isEnabled', e.target.checked)}
-              className="rounded accent-amber-500 w-4 h-4 cursor-pointer"
-            />
-            <span style={{ color: settings.isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
-              {settings.isEnabled ? t('systemActive', 'Notifications Enabled') : t('systemPaused', 'All Paused')}
-            </span>
-          </label>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {renderToggle(
-            t('inAppChannel', 'In-App Alerts'),
-            t('inAppChannelDesc', 'Render notifications in the top bar bell dropdown and system flyouts.'),
-            settings.inAppEnabled,
-            (val) => updateSetting('inAppEnabled', val),
-            <Bell className="h-4 w-4" />
-          )}
-
-          {renderToggle(
-            t('emailChannel', 'Email Dispatch'),
-            t('emailChannelDesc', 'Send transactional emails for critical warnings, renewals, and low balances.'),
-            settings.emailEnabled,
-            (val) => updateSetting('emailEnabled', val),
-            <Mail className="h-4 w-4" />
-          )}
-
-          {renderToggle(
-            t('pushChannel', 'Browser Push Alerts'),
-            t('pushChannelDesc', 'Broadcast native Web Push notifications directly to subscriber desktops/mobiles.'),
-            settings.pushEnabled,
-            (val) => updateSetting('pushEnabled', val),
-            <Smartphone className="h-4 w-4" />
-          )}
-        </div>
-      </div>
-
       {/* Filter Category Tabs */}
       <div 
-        className="flex p-1.5 rounded-2xl border transition-colors duration-200 overflow-x-auto"
-        style={{
-          backgroundColor: 'var(--color-inner-dark)',
-          borderColor: 'var(--color-border)'
-        }}
+        className="flex p-1.5 rounded-2xl border transition-colors duration-200 overflow-x-auto gap-1"
+        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
       >
         <button
           type="button"
+          onClick={() => setActiveTab('custom')}
+          className={`py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'custom' ? 'border shadow-md' : 'opacity-70'
+          }`}
+          style={activeTab === 'custom' ? {
+            backgroundColor: 'var(--color-card)',
+            color: 'var(--color-primary)',
+            borderColor: 'var(--color-border)'
+          } : { color: 'var(--color-text-secondary)' }}
+        >
+          <Megaphone className="h-3.5 w-3.5 text-amber-500" />
+          <span>{t('tabCustomAlerts', 'Custom Broadcasts')}</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-amber-500/20 text-amber-500">
+            {customNotifications.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('all')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
             activeTab === 'all' ? 'border shadow-md' : 'opacity-70'
           }`}
           style={activeTab === 'all' ? {
@@ -17638,13 +17837,13 @@ export default function AdminNotificationSettingsPage() {
           } : { color: 'var(--color-text-secondary)' }}
         >
           <Bell className="h-3.5 w-3.5" />
-          <span>{t('tabAllAlerts', 'All Notifications')}</span>
+          <span>{t('tabAllAlerts', 'All Settings')}</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('reminders')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
             activeTab === 'reminders' ? 'border shadow-md' : 'opacity-70'
           }`}
           style={activeTab === 'reminders' ? {
@@ -17660,7 +17859,7 @@ export default function AdminNotificationSettingsPage() {
         <button
           type="button"
           onClick={() => setActiveTab('tokens')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
             activeTab === 'tokens' ? 'border shadow-md' : 'opacity-70'
           }`}
           style={activeTab === 'tokens' ? {
@@ -17676,7 +17875,7 @@ export default function AdminNotificationSettingsPage() {
         <button
           type="button"
           onClick={() => setActiveTab('wallet')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
             activeTab === 'wallet' ? 'border shadow-md' : 'opacity-70'
           }`}
           style={activeTab === 'wallet' ? {
@@ -17692,7 +17891,7 @@ export default function AdminNotificationSettingsPage() {
         <button
           type="button"
           onClick={() => setActiveTab('system')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
             activeTab === 'system' ? 'border shadow-md' : 'opacity-70'
           }`}
           style={activeTab === 'system' ? {
@@ -17704,9 +17903,340 @@ export default function AdminNotificationSettingsPage() {
           <Sparkles className="h-3.5 w-3.5" />
           <span>{t('tabUpdatesSecurity', 'Updates & Security')}</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('rules')}
+          className={`py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'rules' ? 'border shadow-md' : 'opacity-70'
+          }`}
+          style={activeTab === 'rules' ? {
+            backgroundColor: 'var(--color-card)',
+            color: 'var(--color-primary)',
+            borderColor: 'var(--color-border)'
+          } : { color: 'var(--color-text-secondary)' }}
+        >
+          <Sliders className="h-3.5 w-3.5" />
+          <span>{t('tabDeliveryRules', 'Quiet Hours & Rules')}</span>
+        </button>
       </div>
 
-      {/* Category 1: Reminders & Meal Planner */}
+      {/* SECTION: CUSTOM NOTIFICATIONS (ADD, EDIT, REMOVE, SEND ALERT NOW) */}
+      {(activeTab === 'all' || activeTab === 'custom') && (
+        <div 
+          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center gap-2">
+              <Megaphone className="h-4 w-4 text-amber-500" />
+              <div>
+                <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                  {t('customAlertsHeading', 'Custom Announcements & Broadcast Alerts')}
+                </h2>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('customAlertsSub', 'Draft custom messages and click "Send Alert Now" to immediately deliver notices to active users.')}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder={t('searchAlertsPlaceholder', 'Search alerts...')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="px-3 py-1.5 rounded-xl border text-xs outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+              <button
+                type="button"
+                onClick={handleOpenCreateModal}
+                className="px-3 py-1.5 rounded-xl text-white font-extrabold text-xs flex items-center gap-1.5 shadow transition cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>{t('newAlert', 'New Alert')}</span>
+              </button>
+            </div>
+          </div>
+
+          {filteredCustomAlerts.length === 0 ? (
+            <div className="p-8 text-center rounded-2xl border space-y-3" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+              <Bell className="h-8 w-8 mx-auto opacity-40 text-amber-500" />
+              <div className="space-y-1">
+                <p className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{t('noCustomAlertsTitle', 'No Custom Alerts Configured')}</p>
+                <p className="text-[11px] opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('noCustomAlertsDesc', 'Create your first custom announcement to send promotional news or maintenance alerts directly to user bells.')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenCreateModal}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white transition cursor-pointer inline-flex items-center gap-1.5"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>{t('createCustomAlertBtn', 'New Custom Alert')}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredCustomAlerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  className="p-4 rounded-2xl border flex flex-col justify-between gap-3 transition-all hover:border-[var(--color-primary)]/40 shadow-sm"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {getTypeBadge(alert.type)}
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border flex items-center gap-1" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                          <Users className="h-3 w-3" />
+                          <span className="capitalize">{alert.targetAudience}</span>
+                        </span>
+                        {!alert.isActive && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-500/20 text-slate-400">
+                            Paused
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditModal(alert)}
+                          className="p-1.5 rounded-lg border hover:opacity-80 transition cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                          title={t('edit', 'Edit Alert')}
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingId === alert.id}
+                          onClick={() => handleDeleteCustomNotification(alert.id, alert.title)}
+                          className="p-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition cursor-pointer disabled:opacity-50"
+                          title={t('delete', 'Remove Alert')}
+                        >
+                          {deletingId === alert.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3 className="text-xs font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                        {alert.title}
+                      </h3>
+                      <p className="text-[11px] leading-relaxed pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                        {alert.message}
+                      </p>
+                    </div>
+
+                    {alert.actionUrl && (
+                      <div className="pt-1">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
+                          <ExternalLink className="h-3 w-3" />
+                          <span>{alert.actionLabel || alert.actionUrl}</span>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-3 border-t flex items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
+                    <div className="text-[10px] space-y-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      <div>
+                        Sent: <span className="font-mono font-bold text-amber-500">{alert.sendCount || 0} time(s)</span>
+                      </div>
+                      {alert.sentAt && (
+                        <div className="opacity-70">
+                          Last: {new Date(alert.sentAt).toLocaleDateString()} {new Date(alert.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={sendingId === alert.id}
+                      onClick={() => handleSendAlertNow(alert)}
+                      className="px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm text-white disabled:opacity-50"
+                      style={{ backgroundColor: 'var(--color-emerald)' }}
+                      title={t('sendAlertNowDesc', 'Immediately broadcast this notification to users right now')}
+                    >
+                      {sendingId === alert.id ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Send className="h-3.5 w-3.5" />
+                      )}
+                      <span>{t('sendAlertNowBtn', 'Send Alert Now')}</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* SECTION: MASTER CHANNELS */}
+      {(activeTab === 'all' || activeTab === 'rules') && (
+        <div 
+          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center gap-2">
+              <Sliders className="h-4 w-4 text-amber-500" />
+              <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                {t('masterDispatchHeading', 'Master Dispatcher & Communication Channels')}
+              </h2>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
+              <input
+                type="checkbox"
+                checked={settings.isEnabled}
+                onChange={(e) => updateSetting('isEnabled', e.target.checked)}
+                className="rounded accent-amber-500 w-4 h-4 cursor-pointer"
+              />
+              <span style={{ color: settings.isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
+                {settings.isEnabled ? t('systemActive', 'Notifications Enabled') : t('systemPaused', 'All Paused')}
+              </span>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {renderToggle(
+              t('inAppChannel', 'In-App Alerts'),
+              t('inAppChannelDesc', 'Render notifications in the top bar bell dropdown and system flyouts.'),
+              settings.inAppEnabled,
+              (val) => updateSetting('inAppEnabled', val),
+              <Bell className="h-4 w-4" />
+            )}
+
+            {renderToggle(
+              t('emailChannel', 'Email Dispatch'),
+              t('emailChannelDesc', 'Send transactional emails for critical warnings, renewals, and low balances.'),
+              settings.emailEnabled,
+              (val) => updateSetting('emailEnabled', val),
+              <Mail className="h-4 w-4" />
+            )}
+
+            {renderToggle(
+              t('pushChannel', 'Browser Push Alerts'),
+              t('pushChannelDesc', 'Broadcast native Web Push notifications directly to subscriber desktops/mobiles.'),
+              settings.pushEnabled,
+              (val) => updateSetting('pushEnabled', val),
+              <Smartphone className="h-4 w-4" />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SECTION: DELIVERY RULES & QUIET HOURS */}
+      {(activeTab === 'all' || activeTab === 'rules') && (
+        <div 
+          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+            <Sliders className="h-4 w-4 text-cyan-400" />
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('deliveryRulesHeading', 'Delivery Rules, Quiet Hours & Throttling')}
+            </h2>
+          </div>
+
+          <div className="space-y-3">
+            {renderToggle(
+              t('quietHoursAlert', 'Do Not Disturb / Quiet Hours Window'),
+              t('quietHoursAlertDesc', 'Silence non-urgent notifications during nighttime hours to prevent user interruption.'),
+              settings.quietHoursEnabled,
+              (val) => updateSetting('quietHoursEnabled', val),
+              <Clock className="h-4 w-4 text-cyan-400" />,
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[11px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>From:</span>
+                <input
+                  type="time"
+                  value={settings.quietHoursStart}
+                  onChange={(e) => updateSetting('quietHoursStart', e.target.value)}
+                  className="px-2 py-1 rounded-lg border text-xs font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <span className="text-[11px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>To:</span>
+                <input
+                  type="time"
+                  value={settings.quietHoursEnd}
+                  onChange={(e) => updateSetting('quietHoursEnd', e.target.value)}
+                  className="px-2 py-1 rounded-lg border text-xs font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+            )}
+
+            {renderToggle(
+              t('soundChimesAlert', 'Notification Audio Chimes'),
+              t('soundChimesAlertDesc', 'Play a subtle audio tone when new priority notifications arrive in the browser.'),
+              settings.soundEnabled,
+              (val) => updateSetting('soundEnabled', val),
+              <Volume2 className="h-4 w-4 text-purple-400" />
+            )}
+
+            <div 
+              className="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="space-y-0.5">
+                <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>
+                  {t('retentionDaysLabel', 'Notification Storage Retention Period')}
+                </span>
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('retentionDaysDesc', 'Automatically purge read user notifications from database after specified days.')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={settings.retentionDays}
+                  onChange={(e) => updateSetting('retentionDays', Math.max(1, parseInt(e.target.value) || 30))}
+                  className="w-20 px-2.5 py-1 rounded-lg border text-xs font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>days</span>
+              </div>
+            </div>
+
+            <div 
+              className="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="space-y-0.5">
+                <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>
+                  {t('maxDailyAlertsLabel', 'Maximum Alerts Per User / Day (Rate Limit)')}
+                </span>
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('maxDailyAlertsDesc', 'Cap the total number of automated non-critical reminders a single user receives daily.')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={settings.maxDailyAlerts}
+                  onChange={(e) => updateSetting('maxDailyAlerts', Math.max(1, parseInt(e.target.value) || 5))}
+                  className="w-20 px-2.5 py-1 rounded-lg border text-xs font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>alerts</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION: MEAL PLANNER & ROUTINE */}
       {(activeTab === 'all' || activeTab === 'reminders') && (
         <div 
           className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
@@ -17759,7 +18289,7 @@ export default function AdminNotificationSettingsPage() {
         </div>
       )}
 
-      {/* Category 2: AI Token Quota Warnings */}
+      {/* SECTION: TOKEN QUOTAS */}
       {(activeTab === 'all' || activeTab === 'tokens') && (
         <div 
           className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
@@ -17814,7 +18344,7 @@ export default function AdminNotificationSettingsPage() {
         </div>
       )}
 
-      {/* Category 3: Wallet Funds & Subscription Renewals */}
+      {/* SECTION: WALLET & BILLING */}
       {(activeTab === 'all' || activeTab === 'wallet') && (
         <div 
           className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
@@ -17893,7 +18423,7 @@ export default function AdminNotificationSettingsPage() {
         </div>
       )}
 
-      {/* Category 4: Platform Updates & Security */}
+      {/* SECTION: PLATFORM UPDATES & SECURITY */}
       {(activeTab === 'all' || activeTab === 'system') && (
         <div 
           className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
@@ -17938,6 +18468,249 @@ export default function AdminNotificationSettingsPage() {
               (val) => updateSetting('maintenanceNoticeEnabled', val),
               <Info className="h-4 w-4 text-cyan-400" />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* FORMLESS CUSTOM NOTIFICATION MODAL */}
+      {isModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div 
+            className="w-full max-w-xl rounded-3xl border p-6 space-y-4 shadow-2xl overflow-y-auto max-h-[90vh]"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-amber-500" />
+                <h3 className="text-sm font-black tracking-tight">
+                  {modalForm.id && customNotifications.some(c => c.id === modalForm.id)
+                    ? t('editCustomAlertTitle', 'Edit Custom Alert')
+                    : t('createCustomAlertTitle', 'Create New Custom Alert')}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="p-1 rounded-lg border hover:opacity-80 transition cursor-pointer"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              {/* Alert Title */}
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('alertTitleLabel', 'Alert Title')} *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Flash Weekend Special / Maintenance Notice"
+                  value={modalForm.title}
+                  onChange={(e) => setModalForm(prev => ({ ...prev, title: e.target.value }))}
+                  className="w-full px-3.5 py-2 rounded-xl border font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              {/* Message Body */}
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('alertMessageLabel', 'Message Body')} *
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Write the message text that will display in user notification dropdowns..."
+                  value={modalForm.message}
+                  onChange={(e) => setModalForm(prev => ({ ...prev, message: e.target.value }))}
+                  className="w-full px-3.5 py-2 rounded-xl border outline-none font-medium leading-relaxed"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              {/* Category & Target Audience */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('alertTypeLabel', 'Category / Priority')}
+                  </label>
+                  <select
+                    value={modalForm.type}
+                    onChange={(e) => setModalForm(prev => ({ ...prev, type: e.target.value as any }))}
+                    className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    <option value="info">🔵 Info / Announcement</option>
+                    <option value="promo">🟣 Promotion / Marketing</option>
+                    <option value="success">🟢 Success / Milestone</option>
+                    <option value="warning">🟡 Warning / Advisory</option>
+                    <option value="urgent">🔴 Urgent / Critical</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('targetAudienceLabel', 'Target Audience')}
+                  </label>
+                  <select
+                    value={modalForm.targetAudience}
+                    onChange={(e) => setModalForm(prev => ({ ...prev, targetAudience: e.target.value as any }))}
+                    className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    <option value="all">👥 All Registered Users</option>
+                    <option value="subscribers">⭐ Paid Subscribers Only</option>
+                    <option value="free">🌱 Free Tier Users Only</option>
+                    <option value="admins">🛡️ Administrators Only</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Optional Call to Action Link */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('actionUrlLabel', 'Action URL (Optional)')}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. /subscriptions or /chef"
+                    value={modalForm.actionUrl || ''}
+                    onChange={(e) => setModalForm(prev => ({ ...prev, actionUrl: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border font-mono text-xs outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('actionButtonLabel', 'Button Label (Optional)')}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. View Plans or Claim Bonus"
+                    value={modalForm.actionLabel || ''}
+                    onChange={(e) => setModalForm(prev => ({ ...prev, actionLabel: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border text-xs outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              {/* Channels & Status Switches */}
+              <div className="pt-2 border-t space-y-2" style={{ borderColor: 'var(--color-border)' }}>
+                <span className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('deliveryChannelsTitle', 'Channels & Status')}
+                </span>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <label className="flex items-center gap-1.5 cursor-pointer font-bold">
+                    <input
+                      type="checkbox"
+                      checked={modalForm.channels.inApp}
+                      onChange={(e) => setModalForm(prev => ({
+                        ...prev,
+                        channels: { ...prev.channels, inApp: e.target.checked }
+                      }))}
+                      className="accent-amber-500 rounded"
+                    />
+                    <span>In-App Bell</span>
+                  </label>
+
+                  <label className="flex items-center gap-1.5 cursor-pointer font-bold">
+                    <input
+                      type="checkbox"
+                      checked={modalForm.channels.email}
+                      onChange={(e) => setModalForm(prev => ({
+                        ...prev,
+                        channels: { ...prev.channels, email: e.target.checked }
+                      }))}
+                      className="accent-amber-500 rounded"
+                    />
+                    <span>Email Broadcast</span>
+                  </label>
+
+                  <label className="flex items-center gap-1.5 cursor-pointer font-bold">
+                    <input
+                      type="checkbox"
+                      checked={modalForm.channels.push}
+                      onChange={(e) => setModalForm(prev => ({
+                        ...prev,
+                        channels: { ...prev.channels, push: e.target.checked }
+                      }))}
+                      className="accent-amber-500 rounded"
+                    />
+                    <span>Push Alerts</span>
+                  </label>
+
+                  <label className="flex items-center gap-1.5 cursor-pointer font-bold ml-auto">
+                    <input
+                      type="checkbox"
+                      checked={modalForm.isActive}
+                      onChange={(e) => setModalForm(prev => ({ ...prev, isActive: e.target.checked }))}
+                      className="accent-emerald-500 rounded"
+                    />
+                    <span style={{ color: modalForm.isActive ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
+                      {modalForm.isActive ? 'Active' : 'Draft / Paused'}
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Live Preview Box */}
+              <div className="pt-2 border-t space-y-1.5" style={{ borderColor: 'var(--color-border)' }}>
+                <span className="block text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('previewTitle', 'Preview in User Notification Bell:')}
+                </span>
+                <div 
+                  className="p-3 rounded-2xl border space-y-1 shadow-inner"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>
+                      {modalForm.title || 'Notification Title'}
+                    </span>
+                    {getTypeBadge(modalForm.type)}
+                  </div>
+                  <p className="text-[11px] leading-relaxed opacity-80" style={{ color: 'var(--color-text-secondary)' }}>
+                    {modalForm.message || 'Notification content will render here...'}
+                  </p>
+                  {modalForm.actionUrl && (
+                    <div className="pt-1">
+                      <span className="text-[10px] font-bold underline" style={{ color: 'var(--color-primary)' }}>
+                        👉 {modalForm.actionLabel || 'Check it out'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold hover:opacity-80 transition cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                {t('cancel', 'Cancel')}
+              </button>
+
+              <button
+                type="button"
+                disabled={savingCustom}
+                onClick={handleSaveCustomNotification}
+                className="px-5 py-2 rounded-xl text-xs font-extrabold text-white flex items-center gap-1.5 shadow-md transition cursor-pointer disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {savingCustom ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                <span>{t('saveAlertBtn', 'Save Alert')}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -42820,6 +43593,32 @@ export interface NotificationSettingsData {
   securityAlertsEnabled: boolean;
   weeklyDigestEnabled: boolean;
   maintenanceNoticeEnabled: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  soundEnabled: boolean;
+  retentionDays: number;
+  maxDailyAlerts: number;
+  updatedAt?: string;
+}
+
+export interface CustomNotificationRecord {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'urgent' | 'promo';
+  targetAudience: 'all' | 'subscribers' | 'free' | 'admins';
+  channels: {
+    inApp: boolean;
+    email: boolean;
+    push: boolean;
+  };
+  isActive: boolean;
+  actionUrl?: string;
+  actionLabel?: string;
+  sendCount: number;
+  sentAt?: string | null;
+  createdAt: string;
   updatedAt?: string;
 }
 
@@ -42846,11 +43645,18 @@ const DEFAULT_SETTINGS: NotificationSettingsData = {
   newUpdatesEnabled: true,
   securityAlertsEnabled: true,
   weeklyDigestEnabled: false,
-  maintenanceNoticeEnabled: true
+  maintenanceNoticeEnabled: true,
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '07:00',
+  soundEnabled: true,
+  retentionDays: 30,
+  maxDailyAlerts: 5
 };
 
-async function initNotificationTable(): Promise<void> {
+async function initNotificationTables(): Promise<void> {
   try {
+    // 1. Settings Table
     await query(`
       CREATE TABLE IF NOT EXISTS notification_settings (
         id VARCHAR(64) PRIMARY KEY,
@@ -42876,6 +43682,12 @@ async function initNotificationTable(): Promise<void> {
         security_alerts_enabled BOOLEAN DEFAULT true,
         weekly_digest_enabled BOOLEAN DEFAULT false,
         maintenance_notice_enabled BOOLEAN DEFAULT true,
+        quiet_hours_enabled BOOLEAN DEFAULT false,
+        quiet_hours_start VARCHAR(10) DEFAULT '22:00',
+        quiet_hours_end VARCHAR(10) DEFAULT '07:00',
+        sound_enabled BOOLEAN DEFAULT true,
+        retention_days INTEGER DEFAULT 30,
+        max_daily_alerts INTEGER DEFAULT 5,
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
@@ -42904,21 +43716,49 @@ async function initNotificationTable(): Promise<void> {
       ADD COLUMN IF NOT EXISTS security_alerts_enabled BOOLEAN DEFAULT true,
       ADD COLUMN IF NOT EXISTS weekly_digest_enabled BOOLEAN DEFAULT false,
       ADD COLUMN IF NOT EXISTS maintenance_notice_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS quiet_hours_enabled BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS quiet_hours_start VARCHAR(10) DEFAULT '22:00',
+      ADD COLUMN IF NOT EXISTS quiet_hours_end VARCHAR(10) DEFAULT '07:00',
+      ADD COLUMN IF NOT EXISTS sound_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS retention_days INTEGER DEFAULT 30,
+      ADD COLUMN IF NOT EXISTS max_daily_alerts INTEGER DEFAULT 5,
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
     `);
+
+    // 2. Custom Notifications Table
+    await query(`
+      CREATE TABLE IF NOT EXISTS custom_notifications (
+        id VARCHAR(128) PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        type VARCHAR(32) DEFAULT 'info',
+        target_audience VARCHAR(64) DEFAULT 'all',
+        channels JSONB DEFAULT '{"inApp": true, "email": false, "push": false}'::jsonb,
+        is_active BOOLEAN DEFAULT true,
+        action_url VARCHAR(255) DEFAULT '',
+        action_label VARCHAR(64) DEFAULT '',
+        send_count INTEGER DEFAULT 0,
+        sent_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
   } catch (err) {
-    console.warn('initNotificationTable warning:', err);
+    console.warn('[initNotificationTables] Warning:', err);
   }
 }
 
 export async function GET() {
   try {
-    await initNotificationTable();
-    const rows = await query('SELECT * FROM notification_settings WHERE id = $1 LIMIT 1', [DEFAULT_SETTINGS.id]);
+    await initNotificationTables();
     
+    // 1. Fetch main configuration
+    const rows = await query('SELECT * FROM notification_settings WHERE id = $1 LIMIT 1', [DEFAULT_SETTINGS.id]);
+    let settings: NotificationSettingsData = DEFAULT_SETTINGS;
+
     if (rows && rows.length > 0) {
       const r = rows[0];
-      const settings: NotificationSettingsData = {
+      settings = {
         id: r.id || DEFAULT_SETTINGS.id,
         isEnabled: Boolean(r.is_enabled ?? true),
         emailEnabled: Boolean(r.email_enabled ?? true),
@@ -42942,13 +43782,46 @@ export async function GET() {
         securityAlertsEnabled: Boolean(r.security_alerts_enabled ?? true),
         weeklyDigestEnabled: Boolean(r.weekly_digest_enabled ?? false),
         maintenanceNoticeEnabled: Boolean(r.maintenance_notice_enabled ?? true),
+        quietHoursEnabled: Boolean(r.quiet_hours_enabled ?? false),
+        quietHoursStart: r.quiet_hours_start || '22:00',
+        quietHoursEnd: r.quiet_hours_end || '07:00',
+        soundEnabled: Boolean(r.sound_enabled ?? true),
+        retentionDays: Number(r.retention_days ?? 30),
+        maxDailyAlerts: Number(r.max_daily_alerts ?? 5),
         updatedAt: r.updated_at
       };
-
-      return NextResponse.json({ success: true, settings });
     }
 
-    return NextResponse.json({ success: true, settings: DEFAULT_SETTINGS });
+    // 2. Fetch custom notifications
+    const customRows = await query('SELECT * FROM custom_notifications ORDER BY created_at DESC');
+    const customNotifications: CustomNotificationRecord[] = (customRows || []).map((c: any) => {
+      let channels = { inApp: true, email: false, push: false };
+      if (c.channels) {
+        channels = typeof c.channels === 'string' ? JSON.parse(c.channels) : c.channels;
+      }
+
+      return {
+        id: c.id,
+        title: c.title,
+        message: c.message,
+        type: c.type || 'info',
+        targetAudience: c.target_audience || 'all',
+        channels,
+        isActive: Boolean(c.is_active ?? true),
+        actionUrl: c.action_url || '',
+        actionLabel: c.action_label || '',
+        sendCount: Number(c.send_count ?? 0),
+        sentAt: c.sent_at ? new Date(c.sent_at).toISOString() : null,
+        createdAt: c.created_at ? new Date(c.created_at).toISOString() : new Date().toISOString(),
+        updatedAt: c.updated_at ? new Date(c.updated_at).toISOString() : undefined
+      };
+    });
+
+    return NextResponse.json({
+      success: true,
+      settings,
+      customNotifications
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -42956,16 +43829,100 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    await initNotificationTable();
+    await initNotificationTables();
     const body = await req.json();
+    const action = body.action;
 
-    if (body.action === 'send_test') {
+    // Trigger test dispatch
+    if (action === 'send_test') {
       return NextResponse.json({
         success: true,
         message: 'Test notification triggered successfully.'
       });
     }
 
+    // Trigger Send Alert Now for a specific custom notification
+    if (action === 'send_custom_now') {
+      const { id } = body;
+      if (!id) {
+        return NextResponse.json({ success: false, error: 'Notification ID is required.' }, { status: 400 });
+      }
+
+      const rows = await query(`
+        UPDATE custom_notifications
+        SET send_count = send_count + 1,
+            sent_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `, [id]);
+
+      if (!rows || rows.length === 0) {
+        return NextResponse.json({ success: false, error: 'Custom alert not found.' }, { status: 404 });
+      }
+
+      const updated = rows[0];
+      return NextResponse.json({
+        success: true,
+        message: `Alert "${updated.title}" successfully dispatched to users!`,
+        sentAt: updated.sent_at,
+        sendCount: updated.send_count
+      });
+    }
+
+    // Delete custom notification
+    if (action === 'delete_custom') {
+      const { id } = body;
+      if (!id) {
+        return NextResponse.json({ success: false, error: 'Notification ID is required.' }, { status: 400 });
+      }
+
+      await query('DELETE FROM custom_notifications WHERE id = $1', [id]);
+      return NextResponse.json({ success: true, message: 'Custom alert removed.' });
+    }
+
+    // Upsert (Create/Edit) custom notification
+    if (action === 'save_custom') {
+      const c = body.notification;
+      if (!c || !c.title || !c.message) {
+        return NextResponse.json({ success: false, error: 'Title and message are required.' }, { status: 400 });
+      }
+
+      const id = c.id || `notif_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+      const title = String(c.title).trim();
+      const message = String(c.message).trim();
+      const type = c.type || 'info';
+      const targetAudience = c.targetAudience || 'all';
+      const channels = JSON.stringify(c.channels || { inApp: true, email: false, push: false });
+      const isActive = c.isActive !== undefined ? Boolean(c.isActive) : true;
+      const actionUrl = String(c.actionUrl || '').trim();
+      const actionLabel = String(c.actionLabel || '').trim();
+
+      await query(`
+        INSERT INTO custom_notifications (
+          id, title, message, type, target_audience, channels, is_active,
+          action_url, action_label, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          message = EXCLUDED.message,
+          type = EXCLUDED.type,
+          target_audience = EXCLUDED.target_audience,
+          channels = EXCLUDED.channels,
+          is_active = EXCLUDED.is_active,
+          action_url = EXCLUDED.action_url,
+          action_label = EXCLUDED.action_label,
+          updated_at = NOW()
+      `, [id, title, message, type, targetAudience, channels, isActive, actionUrl, actionLabel]);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Custom alert saved to PostgreSQL.',
+        id
+      });
+    }
+
+    // Default: Save General Notification Settings
     const s = { ...DEFAULT_SETTINGS, ...body };
 
     await query(`
@@ -42976,10 +43933,12 @@ export async function POST(req: NextRequest) {
         wallet_low_enabled, wallet_low_threshold, wallet_topup_confirm_enabled,
         subscription_expiry_enabled, subscription_expiry_days, payment_failed_alert,
         new_updates_enabled, security_alerts_enabled, weekly_digest_enabled,
-        maintenance_notice_enabled, updated_at
+        maintenance_notice_enabled, quiet_hours_enabled, quiet_hours_start, quiet_hours_end,
+        sound_enabled, retention_days, max_daily_alerts, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-        $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW()
+        $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+        $25, $26, $27, $28, $29, NOW()
       )
       ON CONFLICT (id) DO UPDATE SET
         is_enabled = EXCLUDED.is_enabled,
@@ -43004,6 +43963,12 @@ export async function POST(req: NextRequest) {
         security_alerts_enabled = EXCLUDED.security_alerts_enabled,
         weekly_digest_enabled = EXCLUDED.weekly_digest_enabled,
         maintenance_notice_enabled = EXCLUDED.maintenance_notice_enabled,
+        quiet_hours_enabled = EXCLUDED.quiet_hours_enabled,
+        quiet_hours_start = EXCLUDED.quiet_hours_start,
+        quiet_hours_end = EXCLUDED.quiet_hours_end,
+        sound_enabled = EXCLUDED.sound_enabled,
+        retention_days = EXCLUDED.retention_days,
+        max_daily_alerts = EXCLUDED.max_daily_alerts,
         updated_at = NOW()
     `, [
       DEFAULT_SETTINGS.id,
@@ -43028,12 +43993,18 @@ export async function POST(req: NextRequest) {
       Boolean(s.newUpdatesEnabled),
       Boolean(s.securityAlertsEnabled),
       Boolean(s.weeklyDigestEnabled),
-      Boolean(s.maintenanceNoticeEnabled)
+      Boolean(s.maintenanceNoticeEnabled),
+      Boolean(s.quietHoursEnabled),
+      String(s.quietHoursStart || '22:00'),
+      String(s.quietHoursEnd || '07:00'),
+      Boolean(s.soundEnabled),
+      Math.max(1, parseInt(s.retentionDays ?? 30, 10)),
+      Math.max(1, parseInt(s.maxDailyAlerts ?? 5, 10))
     ]);
 
     return NextResponse.json({
       success: true,
-      message: 'Notification settings persisted to PostgreSQL.',
+      message: 'Notification configurations saved to PostgreSQL.',
       settings: s
     });
   } catch (err: any) {
@@ -51106,6 +52077,303 @@ export async function POST(req: Request) {
 
 ```
 
+## File: `apps/web/src/app/api/notifications/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export interface ClientNotificationItem {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'urgent' | 'promo' | 'system';
+  isRead: boolean;
+  actionUrl?: string;
+  actionLabel?: string;
+  timestamp: string;
+}
+
+async function ensureNotificationReadTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_notification_reads (
+        id SERIAL PRIMARY KEY,
+        user_email VARCHAR(255) NOT NULL,
+        notification_id VARCHAR(128) NOT NULL,
+        read_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_email, notification_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_notif_reads_email ON user_notification_reads(user_email);
+    `);
+  } catch (err) {
+    console.warn('[ensureNotificationReadTable] Warning:', err);
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    await ensureNotificationReadTable();
+    const { searchParams } = new URL(req.url);
+    const email = (searchParams.get('email') || '').toLowerCase().trim();
+    const userId = searchParams.get('userId') || '';
+
+    // 1. Fetch Notification Settings
+    let notifSettings: any = {
+      is_enabled: true,
+      in_app_enabled: true,
+      token_low_enabled: true,
+      token_low_threshold: 15,
+      token_exhausted_enabled: true,
+      wallet_low_enabled: true,
+      wallet_low_threshold: 5.0,
+      subscription_expiry_enabled: true,
+      subscription_expiry_days: 3,
+      reminder_meal_planner: true,
+      sound_enabled: true,
+      quiet_hours_enabled: false,
+      quiet_hours_start: '22:00',
+      quiet_hours_end: '07:00',
+      retention_days: 30
+    };
+
+    try {
+      const cfgRows = await query('SELECT * FROM notification_settings WHERE id = $1 LIMIT 1', ['default_notification_settings']);
+      if (cfgRows && cfgRows.length > 0) {
+        notifSettings = { ...notifSettings, ...cfgRows[0] };
+      }
+    } catch (_) {}
+
+    // If notifications master or in-app channel is disabled, return empty
+    if (!notifSettings.is_enabled || !notifSettings.in_app_enabled) {
+      return NextResponse.json({
+        success: true,
+        notifications: [],
+        unreadCount: 0,
+        settings: {
+          isEnabled: Boolean(notifSettings.is_enabled),
+          inAppEnabled: Boolean(notifSettings.in_app_enabled),
+          soundEnabled: false,
+          quietHoursEnabled: false
+        }
+      });
+    }
+
+    // 2. Load Read Receipts for this user
+    const readIds = new Set<string>();
+    if (email) {
+      const readRows = await query('SELECT notification_id FROM user_notification_reads WHERE LOWER(user_email) = $1', [email]);
+      (readRows || []).forEach((r: any) => {
+        if (r.notification_id) readIds.add(r.notification_id);
+      });
+    }
+
+    const notifications: ClientNotificationItem[] = [];
+
+    // 3. Load Custom Announcements from PostgreSQL custom_notifications
+    try {
+      const customRows = await query(`
+        SELECT * FROM custom_notifications
+        WHERE is_active = true AND (sent_at IS NOT NULL OR send_count > 0)
+        ORDER BY COALESCE(sent_at, created_at) DESC
+        LIMIT 25
+      `);
+
+      (customRows || []).forEach((c: any) => {
+        let channels = { inApp: true };
+        if (c.channels) {
+          channels = typeof c.channels === 'string' ? JSON.parse(c.channels) : c.channels;
+        }
+        if (channels.inApp !== false) {
+          notifications.push({
+            id: c.id,
+            title: c.title,
+            message: c.message,
+            type: (c.type as any) || 'info',
+            isRead: readIds.has(c.id),
+            actionUrl: c.action_url || '',
+            actionLabel: c.action_label || '',
+            timestamp: c.sent_at ? new Date(c.sent_at).toISOString() : new Date(c.created_at).toISOString()
+          });
+        }
+      });
+    } catch (_) {}
+
+    // 4. Evaluate Dynamic User Account Warnings (Tokens, Wallet, Subscriptions)
+    if (email) {
+      const userRows = await query('SELECT token_balance, wallet_balance, subscription_plan, role FROM users WHERE LOWER(email) = $1 LIMIT 1', [email]);
+      if (userRows && userRows.length > 0) {
+        const u = userRows[0];
+        const tBal = Number(u.token_balance ?? 0);
+        const wBal = Number(u.wallet_balance ?? 0);
+
+        // Daily bucket key ensures threshold alerts refresh predictably
+        const dayBucket = new Date().toISOString().slice(0, 10);
+
+        // A. Token Low or Zero Alert
+        if (notifSettings.token_exhausted_enabled && tBal <= 0) {
+          const id = `sys_token_zero_${dayBucket}`;
+          notifications.push({
+            id,
+            title: 'AI Tokens Exhausted',
+            message: 'You have 0 tokens remaining. Chef AI requests are paused until your tokens are replenished.',
+            type: 'urgent',
+            isRead: readIds.has(id),
+            actionUrl: '/token',
+            actionLabel: 'Top Up Tokens',
+            timestamp: new Date().toISOString()
+          });
+        } else if (notifSettings.token_low_enabled && tBal > 0 && tBal <= Number(notifSettings.token_low_threshold ?? 15)) {
+          const id = `sys_token_low_${dayBucket}`;
+          notifications.push({
+            id,
+            title: 'Token Balance Running Low',
+            message: `You have ${tBal} AI tokens left. Add tokens now to keep creating recipes uninterrupted.`,
+            type: 'warning',
+            isRead: readIds.has(id),
+            actionUrl: '/token',
+            actionLabel: 'Get Tokens',
+            timestamp: new Date().toISOString()
+          });
+        }
+
+        // B. Wallet Balance Low Alert
+        if (notifSettings.wallet_low_enabled && wBal <= Number(notifSettings.wallet_low_threshold ?? 5.0)) {
+          const id = `sys_wallet_low_${dayBucket}`;
+          notifications.push({
+            id,
+            title: 'Store Wallet Funds Low',
+            message: `Your wallet balance is $${wBal.toFixed(2)}. Add funds to ensure seamless tool purchases and renewals.`,
+            type: 'warning',
+            isRead: readIds.has(id),
+            actionUrl: '/wallet',
+            actionLabel: 'Top Up Wallet',
+            timestamp: new Date().toISOString()
+          });
+        }
+
+        // C. Subscription Expiry Warning
+        if (notifSettings.subscription_expiry_enabled && u.subscription_plan && u.subscription_plan !== 'taster' && u.subscription_plan !== 'free') {
+          try {
+            const txRows = await query(`
+              SELECT expiry_date, plan_name FROM payment_transactions
+              WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'active')
+              ORDER BY created_at DESC LIMIT 1
+            `, [email]);
+
+            if (txRows && txRows.length > 0 && txRows[0].expiry_date) {
+              const exp = new Date(txRows[0].expiry_date);
+              const now = new Date();
+              const diffDays = Math.ceil((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+              const alertDays = Number(notifSettings.subscription_expiry_days ?? 3);
+
+              if (diffDays <= alertDays) {
+                const id = `sys_sub_expiry_${dayBucket}`;
+                notifications.push({
+                  id,
+                  title: diffDays <= 0 ? 'Subscription Expired' : 'Subscription Renewal Reminder',
+                  message: diffDays <= 0
+                    ? `Your ${txRows[0].plan_name || 'Membership'} has expired. Choose a tier to keep your premium benefits.`
+                    : `Your ${txRows[0].plan_name || 'Membership'} will renew in ${diffDays} day(s) on ${exp.toLocaleDateString()}.`,
+                  type: diffDays <= 0 ? 'urgent' : 'info',
+                  isRead: readIds.has(id),
+                  actionUrl: '/subscriptions',
+                  actionLabel: 'Manage Plan',
+                  timestamp: new Date().toISOString()
+                });
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    }
+
+    // 5. Default Welcome Alert if no notifications exist
+    if (notifications.length === 0) {
+      const welcomeId = 'sys_welcome_alert';
+      notifications.push({
+        id: welcomeId,
+        title: '🎉 Welcome to Zecratary!',
+        message: 'Your culinary portal is fully connected with live PostgreSQL storage and AI tools.',
+        type: 'success',
+        isRead: readIds.has(welcomeId),
+        actionUrl: '/chef',
+        actionLabel: 'Try Chef AI',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Sort newest first
+    notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    const unreadCount = notifications.filter(n => !n.isRead).length;
+
+    return NextResponse.json({
+      success: true,
+      notifications,
+      unreadCount,
+      settings: {
+        isEnabled: Boolean(notifSettings.is_enabled),
+        inAppEnabled: Boolean(notifSettings.in_app_enabled),
+        soundEnabled: Boolean(notifSettings.sound_enabled),
+        quietHoursEnabled: Boolean(notifSettings.quiet_hours_enabled),
+        quietHoursStart: notifSettings.quiet_hours_start || '22:00',
+        quietHoursEnd: notifSettings.quiet_hours_end || '07:00'
+      }
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    await ensureNotificationReadTable();
+    const body = await req.json();
+    const action = body.action;
+    const email = (body.email || '').toLowerCase().trim();
+
+    if (!email) {
+      return NextResponse.json({ success: false, error: 'User email is required' }, { status: 400 });
+    }
+
+    if (action === 'mark_read') {
+      const notifId = body.notificationId;
+      if (notifId) {
+        await query(`
+          INSERT INTO user_notification_reads (user_email, notification_id, read_at)
+          VALUES ($1, $2, NOW())
+          ON CONFLICT (user_email, notification_id) DO UPDATE SET read_at = NOW()
+        `, [email, notifId]);
+      }
+      return NextResponse.json({ success: true, message: 'Notification marked as read in PostgreSQL.' });
+    }
+
+    if (action === 'mark_all_read') {
+      const ids: string[] = Array.isArray(body.notificationIds) ? body.notificationIds : [];
+      for (const id of ids) {
+        if (id) {
+          await query(`
+            INSERT INTO user_notification_reads (user_email, notification_id, read_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (user_email, notification_id) DO NOTHING
+          `, [email, id]);
+        }
+      }
+      return NextResponse.json({ success: true, message: 'All notifications marked as read in PostgreSQL.' });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unknown action' }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
 ## File: `apps/web/src/app/api/billing/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -57292,8 +58560,10 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   ExternalLink,
-  Layers
+  Layers,
+  Check
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -57306,6 +58576,17 @@ interface TokenPackage {
   price: number;
   badge?: string;
   isPopular?: boolean;
+}
+
+interface InAppNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'urgent' | 'promo' | 'system';
+  isRead: boolean;
+  actionUrl?: string;
+  actionLabel?: string;
+  timestamp: string;
 }
 
 const DEFAULT_FALLBACK_PACKAGES: TokenPackage[] = [
@@ -57363,6 +58644,67 @@ const isImageIcon = (icon?: unknown): icon is string =>
     icon.startsWith('data:image')
   );
 
+function isQuietHours(startStr?: string, endStr?: string): boolean {
+  if (!startStr || !endStr) return false;
+  try {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const [sH, sM] = startStr.split(':').map(Number);
+    const [eH, eM] = endStr.split(':').map(Number);
+    const startMinutes = (sH || 0) * 60 + (sM || 0);
+    const endMinutes = (eH || 0) * 60 + (eM || 0);
+
+    if (startMinutes <= endMinutes) {
+      return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    } else {
+      return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+    }
+  } catch (_) {
+    return false;
+  }
+}
+
+function playNotificationChime(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12); // A5
+
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (_) {}
+}
+
+function formatNotificationTime(timestampStr: string): string {
+  try {
+    const d = new Date(timestampStr);
+    if (isNaN(d.getTime())) return '';
+    const diffMs = Date.now() - d.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  } catch (_) {
+    return '';
+  }
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
   const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
@@ -57377,7 +58719,7 @@ export default function Sidebar() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
 
-  // SSR-deterministic state initialization
+  // SSR-deterministic token & wallet states
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
@@ -57388,7 +58730,6 @@ export default function Sidebar() {
   const [topUpSuccessMsg, setTopUpSuccessMsg] = useState<string>('');
   const [topUpErrorMsg, setTopUpErrorMsg] = useState<string>('');
 
-  // Live Wallet Balance state
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [walletCurrency, setWalletCurrency] = useState<string>('USD');
   const [walletSymbol, setWalletSymbol] = useState<string>('$');
@@ -57399,14 +58740,24 @@ export default function Sidebar() {
   const [walletTopUpSuccessMsg, setWalletTopUpSuccessMsg] = useState<string>('');
   const [walletTopUpErrorMsg, setWalletTopUpErrorMsg] = useState<string>('');
 
-  // Notifications & Profile state
-  const [unreadCount, setUnreadCount] = useState<number>(3);
+  // Synchronized In-App Notifications State
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
+  const [showNotificationsMobile, setShowNotificationsMobile] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
+
+  const notifConfigRef = useRef<{ soundEnabled: boolean; quietHoursEnabled: boolean; quietHoursStart: string; quietHoursEnd: string }>({
+    soundEnabled: true,
+    quietHoursEnabled: false,
+    quietHoursStart: '22:00',
+    quietHoursEnd: '07:00'
+  });
 
   // Dropdown click-outside refs
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const notifMobileDropdownRef = useRef<HTMLDivElement>(null);
   const topUpDropdownRef = useRef<HTMLDivElement>(null);
   const topUpMobileDropdownRef = useRef<HTMLDivElement>(null);
   const walletDropdownRef = useRef<HTMLDivElement>(null);
@@ -57440,6 +58791,85 @@ export default function Sidebar() {
     } catch (_) {}
   };
 
+  // 1. Fetch Dynamic Notifications from PostgreSQL
+  const fetchNotifications = useCallback(async (currentUser?: any) => {
+    try {
+      let activeUser = currentUser || user;
+      if (!activeUser && typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
+          if (raw) activeUser = JSON.parse(raw);
+        } catch (_) {}
+        if (!activeUser) activeUser = getCurrentUser();
+      }
+
+      const userEmail = activeUser?.email || 'admin@zecratary.com';
+      const userId = activeUser?.id || '';
+
+      const res = await fetch(`/api/notifications?email=${encodeURIComponent(userEmail)}&userId=${encodeURIComponent(userId)}&t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (Array.isArray(data.notifications)) {
+            setNotifications(data.notifications);
+          }
+          if (typeof data.unreadCount === 'number') {
+            setUnreadCount(data.unreadCount);
+          }
+          if (data.settings) {
+            notifConfigRef.current = {
+              soundEnabled: Boolean(data.settings.soundEnabled ?? true),
+              quietHoursEnabled: Boolean(data.settings.quietHoursEnabled ?? false),
+              quietHoursStart: data.settings.quietHoursStart || '22:00',
+              quietHoursEnd: data.settings.quietHoursEnd || '07:00'
+            };
+          }
+        }
+      }
+    } catch (_) {}
+  }, [user]);
+
+  // 2. Mark Single Notification as Read
+  const handleMarkAsRead = async (notifId: string) => {
+    setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, isRead: true } : n));
+    setUnreadCount(prev => Math.max(0, prev - 1));
+
+    try {
+      const activeUser = getCurrentUser() || user;
+      const userEmail = activeUser?.email || 'admin@zecratary.com';
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'mark_read',
+          email: userEmail,
+          notificationId: notifId
+        })
+      });
+    } catch (_) {}
+  };
+
+  // 3. Mark All Notifications as Read
+  const handleMarkAllRead = async () => {
+    setUnreadCount(0);
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+
+    try {
+      const activeUser = getCurrentUser() || user;
+      const userEmail = activeUser?.email || 'admin@zecratary.com';
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'mark_all_read',
+          email: userEmail,
+          notificationIds: notifications.map(n => n.id)
+        })
+      });
+    } catch (_) {}
+  };
+
+  // 4. Fetch Token Settings and Balances
   const fetchUserTokenAndNotifications = useCallback(async (currentUser?: any) => {
     try {
       let cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
@@ -57507,6 +58937,7 @@ export default function Sidebar() {
     } catch (_) {}
   }, [user]);
 
+  // 5. Fetch Wallet Data
   const fetchWalletData = useCallback(async (currentUser?: any) => {
     try {
       let activeUser = currentUser || user;
@@ -57573,8 +59004,10 @@ export default function Sidebar() {
     setSiteIcon(icon);
     updateFavicon(icon);
     loadLanguagesFromAdmin();
+
     fetchUserTokenAndNotifications(currentUser);
     fetchWalletData(currentUser);
+    fetchNotifications(currentUser);
 
     const savedMode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
     if (savedMode) {
@@ -57604,7 +59037,10 @@ export default function Sidebar() {
       if (currentCategory !== prevCategory) {
         if (currentCategory === 'tablet') setIsCollapsed(true);
         else if (currentCategory === 'desktop') setIsCollapsed(false);
-        if (currentCategory !== 'mobile') setIsOpen(false);
+        if (currentCategory !== 'mobile') {
+          setIsOpen(false);
+          setShowNotificationsMobile(false);
+        }
         prevCategory = currentCategory;
       }
     };
@@ -57616,6 +59052,7 @@ export default function Sidebar() {
       setUser(updated);
       fetchUserTokenAndNotifications(updated);
       fetchWalletData(updated);
+      fetchNotifications(updated);
     };
     const handleSiteSync = () => {
       setSiteName(getSiteName());
@@ -57636,12 +59073,48 @@ export default function Sidebar() {
       fetchWalletData(u);
     };
 
+    // Real-time notification broadcaster sync
+    const handleNewNotification = (e: any) => {
+      const detail = e.detail;
+      if (!detail) return;
+
+      const newNotif: InAppNotification = {
+        id: detail.id || `notif_${Date.now()}`,
+        title: detail.title || 'System Notification',
+        message: detail.message || '',
+        type: detail.type || 'info',
+        isRead: false,
+        actionUrl: detail.actionUrl,
+        actionLabel: detail.actionLabel,
+        timestamp: detail.timestamp || new Date().toISOString()
+      };
+
+      setNotifications(prev => [newNotif, ...prev.filter(n => n.id !== newNotif.id)]);
+      setUnreadCount(prev => prev + 1);
+
+      // Play audio chime if enabled and outside quiet hours
+      const cfg = notifConfigRef.current;
+      if (cfg.soundEnabled && !isQuietHours(cfg.quietHoursStart, cfg.quietHoursEnd)) {
+        playNotificationChime();
+      }
+
+      // Re-fetch to synchronize state
+      fetchNotifications();
+    };
+
+    const handleNotifSettingsUpdated = () => {
+      fetchNotifications();
+    };
+
     const handleClickOutside = (e: MouseEvent) => {
       if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target as Node)) {
         setShowProfileMenu(false);
       }
       if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
         setShowNotifications(false);
+      }
+      if (notifMobileDropdownRef.current && !notifMobileDropdownRef.current.contains(e.target as Node)) {
+        setShowNotificationsMobile(false);
       }
       if (topUpDropdownRef.current && !topUpDropdownRef.current.contains(e.target as Node)) {
         setShowTopUpMenu(false);
@@ -57667,6 +59140,8 @@ export default function Sidebar() {
     window.addEventListener('zecratary_tokens_updated', handleTokenSync);
     window.addEventListener('zecratary_wallet_updated', handleWalletSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleWalletSync);
+    window.addEventListener('zecratary_new_notification', handleNewNotification);
+    window.addEventListener('zecratary_notification_settings_updated', handleNotifSettingsUpdated);
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
@@ -57680,8 +59155,10 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_tokens_updated', handleTokenSync);
       window.removeEventListener('zecratary_wallet_updated', handleWalletSync);
       window.removeEventListener('zecratary_wallet_settings_updated', handleWalletSync);
+      window.removeEventListener('zecratary_new_notification', handleNewNotification);
+      window.removeEventListener('zecratary_notification_settings_updated', handleNotifSettingsUpdated);
     };
-  }, [fetchUserTokenAndNotifications, fetchWalletData]);
+  }, [fetchUserTokenAndNotifications, fetchWalletData, fetchNotifications]);
 
   const toggleThemeMode = () => {
     const nextMode = !isDarkMode;
@@ -57698,6 +59175,7 @@ export default function Sidebar() {
     setIsOpen(false);
     setShowProfileMenu(false);
     setShowNotifications(false);
+    setShowNotificationsMobile(false);
     setShowTopUpMenu(false);
     setShowTopUpMobileMenu(false);
     setShowWalletTopUpMenu(false);
@@ -57837,11 +59315,93 @@ export default function Sidebar() {
     }
   `;
 
+  const getNotifIcon = (type: InAppNotification['type']) => {
+    switch (type) {
+      case 'urgent':
+        return <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />;
+      case 'warning':
+        return <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />;
+      case 'promo':
+        return <Sparkles className="h-4 w-4 text-purple-400 shrink-0" />;
+      case 'success':
+        return <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />;
+      default:
+        return <Bell className="h-4 w-4 text-blue-400 shrink-0" />;
+    }
+  };
+
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
 
   const displayPackages = tokenPackages.length > 0 ? tokenPackages : DEFAULT_FALLBACK_PACKAGES;
+
+  // Reusable Notifications List Element
+  const renderNotificationsList = (onItemClick?: () => void) => {
+    return (
+      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+        {notifications.length === 0 ? (
+          <div className="p-6 text-center text-xs space-y-1 opacity-75">
+            <Bell className="h-6 w-6 mx-auto opacity-40 text-amber-500 mb-1" />
+            <p className="font-bold">{t('allCaughtUp', "You're all caught up!")}</p>
+            <p className="text-[11px] opacity-70">{t('noNewNotifs', 'No notifications at this time.')}</p>
+          </div>
+        ) : (
+          notifications.map((item) => (
+            <div
+              key={item.id}
+              onClick={() => {
+                if (!item.isRead) handleMarkAsRead(item.id);
+              }}
+              className={`p-3 rounded-2xl border transition flex items-start gap-2.5 cursor-pointer relative ${
+                !item.isRead ? 'border-[var(--color-primary)]/40 shadow-xs' : 'opacity-80'
+              }`}
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: !item.isRead ? 'rgba(224, 86, 56, 0.35)' : 'var(--color-border)' }}
+            >
+              <div className="pt-0.5">{getNotifIcon(item.type)}</div>
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
+                    {item.title}
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] opacity-60 font-mono">
+                      {formatNotificationTime(item.timestamp)}
+                    </span>
+                    {!item.isRead && (
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: 'var(--color-primary)' }} />
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                  {item.message}
+                </p>
+
+                {item.actionUrl && (
+                  <div className="pt-1">
+                    <Link
+                      href={item.actionUrl}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMarkAsRead(item.id);
+                        if (onItemClick) onItemClick();
+                      }}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold underline hover:opacity-80"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      <span>{item.actionLabel || t('viewDetails', 'View Details')}</span>
+                      <ExternalLink className="h-2.5 w-2.5" />
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  };
 
   return (
     <>
@@ -57849,10 +59409,11 @@ export default function Sidebar() {
       <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
         <Link href="/dashboard" className="flex items-center gap-2">
           {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[110px]">
+          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[100px]">
             {displayName}
           </span>
         </Link>
+
         <div className="flex items-center gap-1.5">
           {/* Mobile Wallet Balance & Top Up */}
           <div className="relative" ref={walletMobileDropdownRef}>
@@ -57862,6 +59423,7 @@ export default function Sidebar() {
                 setShowWalletMobileMenu(!showWalletMobileMenu);
                 setShowTopUpMobileMenu(false);
                 setShowProfileMenu(false);
+                setShowNotificationsMobile(false);
               }}
               className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
               title="Wallet Balance & Top Up"
@@ -57875,7 +59437,7 @@ export default function Sidebar() {
               </span>
             </button>
 
-            {/* Mobile Wallet Top Up Drawer */}
+            {/* Mobile Wallet Drawer */}
             {showWalletMobileMenu && (
               <div 
                 className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
@@ -57961,6 +59523,7 @@ export default function Sidebar() {
                 setShowTopUpMobileMenu(!showTopUpMobileMenu);
                 setShowWalletMobileMenu(false);
                 setShowProfileMenu(false);
+                setShowNotificationsMobile(false);
               }}
               className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
             >
@@ -57974,7 +59537,7 @@ export default function Sidebar() {
               </span>
             </button>
 
-            {/* Mobile Top Up Drawer */}
+            {/* Mobile Token Drawer */}
             {showTopUpMobileMenu && (
               <div 
                 className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
@@ -58002,7 +59565,6 @@ export default function Sidebar() {
                   </button>
                 </div>
 
-                {/* Wallet Balance Status Banner */}
                 <div className="p-2.5 rounded-2xl border flex items-center justify-between gap-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center gap-2">
                     <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
@@ -58038,18 +59600,6 @@ export default function Sidebar() {
                       <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                       <span>{topUpErrorMsg}</span>
                     </div>
-                    {topUpErrorMsg.includes('wallet') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowTopUpMobileMenu(false);
-                          setShowWalletMobileMenu(true);
-                        }}
-                        className="text-left text-[10px] font-extrabold underline text-white pt-1"
-                      >
-                        👉 {t('depositWalletNow') || 'Deposit funds into your Wallet now'}
-                      </button>
-                    )}
                   </div>
                 )}
 
@@ -58080,14 +59630,7 @@ export default function Sidebar() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right">
-                            <span className="text-xs font-mono font-black">${price.toFixed(2)}</span>
-                            {!canAfford && (
-                              <div className="text-[8px] text-amber-400 font-bold">
-                                Need ${(price - walletBalance).toFixed(2)}
-                              </div>
-                            )}
-                          </div>
+                          <span className="text-xs font-mono font-black">${price.toFixed(2)}</span>
                           {canAfford ? (
                             <button
                               type="button"
@@ -58130,6 +59673,81 @@ export default function Sidebar() {
             )}
           </div>
 
+          {/* Mobile Notifications Bell & Drawer */}
+          <div className="relative" ref={notifMobileDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowNotificationsMobile(!showNotificationsMobile);
+                setShowWalletMobileMenu(false);
+                setShowTopUpMobileMenu(false);
+                setShowProfileMenu(false);
+              }}
+              className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
+              aria-label="Notifications"
+            >
+              <Bell className="h-4 w-4" style={iconStyle} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {showNotificationsMobile && (
+              <div 
+                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <BellRing className="h-4 w-4 text-amber-500" />
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wider">{t('notifications', 'Notifications')}</h3>
+                      <p className="text-[10px] opacity-70">
+                        {unreadCount > 0 ? `${unreadCount} ${t('unreadAlerts', 'unread alert(s)')}` : t('allRead', 'All notifications read')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button 
+                        type="button"
+                        onClick={handleMarkAllRead}
+                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
+                      >
+                        {t('markAllRead', 'Mark all read')}
+                      </button>
+                    )}
+                    <button 
+                      type="button"
+                      onClick={() => setShowNotificationsMobile(false)}
+                      className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {renderNotificationsList(() => setShowNotificationsMobile(false))}
+
+                {isAdmin && (
+                  <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
+                    <Link
+                      href="/admin/notification-settings"
+                      onClick={() => setShowNotificationsMobile(false)}
+                      className="text-xs font-bold hover:underline inline-flex items-center gap-1.5"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      <Settings className="h-3 w-3" />
+                      <span>{t('manageNotifSettings', 'Manage Notification Settings')}</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Profile Button */}
           <div className="relative" ref={profileDropdownRef}>
             <button
@@ -58138,6 +59756,7 @@ export default function Sidebar() {
                 setShowProfileMenu(!showProfileMenu);
                 setShowTopUpMobileMenu(false);
                 setShowWalletMobileMenu(false);
+                setShowNotificationsMobile(false);
               }}
               className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
               aria-label="User Profile"
@@ -58323,7 +59942,7 @@ export default function Sidebar() {
               </button>
             </div>
 
-            {/* Wallet Quick Top Up Dropdown Menu */}
+            {/* Wallet Quick Top Up Dropdown */}
             {showWalletTopUpMenu && (
               <div 
                 className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
@@ -58373,7 +59992,6 @@ export default function Sidebar() {
                   </div>
                 )}
 
-                {/* Quick Presets Grid */}
                 <div className="space-y-2">
                   <span className="text-[10px] font-black uppercase tracking-wider opacity-60">
                     {t('quickDepositAmounts') || 'Choose Deposit Amount'}
@@ -58393,7 +60011,6 @@ export default function Sidebar() {
                   </div>
                 </div>
 
-                {/* Footer Links */}
                 <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
                   <Link
                     href="/wallet"
@@ -58437,7 +60054,6 @@ export default function Sidebar() {
                 </span>
               </Link>
 
-              {/* Top Up Button with Dropdown Trigger */}
               <button
                 type="button"
                 onClick={() => {
@@ -58457,7 +60073,7 @@ export default function Sidebar() {
               </button>
             </div>
 
-            {/* Top Up Dropdown Menu */}
+            {/* Token Packages Dropdown */}
             {showTopUpMenu && (
               <div 
                 className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
@@ -58487,7 +60103,6 @@ export default function Sidebar() {
                   </div>
                 </div>
 
-                {/* Live Wallet Balance Status Card */}
                 <div 
                   className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -58538,22 +60153,9 @@ export default function Sidebar() {
                       <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                       <span className="text-[11px]">{topUpErrorMsg}</span>
                     </div>
-                    {topUpErrorMsg.includes('wallet') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowTopUpMenu(false);
-                          setShowWalletTopUpMenu(true);
-                        }}
-                        className="self-start text-[10px] font-extrabold text-white underline hover:opacity-80 cursor-pointer pt-0.5"
-                      >
-                        👉 {t('clickToTopUpWallet') || 'Click here to top up your Wallet balance first'}
-                      </button>
-                    )}
                   </div>
                 )}
 
-                {/* Packages List */}
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {displayPackages.map((pkg) => {
                     const price = Number(pkg.price);
@@ -58584,16 +60186,9 @@ export default function Sidebar() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right">
-                            <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-                              ${price.toFixed(2)}
-                            </span>
-                            {!canAfford && (
-                              <div className="text-[9px] font-bold text-amber-400">
-                                Short ${(price - walletBalance).toFixed(2)}
-                              </div>
-                            )}
-                          </div>
+                          <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
+                            ${price.toFixed(2)}
+                          </span>
 
                           {canAfford ? (
                             <button
@@ -58620,7 +60215,6 @@ export default function Sidebar() {
                                 setShowWalletTopUpMenu(true);
                               }}
                               className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold text-amber-300 border border-amber-500/40 bg-amber-500/10 transition flex items-center gap-1 cursor-pointer hover:bg-amber-500/20 active:scale-95 shadow-xs"
-                              title={t('topUpWalletToBuy') || 'Deposit Funds in Wallet to Buy'}
                             >
                               <Wallet className="h-3 w-3 text-amber-400" />
                               <span>{t('topUpWalletShort') || 'Top Up'}</span>
@@ -58632,7 +60226,6 @@ export default function Sidebar() {
                   })}
                 </div>
 
-                {/* Footer Links */}
                 <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
                   <Link
                     href="/subscriptions"
@@ -58659,7 +60252,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* Notification Icon with Dropdown */}
+          {/* DYNAMIC DESKTOP NOTIFICATION BELL WIDGET */}
           <div className="relative" ref={notifDropdownRef}>
             <button
               type="button"
@@ -58671,45 +60264,58 @@ export default function Sidebar() {
               }}
               className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="Notifications"
+              title={t('notifications', 'Notifications')}
             >
               <Bell className="h-4 w-4" style={iconStyle} />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
-                  {unreadCount}
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md animate-pulse">
+                  {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
             </button>
 
             {showNotifications && (
               <div 
-                className="absolute right-0 mt-2 w-80 rounded-2xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                className="absolute right-0 mt-2 w-84 sm:w-96 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               >
-                <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                  <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                    Notifications
-                  </h3>
-                  <button 
-                    onClick={() => { setUnreadCount(0); setShowNotifications(false); }}
-                    className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
-                  >
-                    Mark all read
-                  </button>
+                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <BellRing className="h-4 w-4 text-amber-500" />
+                    <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                      {t('notifications', 'Notifications')}
+                    </h3>
+                    {unreadCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-md bg-red-500/20 text-red-400 text-[10px] font-mono font-bold">
+                        {unreadCount} {t('new', 'new')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button 
+                        type="button"
+                        onClick={handleMarkAllRead}
+                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
+                      >
+                        {t('markAllRead', 'Mark all read')}
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <Link
+                        href="/admin/notification-settings"
+                        onClick={() => setShowNotifications(false)}
+                        className="p-1 rounded-lg border hover:opacity-80 transition"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                        title={t('notificationSettings', 'Notification Settings')}
+                      >
+                        <Settings className="h-3 w-3" />
+                      </Link>
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1 text-xs">
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">🎉 Welcome to Zecratary!</p>
-                    <p className="text-[11px] opacity-75">Your account has been initialized with free AI token credits.</p>
-                  </div>
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">⚡ AI Model Updated</p>
-                    <p className="text-[11px] opacity-75">Gemini models are fully synchronized and ready for your recipes.</p>
-                  </div>
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">🔒 Security Secured</p>
-                    <p className="text-[11px] opacity-75">PostgreSQL database storage connected successfully.</p>
-                  </div>
-                </div>
+
+                {renderNotificationsList(() => setShowNotifications(false))}
               </div>
             )}
           </div>
