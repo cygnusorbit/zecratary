@@ -1,4 +1,4 @@
-// Generated / Updated by AI Collaborator
+// Generated / Cleaned by AI Collaborator
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -10,7 +10,7 @@ import {
   PlusCircle, X, User as UserIcon, Activity, Calendar,
   Pencil, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   ShieldAlert, Ban, ArrowUpRight, AlertTriangle, Repeat, RotateCcw,
-  ShieldCheck, CheckCheck, Columns3, Coins
+  ShieldCheck, CheckCheck, Columns3, Coins, Copy, Terminal, ExternalLink, Code2
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -215,6 +215,11 @@ export default function AdminPaymentPage() {
   const [registeredUsers, setRegisteredUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [connectingStripe, setConnectingStripe] = useState(false);
+  const [verifyingStripe, setVerifyingStripe] = useState(false);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const [showStripeGuideModal, setShowStripeGuideModal] = useState(false);
+  const [copiedCliKey, setCopiedCliKey] = useState<string | null>(null);
+  const [webhookEndpointUrl, setWebhookEndpointUrl] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
@@ -393,7 +398,7 @@ export default function AdminPaymentPage() {
     }
   }, [feedback]);
 
-  // Clean, Non-Looping Theme Synchronization
+  // Theme Synchronization
   const handleModeChange = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -441,7 +446,6 @@ export default function AdminPaymentPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
-  // Synchronize ONLY Plans with actual price (> 0) from /admin/plans
   const loadPlans = useCallback(async (currencyOverride?: string) => {
     let parsedPlans: PlanOption[] = [];
     const symbol = getCurrencySymbol(currencyOverride || configRef.current.currency);
@@ -468,12 +472,11 @@ export default function AdminPaymentPage() {
         const rawName = String(cfg.name || baseSlug || '').trim();
         const baseName = rawName.replace(/\s*\((Monthly|Annual|Free)\)/i, '').trim();
 
-        // Check if plan is explicitly free or has no positive pricing
         const isFreeTier = Boolean(
           cfg.isFree === true || cfg.is_free === true || cfg.free === true ||
           baseSlug === 'taster' || baseSlug === 'free'
         );
-        if (isFreeTier) return; // Do NOT add free plans into payment recording dropdown
+        if (isFreeTier) return;
 
         const tokenLimit = cfg.tokenLimit !== undefined 
           ? Number(cfg.tokenLimit) 
@@ -482,7 +485,6 @@ export default function AdminPaymentPage() {
         const monthlyPrice = Number(cfg.monthlyPriceDollars ?? cfg.monthly_price_dollars ?? (cfg.interval === 'MONTH' ? cfg.price : 0) ?? 0);
         const annualPrice = Number(cfg.annualPriceDollars ?? cfg.annual_price_dollars ?? (cfg.interval === 'YEAR' ? cfg.price : 0) ?? 0);
 
-        // ONLY add Monthly if explicitly priced > 0
         if (monthlyPrice > 0) {
           parsedPlans.push({
             id: cfg.monthlyPlanId || `${cfg.id || baseSlug}-monthly`,
@@ -496,7 +498,6 @@ export default function AdminPaymentPage() {
           });
         }
 
-        // ONLY add Annual if explicitly priced > 0
         if (annualPrice > 0) {
           parsedPlans.push({
             id: cfg.annualPlanId || `${cfg.id || baseSlug}-annual`,
@@ -512,9 +513,7 @@ export default function AdminPaymentPage() {
       });
     }
 
-    // Filter strictly for options with valid positive price
     const validPricedPlans = parsedPlans.filter((p) => p.priceDollars > 0 && !p.isFree);
-
     const uniquePlans: PlanOption[] = [];
     const seenSlugs = new Set<string>();
     for (const p of validPricedPlans) {
@@ -665,11 +664,9 @@ export default function AdminPaymentPage() {
     return registeredUsers.find((u) => u.id === selectedUserId) || null;
   }, [registeredUsers, selectedUserId]);
 
-  // Plan Transition and Exclusivity Analyzer: Enforces No Concurrent Monthly & Annual for Same Plan
   const planTransitionInfo = useMemo(() => {
     if (!showAddModal || !selectedUserId || !currentSelectedUser) return null;
 
-    // Resolve user's current active transaction plan if active in history
     const userEmailClean = (currentSelectedUser.email || '').toLowerCase().trim();
     const activeTx = transactionsRef.current.find(
       (t) => (t.customerEmail || '').toLowerCase().trim() === userEmailClean && isSucceeded(t.status)
@@ -688,7 +685,6 @@ export default function AdminPaymentPage() {
     const matchedChosen = availablePlans.find((p) => p.slug === chosenPlanSlug);
     const matchedActive = availablePlans.find((p) => p.slug === activePlanSlug);
 
-    // Case 1: Same Plan and Same Interval -> Subscription Renewal
     if (activePlanSlug === chosenPlanSlug && chosenPlanSlug !== 'taster' && chosenPlanSlug !== 'free') {
       const intervalName = chosenInterval === 'YEAR' ? 'Annual' : 'Monthly';
       return {
@@ -703,7 +699,6 @@ export default function AdminPaymentPage() {
       };
     }
 
-    // Case 2: Same Plan, Different Interval -> Mutual Exclusivity Switch (Monthly <-> Annual Upgrade or Downgrade)
     if (activeBase === chosenBase && activePlanSlug !== 'taster' && chosenPlanSlug !== 'taster' && activeInterval !== chosenInterval) {
       const isUpgrade = chosenInterval === 'YEAR' && activeInterval === 'MONTH';
       const fromIntervalName = activeInterval === 'YEAR' ? 'Annual' : 'Monthly';
@@ -725,7 +720,6 @@ export default function AdminPaymentPage() {
       };
     }
 
-    // Case 3: Completely Different Plan -> Plan Switch (Upgrade / Downgrade)
     if (activePlanSlug !== 'taster' && chosenPlanSlug !== 'taster' && activeBase !== chosenBase) {
       return {
         isRenewal: false,
@@ -742,7 +736,6 @@ export default function AdminPaymentPage() {
     return null;
   }, [showAddModal, selectedUserId, currentSelectedUser, selectedPlanSlug, availablePlans]);
 
-  // TOGGLE RECURRING HANDLER
   const handleToggleRecurring = async (tx: PaymentTransaction) => {
     const nextState = !tx.isRecurring;
     setTogglingTxId(tx.id);
@@ -799,7 +792,6 @@ export default function AdminPaymentPage() {
     }
   };
 
-  // TRIGGER GATEWAY REFUND HANDLER
   const handleRefundTransaction = async (tx: PaymentTransaction) => {
     const symbol = getCurrencySymbol(tx.currency || config.currency);
     const amountStr = `${symbol}${parseAmount(tx.amount).toFixed(2)}`;
@@ -856,7 +848,6 @@ export default function AdminPaymentPage() {
     }
   };
 
-  // OPEN CONFIRM PAYMENT FROM GATEWAY MODAL
   const handleOpenConfirmModal = (tx: PaymentTransaction) => {
     setModalError('');
     setConfirmingTx(tx);
@@ -866,9 +857,8 @@ export default function AdminPaymentPage() {
     setConfirmSyncPlan(true);
   };
 
-  // SUBMIT CONFIRM PAYMENT FROM GATEWAY
-  const handleConfirmPaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleConfirmPaymentSubmit = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     if (!confirmingTx) return;
     setModalError('');
 
@@ -934,7 +924,6 @@ export default function AdminPaymentPage() {
         }).catch(() => {});
       }
 
-      // Credit tokens associated with plan in /admin/plans
       const matchedPlan = availablePlans.find((p) => p.slug === singlePlanSlug);
       if (matchedPlan?.tokenLimit && matchedPlan.tokenLimit > 0 && targetUser) {
         await fetch('/api/tokens', {
@@ -1013,7 +1002,6 @@ export default function AdminPaymentPage() {
     const target = registeredUsers.find((u) => u.id === userId);
     if (target) {
       const userPlan = sanitizeSinglePlan(target.subscriptionPlan);
-      // Intelligently default to the user's active plan if available and has a price, or the first available plan with price
       const matched = availablePlans.find((p) => p.slug === userPlan && p.priceDollars > 0) ||
                       availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === userPlan.replace(/-(monthly|annual)$/, '') && p.priceDollars > 0) ||
                       availablePlans[0];
@@ -1025,7 +1013,6 @@ export default function AdminPaymentPage() {
     }
   };
 
-  // Sync plan and price cleanly
   const handlePlanSelectChange = (slug: string) => {
     const singleSlug = sanitizeSinglePlan(slug);
     setSelectedPlanSlug(singleSlug);
@@ -1046,7 +1033,6 @@ export default function AdminPaymentPage() {
     }
   };
 
-  // Validates selectedPlanSlug against availablePlans (strictly plans with price)
   useEffect(() => {
     if (availablePlans.length > 0) {
       const exists = availablePlans.some((p) => p.slug === selectedPlanSlug && p.priceDollars > 0);
@@ -1075,7 +1061,6 @@ export default function AdminPaymentPage() {
 
     const userCurrentPlan = targetUser ? sanitizeSinglePlan(targetUser.subscriptionPlan) : '';
     
-    // Choose active user plan if available and priced, or first available plan with price
     const matchedPlan = availablePlans.find((p) => p.slug === userCurrentPlan && p.priceDollars > 0) ||
                         availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === userCurrentPlan.replace(/-(monthly|annual)$/, '') && p.priceDollars > 0) ||
                         availablePlans[0];
@@ -1213,8 +1198,8 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const handleUpdatePaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdatePaymentSubmit = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     if (!editingTx) return;
     setModalError('');
 
@@ -1228,7 +1213,6 @@ export default function AdminPaymentPage() {
     const singlePlanSlug = sanitizeSinglePlan(editPlanSlug);
     const cleanEmail = editCustomerEmail.trim().toLowerCase();
 
-    // Enforce gateway verification for automated processors, permit manual
     if (isSucceeded(normalizedStatus) && !isSucceeded(editingTx.status) && editGateway !== 'manual' && !editGatewayConfirmed) {
       setModalError(t('requireGatewayConfirmToUpdateSucceeded', 'Confirmation required: You must confirm the transaction amount from the payment gateway to mark status as Succeeded.'));
       return;
@@ -1415,8 +1399,8 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const handleAddPaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddPaymentSubmit = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     setModalError('');
 
     const targetUser = registeredUsers.find((u) => u.id === selectedUserId);
@@ -1433,7 +1417,6 @@ export default function AdminPaymentPage() {
     const cleanAmount = parseAmount(paymentAmount);
     const normalizedStatus = paymentStatus.toLowerCase();
 
-    // Enforce gateway verification for automated processors, permit manual
     if (isSucceeded(normalizedStatus) && paymentGateway !== 'manual' && !addGatewayConfirmed) {
       setModalError(t('requireGatewayConfirmToAddSucceeded', 'Confirmation required: Please verify and confirm the transaction amount from the payment gateway to record as Succeeded.'));
       return;
@@ -1449,7 +1432,6 @@ export default function AdminPaymentPage() {
 
     const detectedInterval = (matchedPlan?.interval || (singlePlanSlug.includes('annual') ? 'YEAR' : 'MONTH')) as any;
 
-    // Mutual Exclusivity: Automatically CANCEL previous subscriptions when upgrading, downgrading, or switching intervals
     if (isSucceeded(normalizedStatus)) {
       const isSwitchOrUpgradeDowngrade = Boolean(
         planTransitionInfo?.isIntervalSwitch || planTransitionInfo?.isPlanSwitch
@@ -1461,7 +1443,6 @@ export default function AdminPaymentPage() {
       });
 
       for (const oldTx of existingUserActiveTxs) {
-        // If switching between Monthly & Annual or switching plans, cancel previous plan completely!
         const shouldCancelStatus = isSwitchOrUpgradeDowngrade || (oldTx.planSlug !== singlePlanSlug);
         
         const updatedOldTx: PaymentTransaction = { 
@@ -1517,7 +1498,6 @@ export default function AdminPaymentPage() {
         throw new Error(data.error || 'Failed to record transaction in database');
       }
 
-      // Update user plan entitlement in PostgreSQL
       const finalPlanToSync = (syncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) 
         ? singlePlanSlug 
         : (targetUser.subscriptionPlan || 'taster');
@@ -1533,7 +1513,6 @@ export default function AdminPaymentPage() {
         }),
       }).catch(() => {});
 
-      // Credit tokens associated with this plan in /admin/plans
       if (isSucceeded(normalizedStatus) && matchedPlan?.tokenLimit && matchedPlan.tokenLimit > 0) {
         await fetch('/api/tokens', {
           method: 'POST',
@@ -1561,7 +1540,7 @@ export default function AdminPaymentPage() {
 
       setShowAddModal(false);
       const isRenewal = planTransitionInfo?.isRenewal;
-      const isSwitched = planTransitionInfo?.isTransition;
+      const isSwitched = planTransitionInfo?.isIntervalSwitch || planTransitionInfo?.isPlanSwitch;
       setFeedback({
         type: 'success',
         msg: isRenewal
@@ -1632,7 +1611,6 @@ export default function AdminPaymentPage() {
     );
   };
 
-  // Metrics hook evaluated safely before the return statement
   const metrics = useMemo(() => {
     const succeeded = transactions.filter((t) => isSucceeded(t.status));
     const failed = transactions.filter((t) => isFailed(t.status));
@@ -1653,7 +1631,20 @@ export default function AdminPaymentPage() {
     };
   }, [transactions]);
 
+  const handleCopyCliCommand = (cmd: string, key: string) => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard.writeText(cmd);
+      setCopiedCliKey(key);
+      setTimeout(() => setCopiedCliKey(null), 2500);
+    }
+  };
+
   const handleConnectStripe = async () => {
+    if (!config.stripe.secretKey || !config.stripe.publishableKey) {
+      setShowStripeGuideModal(true);
+      return;
+    }
+
     setConnectingStripe(true);
     setFeedback(null);
     try {
@@ -1664,35 +1655,59 @@ export default function AdminPaymentPage() {
           action: 'connect_stripe',
           secretKey: config.stripe.secretKey,
           publishableKey: config.stripe.publishableKey,
+          webhookSecret: config.stripe.webhookSecret,
+          stripe: config.stripe,
+          testMode: config.testMode,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        if (data.url) {
-          window.open(data.url, '_blank');
-        } else {
-          const updated: GatewayConfig = { 
-            ...config, 
-            stripeConnected: true, 
-            stripe: { ...config.stripe, enabled: true } 
-          };
-          setConfig(updated);
-          configRef.current = updated;
-          await persistServerAdminSettings({ paymentSettings: updated });
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event('zecratary_payment_updated'));
-            window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-          }
-          setFeedback({ type: 'success', msg: data.message || 'Stripe account connected successfully!' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        const updated: GatewayConfig = { 
+          ...config, 
+          stripeConnected: true, 
+          stripe: { ...config.stripe, enabled: true } 
+        };
+        setConfig(updated);
+        configRef.current = updated;
+        await persistServerAdminSettings({ paymentSettings: updated });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
         }
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('stripeConnectedSuccess', 'Stripe account connected and enabled successfully in PostgreSQL!') 
+        });
       } else {
-        setFeedback({ type: 'error', msg: data.error || 'Failed to connect Stripe.' });
+        setFeedback({ 
+          type: 'error', 
+          msg: data.error || t('failedToConnectStripe', 'Failed to connect Stripe.') 
+        });
       }
     } catch (e: any) {
+      setFeedback({ 
+        type: 'error', 
+        msg: e.message || t('failedToConnectStripe', 'Failed to communicate with Stripe verification endpoint.') 
+      });
+    } finally {
+      setConnectingStripe(false);
+    }
+  };
+
+  const handleDisconnectStripe = async () => {
+    setConnectingStripe(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'disconnect_stripe' }),
+      });
+      const data = await res.json().catch(() => ({}));
       const updated: GatewayConfig = { 
         ...config, 
-        stripeConnected: true, 
-        stripe: { ...config.stripe, enabled: true } 
+        stripeConnected: false,
+        stripe: { ...config.stripe, enabled: false }
       };
       setConfig(updated);
       configRef.current = updated;
@@ -1701,14 +1716,106 @@ export default function AdminPaymentPage() {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
-      setFeedback({ type: 'success', msg: 'Stripe Gateway enabled and verified.' });
+      setFeedback({ 
+        type: 'success', 
+        msg: data.message || t('stripeDisconnectedSuccess', 'Stripe account disconnected successfully.') 
+      });
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: e.message || 'Failed to disconnect Stripe.' });
     } finally {
       setConnectingStripe(false);
     }
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setWebhookEndpointUrl(`${window.location.origin}/api/webhooks/stripe`);
+    }
+  }, []);
+
+  const handleCopyWebhookUrl = () => {
+    if (typeof window !== 'undefined' && webhookEndpointUrl) {
+      navigator.clipboard.writeText(webhookEndpointUrl);
+      setCopiedWebhook(true);
+      setTimeout(() => setCopiedWebhook(false), 2500);
+    }
+  };
+
+  const handleToggleTestMode = async () => {
+    const nextMode = !config.testMode;
+    const updatedConfig: GatewayConfig = {
+      ...config,
+      testMode: nextMode,
+    };
+    setConfig(updatedConfig);
+    configRef.current = updatedConfig;
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle_test_mode', testMode: nextMode }),
+      });
+      const data = await res.json().catch(() => ({}));
+      await persistServerAdminSettings({ paymentSettings: updatedConfig });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+
+      setFeedback({
+        type: 'success',
+        msg: nextMode
+          ? t('sandboxTestModeEnabled', 'Sandbox (Test Mode) enabled and saved to server!')
+          : t('liveProductionModeEnabled', 'Live Production mode enabled and saved to server!'),
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || 'Failed to update gateway environment.',
+      });
+    }
+  };
+
+  const handleVerifyStripeKeys = async () => {
+    setVerifyingStripe(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verify_stripe_keys',
+          secretKey: config.stripe.secretKey,
+          publishableKey: config.stripe.publishableKey,
+          testMode: config.testMode,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setFeedback({
+          type: 'success',
+          msg: data.message || t('stripeKeyVerifiedSuccess', 'Stripe API keys verified successfully with Stripe servers!'),
+        });
+      } else {
+        setFeedback({
+          type: 'error',
+          msg: data.error || t('stripeKeyVerificationFailed', 'Stripe key verification failed. Please check your keys and test mode setting.'),
+        });
+      }
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || 'Failed to communicate with Stripe verification endpoint.',
+      });
+    } finally {
+      setVerifyingStripe(false);
+    }
+  };
+
+  const handleSaveSettings = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     setLoading(true);
     setFeedback(null);
 
@@ -1868,7 +1975,6 @@ export default function AdminPaymentPage() {
 
       {/* TAB 1: PAYMENT HISTORY CONTAINER */}
       <div className={activeTab === 'history' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
-        {/* GATEWAY STATUS & MONITOR BAR */}
         <div
           className="p-3 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
           style={{
@@ -2219,7 +2325,7 @@ export default function AdminPaymentPage() {
           </div>
         )}
 
-        {/* TRANSACTIONS TABLE WITH DYNAMIC VISIBLE COLUMNS */}
+        {/* TRANSACTIONS TABLE */}
         <div 
           className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
           style={{
@@ -2688,7 +2794,7 @@ export default function AdminPaymentPage() {
 
       {/* TAB 2: GATEWAY SETTINGS CONTAINER */}
       <div className={activeTab === 'settings' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
-        <form onSubmit={handleSaveSettings} className="space-y-6" autoComplete="off" role="presentation">
+        <div className="space-y-6">
           <div 
             className="border p-6 rounded-3xl shadow-sm transition-colors duration-200"
             style={{
@@ -2744,7 +2850,7 @@ export default function AdminPaymentPage() {
                 <label className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>{t('environmentLabel', 'Environment:')}</label>
                 <button
                   type="button"
-                  onClick={() => setConfig({ ...config, testMode: !config.testMode })}
+                  onClick={handleToggleTestMode}
                   className="text-xs font-bold px-3 py-1 rounded-full border transition cursor-pointer shadow-xs"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -2863,22 +2969,101 @@ export default function AdminPaymentPage() {
                 <label className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('connectStripeBtn', 'Connect Stripe Account')}
                 </label>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={handleConnectStripe}
-                    disabled={connectingStripe}
-                    className="inline-flex items-center overflow-hidden rounded-lg bg-[#008cdd] hover:bg-[#0070e0] text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#009bf5]/40"
+                    onClick={() => setShowStripeGuideModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-blue-400"
                     style={{
-                      backgroundImage: 'linear-gradient(180deg, #18a0fb 0%, #0077c8 100%)',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.3)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
+                    title={t('viewStripeCliGuideTooltip', 'View Stripe CLI & Webhook Setup instructions')}
                   >
-                    <div className="px-3 py-2 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">S</div>
-                    <span className="px-3.5 py-2 text-xs tracking-tight font-bold">
-                      {connectingStripe ? t('connectingStripe', 'Connecting...') : t('connectWithStripe', 'Connect with Stripe')}
-                    </span>
+                    <Terminal className="h-3.5 w-3.5 text-amber-500" />
+                    <span>{t('cliGuideBtn', 'CLI & Webhooks Guide')}</span>
                   </button>
+
+                  {!config.stripeConnected ? (
+                    <button
+                      type="button"
+                      onClick={handleConnectStripe}
+                      disabled={connectingStripe}
+                      className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
+                      style={{
+                        backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
+                        boxShadow: '0 2px 5px rgba(99, 91, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)'
+                      }}
+                      title={t('connectWithStripeTooltip', 'Connect or authorize Stripe Account')}
+                    >
+                      <div className="px-3 py-2 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">S</div>
+                      <span className="px-3.5 py-2 text-xs tracking-tight font-bold flex items-center gap-1.5">
+                        {connectingStripe ? (
+                          <>
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                            {t('connectingStripe', 'Connecting...')}
+                          </>
+                        ) : (
+                          t('connectWithStripe', 'Connect with Stripe')
+                        )}
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleConnectStripe}
+                        disabled={connectingStripe}
+                        className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
+                        style={{
+                          backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
+                          boxShadow: '0 2px 5px rgba(99, 91, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)'
+                        }}
+                        title={t('reconnectStripeTooltip', 'Re-authenticate Stripe credentials')}
+                      >
+                        <div className="px-3 py-2 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">S</div>
+                        <span className="px-3.5 py-2 text-xs tracking-tight font-bold flex items-center gap-1.5">
+                          {connectingStripe ? (
+                            <>
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                              {t('reconnectingStripe', 'Reconnecting...')}
+                            </>
+                          ) : (
+                            t('reconnectStripe', 'Reconnect Stripe')
+                          )}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleDisconnectStripe}
+                        disabled={connectingStripe}
+                        className="px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer hover:bg-red-500/10 hover:border-red-500 text-red-500 shadow-xs disabled:opacity-50"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        {t('disconnectStripe', 'Disconnect')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleVerifyStripeKeys}
+                        disabled={verifyingStripe || !config.stripe.secretKey}
+                        className="px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs disabled:opacity-40 flex items-center gap-1.5"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                        title={t('verifyStripeKeysTooltip', 'Ping Stripe API to test key validity')}
+                      >
+                        {verifyingStripe ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-[var(--color-primary)]" /> : <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />}
+                        <span>{verifyingStripe ? t('verifying', 'Verifying...') : t('testKeysBtn', 'Test Keys')}</span>
+                      </button>
+                    </div>
+                  )}
 
                   {config.stripeConnected && (
                     <span 
@@ -2896,6 +3081,71 @@ export default function AdminPaymentPage() {
               </div>
 
               <div className="space-y-3 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                {config.stripe.enabled && (
+                  <div className="space-y-2 pt-1">
+                    {config.testMode && config.stripe.secretKey && !config.stripe.secretKey.startsWith('sk_test_') && (
+                      <div 
+                        className="p-3 rounded-xl border flex items-start gap-2 text-xs font-semibold shadow-xs animate-in fade-in"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: '#f59e0b',
+                          color: '#fbbf24'
+                        }}
+                      >
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+                        <div>
+                          <div className="font-bold">{t('testKeyMismatchTitle', 'Stripe Test Mode Key Alert')}</div>
+                          <div className="text-[11px] font-normal leading-relaxed" style={{ color: 'var(--color-text)' }}>
+                            {t('testKeyMismatchNotice', 'Sandbox Test Mode is active, but your Secret Key does not start with "sk_test_". Payments and test cards will be rejected by Stripe until valid test keys are entered.')}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {!config.testMode && config.stripe.secretKey && config.stripe.secretKey.startsWith('sk_test_') && (
+                      <div 
+                        className="p-3 rounded-xl border flex items-start gap-2 text-xs font-semibold shadow-xs animate-in fade-in"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: '#ef4444',
+                          color: '#ef4444'
+                        }}
+                      >
+                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-500" />
+                        <div>
+                          <div className="font-bold">{t('liveKeyMismatchTitle', 'Live Mode Key Alert')}</div>
+                          <div className="text-[11px] font-normal leading-relaxed" style={{ color: 'var(--color-text)' }}>
+                            {t('liveKeyMismatchNotice', 'Live Production Mode is active, but your Secret Key is a test key ("sk_test_..."). Real customer credit cards will be declined.')}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {config.testMode && (
+                      <div 
+                        className="p-3.5 rounded-2xl border space-y-1.5 transition-colors shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
+                            <CreditCard className="h-3.5 w-3.5" />
+                            {t('stripeTestCardGuide', 'Stripe Test Card Helper')}
+                          </span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                            {t('sandboxActiveBadge', 'Sandbox Active')}
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                          {t('testCardInstructions', 'Use card number')} <code className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>4242 4242 4242 4242</code>, {t('anyFutureExpiry', 'any future MM/YY (e.g. 12/28), and any 3-digit CVC (e.g. 123).')}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('publishableKeyLabel', 'Publishable Key')}
@@ -2975,6 +3225,112 @@ export default function AdminPaymentPage() {
                     >
                       {visibleFields['stripeSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
+                  </div>
+                </div>
+
+                {/* Stripe Webhook Endpoint URL & CLI Forwarding Helper Card */}
+                <div 
+                  className="p-4 rounded-2xl border space-y-3 transition-colors duration-200 shadow-xs"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs uppercase font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                      <Globe className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                      {t('stripeWebhookUrlLabel', 'Stripe Webhook Endpoint URL')}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowStripeGuideModal(true)}
+                        className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <Terminal className="h-3 w-3" />
+                        <span>{t('viewCliMethodBtn', 'Stripe CLI Instructions')}</span>
+                      </button>
+                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded border border-blue-500/30 text-blue-400 bg-blue-500/10 uppercase tracking-wider">
+                        POST
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('stripeWebhookUrlDesc', 'Add this URL in Stripe Dashboard (Developers → Webhooks → Add an endpoint) or use the Stripe CLI command below to forward events locally.')}
+                  </p>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={webhookEndpointUrl || '/api/webhooks/stripe'}
+                        className="payment-input w-full border rounded-xl p-2.5 text-xs font-mono select-all outline-none transition"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCopyWebhookUrl}
+                        className="px-3.5 py-2.5 rounded-xl border text-xs font-bold shrink-0 flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                        style={{
+                          backgroundColor: copiedWebhook ? 'var(--color-emerald)' : 'var(--color-card)',
+                          borderColor: copiedWebhook ? 'var(--color-emerald)' : 'var(--color-border)',
+                          color: copiedWebhook ? '#ffffff' : 'var(--color-text)'
+                        }}
+                        title={t('copyWebhookUrlTooltip', 'Copy Webhook URL to clipboard')}
+                      >
+                        {copiedWebhook ? (
+                          <>
+                            <Check className="h-3.5 w-3.5 text-white" />
+                            <span>{t('copiedBtn', 'Copied!')}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                            <span>{t('copyBtn', 'Copy')}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div 
+                      className="p-2.5 rounded-xl border flex items-center justify-between gap-2"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <Terminal className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                        <code className="text-[11px] font-mono truncate select-all" style={{ color: 'var(--color-text)' }}>
+                          stripe listen --forward-to {(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}
+                        </code>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyCliCommand(`stripe listen --forward-to ${(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}`, 'listen_inline')}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition shrink-0 cursor-pointer"
+                        style={{
+                          backgroundColor: copiedCliKey === 'listen_inline' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                          borderColor: copiedCliKey === 'listen_inline' ? 'var(--color-emerald)' : 'var(--color-border)',
+                          color: copiedCliKey === 'listen_inline' ? '#ffffff' : 'var(--color-text)'
+                        }}
+                      >
+                        {copiedCliKey === 'listen_inline' ? t('copiedBtn', 'Copied!') : t('copyCommandBtn', 'Copy Command')}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] leading-relaxed pt-0.5 flex flex-wrap items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    <span className="font-bold">{t('recommendedEventsTitle', 'Listen to events:')}</span>
+                    <code className="px-1 py-0.5 rounded text-[10px] font-mono border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>checkout.session.completed</code>
+                    <code className="px-1 py-0.5 rounded text-[10px] font-mono border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>invoice.payment_succeeded</code>
+                    <code className="px-1 py-0.5 rounded text-[10px] font-mono border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>customer.subscription.deleted</code>
                   </div>
                 </div>
 
@@ -3182,7 +3538,8 @@ export default function AdminPaymentPage() {
               <RefreshCw className="h-4 w-4" /> {t('resetConfigBtn', 'Reset Config')}
             </button>
             <button
-              type="submit"
+              type="button"
+              onClick={handleSaveSettings}
               disabled={loading}
               className="px-8 py-3 text-white font-bold rounded-2xl transition text-xs shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
@@ -3193,7 +3550,7 @@ export default function AdminPaymentPage() {
               {loading ? t('savingSettings', 'Saving Settings...') : t('saveConfigBtn', 'Save Gateway Settings')}
             </button>
           </div>
-        </form>
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -3278,7 +3635,7 @@ export default function AdminPaymentPage() {
               </div>
             )}
 
-            <form onSubmit={handleConfirmPaymentSubmit} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div>
                 <label className="block font-bold mb-1 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                   <span>{t('confirmedPaymentAmountLabel', 'Confirmed Payment Amount')} ({confirmingTx.currency || config.currency}) *</span>
@@ -3371,8 +3728,9 @@ export default function AdminPaymentPage() {
                   {t('cancel', 'Cancel')}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
                   disabled={!confirmCheckbox || isSubmittingConfirm}
+                  onClick={handleConfirmPaymentSubmit}
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{ backgroundColor: 'var(--color-emerald)' }}
                 >
@@ -3387,7 +3745,7 @@ export default function AdminPaymentPage() {
                   )}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -3503,7 +3861,7 @@ export default function AdminPaymentPage() {
               </div>
             )}
 
-            <form onSubmit={handleAddPaymentSubmit} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div>
                 <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                   <UserIcon className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
@@ -3730,7 +4088,6 @@ export default function AdminPaymentPage() {
                 )}
               </div>
 
-              {/* GATEWAY PAYMENT AMOUNT CONFIRMATION SECTION (Automated Gateways Only) */}
               {isSucceeded(paymentStatus) && paymentGateway !== 'manual' && (
                 <div 
                   className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
@@ -3803,8 +4160,9 @@ export default function AdminPaymentPage() {
                   {t('cancel', 'Cancel')}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
                   disabled={registeredUsers.length === 0}
+                  onClick={handleAddPaymentSubmit}
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{
                     backgroundColor: 'var(--color-primary)'
@@ -3835,7 +4193,7 @@ export default function AdminPaymentPage() {
                   )}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -3886,7 +4244,7 @@ export default function AdminPaymentPage() {
               </div>
             )}
 
-            <form onSubmit={handleUpdatePaymentSubmit} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('customerNameLabel', 'Customer Name')}</label>
@@ -4107,7 +4465,6 @@ export default function AdminPaymentPage() {
                 )}
               </div>
 
-              {/* CONFIRMATION CHECK FOR ADVANCING TO SUCCEEDED */}
               {isSucceeded(editStatus) && !isSucceeded(editingTx.status) && editGateway !== 'manual' && (
                 <div 
                   className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
@@ -4180,7 +4537,8 @@ export default function AdminPaymentPage() {
                   {t('cancel', 'Cancel')}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleUpdatePaymentSubmit}
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -4189,7 +4547,251 @@ export default function AdminPaymentPage() {
                   <Save className="h-4 w-4" /> {t('saveChanges', 'Save Changes')}
                 </button>
               </div>
-            </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STRIPE CONNECTION & WEBHOOK SETUP GUIDE MODAL */}
+      {showStripeGuideModal && (
+        <div 
+          onClick={() => setShowStripeGuideModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button 
+              type="button"
+              onClick={() => setShowStripeGuideModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="space-y-1.5 pr-8">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-[#635bff]/15 text-[#635bff]">
+                  <Terminal className="h-5 w-5" />
+                </div>
+                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                  {t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}
+                </h2>
+              </div>
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('stripeConnectModalSub', 'To connect Stripe webhooks and test payments with your local server, follow the official recommended Stripe CLI setup below.')}
+              </p>
+            </div>
+
+            {/* Method 1: Official Stripe CLI */}
+            <div 
+              className="p-5 rounded-2xl border space-y-4"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                <span className="font-bold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <Code2 className="h-4 w-4 text-[var(--color-primary)]" />
+                  {t('method1Title', 'Method 1: Use the Official Stripe CLI (Recommended)')}
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  {t('recommendedBadge', 'Recommended')}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('method1Desc', 'The official Stripe CLI securely routes events straight to your localhost without needing to register a public URL or configure an HTTP tunnel.')}
+              </p>
+
+              {/* Step 1 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  1. {t('step1Title', 'Install the CLI:')} <span className="font-normal opacity-80">{t('step1Desc', 'Download the Stripe CLI on your system (e.g., via Homebrew on macOS):')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all">brew install stripe/stripe-cli/stripe</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCliCommand('brew install stripe/stripe-cli/stripe', 'cli_install')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_install' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_install' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 2 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  2. {t('step2Title', 'Log in:')} <span className="font-normal opacity-80">{t('step2Desc', 'Link your Stripe account by running in your terminal:')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all">stripe login</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCliCommand('stripe login', 'cli_login')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_login' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_login' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
+                  </button>
+                </div>
+                <p className="text-[10px] opacity-70 italic" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('step2Note', 'Follow the pairing link provided in the terminal to authenticate your Stripe account.')}
+                </p>
+              </div>
+
+              {/* Step 3 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  3. {t('step3Title', 'Forward events:')} <span className="font-normal opacity-80">{t('step3Desc', 'Start forwarding Stripe events directly to your local endpoint:')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all truncate">
+                    stripe listen --forward-to {(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCliCommand(`stripe listen --forward-to ${(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}`, 'cli_listen')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shrink-0"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_listen' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_listen' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 4 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  4. {t('step4Title', 'Capture the Secret:')} <span className="font-normal opacity-80">{t('step4Desc', 'The CLI will print a local signing secret (looks like')} <code className="font-mono font-bold text-[10px] px-1 py-0.5 rounded border">whsec_...</code>{t('step4DescAfter', '). Paste it into the Webhook Secret field below:')}</span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={config.stripe.webhookSecret}
+                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
+                    placeholder="whsec_..."
+                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Method 2: Stripe Dashboard Links */}
+            <div 
+              className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="space-y-0.5">
+                <span className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  {t('method2Title', 'Production / Dashboard API Keys')}
+                </span>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('method2Desc', 'Retrieve your Secret Key and Publishable Key directly from your Stripe Dashboard.')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={config.testMode ? "https://dashboard.stripe.com/test/apikeys" : "https://dashboard.stripe.com/apikeys"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  <span>{t('openApiKeysBtn', 'Stripe API Keys')}</span>
+                </a>
+                <a
+                  href={config.testMode ? "https://dashboard.stripe.com/test/webhooks" : "https://dashboard.stripe.com/webhooks"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  <span>{t('openWebhooksBtn', 'Stripe Webhooks')}</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowStripeGuideModal(false)}
+                className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
+                }}
+              >
+                {t('closeBtn', 'Close')}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowStripeGuideModal(false);
+                  await handleSaveSettings();
+                  await handleVerifyStripeKeys();
+                }}
+                className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <Save className="h-4 w-4" />
+                <span>{t('saveAndConnectBtn', 'Save Settings & Verify Stripe')}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

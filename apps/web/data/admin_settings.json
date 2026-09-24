@@ -2404,21 +2404,24 @@
     "paymentSettings": {
       "activeGateway": "stripe",
       "currency": "USD",
-      "testMode": false,
+      "testMode": true,
       "stripeConnected": true,
       "stripe": {
         "enabled": true,
-        "publishableKey": "",
-        "secretKey": "",
-        "webhookSecret": ""
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
       },
       "paypal": {
         "enabled": false,
         "clientId": "",
-        "clientSecret": "",
         "webhookId": "",
-        "environment": "sandbox"
-      }
+        "environment": "sandbox",
+        "clientSecret": ""
+      },
+      "email": "admin@zecratary.com",
+      "action": "cancel_user_transactions",
+      "preserveExpiry": true
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3756,21 +3759,24 @@
     "paymentSettings": {
       "activeGateway": "stripe",
       "currency": "USD",
-      "testMode": false,
+      "testMode": true,
       "stripeConnected": true,
       "stripe": {
         "enabled": true,
-        "publishableKey": "",
-        "secretKey": "",
-        "webhookSecret": ""
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
       },
       "paypal": {
         "enabled": false,
         "clientId": "",
-        "clientSecret": "",
         "webhookId": "",
-        "environment": "sandbox"
-      }
+        "environment": "sandbox",
+        "clientSecret": ""
+      },
+      "email": "admin@zecratary.com",
+      "action": "cancel_user_transactions",
+      "preserveExpiry": true
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3881,5 +3887,5 @@
       "https://www.taste.com.au/recipes"
     ]
   },
-  "updatedAt": "2026-09-24T15:29:18.038Z"
+  "updatedAt": "2026-09-24T16:51:01.840Z"
 }

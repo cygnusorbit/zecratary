@@ -1,105 +1,113 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
-export const dynamic = 'force-dynamic';
-
-function normalizeTx(tx: any) {
-  if (!tx || typeof tx !== 'object') return tx;
-  const customerEmail = (tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
-  const customerName = tx.customer_name || tx.customerName || 'Customer';
-  const planSlug = (tx.plan_slug || tx.planSlug || 'taster').toLowerCase().trim();
-  const planName = tx.plan_name || tx.planName || 'Plan';
-  const createdAt = tx.created_at || tx.createdAt || new Date().toISOString();
-  const expiryDate = tx.expiry_date || tx.expiryDate || null;
-  const isRecurring = tx.is_recurring !== undefined ? Boolean(tx.is_recurring) : (tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true);
-  const recurringInterval = (tx.recurring_interval || tx.recurringInterval || (planSlug.includes('annual') || planSlug.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
-  const autoRenew = tx.auto_renew !== undefined ? Boolean(tx.auto_renew) : (tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : isRecurring);
-  const testMode = tx.test_mode !== undefined ? Boolean(tx.test_mode) : Boolean(tx.testMode);
-  const failureReason = tx.failure_reason || tx.failureReason || null;
-  const gatewayTransactionId = tx.gateway_transaction_id || tx.gatewayTransactionId || null;
-  const confirmedAmount = tx.confirmed_amount !== undefined ? tx.confirmed_amount : (tx.confirmedAmount !== undefined ? tx.confirmedAmount : null);
-  const confirmedAt = tx.confirmed_at || tx.confirmedAt || null;
-
-  return {
-    ...tx,
-    id: tx.id,
-    customerName,
-    customer_name: customerName,
-    customerEmail,
-    customer_email: customerEmail,
-    planName,
-    plan_name: planName,
-    planSlug,
-    plan_slug: planSlug,
-    amount: Number(tx.amount || 0),
-    currency: tx.currency || 'USD',
-    gateway: tx.gateway || 'stripe',
-    status: tx.status || 'succeeded',
-    testMode,
-    test_mode: testMode,
-    failureReason,
-    failure_reason: failureReason,
-    isRecurring,
-    is_recurring: isRecurring,
-    recurringInterval,
-    recurring_interval: recurringInterval,
-    autoRenew,
-    auto_renew: autoRenew,
-    createdAt,
-    created_at: createdAt,
-    expiryDate,
-    expiry_date: expiryDate,
-    gatewayTransactionId,
-    gateway_transaction_id: gatewayTransactionId,
-    confirmedAmount: confirmedAmount !== null ? Number(confirmedAmount) : null,
-    confirmed_amount: confirmedAmount !== null ? Number(confirmedAmount) : null,
-    confirmedAt,
-    confirmed_at: confirmedAt
-  };
-}
-
-async function ensureTableAndCleanDuplicates() {
+async function ensurePaymentSchema() {
   try {
     await query(`
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT TRUE;
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(32) DEFAULT 'MONTH';
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway_transaction_id VARCHAR(255);
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC(10, 2);
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id VARCHAR(255) PRIMARY KEY,
+        customer_name TEXT,
+        customer_email TEXT,
+        plan_name TEXT,
+        plan_slug TEXT,
+        amount NUMERIC DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'USD',
+        gateway VARCHAR(50) DEFAULT 'stripe',
+        status VARCHAR(50) DEFAULT 'succeeded',
+        test_mode BOOLEAN DEFAULT false,
+        failure_reason TEXT,
+        is_recurring BOOLEAN DEFAULT true,
+        recurring_interval VARCHAR(20) DEFAULT 'MONTH',
+        auto_renew BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        expiry_date TIMESTAMPTZ,
+        gateway_transaction_id TEXT,
+        confirmed_amount NUMERIC,
+        confirmed_at TIMESTAMPTZ
+      );
+    `);
 
-      -- Sanitize historical records: Any prior transaction superseded by a newer upgrade/downgrade must be 'canceled', not 'refunded'
-      UPDATE payment_transactions p1
-      SET status = 'canceled',
-          is_recurring = FALSE,
-          auto_renew = FALSE,
-          updated_at = NOW()
-      WHERE status = 'refunded'
-        AND EXISTS (
-          SELECT 1 FROM payment_transactions p2
-          WHERE LOWER(TRIM(p2.customer_email)) = LOWER(TRIM(p1.customer_email))
-            AND p2.created_at > p1.created_at
-            AND p2.status IN ('succeeded', 'paid', 'active')
-        );
-    `).catch(() => {});
-  } catch (_) {}
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(64) PRIMARY KEY DEFAULT 'primary_settings',
+        payment_settings JSONB,
+        currency VARCHAR(10) DEFAULT 'USD',
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+  } catch (e) {
+    console.warn('[Payment API] Schema check warning:', e);
+  }
+}
+
+// Direct Stripe REST API key verification
+async function verifyStripeKeyWithApi(secretKey: string) {
+  try {
+    const res = await fetch('https://api.stripe.com/v1/balance', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${secretKey.trim()}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      cache: 'no-store'
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      return {
+        valid: false,
+        error: data.error?.message || `Stripe authentication failed with status ${res.status}`
+      };
+    }
+    return { valid: true, livemode: Boolean(data.livemode) };
+  } catch (err: any) {
+    return { valid: false, error: err.message || 'Unable to connect to Stripe verification endpoint.' };
+  }
+}
+
+async function persistAdminPaymentSettings(settings: any, currency: string) {
+  try {
+    await query(
+      `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
+       VALUES ('primary_settings', $1, $2, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         payment_settings = EXCLUDED.payment_settings,
+         currency = EXCLUDED.currency,
+         updated_at = NOW()`,
+      [JSON.stringify(settings), currency]
+    );
+  } catch (_) {
+    await query(
+      `UPDATE admin_settings 
+       SET payment_settings = $1, currency = $2, updated_at = NOW() 
+       WHERE id::text IN ('primary_settings', '1')`,
+      [JSON.stringify(settings), currency]
+    ).catch(() => {});
+  }
 }
 
 export async function GET() {
-  await ensureTableAndCleanDuplicates();
   try {
-    const txRes = await query(
+    await ensurePaymentSchema();
+
+    let txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
-    ).catch(() => ({ rows: [] }));
-    const rawList = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
-    const transactions = rawList.map(normalizeTx);
+    ).catch(async () => {
+      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
+    });
+
+    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
 
     let settings = null;
     try {
-      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings LIMIT 1`);
+      const sRes = await query(
+        `SELECT payment_settings, currency FROM admin_settings 
+         WHERE id::text IN ('primary_settings', '1') 
+         ORDER BY updated_at DESC LIMIT 1`
+      );
       const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
       if (sRow) {
-        settings = sRow.payment_settings || sRow;
+        settings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
         if (sRow.currency && typeof settings === 'object') {
           settings.currency = sRow.currency;
         }
@@ -117,46 +125,192 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  await ensureTableAndCleanDuplicates();
   try {
+    await ensurePaymentSchema();
     const body = await req.json();
 
+    // 1. Stripe Connect Action - Real Stripe API validation before connecting
     if (body.action === 'connect_stripe') {
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (sRow?.payment_settings) {
+          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
+        }
+      } catch (_) {}
+
+      const secretKey = String(body.secretKey || body.stripe?.secretKey || currentSettings?.stripe?.secretKey || '').trim();
+      const publishableKey = String(body.publishableKey || body.stripe?.publishableKey || currentSettings?.stripe?.publishableKey || '').trim();
+      const webhookSecret = String(body.webhookSecret || body.stripe?.webhookSecret || currentSettings?.stripe?.webhookSecret || '').trim();
+      const testMode = body.testMode !== undefined ? Boolean(body.testMode) : Boolean(currentSettings?.testMode);
+
+      if (!secretKey) {
+        return NextResponse.json({ success: false, error: 'Stripe Secret Key is required to connect.' }, { status: 400 });
+      }
+
+      // Format validation against active environment
+      if (testMode && !secretKey.startsWith('sk_test_') && !secretKey.startsWith('rk_test_')) {
+        return NextResponse.json({
+          success: false,
+          error: 'Test Mode is active, but your Secret Key does not start with "sk_test_". Test transactions will fail.'
+        }, { status: 400 });
+      }
+
+      if (!testMode && (secretKey.startsWith('sk_test_') || secretKey.startsWith('rk_test_'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Live Production mode is active, but your Secret Key is a test key ("sk_test_..."). Real charges will fail.'
+        }, { status: 400 });
+      }
+
+      // Live Stripe verification
+      const verifyRes = await verifyStripeKeyWithApi(secretKey);
+      if (!verifyRes.valid) {
+        return NextResponse.json({
+          success: false,
+          error: `Stripe API Key Verification Failed: ${verifyRes.error}`
+        }, { status: 400 });
+      }
+
+      const updatedSettings = {
+        ...currentSettings,
+        activeGateway: currentSettings?.activeGateway || 'stripe',
+        stripeConnected: true,
+        testMode,
+        stripe: {
+          ...(currentSettings?.stripe || {}),
+          enabled: true,
+          publishableKey,
+          secretKey,
+          webhookSecret,
+        }
+      };
+
+      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
+
       return NextResponse.json({
         success: true,
-        message: 'Stripe Gateway enabled and verified.'
+        stripeConnected: true,
+        settings: updatedSettings,
+        message: `Stripe verified and connected successfully with Stripe API (${verifyRes.livemode ? 'Live' : 'Test Mode'})!`
       });
     }
 
-    // Add Transaction: Record payment, cancel prior active transactions with status 'canceled' (NOT 'refunded')
+    // 2. Stripe Verify Keys Diagnostic Action
+    if (body.action === 'verify_stripe_keys') {
+      const secretKey = String(body.secretKey || '').trim();
+      const testMode = Boolean(body.testMode);
+
+      if (!secretKey) {
+        return NextResponse.json({ success: false, error: 'Secret Key is empty.' }, { status: 400 });
+      }
+
+      if (testMode && !secretKey.startsWith('sk_test_') && !secretKey.startsWith('rk_test_')) {
+        return NextResponse.json({
+          success: false,
+          error: 'Key format warning: Sandbox Test Mode is active, but the key does not start with "sk_test_".'
+        }, { status: 400 });
+      }
+
+      if (!testMode && (secretKey.startsWith('sk_test_') || secretKey.startsWith('rk_test_'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Key format warning: Live Mode is active, but the key is a test key ("sk_test_...").'
+        }, { status: 400 });
+      }
+
+      const verifyRes = await verifyStripeKeyWithApi(secretKey);
+      if (!verifyRes.valid) {
+        return NextResponse.json({
+          success: false,
+          error: `Stripe API Verification Failed: ${verifyRes.error}`
+        }, { status: 400 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Stripe API verified successfully with Stripe servers! (${verifyRes.livemode ? 'Live Production Mode' : 'Sandbox Test Mode'})`
+      });
+    }
+
+    // 3. Stripe Disconnect Action
+    if (body.action === 'disconnect_stripe') {
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (sRow?.payment_settings) {
+          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        stripeConnected: false,
+        stripe: {
+          ...(currentSettings?.stripe || {}),
+          enabled: false
+        }
+      };
+
+      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        stripeConnected: false,
+        settings: updatedSettings,
+        message: 'Stripe account disconnected successfully.'
+      });
+    }
+
+    // 4. Toggle Test Mode Action
+    if (body.action === 'toggle_test_mode') {
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (sRow?.payment_settings) {
+          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        testMode: Boolean(body.testMode)
+      };
+
+      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
+      return NextResponse.json({ success: true, message: 'Test mode updated in PostgreSQL', testMode: updatedSettings.testMode });
+    }
+
+    // 5. Add Transaction
     if (body.action === 'add_transaction') {
-      const rawTx = body.transaction || body;
-      if (!rawTx) {
+      const tx = body.transaction;
+      if (!tx) {
         return NextResponse.json({ success: false, error: 'Transaction object required' }, { status: 400 });
       }
 
-      const tx = normalizeTx(rawTx);
-      const isSucceeded = tx.status === 'succeeded' || tx.status === 'paid';
-      const isFree = tx.planSlug === 'taster' || tx.planSlug === 'free' || tx.amount === 0;
+      const txId = String(tx.id || ('tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5)));
+      const customerName = String(tx.customerName || 'Customer');
+      const customerEmail = String(tx.customerEmail || '').toLowerCase().trim();
+      const planName = String(tx.planName || 'Plan');
+      const planSlug = String(tx.planSlug || 'taster');
+      const amount = Number(tx.amount || 0);
+      const currency = String(tx.currency || 'USD');
+      const gateway = String(tx.gateway || 'stripe');
+      const status = String(tx.status || 'succeeded').toLowerCase();
+      const testMode = Boolean(tx.testMode);
+      const failureReason = tx.failureReason || null;
+      const isRecurring = tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true;
+      const recurringInterval = String(tx.recurringInterval || 'MONTH');
+      const autoRenew = tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true;
+      const createdAt = tx.createdAt ? new Date(tx.createdAt).toISOString() : new Date().toISOString();
+      const expiryDate = tx.expiryDate ? new Date(tx.expiryDate).toISOString() : null;
+      const gatewayTxId = tx.gatewayTransactionId ? String(tx.gatewayTransactionId).trim() : null;
+      const confirmedAmount = tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : (status === 'succeeded' ? amount : null);
+      const confirmedAt = tx.confirmedAt ? new Date(tx.confirmedAt).toISOString() : (status === 'succeeded' ? new Date().toISOString() : null);
 
-      // RULE: Any upgrade or downgrade MUST label prior transactions as "canceled".
-      // "refunded" status can ONLY be done manually by admin.
-      if (tx.customerEmail && isSucceeded) {
-        await query(
-          `UPDATE payment_transactions
-           SET status = 'canceled',
-               is_recurring = FALSE,
-               auto_renew = FALSE,
-               expiry_date = NOW(),
-               updated_at = NOW()
-           WHERE LOWER(TRIM(customer_email)) = $1
-             AND id != $2
-             AND status IN ('succeeded', 'paid', 'active')`,
-          [tx.customerEmail, tx.id]
-        ).catch(() => {});
-      }
-
-      // Insert new transaction into payment_transactions
       await query(
         `INSERT INTO payment_transactions (
           id, customer_name, customer_email, plan_name, plan_slug,
@@ -173,7 +327,6 @@ export async function POST(req: Request) {
           currency = EXCLUDED.currency,
           gateway = EXCLUDED.gateway,
           status = EXCLUDED.status,
-          test_mode = EXCLUDED.test_mode,
           failure_reason = EXCLUDED.failure_reason,
           is_recurring = EXCLUDED.is_recurring,
           recurring_interval = EXCLUDED.recurring_interval,
@@ -185,191 +338,22 @@ export async function POST(req: Request) {
           confirmed_at = EXCLUDED.confirmed_at,
           updated_at = NOW()`,
         [
-          tx.id || ('tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5)),
-          tx.customerName,
-          tx.customerEmail,
-          tx.planName,
-          tx.planSlug,
-          tx.amount,
-          tx.currency,
-          tx.gateway,
-          tx.status,
-          tx.testMode,
-          tx.failureReason,
-          tx.isRecurring,
-          tx.recurringInterval,
-          tx.autoRenew,
-          tx.createdAt,
-          tx.expiryDate,
-          tx.gatewayTransactionId,
-          tx.confirmedAmount,
-          tx.confirmedAt
+          txId, customerName, customerEmail, planName, planSlug,
+          amount, currency, gateway, status, testMode, failureReason,
+          isRecurring, recurringInterval, autoRenew, createdAt,
+          expiryDate, gatewayTxId, confirmedAmount, confirmedAt
         ]
       );
 
-      // Atomically synchronize user plan in PostgreSQL users table
-      if (tx.customerEmail) {
-        if (isSucceeded && !isFree) {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = $1,
-                 subscription_tier = $1,
-                 plan_slug = $1,
-                 plan_name = $2,
-                 plan_interval = $3,
-                 plan_expiry_date = $4,
-                 updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $5`,
-            [tx.planSlug, tx.planName, tx.recurringInterval, tx.expiryDate, tx.customerEmail]
-          ).catch(() => {});
-        } else if (isFree) {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = 'taster',
-                 subscription_tier = 'taster',
-                 plan_slug = 'taster',
-                 plan_name = 'Taster (Free)',
-                 plan_interval = 'MONTH',
-                 plan_expiry_date = NULL,
-                 updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $1`,
-            [tx.customerEmail]
-          ).catch(() => {});
-        }
-      }
-
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Transaction recorded and prior subscription cancelled successfully', 
-        transaction: tx 
-      });
+      return NextResponse.json({ success: true, message: 'Transaction recorded successfully', transaction: tx });
     }
 
-    // Cancel User Transactions (Called on upgrade/downgrade/switch): strictly set status to 'canceled'
-    if (body.action === 'cancel_user_transactions') {
-      const email = (body.email || body.customerEmail || body.customer_email || '').toLowerCase().trim();
-      const preserveExpiry = body.preserveExpiry !== undefined ? Boolean(body.preserveExpiry) : false;
-      if (email) {
-        if (preserveExpiry) {
-          await query(`
-            UPDATE payment_transactions
-            SET status = 'canceled',
-                is_recurring = FALSE,
-                auto_renew = FALSE,
-                updated_at = NOW()
-            WHERE LOWER(TRIM(customer_email)) = $1 
-              AND LOWER(status) IN ('succeeded', 'paid', 'active')
-              AND (expiry_date IS NOT NULL AND expiry_date > NOW())
-          `, [email]).catch(() => {});
-
-          await query(`
-            UPDATE payment_transactions
-            SET status = 'canceled',
-                is_recurring = FALSE,
-                auto_renew = FALSE,
-                expiry_date = NOW(),
-                updated_at = NOW()
-            WHERE LOWER(TRIM(customer_email)) = $1 
-              AND LOWER(status) IN ('succeeded', 'paid', 'active')
-              AND (expiry_date IS NULL OR expiry_date <= NOW())
-          `, [email]).catch(() => {});
-        } else {
-          await query(`
-            UPDATE payment_transactions
-            SET status = 'canceled',
-                is_recurring = FALSE,
-                auto_renew = FALSE,
-                expiry_date = NOW(),
-                updated_at = NOW()
-            WHERE LOWER(TRIM(customer_email)) = $1 
-              AND LOWER(status) IN ('succeeded', 'paid', 'active')
-          `, [email]).catch(() => {});
-        }
-        return NextResponse.json({ success: true, message: 'Prior transactions cancelled in PostgreSQL.' });
-      }
-    }
-
-    // Manual Cancel Action
-    if (body.action === 'cancel_transaction') {
-      const rawTx = body.transaction || body;
-      const txId = body.id || rawTx.id;
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-      }
-      const tx = normalizeTx(rawTx);
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'canceled', is_recurring = FALSE, auto_renew = FALSE, expiry_date = $1, updated_at = NOW()
-         WHERE id = $2`,
-        [tx.expiryDate || new Date().toISOString(), txId]
-      );
-
-      return NextResponse.json({ success: true, message: 'Subscription cancelled successfully.' });
-    }
-
-    // Manual Admin Refund Action (ONLY manually by admin)
-    if (body.action === 'refund_transaction') {
-      const rawTx = body.transaction || body;
-      const txId = body.id || rawTx.id;
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-      }
-      const tx = normalizeTx(rawTx);
-
-      // 1. Manually set status to 'refunded'
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'refunded', is_recurring = FALSE, auto_renew = FALSE, expiry_date = NOW(), updated_at = NOW()
-         WHERE id = $1`,
-        [txId]
-      );
-
-      // 2. Immediately revoke privileges and revert to free tier if no other active paid transaction exists
-      if (tx.customerEmail) {
-        const otherTx = await query(
-          `SELECT plan_slug, plan_name, recurring_interval, expiry_date 
-           FROM payment_transactions 
-           WHERE LOWER(TRIM(customer_email)) = $1 
-             AND status IN ('succeeded', 'paid') 
-             AND (expiry_date IS NULL OR expiry_date > NOW())
-           ORDER BY created_at DESC LIMIT 1`,
-          [tx.customerEmail]
-        ).catch(() => ({ rows: [] }));
-
-        const activeRow = Array.isArray(otherTx) ? otherTx[0] : otherTx?.rows?.[0];
-        if (activeRow) {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $5`,
-            [activeRow.plan_slug, activeRow.plan_name, activeRow.recurring_interval, activeRow.expiry_date, tx.customerEmail]
-          ).catch(() => {});
-        } else {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = 'taster', plan_slug = 'taster', plan_name = 'Taster (Free)', plan_interval = 'MONTH', plan_expiry_date = NULL, updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $1`,
-            [tx.customerEmail]
-          ).catch(() => {});
-        }
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Payment refunded successfully by administrator.',
-        transaction: { ...tx, status: 'refunded', isRecurring: false, autoRenew: false }
-      });
-    }
-
-    // Manual Edit / Update Transaction by Admin
+    // 6. Update Transaction
     if (body.action === 'update_transaction') {
-      const rawTx = body.transaction || body;
-      if (!rawTx || !rawTx.id) {
+      const tx = body.transaction;
+      if (!tx || !tx.id) {
         return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
       }
-
-      const tx = normalizeTx(rawTx);
 
       await query(
         `UPDATE payment_transactions 
@@ -381,121 +365,67 @@ export async function POST(req: Request) {
          WHERE id = $18`,
         [
           tx.customerName,
-          tx.customerEmail,
+          (tx.customerEmail || '').toLowerCase().trim(),
           tx.planName,
           tx.planSlug,
-          tx.amount,
+          Number(tx.amount || 0),
           tx.currency,
           tx.gateway,
           tx.status,
-          tx.failureReason,
-          tx.isRecurring,
-          tx.recurringInterval,
-          tx.autoRenew,
+          tx.failureReason || null,
+          Boolean(tx.isRecurring),
+          tx.recurringInterval || 'MONTH',
+          Boolean(tx.autoRenew),
           tx.createdAt,
-          tx.expiryDate,
-          tx.gatewayTransactionId,
-          tx.confirmedAmount,
-          tx.confirmedAt,
+          tx.expiryDate || null,
+          tx.gatewayTransactionId || null,
+          tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : null,
+          tx.confirmedAt || null,
           tx.id
         ]
       );
 
-      // Reconcile user plan in PostgreSQL
-      if (tx.customerEmail) {
-        if (tx.status === 'succeeded' || tx.status === 'paid') {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $5`,
-            [tx.planSlug, tx.planName, tx.recurringInterval, tx.expiryDate, tx.customerEmail]
-          ).catch(() => {});
-        } else if (tx.status === 'refunded') {
-          const otherTx = await query(
-            `SELECT plan_slug, plan_name, recurring_interval, expiry_date 
-             FROM payment_transactions 
-             WHERE LOWER(TRIM(customer_email)) = $1 
-               AND status IN ('succeeded', 'paid') 
-               AND (expiry_date IS NULL OR expiry_date > NOW())
-             ORDER BY created_at DESC LIMIT 1`,
-            [tx.customerEmail]
-          ).catch(() => ({ rows: [] }));
-
-          const activeRow = Array.isArray(otherTx) ? otherTx[0] : otherTx?.rows?.[0];
-          if (activeRow) {
-            await query(
-              `UPDATE users 
-               SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
-               WHERE LOWER(TRIM(email)) = $5`,
-              [activeRow.plan_slug, activeRow.plan_name, activeRow.recurring_interval, activeRow.expiry_date, tx.customerEmail]
-            ).catch(() => {});
-          } else {
-            await query(
-              `UPDATE users 
-               SET subscription_plan = 'taster', plan_slug = 'taster', plan_name = 'Taster (Free)', plan_interval = 'MONTH', plan_expiry_date = NULL, updated_at = NOW()
-               WHERE LOWER(TRIM(email)) = $1`,
-              [tx.customerEmail]
-            ).catch(() => {});
-          }
-        }
-      }
-
-      return NextResponse.json({ success: true, message: 'Transaction updated in database', transaction: tx });
+      return NextResponse.json({ success: true, message: 'Transaction updated', transaction: tx });
     }
 
-    // Confirm Payment
-    if (body.action === 'confirm_payment') {
-      const rawTx = body.transaction || body;
-      const txId = body.id || rawTx.id;
+    // 7. Refund / Cancel / Confirm
+    if (body.action === 'refund_transaction' || body.action === 'cancel_transaction' || body.action === 'confirm_payment') {
+      const tx = body.transaction || {};
+      const txId = body.id || tx.id;
       if (!txId) {
         return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
       }
 
-      const tx = normalizeTx(rawTx);
-
       await query(
         `UPDATE payment_transactions 
-         SET status = 'succeeded', is_recurring = $1, auto_renew = $2, expiry_date = $3,
-             confirmed_amount = $4, confirmed_at = $5, gateway_transaction_id = $6, updated_at = NOW()
-         WHERE id = $7`,
+         SET status = $1, is_recurring = $2, auto_renew = $3, expiry_date = $4,
+             confirmed_amount = $5, confirmed_at = $6, gateway_transaction_id = $7, updated_at = NOW()
+         WHERE id = $8`,
         [
-          tx.isRecurring,
-          tx.autoRenew,
-          tx.expiryDate,
-          tx.confirmedAmount,
-          tx.confirmedAt,
-          tx.gatewayTransactionId,
+          tx.status,
+          Boolean(tx.isRecurring),
+          Boolean(tx.autoRenew),
+          tx.expiryDate || null,
+          tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : null,
+          tx.confirmedAt || null,
+          tx.gatewayTransactionId || null,
           txId
         ]
       );
 
       return NextResponse.json({ 
         success: true, 
-        message: 'Payment verified and confirmed as Succeeded',
-        transaction: { ...tx, status: 'succeeded' } 
+        message: body.action === 'refund_transaction' ? 'Transaction refunded' : body.action === 'cancel_transaction' ? 'Transaction cancelled' : 'Payment confirmed',
+        transaction: tx 
       });
     }
 
-    // Save Gateway Settings into admin_settings
+    // 8. Save Full Gateway Settings into admin_settings
     const gatewayConfig = body.paymentSettings || body;
     const currency = gatewayConfig.currency || body.currency || 'USD';
+    await persistAdminPaymentSettings(gatewayConfig, currency);
 
-    await query(
-      `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
-       VALUES (1, $1, $2, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         payment_settings = EXCLUDED.payment_settings,
-         currency = EXCLUDED.currency,
-         updated_at = NOW()`,
-      [JSON.stringify(gatewayConfig), currency]
-    ).catch(async () => {
-      await query(
-        `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW()`,
-        [JSON.stringify(gatewayConfig), currency]
-      ).catch(() => {});
-    });
-
-    return NextResponse.json({ success: true, message: 'Gateway settings saved' });
+    return NextResponse.json({ success: true, message: 'Gateway settings saved to PostgreSQL' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -503,6 +433,7 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
+    await ensurePaymentSchema();
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
 
