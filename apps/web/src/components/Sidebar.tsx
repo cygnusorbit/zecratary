@@ -34,6 +34,7 @@ import {
   Key,
   Coins,
   Bell,
+  BellRing,
   User as UserIcon,
   Plus,
   ChevronDown,
@@ -1751,6 +1752,10 @@ export default function Sidebar() {
                 <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
                   <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
+                </Link>
+                <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
+                  <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
                 </Link>
                 <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
                   <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
