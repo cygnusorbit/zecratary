@@ -42,8 +42,10 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   ExternalLink,
-  Layers
+  Layers,
+  Check
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -56,6 +58,17 @@ interface TokenPackage {
   price: number;
   badge?: string;
   isPopular?: boolean;
+}
+
+interface InAppNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'urgent' | 'promo' | 'system';
+  isRead: boolean;
+  actionUrl?: string;
+  actionLabel?: string;
+  timestamp: string;
 }
 
 const DEFAULT_FALLBACK_PACKAGES: TokenPackage[] = [
@@ -113,6 +126,67 @@ const isImageIcon = (icon?: unknown): icon is string =>
     icon.startsWith('data:image')
   );
 
+function isQuietHours(startStr?: string, endStr?: string): boolean {
+  if (!startStr || !endStr) return false;
+  try {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const [sH, sM] = startStr.split(':').map(Number);
+    const [eH, eM] = endStr.split(':').map(Number);
+    const startMinutes = (sH || 0) * 60 + (sM || 0);
+    const endMinutes = (eH || 0) * 60 + (eM || 0);
+
+    if (startMinutes <= endMinutes) {
+      return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    } else {
+      return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+    }
+  } catch (_) {
+    return false;
+  }
+}
+
+function playNotificationChime(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12); // A5
+
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (_) {}
+}
+
+function formatNotificationTime(timestampStr: string): string {
+  try {
+    const d = new Date(timestampStr);
+    if (isNaN(d.getTime())) return '';
+    const diffMs = Date.now() - d.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  } catch (_) {
+    return '';
+  }
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
   const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
@@ -127,7 +201,7 @@ export default function Sidebar() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
 
-  // SSR-deterministic state initialization
+  // SSR-deterministic token & wallet states
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
@@ -138,7 +212,6 @@ export default function Sidebar() {
   const [topUpSuccessMsg, setTopUpSuccessMsg] = useState<string>('');
   const [topUpErrorMsg, setTopUpErrorMsg] = useState<string>('');
 
-  // Live Wallet Balance state
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [walletCurrency, setWalletCurrency] = useState<string>('USD');
   const [walletSymbol, setWalletSymbol] = useState<string>('$');
@@ -149,14 +222,24 @@ export default function Sidebar() {
   const [walletTopUpSuccessMsg, setWalletTopUpSuccessMsg] = useState<string>('');
   const [walletTopUpErrorMsg, setWalletTopUpErrorMsg] = useState<string>('');
 
-  // Notifications & Profile state
-  const [unreadCount, setUnreadCount] = useState<number>(3);
+  // Synchronized In-App Notifications State
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
+  const [showNotificationsMobile, setShowNotificationsMobile] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
+
+  const notifConfigRef = useRef<{ soundEnabled: boolean; quietHoursEnabled: boolean; quietHoursStart: string; quietHoursEnd: string }>({
+    soundEnabled: true,
+    quietHoursEnabled: false,
+    quietHoursStart: '22:00',
+    quietHoursEnd: '07:00'
+  });
 
   // Dropdown click-outside refs
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const notifMobileDropdownRef = useRef<HTMLDivElement>(null);
   const topUpDropdownRef = useRef<HTMLDivElement>(null);
   const topUpMobileDropdownRef = useRef<HTMLDivElement>(null);
   const walletDropdownRef = useRef<HTMLDivElement>(null);
@@ -190,6 +273,85 @@ export default function Sidebar() {
     } catch (_) {}
   };
 
+  // 1. Fetch Dynamic Notifications from PostgreSQL
+  const fetchNotifications = useCallback(async (currentUser?: any) => {
+    try {
+      let activeUser = currentUser || user;
+      if (!activeUser && typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
+          if (raw) activeUser = JSON.parse(raw);
+        } catch (_) {}
+        if (!activeUser) activeUser = getCurrentUser();
+      }
+
+      const userEmail = activeUser?.email || 'admin@zecratary.com';
+      const userId = activeUser?.id || '';
+
+      const res = await fetch(`/api/notifications?email=${encodeURIComponent(userEmail)}&userId=${encodeURIComponent(userId)}&t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (Array.isArray(data.notifications)) {
+            setNotifications(data.notifications);
+          }
+          if (typeof data.unreadCount === 'number') {
+            setUnreadCount(data.unreadCount);
+          }
+          if (data.settings) {
+            notifConfigRef.current = {
+              soundEnabled: Boolean(data.settings.soundEnabled ?? true),
+              quietHoursEnabled: Boolean(data.settings.quietHoursEnabled ?? false),
+              quietHoursStart: data.settings.quietHoursStart || '22:00',
+              quietHoursEnd: data.settings.quietHoursEnd || '07:00'
+            };
+          }
+        }
+      }
+    } catch (_) {}
+  }, [user]);
+
+  // 2. Mark Single Notification as Read
+  const handleMarkAsRead = async (notifId: string) => {
+    setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, isRead: true } : n));
+    setUnreadCount(prev => Math.max(0, prev - 1));
+
+    try {
+      const activeUser = getCurrentUser() || user;
+      const userEmail = activeUser?.email || 'admin@zecratary.com';
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'mark_read',
+          email: userEmail,
+          notificationId: notifId
+        })
+      });
+    } catch (_) {}
+  };
+
+  // 3. Mark All Notifications as Read
+  const handleMarkAllRead = async () => {
+    setUnreadCount(0);
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+
+    try {
+      const activeUser = getCurrentUser() || user;
+      const userEmail = activeUser?.email || 'admin@zecratary.com';
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'mark_all_read',
+          email: userEmail,
+          notificationIds: notifications.map(n => n.id)
+        })
+      });
+    } catch (_) {}
+  };
+
+  // 4. Fetch Token Settings and Balances
   const fetchUserTokenAndNotifications = useCallback(async (currentUser?: any) => {
     try {
       let cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
@@ -257,6 +419,7 @@ export default function Sidebar() {
     } catch (_) {}
   }, [user]);
 
+  // 5. Fetch Wallet Data
   const fetchWalletData = useCallback(async (currentUser?: any) => {
     try {
       let activeUser = currentUser || user;
@@ -323,8 +486,10 @@ export default function Sidebar() {
     setSiteIcon(icon);
     updateFavicon(icon);
     loadLanguagesFromAdmin();
+
     fetchUserTokenAndNotifications(currentUser);
     fetchWalletData(currentUser);
+    fetchNotifications(currentUser);
 
     const savedMode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
     if (savedMode) {
@@ -354,7 +519,10 @@ export default function Sidebar() {
       if (currentCategory !== prevCategory) {
         if (currentCategory === 'tablet') setIsCollapsed(true);
         else if (currentCategory === 'desktop') setIsCollapsed(false);
-        if (currentCategory !== 'mobile') setIsOpen(false);
+        if (currentCategory !== 'mobile') {
+          setIsOpen(false);
+          setShowNotificationsMobile(false);
+        }
         prevCategory = currentCategory;
       }
     };
@@ -366,6 +534,7 @@ export default function Sidebar() {
       setUser(updated);
       fetchUserTokenAndNotifications(updated);
       fetchWalletData(updated);
+      fetchNotifications(updated);
     };
     const handleSiteSync = () => {
       setSiteName(getSiteName());
@@ -386,12 +555,48 @@ export default function Sidebar() {
       fetchWalletData(u);
     };
 
+    // Real-time notification broadcaster sync
+    const handleNewNotification = (e: any) => {
+      const detail = e.detail;
+      if (!detail) return;
+
+      const newNotif: InAppNotification = {
+        id: detail.id || `notif_${Date.now()}`,
+        title: detail.title || 'System Notification',
+        message: detail.message || '',
+        type: detail.type || 'info',
+        isRead: false,
+        actionUrl: detail.actionUrl,
+        actionLabel: detail.actionLabel,
+        timestamp: detail.timestamp || new Date().toISOString()
+      };
+
+      setNotifications(prev => [newNotif, ...prev.filter(n => n.id !== newNotif.id)]);
+      setUnreadCount(prev => prev + 1);
+
+      // Play audio chime if enabled and outside quiet hours
+      const cfg = notifConfigRef.current;
+      if (cfg.soundEnabled && !isQuietHours(cfg.quietHoursStart, cfg.quietHoursEnd)) {
+        playNotificationChime();
+      }
+
+      // Re-fetch to synchronize state
+      fetchNotifications();
+    };
+
+    const handleNotifSettingsUpdated = () => {
+      fetchNotifications();
+    };
+
     const handleClickOutside = (e: MouseEvent) => {
       if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target as Node)) {
         setShowProfileMenu(false);
       }
       if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
         setShowNotifications(false);
+      }
+      if (notifMobileDropdownRef.current && !notifMobileDropdownRef.current.contains(e.target as Node)) {
+        setShowNotificationsMobile(false);
       }
       if (topUpDropdownRef.current && !topUpDropdownRef.current.contains(e.target as Node)) {
         setShowTopUpMenu(false);
@@ -417,6 +622,8 @@ export default function Sidebar() {
     window.addEventListener('zecratary_tokens_updated', handleTokenSync);
     window.addEventListener('zecratary_wallet_updated', handleWalletSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleWalletSync);
+    window.addEventListener('zecratary_new_notification', handleNewNotification);
+    window.addEventListener('zecratary_notification_settings_updated', handleNotifSettingsUpdated);
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
@@ -430,8 +637,10 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_tokens_updated', handleTokenSync);
       window.removeEventListener('zecratary_wallet_updated', handleWalletSync);
       window.removeEventListener('zecratary_wallet_settings_updated', handleWalletSync);
+      window.removeEventListener('zecratary_new_notification', handleNewNotification);
+      window.removeEventListener('zecratary_notification_settings_updated', handleNotifSettingsUpdated);
     };
-  }, [fetchUserTokenAndNotifications, fetchWalletData]);
+  }, [fetchUserTokenAndNotifications, fetchWalletData, fetchNotifications]);
 
   const toggleThemeMode = () => {
     const nextMode = !isDarkMode;
@@ -448,6 +657,7 @@ export default function Sidebar() {
     setIsOpen(false);
     setShowProfileMenu(false);
     setShowNotifications(false);
+    setShowNotificationsMobile(false);
     setShowTopUpMenu(false);
     setShowTopUpMobileMenu(false);
     setShowWalletTopUpMenu(false);
@@ -587,11 +797,93 @@ export default function Sidebar() {
     }
   `;
 
+  const getNotifIcon = (type: InAppNotification['type']) => {
+    switch (type) {
+      case 'urgent':
+        return <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />;
+      case 'warning':
+        return <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />;
+      case 'promo':
+        return <Sparkles className="h-4 w-4 text-purple-400 shrink-0" />;
+      case 'success':
+        return <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />;
+      default:
+        return <Bell className="h-4 w-4 text-blue-400 shrink-0" />;
+    }
+  };
+
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
 
   const displayPackages = tokenPackages.length > 0 ? tokenPackages : DEFAULT_FALLBACK_PACKAGES;
+
+  // Reusable Notifications List Element
+  const renderNotificationsList = (onItemClick?: () => void) => {
+    return (
+      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+        {notifications.length === 0 ? (
+          <div className="p-6 text-center text-xs space-y-1 opacity-75">
+            <Bell className="h-6 w-6 mx-auto opacity-40 text-amber-500 mb-1" />
+            <p className="font-bold">{t('allCaughtUp', "You're all caught up!")}</p>
+            <p className="text-[11px] opacity-70">{t('noNewNotifs', 'No notifications at this time.')}</p>
+          </div>
+        ) : (
+          notifications.map((item) => (
+            <div
+              key={item.id}
+              onClick={() => {
+                if (!item.isRead) handleMarkAsRead(item.id);
+              }}
+              className={`p-3 rounded-2xl border transition flex items-start gap-2.5 cursor-pointer relative ${
+                !item.isRead ? 'border-[var(--color-primary)]/40 shadow-xs' : 'opacity-80'
+              }`}
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: !item.isRead ? 'rgba(224, 86, 56, 0.35)' : 'var(--color-border)' }}
+            >
+              <div className="pt-0.5">{getNotifIcon(item.type)}</div>
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
+                    {item.title}
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] opacity-60 font-mono">
+                      {formatNotificationTime(item.timestamp)}
+                    </span>
+                    {!item.isRead && (
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: 'var(--color-primary)' }} />
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                  {item.message}
+                </p>
+
+                {item.actionUrl && (
+                  <div className="pt-1">
+                    <Link
+                      href={item.actionUrl}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMarkAsRead(item.id);
+                        if (onItemClick) onItemClick();
+                      }}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold underline hover:opacity-80"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      <span>{item.actionLabel || t('viewDetails', 'View Details')}</span>
+                      <ExternalLink className="h-2.5 w-2.5" />
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  };
 
   return (
     <>
@@ -599,10 +891,11 @@ export default function Sidebar() {
       <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
         <Link href="/dashboard" className="flex items-center gap-2">
           {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[110px]">
+          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[100px]">
             {displayName}
           </span>
         </Link>
+
         <div className="flex items-center gap-1.5">
           {/* Mobile Wallet Balance & Top Up */}
           <div className="relative" ref={walletMobileDropdownRef}>
@@ -612,6 +905,7 @@ export default function Sidebar() {
                 setShowWalletMobileMenu(!showWalletMobileMenu);
                 setShowTopUpMobileMenu(false);
                 setShowProfileMenu(false);
+                setShowNotificationsMobile(false);
               }}
               className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
               title="Wallet Balance & Top Up"
@@ -625,7 +919,7 @@ export default function Sidebar() {
               </span>
             </button>
 
-            {/* Mobile Wallet Top Up Drawer */}
+            {/* Mobile Wallet Drawer */}
             {showWalletMobileMenu && (
               <div 
                 className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
@@ -711,6 +1005,7 @@ export default function Sidebar() {
                 setShowTopUpMobileMenu(!showTopUpMobileMenu);
                 setShowWalletMobileMenu(false);
                 setShowProfileMenu(false);
+                setShowNotificationsMobile(false);
               }}
               className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
             >
@@ -724,7 +1019,7 @@ export default function Sidebar() {
               </span>
             </button>
 
-            {/* Mobile Top Up Drawer */}
+            {/* Mobile Token Drawer */}
             {showTopUpMobileMenu && (
               <div 
                 className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
@@ -752,7 +1047,6 @@ export default function Sidebar() {
                   </button>
                 </div>
 
-                {/* Wallet Balance Status Banner */}
                 <div className="p-2.5 rounded-2xl border flex items-center justify-between gap-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center gap-2">
                     <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
@@ -788,18 +1082,6 @@ export default function Sidebar() {
                       <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                       <span>{topUpErrorMsg}</span>
                     </div>
-                    {topUpErrorMsg.includes('wallet') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowTopUpMobileMenu(false);
-                          setShowWalletMobileMenu(true);
-                        }}
-                        className="text-left text-[10px] font-extrabold underline text-white pt-1"
-                      >
-                        👉 {t('depositWalletNow') || 'Deposit funds into your Wallet now'}
-                      </button>
-                    )}
                   </div>
                 )}
 
@@ -830,14 +1112,7 @@ export default function Sidebar() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right">
-                            <span className="text-xs font-mono font-black">${price.toFixed(2)}</span>
-                            {!canAfford && (
-                              <div className="text-[8px] text-amber-400 font-bold">
-                                Need ${(price - walletBalance).toFixed(2)}
-                              </div>
-                            )}
-                          </div>
+                          <span className="text-xs font-mono font-black">${price.toFixed(2)}</span>
                           {canAfford ? (
                             <button
                               type="button"
@@ -880,6 +1155,81 @@ export default function Sidebar() {
             )}
           </div>
 
+          {/* Mobile Notifications Bell & Drawer */}
+          <div className="relative" ref={notifMobileDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowNotificationsMobile(!showNotificationsMobile);
+                setShowWalletMobileMenu(false);
+                setShowTopUpMobileMenu(false);
+                setShowProfileMenu(false);
+              }}
+              className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
+              aria-label="Notifications"
+            >
+              <Bell className="h-4 w-4" style={iconStyle} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {showNotificationsMobile && (
+              <div 
+                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <BellRing className="h-4 w-4 text-amber-500" />
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wider">{t('notifications', 'Notifications')}</h3>
+                      <p className="text-[10px] opacity-70">
+                        {unreadCount > 0 ? `${unreadCount} ${t('unreadAlerts', 'unread alert(s)')}` : t('allRead', 'All notifications read')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button 
+                        type="button"
+                        onClick={handleMarkAllRead}
+                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
+                      >
+                        {t('markAllRead', 'Mark all read')}
+                      </button>
+                    )}
+                    <button 
+                      type="button"
+                      onClick={() => setShowNotificationsMobile(false)}
+                      className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {renderNotificationsList(() => setShowNotificationsMobile(false))}
+
+                {isAdmin && (
+                  <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
+                    <Link
+                      href="/admin/notification-settings"
+                      onClick={() => setShowNotificationsMobile(false)}
+                      className="text-xs font-bold hover:underline inline-flex items-center gap-1.5"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      <Settings className="h-3 w-3" />
+                      <span>{t('manageNotifSettings', 'Manage Notification Settings')}</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Profile Button */}
           <div className="relative" ref={profileDropdownRef}>
             <button
@@ -888,6 +1238,7 @@ export default function Sidebar() {
                 setShowProfileMenu(!showProfileMenu);
                 setShowTopUpMobileMenu(false);
                 setShowWalletMobileMenu(false);
+                setShowNotificationsMobile(false);
               }}
               className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
               aria-label="User Profile"
@@ -1073,7 +1424,7 @@ export default function Sidebar() {
               </button>
             </div>
 
-            {/* Wallet Quick Top Up Dropdown Menu */}
+            {/* Wallet Quick Top Up Dropdown */}
             {showWalletTopUpMenu && (
               <div 
                 className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
@@ -1123,7 +1474,6 @@ export default function Sidebar() {
                   </div>
                 )}
 
-                {/* Quick Presets Grid */}
                 <div className="space-y-2">
                   <span className="text-[10px] font-black uppercase tracking-wider opacity-60">
                     {t('quickDepositAmounts') || 'Choose Deposit Amount'}
@@ -1143,7 +1493,6 @@ export default function Sidebar() {
                   </div>
                 </div>
 
-                {/* Footer Links */}
                 <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
                   <Link
                     href="/wallet"
@@ -1187,7 +1536,6 @@ export default function Sidebar() {
                 </span>
               </Link>
 
-              {/* Top Up Button with Dropdown Trigger */}
               <button
                 type="button"
                 onClick={() => {
@@ -1207,7 +1555,7 @@ export default function Sidebar() {
               </button>
             </div>
 
-            {/* Top Up Dropdown Menu */}
+            {/* Token Packages Dropdown */}
             {showTopUpMenu && (
               <div 
                 className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
@@ -1237,7 +1585,6 @@ export default function Sidebar() {
                   </div>
                 </div>
 
-                {/* Live Wallet Balance Status Card */}
                 <div 
                   className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -1288,22 +1635,9 @@ export default function Sidebar() {
                       <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                       <span className="text-[11px]">{topUpErrorMsg}</span>
                     </div>
-                    {topUpErrorMsg.includes('wallet') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowTopUpMenu(false);
-                          setShowWalletTopUpMenu(true);
-                        }}
-                        className="self-start text-[10px] font-extrabold text-white underline hover:opacity-80 cursor-pointer pt-0.5"
-                      >
-                        👉 {t('clickToTopUpWallet') || 'Click here to top up your Wallet balance first'}
-                      </button>
-                    )}
                   </div>
                 )}
 
-                {/* Packages List */}
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {displayPackages.map((pkg) => {
                     const price = Number(pkg.price);
@@ -1334,16 +1668,9 @@ export default function Sidebar() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right">
-                            <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-                              ${price.toFixed(2)}
-                            </span>
-                            {!canAfford && (
-                              <div className="text-[9px] font-bold text-amber-400">
-                                Short ${(price - walletBalance).toFixed(2)}
-                              </div>
-                            )}
-                          </div>
+                          <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
+                            ${price.toFixed(2)}
+                          </span>
 
                           {canAfford ? (
                             <button
@@ -1370,7 +1697,6 @@ export default function Sidebar() {
                                 setShowWalletTopUpMenu(true);
                               }}
                               className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold text-amber-300 border border-amber-500/40 bg-amber-500/10 transition flex items-center gap-1 cursor-pointer hover:bg-amber-500/20 active:scale-95 shadow-xs"
-                              title={t('topUpWalletToBuy') || 'Deposit Funds in Wallet to Buy'}
                             >
                               <Wallet className="h-3 w-3 text-amber-400" />
                               <span>{t('topUpWalletShort') || 'Top Up'}</span>
@@ -1382,7 +1708,6 @@ export default function Sidebar() {
                   })}
                 </div>
 
-                {/* Footer Links */}
                 <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
                   <Link
                     href="/subscriptions"
@@ -1409,7 +1734,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* Notification Icon with Dropdown */}
+          {/* DYNAMIC DESKTOP NOTIFICATION BELL WIDGET */}
           <div className="relative" ref={notifDropdownRef}>
             <button
               type="button"
@@ -1421,45 +1746,58 @@ export default function Sidebar() {
               }}
               className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="Notifications"
+              title={t('notifications', 'Notifications')}
             >
               <Bell className="h-4 w-4" style={iconStyle} />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
-                  {unreadCount}
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md animate-pulse">
+                  {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
             </button>
 
             {showNotifications && (
               <div 
-                className="absolute right-0 mt-2 w-80 rounded-2xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                className="absolute right-0 mt-2 w-84 sm:w-96 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               >
-                <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                  <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                    Notifications
-                  </h3>
-                  <button 
-                    onClick={() => { setUnreadCount(0); setShowNotifications(false); }}
-                    className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
-                  >
-                    Mark all read
-                  </button>
+                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <BellRing className="h-4 w-4 text-amber-500" />
+                    <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                      {t('notifications', 'Notifications')}
+                    </h3>
+                    {unreadCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-md bg-red-500/20 text-red-400 text-[10px] font-mono font-bold">
+                        {unreadCount} {t('new', 'new')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button 
+                        type="button"
+                        onClick={handleMarkAllRead}
+                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
+                      >
+                        {t('markAllRead', 'Mark all read')}
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <Link
+                        href="/admin/notification-settings"
+                        onClick={() => setShowNotifications(false)}
+                        className="p-1 rounded-lg border hover:opacity-80 transition"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                        title={t('notificationSettings', 'Notification Settings')}
+                      >
+                        <Settings className="h-3 w-3" />
+                      </Link>
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1 text-xs">
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">🎉 Welcome to Zecratary!</p>
-                    <p className="text-[11px] opacity-75">Your account has been initialized with free AI token credits.</p>
-                  </div>
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">⚡ AI Model Updated</p>
-                    <p className="text-[11px] opacity-75">Gemini models are fully synchronized and ready for your recipes.</p>
-                  </div>
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">🔒 Security Secured</p>
-                    <p className="text-[11px] opacity-75">PostgreSQL database storage connected successfully.</p>
-                  </div>
-                </div>
+
+                {renderNotificationsList(() => setShowNotifications(false))}
               </div>
             )}
           </div>
