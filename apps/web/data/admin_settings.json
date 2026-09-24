@@ -2,34 +2,34 @@
   "aiProvider": "gemini",
   "aiModel": "gemini-3.6-flash",
   "themeColors": {
+    "accent": "#a855f7",
     "primary": "#38bdf8",
+    "cardBorder": "#172554",
+    "accentColor": "#a855f7",
+    "sidebarIcon": "#38bdf8",
     "primaryColor": "#38bdf8",
     "primaryHover": "#0284c7",
     "accentEmerald": "#a855f7",
-    "accentColor": "#a855f7",
-    "accent": "#a855f7",
-    "sidebarIconColor": "#38bdf8",
-    "sidebarIcon": "#38bdf8",
-    "backgroundColor": "#020617",
+    "textSecondary": "#7dd3fc",
     "backgroundDark": "#020617",
     "cardBackground": "#080e22",
-    "cardBorder": "#172554",
-    "textSecondary": "#7dd3fc"
+    "backgroundColor": "#020617",
+    "sidebarIconColor": "#38bdf8"
   },
   "theme_colors": {
+    "accent": "#a855f7",
     "primary": "#38bdf8",
+    "cardBorder": "#172554",
+    "accentColor": "#a855f7",
+    "sidebarIcon": "#38bdf8",
     "primaryColor": "#38bdf8",
     "primaryHover": "#0284c7",
     "accentEmerald": "#a855f7",
-    "accentColor": "#a855f7",
-    "accent": "#a855f7",
-    "sidebarIconColor": "#38bdf8",
-    "sidebarIcon": "#38bdf8",
-    "backgroundColor": "#020617",
+    "textSecondary": "#7dd3fc",
     "backgroundDark": "#020617",
     "cardBackground": "#080e22",
-    "cardBorder": "#172554",
-    "textSecondary": "#7dd3fc"
+    "backgroundColor": "#020617",
+    "sidebarIconColor": "#38bdf8"
   },
   "chefAiSettings": {
     "model": "gemini-3.6-flash",
@@ -1220,36 +1220,36 @@
       "requireEmailVerification": true
     },
     "themeColors": {
+      "accent": "#a855f7",
       "primary": "#38bdf8",
+      "cardBorder": "#172554",
+      "accentColor": "#a855f7",
+      "sidebarIcon": "#38bdf8",
       "primaryColor": "#38bdf8",
       "primaryHover": "#0284c7",
       "accentEmerald": "#a855f7",
-      "accentColor": "#a855f7",
-      "accent": "#a855f7",
-      "sidebarIconColor": "#38bdf8",
-      "sidebarIcon": "#38bdf8",
-      "backgroundColor": "#020617",
+      "textSecondary": "#7dd3fc",
       "backgroundDark": "#020617",
       "cardBackground": "#080e22",
-      "cardBorder": "#172554",
-      "textSecondary": "#7dd3fc"
+      "backgroundColor": "#020617",
+      "sidebarIconColor": "#38bdf8"
     },
     "faviconEmoji": "🍳",
     "faviconImage": "",
     "theme_colors": {
+      "accent": "#a855f7",
       "primary": "#38bdf8",
+      "cardBorder": "#172554",
+      "accentColor": "#a855f7",
+      "sidebarIcon": "#38bdf8",
       "primaryColor": "#38bdf8",
       "primaryHover": "#0284c7",
       "accentEmerald": "#a855f7",
-      "accentColor": "#a855f7",
-      "accent": "#a855f7",
-      "sidebarIconColor": "#38bdf8",
-      "sidebarIcon": "#38bdf8",
-      "backgroundColor": "#020617",
+      "textSecondary": "#7dd3fc",
       "backgroundDark": "#020617",
       "cardBackground": "#080e22",
-      "cardBorder": "#172554",
-      "textSecondary": "#7dd3fc"
+      "backgroundColor": "#020617",
+      "sidebarIconColor": "#38bdf8"
     },
     "favicon_emoji": "🍳",
     "favicon_image": "",
@@ -2401,6 +2401,25 @@
     "titlebar_emoji": "🍳",
     "titlebar_image": "",
     "maintenanceMode": false,
+    "paymentSettings": {
+      "activeGateway": "stripe",
+      "currency": "USD",
+      "testMode": false,
+      "stripeConnected": true,
+      "stripe": {
+        "enabled": true,
+        "publishableKey": "",
+        "secretKey": "",
+        "webhookSecret": ""
+      },
+      "paypal": {
+        "enabled": false,
+        "clientId": "",
+        "clientSecret": "",
+        "webhookId": "",
+        "environment": "sandbox"
+      }
+    },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
     "chefQuestionnaire": [
@@ -2553,36 +2572,36 @@
       "requireEmailVerification": true
     },
     "themeColors": {
+      "accent": "#a855f7",
       "primary": "#38bdf8",
+      "cardBorder": "#172554",
+      "accentColor": "#a855f7",
+      "sidebarIcon": "#38bdf8",
       "primaryColor": "#38bdf8",
       "primaryHover": "#0284c7",
       "accentEmerald": "#a855f7",
-      "accentColor": "#a855f7",
-      "accent": "#a855f7",
-      "sidebarIconColor": "#38bdf8",
-      "sidebarIcon": "#38bdf8",
-      "backgroundColor": "#020617",
+      "textSecondary": "#7dd3fc",
       "backgroundDark": "#020617",
       "cardBackground": "#080e22",
-      "cardBorder": "#172554",
-      "textSecondary": "#7dd3fc"
+      "backgroundColor": "#020617",
+      "sidebarIconColor": "#38bdf8"
     },
     "faviconEmoji": "🍳",
     "faviconImage": "",
     "theme_colors": {
+      "accent": "#a855f7",
       "primary": "#38bdf8",
+      "cardBorder": "#172554",
+      "accentColor": "#a855f7",
+      "sidebarIcon": "#38bdf8",
       "primaryColor": "#38bdf8",
       "primaryHover": "#0284c7",
       "accentEmerald": "#a855f7",
-      "accentColor": "#a855f7",
-      "accent": "#a855f7",
-      "sidebarIconColor": "#38bdf8",
-      "sidebarIcon": "#38bdf8",
-      "backgroundColor": "#020617",
+      "textSecondary": "#7dd3fc",
       "backgroundDark": "#020617",
       "cardBackground": "#080e22",
-      "cardBorder": "#172554",
-      "textSecondary": "#7dd3fc"
+      "backgroundColor": "#020617",
+      "sidebarIconColor": "#38bdf8"
     },
     "favicon_emoji": "🍳",
     "favicon_image": "",
@@ -3734,6 +3753,25 @@
     "titlebar_emoji": "🍳",
     "titlebar_image": "",
     "maintenanceMode": false,
+    "paymentSettings": {
+      "activeGateway": "stripe",
+      "currency": "USD",
+      "testMode": false,
+      "stripeConnected": true,
+      "stripe": {
+        "enabled": true,
+        "publishableKey": "",
+        "secretKey": "",
+        "webhookSecret": ""
+      },
+      "paypal": {
+        "enabled": false,
+        "clientId": "",
+        "clientSecret": "",
+        "webhookId": "",
+        "environment": "sandbox"
+      }
+    },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
     "chefQuestionnaire": [
@@ -3843,5 +3881,5 @@
       "https://www.taste.com.au/recipes"
     ]
   },
-  "updatedAt": "2026-09-24T09:12:09.081Z"
+  "updatedAt": "2026-09-24T15:29:18.038Z"
 }
