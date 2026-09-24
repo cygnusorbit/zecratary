@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.7.2",
+  "version": "7.7.4",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -109,7 +109,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.7.2",
+  "version": "7.7.4",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17255,6 +17255,698 @@ export default function AdminWalletSettingsPage() {
 
 ```
 
+## File: `apps/web/src/app/admin/notification-settings/page.tsx`
+```typescript
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import {
+  Bell, BellRing, Save, ArrowLeft, CheckCircle2, AlertCircle, RefreshCw,
+  Mail, Smartphone, Calendar, ShoppingCart, ChefHat, Coins, Wallet,
+  Sparkles, ShieldCheck, AlertTriangle, Send, Sliders, Info, ShieldAlert,
+  Clock, Check
+} from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+
+interface NotificationSettingsState {
+  isEnabled: boolean;
+  emailEnabled: boolean;
+  inAppEnabled: boolean;
+  pushEnabled: boolean;
+  reminderMealPlanner: boolean;
+  reminderMealTime: string;
+  reminderGroceryList: boolean;
+  reminderPrepAlerts: boolean;
+  tokenLowEnabled: boolean;
+  tokenLowThreshold: number;
+  tokenExhaustedEnabled: boolean;
+  tokenMonthlyGrantEnabled: boolean;
+  walletLowEnabled: boolean;
+  walletLowThreshold: number;
+  walletTopupConfirmEnabled: boolean;
+  subscriptionExpiryEnabled: boolean;
+  subscriptionExpiryDays: number;
+  paymentFailedAlert: boolean;
+  newUpdatesEnabled: boolean;
+  securityAlertsEnabled: boolean;
+  weeklyDigestEnabled: boolean;
+  maintenanceNoticeEnabled: boolean;
+}
+
+export default function AdminNotificationSettingsPage() {
+  const { t } = useTranslation();
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Active sub-tab: 'all' | 'reminders' | 'tokens' | 'wallet' | 'system'
+  const [activeTab, setActiveTab] = useState<'all' | 'reminders' | 'tokens' | 'wallet' | 'system'>('all');
+
+  const [settings, setSettings] = useState<NotificationSettingsState>({
+    isEnabled: true,
+    emailEnabled: true,
+    inAppEnabled: true,
+    pushEnabled: false,
+    reminderMealPlanner: true,
+    reminderMealTime: '18:00',
+    reminderGroceryList: true,
+    reminderPrepAlerts: true,
+    tokenLowEnabled: true,
+    tokenLowThreshold: 15,
+    tokenExhaustedEnabled: true,
+    tokenMonthlyGrantEnabled: true,
+    walletLowEnabled: true,
+    walletLowThreshold: 5.0,
+    walletTopupConfirmEnabled: true,
+    subscriptionExpiryEnabled: true,
+    subscriptionExpiryDays: 3,
+    paymentFailedAlert: true,
+    newUpdatesEnabled: true,
+    securityAlertsEnabled: true,
+    weeklyDigestEnabled: false,
+    maintenanceNoticeEnabled: true
+  });
+
+  const fetchSettings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/notification-settings', { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success && data.settings) {
+        setSettings(prev => ({ ...prev, ...data.settings }));
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to load notification settings');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  const updateSetting = <K extends keyof NotificationSettingsState>(key: K, value: NotificationSettingsState[K]) => {
+    setSettings(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/admin/notification-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed saving notification settings');
+      }
+
+      setSuccessMsg(t('notifSettingsSaved', 'Notification configurations saved to PostgreSQL!'));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_notification_settings_updated'));
+      }
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error occurred while saving');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSendTestNotification = async () => {
+    setTesting(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/admin/notification-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'send_test' })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Test notification delivery failed');
+      }
+
+      setSuccessMsg(t('testNotifSent', 'Test notification triggered! Check your top bar notification bell.'));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zecratary_new_notification', {
+          detail: {
+            title: 'Test System Alert',
+            message: 'Notification subsystem is operating normally in PostgreSQL.',
+            timestamp: new Date().toISOString(),
+            type: 'system'
+          }
+        }));
+      }
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed sending test alert');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // Reusable custom switch component that strictly avoids <form> submissions
+  const renderToggle = (
+    label: string,
+    description: string,
+    checked: boolean,
+    onChange: (val: boolean) => void,
+    icon?: React.ReactNode,
+    extraControls?: React.ReactNode
+  ) => {
+    return (
+      <div 
+        className="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex items-start gap-3 flex-1">
+          {icon && (
+            <div 
+              className="p-2 rounded-xl shrink-0 mt-0.5"
+              style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' }}
+            >
+              {icon}
+            </div>
+          )}
+          <div className="space-y-0.5">
+            <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>
+              {label}
+            </span>
+            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+              {description}
+            </p>
+            {extraControls && <div className="pt-2">{extraControls}</div>}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={checked}
+          onClick={() => onChange(!checked)}
+          className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 cursor-pointer shrink-0 self-end sm:self-center ${
+            checked ? 'bg-emerald-500' : 'bg-slate-600/40'
+          }`}
+        >
+          <div
+            className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${
+              checked ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div 
+        className="min-h-screen p-8 flex items-center justify-center font-sans transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
+      >
+        <div className="flex items-center gap-3">
+          <RefreshCw className="h-5 w-5 animate-spin" style={{ color: 'var(--color-primary)' }} />
+          <span className="text-xs font-bold">{t('loadingNotifSettings', 'Loading Notification Settings...')}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 sm:px-6 pt-4 font-sans transition-colors duration-200 min-h-screen"
+      style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
+    >
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Link 
+              href="/admin" 
+              className="p-1.5 rounded-lg border hover:opacity-80 transition"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              <BellRing className="h-6 w-6 text-amber-500" /> {t('adminNotifTitle', 'Notification Settings')}
+            </h1>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('adminNotifSubtitle', 'Configure reminders for meal planners, token depletion warnings, wallet balance limits, renewal notices, and updates.')}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSendTestNotification}
+            disabled={testing}
+            className="px-3.5 py-2.5 rounded-xl border font-bold text-xs flex items-center gap-2 shadow-sm transition cursor-pointer hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            title={t('testNotifBtnDesc', 'Trigger a test broadcast to verify user notification delivery')}
+          >
+            {testing ? <RefreshCw className="h-4 w-4 animate-spin text-amber-500" /> : <Send className="h-4 w-4 text-amber-500" />}
+            <span>{t('testAlertBtn', 'Send Test Alert')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="px-5 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+          >
+            {saving ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" /> {t('saving', 'Saving to PostgreSQL...')}
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4" /> {t('saveConfigurations', 'Save Configurations')}
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Feedback Messages */}
+      {errorMsg && (
+        <div 
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
+          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }}
+        >
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {successMsg && (
+        <div 
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
+          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
+      {/* Section 1: Master Dispatcher & Delivery Channels */}
+      <div 
+        className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex items-center gap-2">
+            <Sliders className="h-4 w-4 text-amber-500" />
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('masterDispatchHeading', 'Master Dispatcher & Communication Channels')}
+            </h2>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
+            <input
+              type="checkbox"
+              checked={settings.isEnabled}
+              onChange={(e) => updateSetting('isEnabled', e.target.checked)}
+              className="rounded accent-amber-500 w-4 h-4 cursor-pointer"
+            />
+            <span style={{ color: settings.isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
+              {settings.isEnabled ? t('systemActive', 'Notifications Enabled') : t('systemPaused', 'All Paused')}
+            </span>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {renderToggle(
+            t('inAppChannel', 'In-App Alerts'),
+            t('inAppChannelDesc', 'Render notifications in the top bar bell dropdown and system flyouts.'),
+            settings.inAppEnabled,
+            (val) => updateSetting('inAppEnabled', val),
+            <Bell className="h-4 w-4" />
+          )}
+
+          {renderToggle(
+            t('emailChannel', 'Email Dispatch'),
+            t('emailChannelDesc', 'Send transactional emails for critical warnings, renewals, and low balances.'),
+            settings.emailEnabled,
+            (val) => updateSetting('emailEnabled', val),
+            <Mail className="h-4 w-4" />
+          )}
+
+          {renderToggle(
+            t('pushChannel', 'Browser Push Alerts'),
+            t('pushChannelDesc', 'Broadcast native Web Push notifications directly to subscriber desktops/mobiles.'),
+            settings.pushEnabled,
+            (val) => updateSetting('pushEnabled', val),
+            <Smartphone className="h-4 w-4" />
+          )}
+        </div>
+      </div>
+
+      {/* Filter Category Tabs */}
+      <div 
+        className="flex p-1.5 rounded-2xl border transition-colors duration-200 overflow-x-auto"
+        style={{
+          backgroundColor: 'var(--color-inner-dark)',
+          borderColor: 'var(--color-border)'
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setActiveTab('all')}
+          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'all' ? 'border shadow-md' : 'opacity-70'
+          }`}
+          style={activeTab === 'all' ? {
+            backgroundColor: 'var(--color-card)',
+            color: 'var(--color-primary)',
+            borderColor: 'var(--color-border)'
+          } : { color: 'var(--color-text-secondary)' }}
+        >
+          <Bell className="h-3.5 w-3.5" />
+          <span>{t('tabAllAlerts', 'All Notifications')}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('reminders')}
+          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'reminders' ? 'border shadow-md' : 'opacity-70'
+          }`}
+          style={activeTab === 'reminders' ? {
+            backgroundColor: 'var(--color-card)',
+            color: 'var(--color-primary)',
+            borderColor: 'var(--color-border)'
+          } : { color: 'var(--color-text-secondary)' }}
+        >
+          <Calendar className="h-3.5 w-3.5" />
+          <span>{t('tabPlannerReminders', 'Planner & Reminders')}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('tokens')}
+          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'tokens' ? 'border shadow-md' : 'opacity-70'
+          }`}
+          style={activeTab === 'tokens' ? {
+            backgroundColor: 'var(--color-card)',
+            color: 'var(--color-primary)',
+            borderColor: 'var(--color-border)'
+          } : { color: 'var(--color-text-secondary)' }}
+        >
+          <Coins className="h-3.5 w-3.5" />
+          <span>{t('tabTokenAlerts', 'Token Quotas')}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('wallet')}
+          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'wallet' ? 'border shadow-md' : 'opacity-70'
+          }`}
+          style={activeTab === 'wallet' ? {
+            backgroundColor: 'var(--color-card)',
+            color: 'var(--color-primary)',
+            borderColor: 'var(--color-border)'
+          } : { color: 'var(--color-text-secondary)' }}
+        >
+          <Wallet className="h-3.5 w-3.5" />
+          <span>{t('tabWalletRenewals', 'Wallet & Billing')}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('system')}
+          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap ${
+            activeTab === 'system' ? 'border shadow-md' : 'opacity-70'
+          }`}
+          style={activeTab === 'system' ? {
+            backgroundColor: 'var(--color-card)',
+            color: 'var(--color-primary)',
+            borderColor: 'var(--color-border)'
+          } : { color: 'var(--color-text-secondary)' }}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          <span>{t('tabUpdatesSecurity', 'Updates & Security')}</span>
+        </button>
+      </div>
+
+      {/* Category 1: Reminders & Meal Planner */}
+      {(activeTab === 'all' || activeTab === 'reminders') && (
+        <div 
+          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+            <Calendar className="h-4 w-4 text-emerald-500" />
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('plannerRemindersHeading', 'Meal Planner & Routine Reminders')}
+            </h2>
+          </div>
+
+          <div className="space-y-3">
+            {renderToggle(
+              t('dailyMealPlannerAlert', 'Daily Meal Planner Reminder'),
+              t('dailyMealPlannerAlertDesc', 'Prompt users with their scheduled dinner/lunch menu and prep checklist.'),
+              settings.reminderMealPlanner,
+              (val) => updateSetting('reminderMealPlanner', val),
+              <ChefHat className="h-4 w-4 text-emerald-500" />,
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[11px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('reminderTimeLabel', 'Dispatch Time:')}
+                </span>
+                <input
+                  type="time"
+                  value={settings.reminderMealTime}
+                  onChange={(e) => updateSetting('reminderMealTime', e.target.value)}
+                  className="px-2.5 py-1 rounded-lg border text-xs font-mono font-bold outline-none cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+            )}
+
+            {renderToggle(
+              t('groceryListAlert', 'Grocery & Shopping Day Reminders'),
+              t('groceryListAlertDesc', 'Remind users about missing ingredients for upcoming planned meals.'),
+              settings.reminderGroceryList,
+              (val) => updateSetting('reminderGroceryList', val),
+              <ShoppingCart className="h-4 w-4 text-blue-400" />
+            )}
+
+            {renderToggle(
+              t('prepAlerts', 'Recipe Defrosting & Advance Prep Alerts'),
+              t('prepAlertsDesc', 'Send advance notices when recipes require marinating or defrosting 4-8 hours prior.'),
+              settings.reminderPrepAlerts,
+              (val) => updateSetting('reminderPrepAlerts', val),
+              <Clock className="h-4 w-4 text-amber-500" />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Category 2: AI Token Quota Warnings */}
+      {(activeTab === 'all' || activeTab === 'tokens') && (
+        <div 
+          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+            <Coins className="h-4 w-4 text-amber-500" />
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('tokenAlertsHeading', 'AI Token & Quota Reminders')}
+            </h2>
+          </div>
+
+          <div className="space-y-3">
+            {renderToggle(
+              t('tokenLowAlert', 'Token Balance Running Low'),
+              t('tokenLowAlertDesc', 'Warn users before they run out of tokens for /chef AI Chat or /import scraping.'),
+              settings.tokenLowEnabled,
+              (val) => updateSetting('tokenLowEnabled', val),
+              <Coins className="h-4 w-4 text-amber-500" />,
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[11px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('tokenThresholdLabel', 'Trigger when balance drops below:')}
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  value={settings.tokenLowThreshold}
+                  onChange={(e) => updateSetting('tokenLowThreshold', Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-20 px-2.5 py-1 rounded-lg border text-xs font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <span className="text-xs font-bold text-amber-500">🪙 Tokens</span>
+              </div>
+            )}
+
+            {renderToggle(
+              t('tokenExhaustedAlert', 'Zero Balance / Token Exhaustion Alert'),
+              t('tokenExhaustedAlertDesc', 'Immediate alert when a user query fails due to complete token depletion, prompting package top-ups.'),
+              settings.tokenExhaustedEnabled,
+              (val) => updateSetting('tokenExhaustedEnabled', val),
+              <AlertTriangle className="h-4 w-4 text-red-400" />
+            )}
+
+            {renderToggle(
+              t('tokenMonthlyGrantAlert', 'Monthly Plan Token Grant Notice'),
+              t('tokenMonthlyGrantAlertDesc', 'Notify subscribers when their recurring monthly plan token allowance is credited.'),
+              settings.tokenMonthlyGrantEnabled,
+              (val) => updateSetting('tokenMonthlyGrantEnabled', val),
+              <Sparkles className="h-4 w-4 text-purple-400" />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Category 3: Wallet Funds & Subscription Renewals */}
+      {(activeTab === 'all' || activeTab === 'wallet') && (
+        <div 
+          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+            <Wallet className="h-4 w-4 text-emerald-400" />
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('walletAlertsHeading', 'Wallet Funds & Subscription Renewals')}
+            </h2>
+          </div>
+
+          <div className="space-y-3">
+            {renderToggle(
+              t('walletLowAlert', 'Wallet Funds Low Alert'),
+              t('walletLowAlertDesc', 'Alert users when store credit dips below the safe threshold required for purchases.'),
+              settings.walletLowEnabled,
+              (val) => updateSetting('walletLowEnabled', val),
+              <Wallet className="h-4 w-4 text-emerald-400" />,
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[11px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('walletThresholdLabel', 'Trigger when store balance drops below:')}
+                </span>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  value={settings.walletLowThreshold}
+                  onChange={(e) => updateSetting('walletLowThreshold', Math.max(0, parseFloat(e.target.value) || 0))}
+                  className="w-20 px-2.5 py-1 rounded-lg border text-xs font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <span className="text-xs font-bold text-emerald-400">$ USD</span>
+              </div>
+            )}
+
+            {renderToggle(
+              t('walletTopupAlert', 'Top-Up & Deposit Confirmation'),
+              t('walletTopupAlertDesc', 'Dispatch immediate receipts and confirmation notices when store wallet funds are credited.'),
+              settings.walletTopupConfirmEnabled,
+              (val) => updateSetting('walletTopupConfirmEnabled', val),
+              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            )}
+
+            {renderToggle(
+              t('subscriptionExpiryAlert', 'Recurring Plan 3-Day Expiry & Renewal Notice'),
+              t('subscriptionExpiryAlertDesc', 'Notify subscribers in advance before recurring billing cycles or expiration.'),
+              settings.subscriptionExpiryEnabled,
+              (val) => updateSetting('subscriptionExpiryEnabled', val),
+              <Calendar className="h-4 w-4 text-amber-400" />,
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[11px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('advanceDaysLabel', 'Notify prior by:')}
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  max="14"
+                  value={settings.subscriptionExpiryDays}
+                  onChange={(e) => updateSetting('subscriptionExpiryDays', Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-16 px-2.5 py-1 rounded-lg border text-xs font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>days</span>
+              </div>
+            )}
+
+            {renderToggle(
+              t('paymentFailedAlert', 'Payment Failed / Renewal Error Notice'),
+              t('paymentFailedAlertDesc', 'Immediately alert users when automatic card renewals fail, providing a direct link to update payment methods.'),
+              settings.paymentFailedAlert,
+              (val) => updateSetting('paymentFailedAlert', val),
+              <ShieldAlert className="h-4 w-4 text-red-500" />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Category 4: Platform Updates & Security */}
+      {(activeTab === 'all' || activeTab === 'system') && (
+        <div 
+          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+            <ShieldCheck className="h-4 w-4 text-blue-400" />
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('updatesSecurityHeading', 'Platform Releases, Digest & Security Alerts')}
+            </h2>
+          </div>
+
+          <div className="space-y-3">
+            {renderToggle(
+              t('newUpdatesAlert', 'New Feature Announcements & Releases'),
+              t('newUpdatesAlertDesc', 'Broadcast announcements when major AI engine versions or culinary tools are deployed.'),
+              settings.newUpdatesEnabled,
+              (val) => updateSetting('newUpdatesEnabled', val),
+              <Sparkles className="h-4 w-4 text-amber-400" />
+            )}
+
+            {renderToggle(
+              t('securityAlert', 'Security & New Device Login Alerts'),
+              t('securityAlertDesc', 'Notify users when their account is accessed from an unfamiliar IP address or device.'),
+              settings.securityAlertsEnabled,
+              (val) => updateSetting('securityAlertsEnabled', val),
+              <ShieldCheck className="h-4 w-4 text-blue-400" />
+            )}
+
+            {renderToggle(
+              t('weeklyDigestAlert', 'Weekly Nutrition & Activity Digest'),
+              t('weeklyDigestAlertDesc', 'Send a weekend email summarizing meals cooked, tokens utilized, and meal planning metrics.'),
+              settings.weeklyDigestEnabled,
+              (val) => updateSetting('weeklyDigestEnabled', val),
+              <Mail className="h-4 w-4 text-purple-400" />
+            )}
+
+            {renderToggle(
+              t('maintenanceAlert', 'Scheduled Maintenance Notices'),
+              t('maintenanceAlertDesc', 'Alert users 24 hours prior to scheduled server or database maintenance.'),
+              settings.maintenanceNoticeEnabled,
+              (val) => updateSetting('maintenanceNoticeEnabled', val),
+              <Info className="h-4 w-4 text-cyan-400" />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+```
+
 ## File: `apps/web/src/app/admin/ai-settings/page.tsx`
 ```typescript
 // Generated / Updated by AI Collaborator
@@ -34183,6 +34875,1187 @@ export default function BooksPage() {
 
 ```
 
+## File: `apps/web/src/app/subscriptions/page.tsx`
+```typescript
+// Generated / Updated by AI Collaborator
+'use client';
+
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import Link from 'next/link';
+import { 
+  Layers, 
+  CreditCard, 
+  CheckCircle, 
+  AlertTriangle, 
+  RefreshCw, 
+  Coins, 
+  Calendar, 
+  Check, 
+  ArrowUpRight, 
+  Ban, 
+  Sparkles, 
+  Zap, 
+  ShieldCheck, 
+  Info,
+  Clock,
+  ChevronRight,
+  Wallet,
+  History,
+  FileText,
+  CheckCircle2,
+  XCircle,
+  ExternalLink
+} from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+import { getCurrentUser } from '@/lib/auth';
+
+interface Transaction {
+  id: string;
+  customerName: string;
+  customerEmail: string;
+  planName: string;
+  planSlug: string;
+  amount: number;
+  currency: string;
+  gateway: string;
+  status: string;
+  failureReason?: string;
+  isRecurring: boolean;
+  recurringInterval: string;
+  autoRenew: boolean;
+  expiryDate?: string;
+  createdAt: string;
+}
+
+interface PlanCatalog {
+  id: string;
+  slug: string;
+  name: string;
+  monthlyPrice: number;
+  annualPrice: number;
+  tokenLimit: number;
+  monthlyBadge?: string;
+  annualBadge?: string;
+  trialBadge?: string;
+  description: string;
+  features?: string[] | string;
+  isFree?: boolean;
+}
+
+interface TokenIdentity {
+  tokenName: string;
+  tokenSymbol: string;
+}
+
+const DEFAULT_FALLBACK_PLANS: PlanCatalog[] = [
+  {
+    id: 'plan_taster',
+    slug: 'taster',
+    name: 'Taster',
+    monthlyPrice: 0,
+    annualPrice: 0,
+    tokenLimit: 50,
+    trialBadge: 'Free Tier',
+    description: 'Explore recipes and basic AI assistance with starter monthly token quota.',
+    features: [
+      '50 Foodie AI Tokens / month',
+      'Basic Recipe Generator',
+      'Standard Ingredient Conversion',
+      'Community Support'
+    ],
+    isFree: true
+  },
+  {
+    id: 'plan_pro',
+    slug: 'foodie-pro',
+    name: 'Foodie Pro',
+    monthlyPrice: 9.99,
+    annualPrice: 99.00,
+    tokenLimit: 600,
+    monthlyBadge: 'Popular',
+    annualBadge: 'Save 17%',
+    description: 'Advanced AI cooking partner with abundant monthly tokens and smart meal planning.',
+    features: [
+      '600 Foodie AI Tokens / month',
+      'Unlimited Smart Recipe Imports',
+      'Pantry Ingredient Matcher',
+      'Automated Shopping Lists',
+      'Priority AI Model Access'
+    ],
+    isFree: false
+  },
+  {
+    id: 'plan_chef',
+    slug: 'master-chef',
+    name: 'Master Kitchen',
+    monthlyPrice: 24.99,
+    annualPrice: 249.00,
+    tokenLimit: 1800,
+    monthlyBadge: 'Pro Chef',
+    annualBadge: 'Best Value',
+    description: 'The ultimate culinary suite for food enthusiasts, culinary creators, and chefs.',
+    features: [
+      '1,800 Foodie AI Tokens / month',
+      'High-Resolution AI Recipe Visualizer',
+      'Custom Cookbooks & Export Tools',
+      'Dedicated Priority Processing',
+      '24/7 Dedicated Support'
+    ],
+    isFree: false
+  }
+];
+
+// Helper to sanitize slug prefixes and suffixes
+const sanitizeSlug = (slug: string): string => {
+  return (slug || '')
+    .toLowerCase()
+    .trim()
+    .replace(/^(preset_|plan_)/i, '')
+    .replace(/-(monthly|annual|year)$/i, '')
+    .trim();
+};
+
+export default function SubscriptionsPage() {
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [processing, setProcessing] = useState<boolean>(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+
+  const [user, setUser] = useState<any>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [plans, setPlans] = useState<PlanCatalog[]>([]);
+  const [billingInterval, setBillingInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
+  const [tokenIdentity, setTokenIdentity] = useState<TokenIdentity>({ tokenName: 'Tokens', tokenSymbol: '🪙' });
+  const [gatewayConfig, setGatewayConfig] = useState<any>({
+    activeGateway: 'stripe',
+    currency: 'USD',
+    currencySymbol: '$',
+    stripe: { enabled: true },
+    paypal: { enabled: true },
+    manual: { enabled: true }
+  });
+
+  // Dynamic Theme Synchronization
+  useEffect(() => {
+    const checkTheme = () => {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('zecratary_theme_mode');
+        const isDark = saved ? saved !== 'light' : document.documentElement.classList.contains('dark');
+        setIsDarkMode(isDark);
+      }
+    };
+
+    checkTheme();
+    window.addEventListener('zecratary_theme_mode_changed', checkTheme);
+    window.addEventListener('zecratary_theme_changed', checkTheme);
+
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', checkTheme);
+      window.removeEventListener('zecratary_theme_changed', checkTheme);
+    };
+  }, []);
+
+  // Normalization helper for PostgreSQL transactions
+  const normalizeTransaction = (tx: any): Transaction => ({
+    id: tx.id || tx.transaction_id || `tx_${Date.now()}`,
+    customerName: tx.customerName || tx.customer_name || tx.userName || '',
+    customerEmail: tx.customerEmail || tx.customer_email || tx.userEmail || '',
+    planName: tx.planName || tx.plan_name || 'Subscription Tier',
+    planSlug: tx.planSlug || tx.plan_slug || '',
+    amount: typeof tx.amount === 'number' ? tx.amount : parseFloat(tx.amount || 0),
+    currency: (tx.currency || 'USD').toUpperCase(),
+    gateway: tx.gateway || tx.payment_method || 'stripe',
+    status: (tx.status || 'succeeded').toLowerCase(),
+    failureReason: tx.failureReason || tx.failure_reason,
+    isRecurring: Boolean(tx.isRecurring ?? tx.is_recurring ?? true),
+    recurringInterval: (tx.recurringInterval || tx.recurring_interval || tx.interval || 'MONTH').toUpperCase(),
+    autoRenew: Boolean(tx.autoRenew ?? tx.auto_renew ?? true),
+    expiryDate: tx.expiryDate || tx.expiry_date || tx.subscription_expiry_date || tx.plan_expiry,
+    createdAt: tx.createdAt || tx.created_at || new Date().toISOString()
+  });
+
+  // Normalization helper for User state with interval inference
+  const normalizeUser = (rawUser: any) => {
+    if (!rawUser) return null;
+    const rawPlan = rawUser.subscription_plan || rawUser.subscriptionPlan || rawUser.plan_slug || rawUser.plan || 'taster';
+    const rawInterval = rawUser.plan_interval || rawUser.planInterval || rawUser.recurring_interval;
+    const inferredInterval = (rawPlan.includes('annual') || rawPlan.includes('year')) ? 'YEAR' : 'MONTH';
+
+    return {
+      ...rawUser,
+      name: rawUser.name || rawUser.user_name || rawUser.displayName || '',
+      email: rawUser.email || rawUser.user_email || '',
+      subscription_plan: rawPlan,
+      plan_interval: (rawInterval || inferredInterval).toUpperCase(),
+      token_balance: Number(rawUser.token_balance ?? rawUser.tokenBalance ?? 0),
+      wallet_balance: Number(rawUser.wallet_balance ?? rawUser.walletBalance ?? 0),
+      payment_method: rawUser.payment_method || rawUser.paymentMethod || 'Stripe',
+      expiry_date: rawUser.expiry_date || rawUser.expiryDate || rawUser.subscription_expiry_date
+    };
+  };
+
+  // Robust feature parser supporting arrays, JSON strings, and newline-delimited text
+  const parsePlanFeatures = (features: any): string[] => {
+    if (!features) return [];
+    if (Array.isArray(features)) return features;
+    if (typeof features === 'string') {
+      try {
+        const parsed = JSON.parse(features);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (_) {}
+      return features.split('\n').map((s) => s.trim()).filter(Boolean);
+    }
+    return [];
+  };
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      let emailParam = '';
+      if (typeof window !== 'undefined') {
+        try {
+          const authUser = getCurrentUser();
+          if (authUser?.email) {
+            emailParam = `?email=${encodeURIComponent(authUser.email)}`;
+          } else {
+            const rawStored = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
+            if (rawStored) {
+              const parsed = JSON.parse(rawStored);
+              if (parsed?.email) emailParam = `?email=${encodeURIComponent(parsed.email)}`;
+            }
+          }
+        } catch (_) {}
+      }
+
+      const res = await fetch(`/api/billing${emailParam}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          const normalizedU = normalizeUser(data.user);
+          setUser(normalizedU);
+
+          const rawTxList = Array.isArray(data.transactions) ? data.transactions : [];
+          const normalizedTxList = rawTxList.map(normalizeTransaction);
+          setTransactions(normalizedTxList);
+
+          setGatewayConfig(data.gatewayConfig || {
+            activeGateway: 'stripe',
+            currency: 'USD',
+            currencySymbol: '$',
+            stripe: { enabled: true },
+            paypal: { enabled: true },
+            manual: { enabled: true }
+          });
+
+          const rawPlans = Array.isArray(data.plans) && data.plans.length > 0 ? data.plans : DEFAULT_FALLBACK_PLANS;
+          setPlans(rawPlans);
+
+          if (data.tokenIdentity) {
+            setTokenIdentity(data.tokenIdentity);
+          }
+
+          // Inferred default interval: check active transaction first, then user's plan
+          const activeTx = normalizedTxList.find((tx) => 
+            ['active', 'succeeded', 'successful', 'paid', 'canceled'].includes(tx.status) &&
+            (!tx.expiryDate || new Date(tx.expiryDate).getTime() > Date.now())
+          );
+
+          let detectedInterval = (activeTx?.recurringInterval || normalizedU?.plan_interval || '').toUpperCase();
+          if (normalizedU?.subscription_plan && (normalizedU.subscription_plan.includes('annual') || normalizedU.subscription_plan.includes('year'))) {
+            detectedInterval = 'YEAR';
+          }
+
+          if (detectedInterval === 'YEAR' || detectedInterval === 'ANNUAL') {
+            setBillingInterval('YEAR');
+          } else {
+            setBillingInterval('MONTH');
+          }
+        }
+      } else {
+        setPlans(DEFAULT_FALLBACK_PLANS);
+      }
+    } catch (err: any) {
+      setPlans(DEFAULT_FALLBACK_PLANS);
+      setFeedback({ type: 'error', msg: err.message || t('failedLoadSubscriptionInfo', 'Failed to load subscription information') });
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    fetchData();
+
+    const handleSyncEvents = () => {
+      fetchData();
+    };
+
+    window.addEventListener('zecratary_payment_updated', handleSyncEvents);
+    window.addEventListener('zecratary_plans_updated', handleSyncEvents);
+    window.addEventListener('zecratary_users_updated', handleSyncEvents);
+    window.addEventListener('zecratary_token_settings_updated', handleSyncEvents);
+    window.addEventListener('zecratary_tokens_updated', handleSyncEvents);
+    window.addEventListener('zecratary_wallet_updated', handleSyncEvents);
+
+    return () => {
+      window.removeEventListener('zecratary_payment_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_plans_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_users_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_token_settings_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_tokens_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_wallet_updated', handleSyncEvents);
+    };
+  }, [fetchData]);
+
+  useEffect(() => {
+    if (feedback) {
+      const timer = setTimeout(() => setFeedback(null), 4500);
+      return () => clearTimeout(timer);
+    }
+  }, [feedback]);
+
+  // Determine user's active paid transaction
+  const activeTransaction = useMemo(() => {
+    return transactions.find((tx) => {
+      const isPaidOrActive = ['active', 'succeeded', 'successful', 'paid', 'canceled'].includes(tx.status);
+      if (!isPaidOrActive) return false;
+      if (!tx.expiryDate) return true;
+      return new Date(tx.expiryDate).getTime() > Date.now();
+    });
+  }, [transactions]);
+
+  // Precise active plan slug identification
+  const activeUserPlan = useMemo(() => {
+    if (activeTransaction && activeTransaction.planSlug) {
+      return activeTransaction.planSlug.toLowerCase().trim();
+    }
+    return (user?.subscription_plan || 'taster').toLowerCase().trim();
+  }, [activeTransaction, user?.subscription_plan]);
+
+  // Precise active interval identification
+  const activeUserInterval = useMemo((): 'MONTH' | 'YEAR' => {
+    if (activeTransaction?.recurringInterval) {
+      const intv = activeTransaction.recurringInterval.toUpperCase();
+      if (intv === 'YEAR' || intv === 'ANNUAL') return 'YEAR';
+      if (intv === 'MONTH' || intv === 'MONTHLY') return 'MONTH';
+    }
+    const userPlan = (user?.subscription_plan || '').toLowerCase();
+    if (userPlan.includes('annual') || userPlan.includes('year')) return 'YEAR';
+    const uIntv = (user?.plan_interval || '').toUpperCase();
+    if (uIntv === 'YEAR' || uIntv === 'ANNUAL') return 'YEAR';
+    return 'MONTH';
+  }, [activeTransaction, user?.subscription_plan, user?.plan_interval]);
+
+  const isFreeUser = useMemo(() => {
+    const base = sanitizeSlug(activeUserPlan);
+    return !base || base === 'taster' || base === 'free';
+  }, [activeUserPlan]);
+
+  // Evaluation of Plan Catalog Tier matching & exact active state
+  const getPlanStatus = useCallback((plan: PlanCatalog, currentInterval: 'MONTH' | 'YEAR') => {
+    const isPlanFree = Boolean(plan.slug === 'taster' || plan.isFree || (plan.monthlyPrice === 0 && plan.annualPrice === 0));
+    const planBase = sanitizeSlug(plan.slug || plan.id);
+    const userBase = sanitizeSlug(activeUserPlan);
+
+    const isMatchingTier = isFreeUser 
+      ? isPlanFree 
+      : (userBase === planBase || (userBase && planBase && (userBase.includes(planBase) || planBase.includes(userBase))));
+
+    const isExactActive = isPlanFree 
+      ? isFreeUser 
+      : (isMatchingTier && activeUserInterval === currentInterval);
+
+    return {
+      isPlanFree,
+      isMatchingTier,
+      isExactActive
+    };
+  }, [activeUserPlan, activeUserInterval, isFreeUser]);
+
+  // Switch / Upgrade / Downgrade Plan
+  const handleSwitchPlan = async (plan: PlanCatalog, interval: 'MONTH' | 'YEAR') => {
+    const isTargetFree = plan.slug === 'taster' || plan.isFree || (plan.monthlyPrice === 0 && plan.annualPrice === 0);
+    const amount = isTargetFree ? 0 : (interval === 'YEAR' ? plan.annualPrice : plan.monthlyPrice);
+    const planSlugWithInterval = isTargetFree ? 'taster' : `${plan.slug}-${interval.toLowerCase()}`;
+    const planDisplayName = isTargetFree ? 'Taster (Free)' : `${plan.name} (${interval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly')})`;
+    const tokensCredited = plan.tokenLimit ?? (isTargetFree ? 50 : 500);
+
+    const tokenMsg = tokensCredited > 0 ? ` (+${tokensCredited.toLocaleString()} ${tokenIdentity.tokenSymbol})` : '';
+    const confirmPrompt = `${t('confirmChangePlanPrompt', 'Are you sure you want to change your subscription to')} ${planDisplayName} for ${gatewayConfig.currencySymbol || '$'}${amount.toFixed(2)}${tokenMsg}?`;
+    
+    if (!window.confirm(confirmPrompt)) return;
+
+    setProcessing(true);
+    try {
+      const res = await fetch('/api/billing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'change_plan',
+          email: user?.email,
+          userName: user?.name,
+          planSlug: planSlugWithInterval,
+          planName: planDisplayName,
+          amount,
+          interval,
+          tokenLimit: tokensCredited,
+          gateway: user?.payment_method || 'stripe',
+          currency: gatewayConfig?.currency || 'USD'
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || `${t('successfullySwitchedTo', 'Successfully activated')} ${planDisplayName}` 
+        });
+
+        try {
+          const raw = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user');
+          if (raw) {
+            const u = JSON.parse(raw);
+            u.subscriptionPlan = planSlugWithInterval;
+            u.subscription_plan = planSlugWithInterval;
+            u.plan_interval = interval;
+            localStorage.setItem('zecratary_current_user', JSON.stringify(u));
+            localStorage.setItem('zecratary_user', JSON.stringify(u));
+          }
+        } catch (_) {}
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+          window.dispatchEvent(new Event('zecratary_plans_updated'));
+          window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+          window.dispatchEvent(new Event('zecratary_tokens_updated'));
+        }
+
+        await fetchData();
+      } else {
+        throw new Error(data.error || t('failedSwitchPlan', 'Failed to switch subscription plan'));
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', msg: err.message || t('failedSwitchPlan', 'Failed to switch subscription plan') });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Cancel Auto-Renewal
+  const handleCancelAutoRenew = async () => {
+    if (!window.confirm(t('confirmCancelAutoRenewPrompt', 'Are you sure you want to cancel auto-renewal? You will retain all plan features until the end of your current billing cycle.'))) {
+      return;
+    }
+    setProcessing(true);
+    try {
+      const res = await fetch('/api/billing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'cancel_subscription',
+          email: user?.email,
+          transactionId: activeTransaction?.id
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('autoRenewCancelledMsg', 'Auto-renewal has been cancelled. Your active features remain intact until expiry.') 
+        });
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+        }
+
+        await fetchData();
+      } else {
+        throw new Error(data.error || t('failedCancelAutoRenew', 'Failed to cancel auto-renewal'));
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', msg: err.message || t('failedCancelAutoRenew', 'Failed to cancel auto-renewal') });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Reactivate Auto-Renewal
+  const handleResumeAutoRenew = async () => {
+    setProcessing(true);
+    try {
+      const res = await fetch('/api/billing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'resume_subscription',
+          email: user?.email
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('autoRenewResumedMsg', 'Auto-renewal has been reactivated successfully!') 
+        });
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+        }
+
+        await fetchData();
+      } else {
+        throw new Error(data.error || t('failedReactivateAutoRenew', 'Failed to reactivate auto-renewal'));
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', msg: err.message || t('failedReactivateAutoRenew', 'Failed to reactivate auto-renewal') });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const effectiveExpiry = activeTransaction?.expiryDate || user?.expiry_date;
+
+  const displayActivePlanName = useMemo(() => {
+    const matched = plans.find(p => sanitizeSlug(p.slug || p.id) === sanitizeSlug(activeUserPlan));
+    if (matched) {
+      if (isFreeUser) return `${matched.name} (Free)`;
+      return `${matched.name} (${activeUserInterval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly')})`;
+    }
+    if (isFreeUser) return 'Taster (Free)';
+    return activeUserPlan.replace(/-/g, ' ');
+  }, [plans, activeUserPlan, isFreeUser, activeUserInterval, t]);
+
+  return (
+    <div 
+      className="min-h-screen p-4 sm:p-8 transition-colors duration-200"
+      style={{
+        backgroundColor: 'var(--color-bg, #070b13)',
+        color: 'var(--color-text, #f8fafc)'
+      }}
+    >
+      <div className="max-w-6xl mx-auto space-y-8">
+
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight flex items-center gap-3">
+              <Layers className="h-7 w-7" style={{ color: 'var(--color-emerald, #10b981)' }} />
+              <span>{t('subscriptionsPageTitle', 'Subscriptions & Plans')}</span>
+            </h1>
+            <p className="text-sm opacity-70 mt-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+              {t('subscriptionsPageSubtitle', 'Review your current plan tier, manage auto-renewal, and upgrade or switch packages.')}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={fetchData}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold border transition cursor-pointer self-start sm:self-auto hover:opacity-80 active:scale-95 disabled:opacity-50"
+            style={{
+              backgroundColor: 'var(--color-card, #0f172a)',
+              borderColor: 'var(--color-border, #1e293b)',
+              color: 'var(--color-text, #f8fafc)'
+            }}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald, #10b981)' }} />
+            <span>{t('refreshBtn', 'Refresh Status')}</span>
+          </button>
+        </div>
+
+        {/* Feedback Alert */}
+        {feedback && (
+          <div
+            className="p-4 rounded-2xl border flex items-center gap-3 text-sm font-medium animate-in fade-in transition"
+            style={{
+              backgroundColor: 'var(--color-inner-dark, #070b13)',
+              borderColor: feedback.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444',
+              color: feedback.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444'
+            }}
+          >
+            {feedback.type === 'success' ? (
+              <CheckCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
+            )}
+            <span>{feedback.msg}</span>
+          </div>
+        )}
+
+        {/* SECTION 1: BASIC INFORMATION & ACTIVE PLAN */}
+        <div 
+          className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6 transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-card, #0f172a)',
+            borderColor: 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span 
+                  className="text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full border shadow-sm"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #070b13)',
+                    borderColor: 'var(--color-emerald, #10b981)',
+                    color: 'var(--color-emerald, #10b981)'
+                  }}
+                >
+                  {t('currentActiveTier', 'Current Active Tier')}
+                </span>
+
+                {activeTransaction?.autoRenew && activeTransaction.status !== 'canceled' && (
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" />
+                    <span>{t('autoRenewOn', 'Auto-Renew ON')}</span>
+                  </span>
+                )}
+                {activeTransaction?.status === 'canceled' && (
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20 flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    <span>{t('renewalCanceled', 'Renewal Canceled (Active Until Expiry)')}</span>
+                  </span>
+                )}
+              </div>
+
+              <h2 className="text-2xl sm:text-3xl font-black capitalize" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                {displayActivePlanName}
+              </h2>
+
+              <p className="text-xs opacity-75 flex items-center gap-2" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                <span>
+                  {effectiveExpiry && !isFreeUser
+                    ? `${t('planValidUntil', 'Active period ends on')} ${new Date(effectiveExpiry).toLocaleDateString()}`
+                    : t('freePlanNoExpiry', 'Free Plan — No expiration date')}
+                </span>
+              </p>
+            </div>
+
+            {/* Quick Actions on Active Plan */}
+            <div className="flex flex-wrap items-center gap-3">
+              {activeTransaction && activeTransaction.status !== 'canceled' && !isFreeUser && (
+                <button
+                  type="button"
+                  onClick={handleCancelAutoRenew}
+                  disabled={processing}
+                  className="px-4 py-2.5 rounded-xl border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 font-bold text-xs flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+                  title={t('cancelAutoRenewBtn', 'Cancel Auto-Renewal')}
+                >
+                  <Ban className="w-4 h-4" />
+                  <span>{t('cancelAutoRenewBtn', 'Cancel Auto-Renewal')}</span>
+                </button>
+              )}
+
+              {activeTransaction && activeTransaction.status === 'canceled' && !isFreeUser && (
+                <button
+                  type="button"
+                  onClick={handleResumeAutoRenew}
+                  disabled={processing}
+                  className="px-4 py-2.5 rounded-xl border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 font-bold text-xs flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+                  title={t('reactivateAutoRenewBtn', 'Reactivate Auto-Renew')}
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  <span>{t('reactivateAutoRenewBtn', 'Reactivate Auto-Renew')}</span>
+                </button>
+              )}
+
+              <Link
+                href="/billing"
+                className="px-4 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition cursor-pointer hover:opacity-85"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #070b13)',
+                  borderColor: 'var(--color-border, #1e293b)',
+                  color: 'var(--color-text, #f8fafc)'
+                }}
+              >
+                <CreditCard className="w-4 h-4" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                <span>{t('invoicesBillingBtn', 'Invoices & Billing')}</span>
+              </Link>
+            </div>
+          </div>
+
+          {/* User Account, Quota & Wallet Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div 
+              className="p-4 rounded-2xl border transition-colors"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #070b13)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+            >
+              <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>{t('accountLabel', 'Account')}</span>
+              </div>
+              <div className="font-bold text-sm truncate" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                {user?.name || user?.email || t('memberAccount', 'Logged-in Member')}
+              </div>
+              <div className="text-xs opacity-50 truncate" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {user?.email}
+              </div>
+            </div>
+
+            <div 
+              className="p-4 rounded-2xl border transition-colors"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #070b13)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+            >
+              <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                <Coins className="w-3.5 h-3.5 text-amber-400" />
+                <span>{t('availableTokensLabel', 'Available Tokens')}</span>
+              </div>
+              <div className="font-bold text-base flex items-center gap-1.5" style={{ color: '#f59e0b' }}>
+                <span>{Number(user?.token_balance || 0).toLocaleString()}</span>
+                <span className="text-xs font-semibold opacity-75">{tokenIdentity.tokenSymbol}</span>
+              </div>
+              <div className="text-[11px] opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('replenishedOnCycle', 'Replenished on every billing cycle')}
+              </div>
+            </div>
+
+            <div 
+              className="p-4 rounded-2xl border transition-colors"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #070b13)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+            >
+              <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{t('walletBalanceLabel', 'Store Wallet')}</span>
+              </div>
+              <div className="font-bold text-base font-mono flex items-center gap-1" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                <span>{gatewayConfig.currencySymbol || '$'}</span>
+                <span>{Number(user?.wallet_balance || 0).toFixed(2)}</span>
+              </div>
+              <div className="text-[11px] opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('availableForServices', 'Available for store & token top-ups')}
+              </div>
+            </div>
+
+            <div 
+              className="p-4 rounded-2xl border transition-colors"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #070b13)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+            >
+              <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                <Clock className="w-3.5 h-3.5" />
+                <span>{t('billingIntervalLabel', 'Billing Interval')}</span>
+              </div>
+              <div className="font-bold text-sm uppercase tracking-wider" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                {isFreeUser ? t('freeTierInterval', 'Perpetual') : (activeUserInterval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly'))}
+              </div>
+              <div className="text-[11px] opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {activeTransaction?.isRecurring ? t('recurringActive', 'Recurring auto-renew') : t('oneOffCycle', 'Non-recurring cycle')}
+              </div>
+            </div>
+
+            <div 
+              className="p-4 rounded-2xl border transition-colors"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #070b13)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+            >
+              <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>{t('paymentMethodLabel', 'Payment Gateway')}</span>
+              </div>
+              <div className="font-bold text-sm uppercase tracking-wider" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                {user?.payment_method || activeTransaction?.gateway || 'Stripe'}
+              </div>
+              <div className="text-[11px] opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('pciEncrypted', 'Encrypted via PCI gateway')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* SECTION 2: UPGRADE / DOWNGRADE PLAN SELECTION */}
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-xl sm:text-2xl font-black tracking-tight" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                {t('upgradeChangePlan', 'Upgrade or Change Plan')}
+              </h3>
+              <p className="text-xs opacity-70 mt-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('upgradeSubtitle', 'Select between monthly or annual billing to customize your features and token quotas.')}
+              </p>
+            </div>
+
+            {/* Monthly / Annual Toggle */}
+            <div 
+              className="p-1 rounded-2xl border flex items-center self-start sm:self-auto shadow-xs transition-colors"
+              style={{
+                backgroundColor: 'var(--color-card, #0f172a)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setBillingInterval('MONTH')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  billingInterval === 'MONTH' ? 'shadow-xs' : 'opacity-60 hover:opacity-100'
+                }`}
+                style={billingInterval === 'MONTH' ? {
+                  backgroundColor: 'var(--color-inner-dark, #070b13)',
+                  color: 'var(--color-emerald, #10b981)'
+                } : {
+                  color: 'var(--color-text-secondary, #94a3b8)'
+                }}
+              >
+                {t('monthlyBilling', 'Monthly Billing')}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setBillingInterval('YEAR')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                  billingInterval === 'YEAR' ? 'shadow-xs' : 'opacity-60 hover:opacity-100'
+                }`}
+                style={billingInterval === 'YEAR' ? {
+                  backgroundColor: 'var(--color-inner-dark, #070b13)',
+                  color: 'var(--color-emerald, #10b981)'
+                } : {
+                  color: 'var(--color-text-secondary, #94a3b8)'
+                }}
+              >
+                <span>{t('annualBilling', 'Annual Billing')}</span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  {t('saveDiscount', 'Save ~20%')}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Pricing Tier Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {plans.map((plan) => {
+              const { isPlanFree, isMatchingTier, isExactActive } = getPlanStatus(plan, billingInterval);
+              const price = billingInterval === 'YEAR' ? plan.annualPrice : plan.monthlyPrice;
+              const badge = isPlanFree 
+                ? plan.trialBadge 
+                : (billingInterval === 'YEAR' ? plan.annualBadge : plan.monthlyBadge);
+
+              const parsedFeatures = parsePlanFeatures(plan.features);
+
+              return (
+                <div
+                  key={plan.id || plan.slug}
+                  className={`rounded-3xl border p-6 sm:p-8 flex flex-col justify-between transition-all duration-200 relative ${
+                    isExactActive 
+                      ? 'ring-2 ring-emerald-500/90 shadow-2xl shadow-emerald-500/15' 
+                      : (isMatchingTier ? 'ring-1 ring-amber-500/50 shadow-md' : 'hover:shadow-lg')
+                  }`}
+                  style={{
+                    backgroundColor: isExactActive 
+                      ? (isDarkMode ? 'rgba(16, 185, 129, 0.05)' : 'rgba(16, 185, 129, 0.04)')
+                      : 'var(--color-card, #0f172a)',
+                    borderColor: isExactActive 
+                      ? 'var(--color-emerald, #10b981)' 
+                      : (isMatchingTier ? 'rgba(245, 158, 11, 0.4)' : 'var(--color-border, #1e293b)')
+                  }}
+                >
+                  {/* Top Ribbon Badge */}
+                  {isExactActive ? (
+                    <div className="absolute -top-3.5 right-6 px-3.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500 text-slate-950 shadow-lg flex items-center gap-1.5 z-10 animate-in fade-in">
+                      <CheckCircle2 className="w-3.5 h-3.5 fill-slate-950 text-emerald-500" />
+                      <span>{t('currentSubscribedPlanBadge', 'Current Active Plan')}</span>
+                    </div>
+                  ) : isMatchingTier ? (
+                    <div className="absolute -top-3.5 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md flex items-center gap-1 z-10">
+                      <Sparkles className="w-3 h-3 fill-slate-950 text-amber-500" />
+                      <span>{t('subscribedTierBadge', 'Subscribed ({interval})').replace('{interval}', activeUserInterval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly'))}</span>
+                    </div>
+                  ) : badge ? (
+                    <div className="absolute -top-3.5 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md z-10">
+                      {badge}
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xl font-black" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                        {plan.name}
+                      </h4>
+                      {isExactActive ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-xs">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          <span>{t('activePlanTag', 'Active Plan')}</span>
+                        </span>
+                      ) : isMatchingTier ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                          <Sparkles className="w-3 h-3 text-amber-400" />
+                          <span>{t('currentTierTag', 'Current Tier')}</span>
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <p className="text-xs opacity-70 leading-relaxed min-h-[36px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                      {plan.description}
+                    </p>
+
+                    {/* Price Display */}
+                    <div className="py-2 border-y" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-3xl sm:text-4xl font-black" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                          {isPlanFree ? t('freeLabel', 'Free') : `${gatewayConfig.currencySymbol || '$'}${price.toFixed(2)}`}
+                        </span>
+                        {!isPlanFree && (
+                          <span className="text-xs opacity-60 font-semibold" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                            /{billingInterval === 'YEAR' ? t('yearLabel', 'year') : t('monthLabel', 'month')}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Token Allowance Tag */}
+                      <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                        <Coins className="w-3.5 h-3.5" />
+                        <span>+{(plan.tokenLimit ?? (isPlanFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol} / {billingInterval === 'YEAR' && !isPlanFree ? t('yearLabel', 'year') : t('monthLabel', 'month')}</span>
+                      </div>
+                    </div>
+
+                    {/* Features List */}
+                    <div className="space-y-2 pt-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-50" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                        {t('includedFeatures', 'Included Features:')}
+                      </span>
+                      <ul className="space-y-2 text-xs">
+                        {parsedFeatures.map((feat, fIdx) => (
+                          <li key={fIdx} className="flex items-start gap-2">
+                            <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                            <span style={{ color: 'var(--color-text, #f8fafc)' }}>{feat}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Plan CTA Action Button */}
+                  <div className="pt-6 mt-6 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                    {isExactActive ? (
+                      <button
+                        type="button"
+                        disabled={true}
+                        aria-disabled="true"
+                        className="w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-not-allowed opacity-90 border select-none transition shadow-sm"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark, #070b13)',
+                          borderColor: 'var(--color-emerald, #10b981)',
+                          color: 'var(--color-emerald, #10b981)'
+                        }}
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>{t('currentActivePlanBtn', 'Current Active Plan')}</span>
+                      </button>
+                    ) : isMatchingTier && !isPlanFree ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSwitchPlan(plan, billingInterval)}
+                        disabled={processing}
+                        className="w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md text-white hover:opacity-90 active:scale-98 disabled:opacity-50"
+                        style={{
+                          backgroundColor: 'var(--color-emerald, #10b981)'
+                        }}
+                      >
+                        <RefreshCw className={`w-4 h-4 ${processing ? 'animate-spin' : ''}`} />
+                        <span>
+                          {billingInterval === 'YEAR' 
+                            ? t('switchToAnnualBilling', 'Switch to Annual Billing (Save ~20%)')
+                            : t('switchToMonthlyBilling', 'Switch to Monthly Billing')}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSwitchPlan(plan, billingInterval)}
+                        disabled={processing}
+                        className={`w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md disabled:opacity-50 ${
+                          isPlanFree ? 'border hover:bg-white/5' : 'text-white hover:opacity-90 active:scale-98'
+                        }`}
+                        style={isPlanFree ? {
+                          backgroundColor: 'var(--color-inner-dark, #070b13)',
+                          borderColor: 'var(--color-border, #1e293b)',
+                          color: 'var(--color-text, #f8fafc)'
+                        } : {
+                          backgroundColor: 'var(--color-emerald, #10b981)'
+                        }}
+                      >
+                        <ArrowUpRight className="w-4 h-4" />
+                        <span>
+                          {isPlanFree 
+                            ? t('downgradeToFree', 'Downgrade to Free')
+                            : `${t('switchToPlan', 'Switch to')} ${plan.name} (${billingInterval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly')})`}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* SECTION 3: SUBSCRIPTION & BILLING TRANSACTION HISTORY */}
+        <div 
+          className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6 transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-card, #0f172a)',
+            borderColor: 'var(--color-border, #1e293b)'
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+            <div>
+              <h3 className="text-xl font-black flex items-center gap-2.5" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                <History className="w-5 h-5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                <span>{t('subscriptionHistoryTitle', 'Subscription History & Invoices')}</span>
+              </h3>
+              <p className="text-xs opacity-70 mt-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('subscriptionHistorySubtitle', 'Review your recent subscription transactions, renewal status, and invoices.')}
+              </p>
+            </div>
+
+            <Link
+              href="/billing"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border hover:opacity-80 transition self-start sm:self-auto"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #070b13)',
+                borderColor: 'var(--color-border, #1e293b)',
+                color: 'var(--color-text, #f8fafc)'
+              }}
+            >
+              <FileText className="w-3.5 h-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+              <span>{t('fullInvoicesHub', 'Full Invoices Hub')}</span>
+              <ExternalLink className="w-3 h-3 opacity-60" />
+            </Link>
+          </div>
+
+          {transactions.length === 0 ? (
+            <div 
+              className="p-8 rounded-2xl border text-center space-y-2"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #070b13)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+            >
+              <FileText className="w-8 h-8 mx-auto opacity-40" style={{ color: 'var(--color-emerald, #10b981)' }} />
+              <p className="text-sm font-bold" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                {t('noTransactions', 'No subscription transactions recorded yet.')}
+              </p>
+              <p className="text-xs opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('noTransactionsSubtitle', 'When you subscribe or switch plan tiers, payment receipts will automatically appear here.')}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr 
+                    className="border-b font-extrabold uppercase tracking-wider text-[10px]"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark, #070b13)',
+                      borderColor: 'var(--color-border, #1e293b)',
+                      color: 'var(--color-text-secondary, #94a3b8)'
+                    }}
+                  >
+                    <th className="px-4 py-3">{t('tablePlan', 'Plan & Tier')}</th>
+                    <th className="px-4 py-3">{t('tableInterval', 'Interval')}</th>
+                    <th className="px-4 py-3">{t('tableAmount', 'Amount')}</th>
+                    <th className="px-4 py-3">{t('tableGateway', 'Gateway')}</th>
+                    <th className="px-4 py-3">{t('tableStatus', 'Status')}</th>
+                    <th className="px-4 py-3">{t('tableDate', 'Date & Period')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                  {transactions.map((tx) => {
+                    const isSucceeded = ['active', 'succeeded', 'successful', 'paid'].includes(tx.status);
+                    const isCanceled = tx.status === 'canceled';
+
+                    return (
+                      <tr 
+                        key={tx.id}
+                        className="hover:bg-white/[0.02] transition-colors"
+                        style={{ color: 'var(--color-text, #f8fafc)' }}
+                      >
+                        <td className="px-4 py-3 font-bold">
+                          <div className="flex items-center gap-2">
+                            <span>{tx.planName}</span>
+                            {tx.autoRenew && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                                {t('autoBadge', 'Auto')}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] opacity-50 font-mono block">ID: {tx.id.substring(0, 14)}...</span>
+                        </td>
+
+                        <td className="px-4 py-3 font-semibold uppercase tracking-wider text-[11px] opacity-80">
+                          {tx.recurringInterval}
+                        </td>
+
+                        <td className="px-4 py-3 font-mono font-bold" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                          {tx.currency} {tx.amount.toFixed(2)}
+                        </td>
+
+                        <td className="px-4 py-3 font-medium uppercase text-[11px] opacity-75">
+                          {tx.gateway}
+                        </td>
+
+                        <td className="px-4 py-3">
+                          {isSucceeded && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span className="capitalize">{tx.status}</span>
+                            </span>
+                          )}
+                          {isCanceled && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                              <Clock className="w-3 h-3" />
+                              <span>{t('canceledStatus', 'Canceled')}</span>
+                            </span>
+                          )}
+                          {!isSucceeded && !isCanceled && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                              <XCircle className="w-3 h-3" />
+                              <span className="capitalize">{tx.status}</span>
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3 opacity-75 text-[11px]">
+                          <div>{new Date(tx.createdAt).toLocaleDateString()}</div>
+                          {tx.expiryDate && (
+                            <div className="text-[10px] opacity-60">
+                              {t('expiresOn', 'Expires')}: {new Date(tx.expiryDate).toLocaleDateString()}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+```
+
 ## File: `apps/web/src/app/dashboard/page.tsx`
 ```typescript
 'use client';
@@ -40911,6 +42784,260 @@ export async function POST(req: NextRequest) {
     }
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/notification-settings/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export interface NotificationSettingsData {
+  id: string;
+  isEnabled: boolean;
+  emailEnabled: boolean;
+  inAppEnabled: boolean;
+  pushEnabled: boolean;
+  reminderMealPlanner: boolean;
+  reminderMealTime: string;
+  reminderGroceryList: boolean;
+  reminderPrepAlerts: boolean;
+  tokenLowEnabled: boolean;
+  tokenLowThreshold: number;
+  tokenExhaustedEnabled: boolean;
+  tokenMonthlyGrantEnabled: boolean;
+  walletLowEnabled: boolean;
+  walletLowThreshold: number;
+  walletTopupConfirmEnabled: boolean;
+  subscriptionExpiryEnabled: boolean;
+  subscriptionExpiryDays: number;
+  paymentFailedAlert: boolean;
+  newUpdatesEnabled: boolean;
+  securityAlertsEnabled: boolean;
+  weeklyDigestEnabled: boolean;
+  maintenanceNoticeEnabled: boolean;
+  updatedAt?: string;
+}
+
+const DEFAULT_SETTINGS: NotificationSettingsData = {
+  id: 'default_notification_settings',
+  isEnabled: true,
+  emailEnabled: true,
+  inAppEnabled: true,
+  pushEnabled: false,
+  reminderMealPlanner: true,
+  reminderMealTime: '18:00',
+  reminderGroceryList: true,
+  reminderPrepAlerts: true,
+  tokenLowEnabled: true,
+  tokenLowThreshold: 15,
+  tokenExhaustedEnabled: true,
+  tokenMonthlyGrantEnabled: true,
+  walletLowEnabled: true,
+  walletLowThreshold: 5.0,
+  walletTopupConfirmEnabled: true,
+  subscriptionExpiryEnabled: true,
+  subscriptionExpiryDays: 3,
+  paymentFailedAlert: true,
+  newUpdatesEnabled: true,
+  securityAlertsEnabled: true,
+  weeklyDigestEnabled: false,
+  maintenanceNoticeEnabled: true
+};
+
+async function initNotificationTable(): Promise<void> {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS notification_settings (
+        id VARCHAR(64) PRIMARY KEY,
+        is_enabled BOOLEAN DEFAULT true,
+        email_enabled BOOLEAN DEFAULT true,
+        in_app_enabled BOOLEAN DEFAULT true,
+        push_enabled BOOLEAN DEFAULT false,
+        reminder_meal_planner BOOLEAN DEFAULT true,
+        reminder_meal_time VARCHAR(10) DEFAULT '18:00',
+        reminder_grocery_list BOOLEAN DEFAULT true,
+        reminder_prep_alerts BOOLEAN DEFAULT true,
+        token_low_enabled BOOLEAN DEFAULT true,
+        token_low_threshold INTEGER DEFAULT 15,
+        token_exhausted_enabled BOOLEAN DEFAULT true,
+        token_monthly_grant_enabled BOOLEAN DEFAULT true,
+        wallet_low_enabled BOOLEAN DEFAULT true,
+        wallet_low_threshold NUMERIC(10, 2) DEFAULT 5.00,
+        wallet_topup_confirm_enabled BOOLEAN DEFAULT true,
+        subscription_expiry_enabled BOOLEAN DEFAULT true,
+        subscription_expiry_days INTEGER DEFAULT 3,
+        payment_failed_alert BOOLEAN DEFAULT true,
+        new_updates_enabled BOOLEAN DEFAULT true,
+        security_alerts_enabled BOOLEAN DEFAULT true,
+        weekly_digest_enabled BOOLEAN DEFAULT false,
+        maintenance_notice_enabled BOOLEAN DEFAULT true,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await query(`
+      ALTER TABLE notification_settings
+      ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS email_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS in_app_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS push_enabled BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS reminder_meal_planner BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS reminder_meal_time VARCHAR(10) DEFAULT '18:00',
+      ADD COLUMN IF NOT EXISTS reminder_grocery_list BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS reminder_prep_alerts BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS token_low_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS token_low_threshold INTEGER DEFAULT 15,
+      ADD COLUMN IF NOT EXISTS token_exhausted_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS token_monthly_grant_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS wallet_low_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS wallet_low_threshold NUMERIC(10, 2) DEFAULT 5.00,
+      ADD COLUMN IF NOT EXISTS wallet_topup_confirm_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS subscription_expiry_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS subscription_expiry_days INTEGER DEFAULT 3,
+      ADD COLUMN IF NOT EXISTS payment_failed_alert BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS new_updates_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS security_alerts_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS weekly_digest_enabled BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS maintenance_notice_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+    `);
+  } catch (err) {
+    console.warn('initNotificationTable warning:', err);
+  }
+}
+
+export async function GET() {
+  try {
+    await initNotificationTable();
+    const rows = await query('SELECT * FROM notification_settings WHERE id = $1 LIMIT 1', [DEFAULT_SETTINGS.id]);
+    
+    if (rows && rows.length > 0) {
+      const r = rows[0];
+      const settings: NotificationSettingsData = {
+        id: r.id || DEFAULT_SETTINGS.id,
+        isEnabled: Boolean(r.is_enabled ?? true),
+        emailEnabled: Boolean(r.email_enabled ?? true),
+        inAppEnabled: Boolean(r.in_app_enabled ?? true),
+        pushEnabled: Boolean(r.push_enabled ?? false),
+        reminderMealPlanner: Boolean(r.reminder_meal_planner ?? true),
+        reminderMealTime: r.reminder_meal_time || '18:00',
+        reminderGroceryList: Boolean(r.reminder_grocery_list ?? true),
+        reminderPrepAlerts: Boolean(r.reminder_prep_alerts ?? true),
+        tokenLowEnabled: Boolean(r.token_low_enabled ?? true),
+        tokenLowThreshold: Number(r.token_low_threshold ?? 15),
+        tokenExhaustedEnabled: Boolean(r.token_exhausted_enabled ?? true),
+        tokenMonthlyGrantEnabled: Boolean(r.token_monthly_grant_enabled ?? true),
+        walletLowEnabled: Boolean(r.wallet_low_enabled ?? true),
+        walletLowThreshold: Number(r.wallet_low_threshold ?? 5.0),
+        walletTopupConfirmEnabled: Boolean(r.wallet_topup_confirm_enabled ?? true),
+        subscriptionExpiryEnabled: Boolean(r.subscription_expiry_enabled ?? true),
+        subscriptionExpiryDays: Number(r.subscription_expiry_days ?? 3),
+        paymentFailedAlert: Boolean(r.payment_failed_alert ?? true),
+        newUpdatesEnabled: Boolean(r.new_updates_enabled ?? true),
+        securityAlertsEnabled: Boolean(r.security_alerts_enabled ?? true),
+        weeklyDigestEnabled: Boolean(r.weekly_digest_enabled ?? false),
+        maintenanceNoticeEnabled: Boolean(r.maintenance_notice_enabled ?? true),
+        updatedAt: r.updated_at
+      };
+
+      return NextResponse.json({ success: true, settings });
+    }
+
+    return NextResponse.json({ success: true, settings: DEFAULT_SETTINGS });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    await initNotificationTable();
+    const body = await req.json();
+
+    if (body.action === 'send_test') {
+      return NextResponse.json({
+        success: true,
+        message: 'Test notification triggered successfully.'
+      });
+    }
+
+    const s = { ...DEFAULT_SETTINGS, ...body };
+
+    await query(`
+      INSERT INTO notification_settings (
+        id, is_enabled, email_enabled, in_app_enabled, push_enabled,
+        reminder_meal_planner, reminder_meal_time, reminder_grocery_list, reminder_prep_alerts,
+        token_low_enabled, token_low_threshold, token_exhausted_enabled, token_monthly_grant_enabled,
+        wallet_low_enabled, wallet_low_threshold, wallet_topup_confirm_enabled,
+        subscription_expiry_enabled, subscription_expiry_days, payment_failed_alert,
+        new_updates_enabled, security_alerts_enabled, weekly_digest_enabled,
+        maintenance_notice_enabled, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+        $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        is_enabled = EXCLUDED.is_enabled,
+        email_enabled = EXCLUDED.email_enabled,
+        in_app_enabled = EXCLUDED.in_app_enabled,
+        push_enabled = EXCLUDED.push_enabled,
+        reminder_meal_planner = EXCLUDED.reminder_meal_planner,
+        reminder_meal_time = EXCLUDED.reminder_meal_time,
+        reminder_grocery_list = EXCLUDED.reminder_grocery_list,
+        reminder_prep_alerts = EXCLUDED.reminder_prep_alerts,
+        token_low_enabled = EXCLUDED.token_low_enabled,
+        token_low_threshold = EXCLUDED.token_low_threshold,
+        token_exhausted_enabled = EXCLUDED.token_exhausted_enabled,
+        token_monthly_grant_enabled = EXCLUDED.token_monthly_grant_enabled,
+        wallet_low_enabled = EXCLUDED.wallet_low_enabled,
+        wallet_low_threshold = EXCLUDED.wallet_low_threshold,
+        wallet_topup_confirm_enabled = EXCLUDED.wallet_topup_confirm_enabled,
+        subscription_expiry_enabled = EXCLUDED.subscription_expiry_enabled,
+        subscription_expiry_days = EXCLUDED.subscription_expiry_days,
+        payment_failed_alert = EXCLUDED.payment_failed_alert,
+        new_updates_enabled = EXCLUDED.new_updates_enabled,
+        security_alerts_enabled = EXCLUDED.security_alerts_enabled,
+        weekly_digest_enabled = EXCLUDED.weekly_digest_enabled,
+        maintenance_notice_enabled = EXCLUDED.maintenance_notice_enabled,
+        updated_at = NOW()
+    `, [
+      DEFAULT_SETTINGS.id,
+      Boolean(s.isEnabled),
+      Boolean(s.emailEnabled),
+      Boolean(s.inAppEnabled),
+      Boolean(s.pushEnabled),
+      Boolean(s.reminderMealPlanner),
+      String(s.reminderMealTime || '18:00'),
+      Boolean(s.reminderGroceryList),
+      Boolean(s.reminderPrepAlerts),
+      Boolean(s.tokenLowEnabled),
+      Math.max(1, parseInt(s.tokenLowThreshold ?? 15, 10)),
+      Boolean(s.tokenExhaustedEnabled),
+      Boolean(s.tokenMonthlyGrantEnabled),
+      Boolean(s.walletLowEnabled),
+      Math.max(0.5, parseFloat(s.walletLowThreshold ?? 5.0)),
+      Boolean(s.walletTopupConfirmEnabled),
+      Boolean(s.subscriptionExpiryEnabled),
+      Math.max(1, parseInt(s.subscriptionExpiryDays ?? 3, 10)),
+      Boolean(s.paymentFailedAlert),
+      Boolean(s.newUpdatesEnabled),
+      Boolean(s.securityAlertsEnabled),
+      Boolean(s.weeklyDigestEnabled),
+      Boolean(s.maintenanceNoticeEnabled)
+    ]);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Notification settings persisted to PostgreSQL.',
+      settings: s
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -55157,6 +57284,7 @@ import {
   Key,
   Coins,
   Bell,
+  BellRing,
   User as UserIcon,
   Plus,
   ChevronDown,
@@ -55164,7 +57292,8 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
-  ExternalLink
+  ExternalLink,
+  Layers
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -55989,7 +58118,7 @@ export default function Sidebar() {
 
                 <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
                   <Link
-                    href="/billing"
+                    href="/subscriptions"
                     onClick={() => setShowTopUpMobileMenu(false)}
                     className="text-xs font-bold hover:underline"
                     style={{ color: 'var(--color-primary)' }}
@@ -56080,6 +58209,15 @@ export default function Sidebar() {
                 >
                   <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" />
                   <span>{t('myWallet') || 'Store Wallet'}</span>
+                </Link>
+
+                <Link
+                  href="/subscriptions"
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                >
+                  <Layers className="h-3.5 w-3.5" style={iconStyle} />
+                  <span>{t('subscriptions') || 'Subscriptions'}</span>
                 </Link>
 
                 <Link
@@ -56497,7 +58635,7 @@ export default function Sidebar() {
                 {/* Footer Links */}
                 <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
                   <Link
-                    href="/billing"
+                    href="/subscriptions"
                     onClick={() => setShowTopUpMenu(false)}
                     className="flex items-center justify-between text-xs font-bold hover:underline"
                     style={{ color: 'var(--color-primary)' }}
@@ -56669,6 +58807,16 @@ export default function Sidebar() {
                   >
                     <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
                     <span>{t('myWallet') || 'Store Wallet'}</span>
+                  </Link>
+
+                  <Link
+                    href="/subscriptions"
+                    onClick={() => setShowProfileMenu(false)}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <Layers className="h-4 w-4" style={iconStyle} />
+                    <span>{t('subscriptions') || 'Subscriptions'}</span>
                   </Link>
 
                   <Link
@@ -56855,6 +59003,10 @@ export default function Sidebar() {
                   <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
                 </Link>
+                <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
+                  <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
+                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
+                </Link>
                 <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
                   <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
@@ -56968,6 +59120,12 @@ export default function Sidebar() {
           <Link href="/wallet" className={navClass('/wallet')} title={t('wallet') || 'Wallet'}>
             <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('wallet') || 'Wallet'}</span>}
+          </Link>
+
+          {/* SUBSCRIPTIONS */}
+          <Link href="/subscriptions" className={navClass('/subscriptions')} title={t('subscriptions') || 'Subscriptions'}>
+            <Layers className="h-4 w-4 shrink-0" style={iconStyle} />
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptions') || 'Subscriptions'}</span>}
           </Link>
 
           {/* BILLING */}
