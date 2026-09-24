@@ -44,8 +44,7 @@ import {
   AlertCircle,
   AlertTriangle,
   ExternalLink,
-  Layers,
-  Check
+  Layers
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -156,8 +155,8 @@ function playNotificationChime(): void {
     const gain = ctx.createGain();
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12); // A5
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
 
     gain.gain.setValueAtTime(0.08, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
@@ -229,6 +228,68 @@ export default function Sidebar() {
   const [showNotificationsMobile, setShowNotificationsMobile] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
 
+  // Collapsible Navigation Sections (Create, Manage, Plan, Admin Access)
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    create: true,
+    manage: true,
+    plan: true,
+    admin: true
+  });
+
+  const saveSectionsToPostgres = useCallback(async (nextSections: Record<string, boolean>, targetUser?: any) => {
+    try {
+      const activeUser = targetUser || user || getCurrentUser();
+      const userEmail = activeUser?.email;
+      if (!userEmail) return;
+
+      await fetch('/api/user/sidebar-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: userEmail,
+          sections: nextSections
+        })
+      });
+    } catch (_) {}
+  }, [user]);
+
+  const loadSectionsFromPostgres = useCallback(async (targetUser?: any) => {
+    try {
+      const activeUser = targetUser || user || getCurrentUser();
+      const userEmail = activeUser?.email;
+      if (!userEmail) return;
+
+      const res = await fetch(`/api/user/sidebar-settings?email=${encodeURIComponent(userEmail)}&t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.sections && typeof data.sections === 'object') {
+          setOpenSections(prev => {
+            const merged = { ...prev, ...data.sections };
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(merged));
+              } catch (_) {}
+            }
+            return merged;
+          });
+        }
+      }
+    } catch (_) {}
+  }, [user]);
+
+  const toggleSection = (sectionKey: string) => {
+    setOpenSections(prev => {
+      const next = { ...prev, [sectionKey]: !prev[sectionKey] };
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(next));
+        } catch (_) {}
+      }
+      saveSectionsToPostgres(next);
+      return next;
+    });
+  };
+
   const notifConfigRef = useRef<{ soundEnabled: boolean; quietHoursEnabled: boolean; quietHoursStart: string; quietHoursEnd: string }>({
     soundEnabled: true,
     quietHoursEnabled: false,
@@ -273,7 +334,7 @@ export default function Sidebar() {
     } catch (_) {}
   };
 
-  // 1. Fetch Dynamic Notifications from PostgreSQL
+  // Fetch Notifications
   const fetchNotifications = useCallback(async (currentUser?: any) => {
     try {
       let activeUser = currentUser || user;
@@ -311,7 +372,6 @@ export default function Sidebar() {
     } catch (_) {}
   }, [user]);
 
-  // 2. Mark Single Notification as Read
   const handleMarkAsRead = async (notifId: string) => {
     setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, isRead: true } : n));
     setUnreadCount(prev => Math.max(0, prev - 1));
@@ -331,7 +391,6 @@ export default function Sidebar() {
     } catch (_) {}
   };
 
-  // 3. Mark All Notifications as Read
   const handleMarkAllRead = async () => {
     setUnreadCount(0);
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
@@ -351,7 +410,7 @@ export default function Sidebar() {
     } catch (_) {}
   };
 
-  // 4. Fetch Token Settings and Balances
+  // Fetch Token Settings & Balances
   const fetchUserTokenAndNotifications = useCallback(async (currentUser?: any) => {
     try {
       let cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
@@ -419,7 +478,7 @@ export default function Sidebar() {
     } catch (_) {}
   }, [user]);
 
-  // 5. Fetch Wallet Data
+  // Fetch Wallet Data
   const fetchWalletData = useCallback(async (currentUser?: any) => {
     try {
       let activeUser = currentUser || user;
@@ -476,6 +535,14 @@ export default function Sidebar() {
           if (typeof parsed.wallet_balance === 'number') setWalletBalance(parsed.wallet_balance);
         }
       } catch (_) {}
+
+      // Load saved collapsible section preferences from cache first
+      try {
+        const savedSections = localStorage.getItem('zecratary_sidebar_sections');
+        if (savedSections) {
+          setOpenSections(prev => ({ ...prev, ...JSON.parse(savedSections) }));
+        }
+      } catch (_) {}
     }
 
     const currentUser = getCurrentUser();
@@ -490,6 +557,7 @@ export default function Sidebar() {
     fetchUserTokenAndNotifications(currentUser);
     fetchWalletData(currentUser);
     fetchNotifications(currentUser);
+    loadSectionsFromPostgres(currentUser);
 
     const savedMode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
     if (savedMode) {
@@ -535,6 +603,7 @@ export default function Sidebar() {
       fetchUserTokenAndNotifications(updated);
       fetchWalletData(updated);
       fetchNotifications(updated);
+      loadSectionsFromPostgres(updated);
     };
     const handleSiteSync = () => {
       setSiteName(getSiteName());
@@ -555,7 +624,6 @@ export default function Sidebar() {
       fetchWalletData(u);
     };
 
-    // Real-time notification broadcaster sync
     const handleNewNotification = (e: any) => {
       const detail = e.detail;
       if (!detail) return;
@@ -574,13 +642,11 @@ export default function Sidebar() {
       setNotifications(prev => [newNotif, ...prev.filter(n => n.id !== newNotif.id)]);
       setUnreadCount(prev => prev + 1);
 
-      // Play audio chime if enabled and outside quiet hours
       const cfg = notifConfigRef.current;
       if (cfg.soundEnabled && !isQuietHours(cfg.quietHoursStart, cfg.quietHoursEnd)) {
         playNotificationChime();
       }
 
-      // Re-fetch to synchronize state
       fetchNotifications();
     };
 
@@ -640,7 +706,22 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_new_notification', handleNewNotification);
       window.removeEventListener('zecratary_notification_settings_updated', handleNotifSettingsUpdated);
     };
-  }, [fetchUserTokenAndNotifications, fetchWalletData, fetchNotifications]);
+  }, [fetchUserTokenAndNotifications, fetchWalletData, fetchNotifications, loadSectionsFromPostgres]);
+
+  // Route-Aware Auto-Expansion: Automatically expand the section that contains the active route
+  useEffect(() => {
+    if (!pathname) return;
+
+    if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.create ? prev : { ...prev, create: true });
+    } else if (['/saved', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.manage ? prev : { ...prev, manage: true });
+    } else if (['/shopping', '/planner', '/templates'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.plan ? prev : { ...prev, plan: true });
+    } else if (pathname.startsWith('/admin')) {
+      setOpenSections(prev => prev.admin ? prev : { ...prev, admin: true });
+    }
+  }, [pathname]);
 
   const toggleThemeMode = () => {
     const nextMode = !isDarkMode;
@@ -818,7 +899,6 @@ export default function Sidebar() {
 
   const displayPackages = tokenPackages.length > 0 ? tokenPackages : DEFAULT_FALLBACK_PACKAGES;
 
-  // Reusable Notifications List Element
   const renderNotificationsList = (onItemClick?: () => void) => {
     return (
       <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -1424,7 +1504,7 @@ export default function Sidebar() {
               </button>
             </div>
 
-            {/* Wallet Quick Top Up Dropdown */}
+            {/* Wallet Quick Top Up Dropdown Menu */}
             {showWalletTopUpMenu && (
               <div 
                 className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
@@ -1555,7 +1635,7 @@ export default function Sidebar() {
               </button>
             </div>
 
-            {/* Token Packages Dropdown */}
+            {/* Token Packages Dropdown Menu */}
             {showTopUpMenu && (
               <div 
                 className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
@@ -2014,115 +2094,175 @@ export default function Sidebar() {
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('dashboard')}</span>}
             </Link>
 
-            {!showCollapsed && (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                {t('create')}
-              </div>
-            )}
-            <Link href="/chef" className={navClass('/chef')} title={t('chefAi')}>
-              <MessageSquare className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('chefAi')}</span>}
-            </Link>
-            <Link href="/import" className={navClass('/import')} title={t('import')}>
-              <UploadCloud className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('import')}</span>}
-            </Link>
-            <Link href="/manual" className={navClass('/manual')} title={t('manual')}>
-              <SquarePen className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
-            </Link>
+            {/* COLLAPSIBLE SECTION: CREATE */}
+            <div className="pt-2">
+              {!showCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleSection('create')}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
+                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                  aria-expanded={openSections.create}
+                  title={openSections.create ? (t('collapseSection', 'Collapse section') || 'Collapse section') : (t('expandSection', 'Expand section') || 'Expand section')}
+                >
+                  <span className="truncate">{t('create')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.create ? 'rotate-0' : '-rotate-90'}`} />
+                </button>
+              )}
+              {(openSections.create || showCollapsed) && (
+                <div className="space-y-1 pt-0.5">
+                  <Link href="/chef" className={navClass('/chef')} title={t('chefAi')}>
+                    <MessageSquare className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('chefAi')}</span>}
+                  </Link>
+                  <Link href="/import" className={navClass('/import')} title={t('import')}>
+                    <UploadCloud className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('import')}</span>}
+                  </Link>
+                  <Link href="/manual" className={navClass('/manual')} title={t('manual')}>
+                    <SquarePen className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
+                  </Link>
+                </div>
+              )}
+            </div>
 
-            {!showCollapsed && (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                {t('manage')}
-              </div>
-            )}
-            <Link href="/saved" className={navClass('/saved')} title={t('savedRecipes')}>
-              <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
-            </Link>
-            <Link href="/books" className={navClass('/books')} title={t('books')}>
-              <Book className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('books')}</span>}
-            </Link>
-            <Link href="/pantry" className={navClass('/pantry')}>
-              <Package className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
-            </Link>
+            {/* COLLAPSIBLE SECTION: MANAGE */}
+            <div className="pt-2">
+              {!showCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleSection('manage')}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
+                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                  aria-expanded={openSections.manage}
+                  title={openSections.manage ? (t('collapseSection', 'Collapse section') || 'Collapse section') : (t('expandSection', 'Expand section') || 'Expand section')}
+                >
+                  <span className="truncate">{t('manage')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.manage ? 'rotate-0' : '-rotate-90'}`} />
+                </button>
+              )}
+              {(openSections.manage || showCollapsed) && (
+                <div className="space-y-1 pt-0.5">
+                  <Link href="/saved" className={navClass('/saved')} title={t('savedRecipes')}>
+                    <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
+                  </Link>
+                  <Link href="/books" className={navClass('/books')} title={t('books')}>
+                    <Book className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('books')}</span>}
+                  </Link>
+                  <Link href="/pantry" className={navClass('/pantry')}>
+                    <Package className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
+                  </Link>
+                </div>
+              )}
+            </div>
 
-            {!showCollapsed && (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                {t('plan')}
-              </div>
-            )}
-            <Link href="/shopping" className={navClass('/shopping')} title={t('shoppingList')}>
-              <ShoppingCart className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('shoppingList')}</span>}
-            </Link>
-            <Link href="/planner" className={navClass('/planner')}>
-              <Calendar className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('planner')}</span>}
-            </Link>
-            <Link href="/templates" className={navClass('/templates')}>
-              <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
-            </Link>
+            {/* COLLAPSIBLE SECTION: PLAN */}
+            <div className="pt-2">
+              {!showCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleSection('plan')}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
+                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/50'
+                  }`}
+                  aria-expanded={openSections.plan}
+                  title={openSections.plan ? (t('collapseSection', 'Collapse section') || 'Collapse section') : (t('expandSection', 'Expand section') || 'Expand section')}
+                >
+                  <span className="truncate">{t('plan')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.plan ? 'rotate-0' : '-rotate-90'}`} />
+                </button>
+              )}
+              {(openSections.plan || showCollapsed) && (
+                <div className="space-y-1 pt-0.5">
+                  <Link href="/shopping" className={navClass('/shopping')} title={t('shoppingList')}>
+                    <ShoppingCart className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('shoppingList')}</span>}
+                  </Link>
+                  <Link href="/planner" className={navClass('/planner')}>
+                    <Calendar className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('planner')}</span>}
+                  </Link>
+                  <Link href="/templates" className={navClass('/templates')}>
+                    <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
+                  </Link>
+                </div>
+              )}
+            </div>
 
+            {/* COLLAPSIBLE SECTION: ADMIN ACCESS */}
             {isAdmin && (
-              <div className="pt-2 space-y-1">
+              <div className="pt-2">
                 {!showCollapsed && (
-                  <span className="block text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)] px-3 pt-2 truncate">
-                    {t('adminAccess') || 'Admin Access'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleSection('admin')}
+                    className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)] transition cursor-pointer select-none rounded-lg hover:opacity-85 hover:bg-[var(--color-primary)]/10"
+                    aria-expanded={openSections.admin}
+                    title={openSections.admin ? (t('collapseSection', 'Collapse section') || 'Collapse section') : (t('expandSection', 'Expand section') || 'Expand section')}
+                  >
+                    <span className="truncate">{t('adminAccess') || 'Admin Access'}</span>
+                    <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-75 ${openSections.admin ? 'rotate-0' : '-rotate-90'}`} />
+                  </button>
                 )}
-                <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
-                  <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
-                </Link>
-                <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
-                  <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
-                </Link>
-                <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
-                  <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
-                </Link>
-                <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
-                  <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
-                </Link>
-                <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
-                  <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
-                </Link>
-                <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
-                  <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
-                </Link>
-                <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
-                  <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
-                </Link>
-                <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
-                  <Key className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
-                </Link>
-                <Link href="/admin/users" className={navClass('/admin/users')} title="Users">
-                  <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Users</span>}
-                </Link>
-                <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title="Recipe Type">
-                  <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Recipe Type</span>}
-                </Link>
-                <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
-                  <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
-                </Link>
-                <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
-                  <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Language</span>}
-                </Link>
+                {(openSections.admin || showCollapsed) && (
+                  <div className="space-y-1 pt-0.5">
+                    <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
+                      <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
+                    </Link>
+                    <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
+                      <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
+                    </Link>
+                    <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
+                      <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
+                    </Link>
+                    <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
+                      <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
+                    </Link>
+                    <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
+                      <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
+                    </Link>
+                    <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
+                      <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
+                    </Link>
+                    <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
+                      <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
+                    </Link>
+                    <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
+                      <Key className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
+                    </Link>
+                    <Link href="/admin/users" className={navClass('/admin/users')} title="Users">
+                      <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Users</span>}
+                    </Link>
+                    <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title="Recipe Type">
+                      <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Recipe Type</span>}
+                    </Link>
+                    <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
+                      <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
+                    </Link>
+                    <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
+                      <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Language</span>}
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
           </nav>
