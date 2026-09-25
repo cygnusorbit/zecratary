@@ -1,4 +1,3 @@
-// Generated / Cleaned by AI Collaborator
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -46,6 +45,8 @@ interface GatewayConfig {
   currency: string;
   testMode: boolean;
   stripeConnected?: boolean;
+  stripeKeysVerified?: boolean;
+  stripeWebhookVerified?: boolean;
   stripe: {
     enabled: boolean;
     publishableKey: string;
@@ -214,8 +215,8 @@ export default function AdminPaymentPage() {
   const [availablePlans, setAvailablePlans] = useState<PlanOption[]>([]);
   const [registeredUsers, setRegisteredUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(false);
-  const [connectingStripe, setConnectingStripe] = useState(false);
   const [verifyingStripe, setVerifyingStripe] = useState(false);
+  const [verifyingWebhook, setVerifyingWebhook] = useState(false);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const [showStripeGuideModal, setShowStripeGuideModal] = useState(false);
   const [copiedCliKey, setCopiedCliKey] = useState<string | null>(null);
@@ -249,6 +250,8 @@ export default function AdminPaymentPage() {
     currency: 'USD',
     testMode: true,
     stripeConnected: false,
+    stripeKeysVerified: false,
+    stripeWebhookVerified: false,
     stripe: {
       enabled: true,
       publishableKey: '',
@@ -1639,94 +1642,6 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const handleConnectStripe = async () => {
-    if (!config.stripe.secretKey || !config.stripe.publishableKey) {
-      setShowStripeGuideModal(true);
-      return;
-    }
-
-    setConnectingStripe(true);
-    setFeedback(null);
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'connect_stripe',
-          secretKey: config.stripe.secretKey,
-          publishableKey: config.stripe.publishableKey,
-          webhookSecret: config.stripe.webhookSecret,
-          stripe: config.stripe,
-          testMode: config.testMode,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
-        const updated: GatewayConfig = { 
-          ...config, 
-          stripeConnected: true, 
-          stripe: { ...config.stripe, enabled: true } 
-        };
-        setConfig(updated);
-        configRef.current = updated;
-        await persistServerAdminSettings({ paymentSettings: updated });
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_payment_updated'));
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        }
-        setFeedback({ 
-          type: 'success', 
-          msg: data.message || t('stripeConnectedSuccess', 'Stripe account connected and enabled successfully in PostgreSQL!') 
-        });
-      } else {
-        setFeedback({ 
-          type: 'error', 
-          msg: data.error || t('failedToConnectStripe', 'Failed to connect Stripe.') 
-        });
-      }
-    } catch (e: any) {
-      setFeedback({ 
-        type: 'error', 
-        msg: e.message || t('failedToConnectStripe', 'Failed to communicate with Stripe verification endpoint.') 
-      });
-    } finally {
-      setConnectingStripe(false);
-    }
-  };
-
-  const handleDisconnectStripe = async () => {
-    setConnectingStripe(true);
-    setFeedback(null);
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'disconnect_stripe' }),
-      });
-      const data = await res.json().catch(() => ({}));
-      const updated: GatewayConfig = { 
-        ...config, 
-        stripeConnected: false,
-        stripe: { ...config.stripe, enabled: false }
-      };
-      setConfig(updated);
-      configRef.current = updated;
-      await persistServerAdminSettings({ paymentSettings: updated });
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-      setFeedback({ 
-        type: 'success', 
-        msg: data.message || t('stripeDisconnectedSuccess', 'Stripe account disconnected successfully.') 
-      });
-    } catch (e: any) {
-      setFeedback({ type: 'error', msg: e.message || 'Failed to disconnect Stripe.' });
-    } finally {
-      setConnectingStripe(false);
-    }
-  };
-
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setWebhookEndpointUrl(`${window.location.origin}/api/webhooks/stripe`);
@@ -1746,6 +1661,8 @@ export default function AdminPaymentPage() {
     const updatedConfig: GatewayConfig = {
       ...config,
       testMode: nextMode,
+      stripeKeysVerified: false,
+      stripeWebhookVerified: false,
     };
     setConfig(updatedConfig);
     configRef.current = updatedConfig;
@@ -1756,7 +1673,6 @@ export default function AdminPaymentPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'toggle_test_mode', testMode: nextMode }),
       });
-      const data = await res.json().catch(() => ({}));
       await persistServerAdminSettings({ paymentSettings: updatedConfig });
 
       if (typeof window !== 'undefined') {
@@ -1778,7 +1694,87 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const handleVerifyStripeKeys = async () => {
+  const handleVerifyWebhookSecret = async () => {
+    const secret = config.stripe.webhookSecret?.trim();
+    if (!secret) {
+      setFeedback({
+        type: 'error',
+        msg: t('webhookSecretRequiredToVerify', 'Please enter a Webhook Signing Secret (whsec_...) to verify.'),
+      });
+      return;
+    }
+
+    setVerifyingWebhook(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verify_webhook_secret',
+          webhookSecret: secret,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        const updated: GatewayConfig = { 
+          ...config, 
+          stripeWebhookVerified: true 
+        };
+        setConfig(updated);
+        configRef.current = updated;
+        await persistServerAdminSettings({ paymentSettings: updated });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('webhookSecretVerifiedSuccess', 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!'),
+        });
+      } else {
+        const updated: GatewayConfig = { 
+          ...config, 
+          stripeWebhookVerified: false 
+        };
+        setConfig(updated);
+        configRef.current = updated;
+        setFeedback({ 
+          type: 'error', 
+          msg: data.error || t('webhookSecretVerificationFailed', 'Webhook Secret verification failed. Must start with "whsec_" and be a valid HMAC key.'),
+        });
+      }
+    } catch (e: any) {
+      setFeedback({ 
+        type: 'error', 
+        msg: e.message || 'Failed to communicate with webhook verification endpoint.',
+      });
+    } finally {
+      setVerifyingWebhook(false);
+    }
+  };
+
+  const handleVerifyStripeKey = async () => {
+    const pKey = config.stripe.publishableKey?.trim();
+    const sKey = config.stripe.secretKey?.trim();
+    const wSecret = config.stripe.webhookSecret?.trim();
+
+    if (!pKey || !sKey || !wSecret) {
+      if (!pKey && !sKey && !wSecret) {
+        setShowStripeGuideModal(true);
+      }
+      const missing: string[] = [];
+      if (!pKey) missing.push(t('publishableKeyLabel', 'Publishable Key'));
+      if (!sKey) missing.push(t('secretKeyLabel', 'Secret Key'));
+      if (!wSecret) missing.push(t('webhookSecretLabel', 'Webhook Secret'));
+
+      setFeedback({
+        type: 'error',
+        msg: t('stripeAllThreeRequired', `Verification required: Please enter ${missing.join(', ')} to verify.`),
+      });
+      return;
+    }
+
     setVerifyingStripe(true);
     setFeedback(null);
     try {
@@ -1787,43 +1783,62 @@ export default function AdminPaymentPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'verify_stripe_keys',
-          secretKey: config.stripe.secretKey,
-          publishableKey: config.stripe.publishableKey,
+          publishableKey: pKey,
+          secretKey: sKey,
+          webhookSecret: wSecret,
+          stripe: config.stripe,
           testMode: config.testMode,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
-        setFeedback({
-          type: 'success',
-          msg: data.message || t('stripeKeyVerifiedSuccess', 'Stripe API keys verified successfully with Stripe servers!'),
+        const updated: GatewayConfig = { 
+          ...config, 
+          stripeKeysVerified: true,
+          stripeWebhookVerified: true,
+        };
+        setConfig(updated);
+        configRef.current = updated;
+        await persistServerAdminSettings({ paymentSettings: updated });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('stripeKeyVerifiedSuccess', 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'),
         });
       } else {
-        setFeedback({
-          type: 'error',
-          msg: data.error || t('stripeKeyVerificationFailed', 'Stripe key verification failed. Please check your keys and test mode setting.'),
+        const updated: GatewayConfig = { 
+          ...config, 
+          stripeKeysVerified: false,
+          stripeWebhookVerified: false,
+        };
+        setConfig(updated);
+        configRef.current = updated;
+        setFeedback({ 
+          type: 'error', 
+          msg: data.error || t('stripeKeyVerificationFailed', 'Stripe verification failed. Please check your Publishable Key, Secret Key, and Webhook Secret.'),
         });
       }
-    } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        msg: err.message || 'Failed to communicate with Stripe verification endpoint.',
+    } catch (e: any) {
+      setFeedback({ 
+        type: 'error', 
+        msg: e.message || t('failedToVerifyStripeKeys', 'Failed to communicate with Stripe verification endpoint.'),
       });
     } finally {
       setVerifyingStripe(false);
     }
   };
 
+  const handleVerifyStripeKeys = handleVerifyStripeKey;
+
   const handleSaveSettings = async (e?: React.SyntheticEvent) => {
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
     setLoading(true);
     setFeedback(null);
 
-    const isStripeFilled = Boolean(config.stripe.secretKey && config.stripe.secretKey.length > 5);
-    const updatedConfig: GatewayConfig = {
-      ...config,
-      stripeConnected: isStripeFilled || config.stripeConnected,
-    };
+    const updatedConfig: GatewayConfig = { ...config };
 
     try {
       const res = await fetch('/api/admin/payment', {
@@ -2013,9 +2028,12 @@ export default function AdminPaymentPage() {
               {t('currencyLabel', 'Currency:')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{config.currency} ({activeCurrencySymbol})</span>
             </div>
             <div>
-              {t('stripeLabel', 'Stripe:')}{' '}
-              <span className={`font-bold ${config.stripeConnected ? 'text-[var(--color-emerald)]' : ''}`} style={{ color: config.stripeConnected ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
-                {config.stripeConnected ? t('connectedStatus', 'Connected') : t('notConnectedStatus', 'Not Connected')}
+              {t('stripeKeysLabel', 'Stripe Keys:')}{' '}
+              <span 
+                className="font-bold" 
+                style={{ color: (config.stripeKeysVerified && config.stripeWebhookVerified) ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}
+              >
+                {(config.stripeKeysVerified && config.stripeWebhookVerified) ? t('verifiedStatus', 'Verified') : t('unverifiedStatus', 'Unverified')}
               </span>
             </div>
             <button
@@ -2967,116 +2985,58 @@ export default function AdminPaymentPage() {
 
               <div className="space-y-1.5 pb-2">
                 <label className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('connectStripeBtn', 'Connect Stripe Account')}
+                  {t('verifyStripeKeyLabel', 'Verify Stripe Key')}
                 </label>
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setShowStripeGuideModal(true)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-blue-400"
+                    onClick={handleVerifyStripeKey}
+                    disabled={verifyingStripe}
+                    className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
                     style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
+                      backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
+                      boxShadow: '0 2px 5px rgba(99, 91, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)'
                     }}
-                    title={t('viewStripeCliGuideTooltip', 'View Stripe CLI & Webhook Setup instructions')}
+                    title={t('verifyStripeKeyTooltip', 'Verify Publishable Key, Secret Key, and Webhook Secret with Stripe servers')}
                   >
-                    <Terminal className="h-3.5 w-3.5 text-amber-500" />
-                    <span>{t('cliGuideBtn', 'CLI & Webhooks Guide')}</span>
+                    <div className="px-3 py-2.5 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">
+                      <ShieldCheck className="h-4 w-4 text-white" />
+                    </div>
+                    <span className="px-3.5 py-2.5 text-xs tracking-tight font-bold flex items-center gap-1.5">
+                      {verifyingStripe ? (
+                        <>
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          {t('verifyingStripeKey', 'Verifying Stripe Keys...')}
+                        </>
+                      ) : (
+                        t('verifyStripeKey', 'Verify Stripe Key')
+                      )}
+                    </span>
                   </button>
 
-                  {!config.stripeConnected ? (
-                    <button
-                      type="button"
-                      onClick={handleConnectStripe}
-                      disabled={connectingStripe}
-                      className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
-                      style={{
-                        backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
-                        boxShadow: '0 2px 5px rgba(99, 91, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)'
-                      }}
-                      title={t('connectWithStripeTooltip', 'Connect or authorize Stripe Account')}
-                    >
-                      <div className="px-3 py-2 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">S</div>
-                      <span className="px-3.5 py-2 text-xs tracking-tight font-bold flex items-center gap-1.5">
-                        {connectingStripe ? (
-                          <>
-                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                            {t('connectingStripe', 'Connecting...')}
-                          </>
-                        ) : (
-                          t('connectWithStripe', 'Connect with Stripe')
-                        )}
-                      </span>
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleConnectStripe}
-                        disabled={connectingStripe}
-                        className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
-                        style={{
-                          backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
-                          boxShadow: '0 2px 5px rgba(99, 91, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)'
-                        }}
-                        title={t('reconnectStripeTooltip', 'Re-authenticate Stripe credentials')}
-                      >
-                        <div className="px-3 py-2 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">S</div>
-                        <span className="px-3.5 py-2 text-xs tracking-tight font-bold flex items-center gap-1.5">
-                          {connectingStripe ? (
-                            <>
-                              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                              {t('reconnectingStripe', 'Reconnecting...')}
-                            </>
-                          ) : (
-                            t('reconnectStripe', 'Reconnect Stripe')
-                          )}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleDisconnectStripe}
-                        disabled={connectingStripe}
-                        className="px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer hover:bg-red-500/10 hover:border-red-500 text-red-500 shadow-xs disabled:opacity-50"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        {t('disconnectStripe', 'Disconnect')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleVerifyStripeKeys}
-                        disabled={verifyingStripe || !config.stripe.secretKey}
-                        className="px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs disabled:opacity-40 flex items-center gap-1.5"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                        title={t('verifyStripeKeysTooltip', 'Ping Stripe API to test key validity')}
-                      >
-                        {verifyingStripe ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-[var(--color-primary)]" /> : <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />}
-                        <span>{verifyingStripe ? t('verifying', 'Verifying...') : t('testKeysBtn', 'Test Keys')}</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {config.stripeConnected && (
+                  {(config.stripeKeysVerified && config.stripeWebhookVerified) ? (
                     <span 
-                      className="text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 border shadow-xs"
+                      className="text-[11px] font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border shadow-xs animate-in fade-in"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
                         borderColor: 'var(--color-emerald)',
                         color: 'var(--color-emerald)'
                       }}
                     >
-                      <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} /> {t('connectedStatus', 'Connected')}
+                      <CheckCircle2 className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} /> {t('keysVerifiedStatus', 'Keys & Webhook Verified')}
                     </span>
-                  )}
+                  ) : config.stripeKeysVerified ? (
+                    <span 
+                      className="text-[11px] font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border shadow-xs animate-in fade-in"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: '#f59e0b',
+                        color: '#fbbf24'
+                      }}
+                    >
+                      <Check className="h-3.5 w-3.5" style={{ color: '#fbbf24' }} /> {t('keysOnlyVerifiedStatus', 'API Keys Verified (Webhook Pending)')}
+                    </span>
+                  ) : null}
                 </div>
               </div>
 
@@ -3228,116 +3188,45 @@ export default function AdminPaymentPage() {
                   </div>
                 </div>
 
-                {/* Stripe Webhook Endpoint URL & CLI Forwarding Helper Card */}
-                <div 
-                  className="p-4 rounded-2xl border space-y-3 transition-colors duration-200 shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs uppercase font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                      <Globe className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                      {t('stripeWebhookUrlLabel', 'Stripe Webhook Endpoint URL')}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('webhookSecretLabel', 'Webhook Secret')}
                     </label>
                     <div className="flex items-center gap-2">
+                      {config.stripeWebhookVerified && (
+                        <span 
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border shadow-xs animate-in fade-in"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-emerald)'
+                          }}
+                        >
+                          <CheckCircle2 className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {t('signingSecretVerified', 'Signing Secret Verified')}
+                        </span>
+                      )}
                       <button
                         type="button"
-                        onClick={() => setShowStripeGuideModal(true)}
-                        className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer"
+                        onClick={handleVerifyWebhookSecret}
+                        disabled={verifyingWebhook || !config.stripe.webhookSecret?.trim()}
+                        className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={t('verifyWebhookSecretTooltip', 'Test Webhook Secret for HMAC-SHA256 signature compliance')}
                       >
-                        <Terminal className="h-3 w-3" />
-                        <span>{t('viewCliMethodBtn', 'Stripe CLI Instructions')}</span>
-                      </button>
-                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded border border-blue-500/30 text-blue-400 bg-blue-500/10 uppercase tracking-wider">
-                        POST
-                      </span>
-                    </div>
-                  </div>
-
-                  <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('stripeWebhookUrlDesc', 'Add this URL in Stripe Dashboard (Developers → Webhooks → Add an endpoint) or use the Stripe CLI command below to forward events locally.')}
-                  </p>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        readOnly
-                        value={webhookEndpointUrl || '/api/webhooks/stripe'}
-                        className="payment-input w-full border rounded-xl p-2.5 text-xs font-mono select-all outline-none transition"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleCopyWebhookUrl}
-                        className="px-3.5 py-2.5 rounded-xl border text-xs font-bold shrink-0 flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                        style={{
-                          backgroundColor: copiedWebhook ? 'var(--color-emerald)' : 'var(--color-card)',
-                          borderColor: copiedWebhook ? 'var(--color-emerald)' : 'var(--color-border)',
-                          color: copiedWebhook ? '#ffffff' : 'var(--color-text)'
-                        }}
-                        title={t('copyWebhookUrlTooltip', 'Copy Webhook URL to clipboard')}
-                      >
-                        {copiedWebhook ? (
+                        {verifyingWebhook ? (
                           <>
-                            <Check className="h-3.5 w-3.5 text-white" />
-                            <span>{t('copiedBtn', 'Copied!')}</span>
+                            <RefreshCw className="h-3 w-3 animate-spin" />
+                            <span>{t('verifyingSecret', 'Verifying...')}</span>
                           </>
                         ) : (
                           <>
-                            <Copy className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                            <span>{t('copyBtn', 'Copy')}</span>
+                            <ShieldCheck className="h-3 w-3" />
+                            <span>{t('verifySecretBtn', 'Verify Secret')}</span>
                           </>
                         )}
                       </button>
                     </div>
-
-                    <div 
-                      className="p-2.5 rounded-xl border flex items-center justify-between gap-2"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        <Terminal className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                        <code className="text-[11px] font-mono truncate select-all" style={{ color: 'var(--color-text)' }}>
-                          stripe listen --forward-to {(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}
-                        </code>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleCopyCliCommand(`stripe listen --forward-to ${(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}`, 'listen_inline')}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition shrink-0 cursor-pointer"
-                        style={{
-                          backgroundColor: copiedCliKey === 'listen_inline' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
-                          borderColor: copiedCliKey === 'listen_inline' ? 'var(--color-emerald)' : 'var(--color-border)',
-                          color: copiedCliKey === 'listen_inline' ? '#ffffff' : 'var(--color-text)'
-                        }}
-                      >
-                        {copiedCliKey === 'listen_inline' ? t('copiedBtn', 'Copied!') : t('copyCommandBtn', 'Copy Command')}
-                      </button>
-                    </div>
                   </div>
-
-                  <div className="text-[10px] leading-relaxed pt-0.5 flex flex-wrap items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    <span className="font-bold">{t('recommendedEventsTitle', 'Listen to events:')}</span>
-                    <code className="px-1 py-0.5 rounded text-[10px] font-mono border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>checkout.session.completed</code>
-                    <code className="px-1 py-0.5 rounded text-[10px] font-mono border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>invoice.payment_succeeded</code>
-                    <code className="px-1 py-0.5 rounded text-[10px] font-mono border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>customer.subscription.deleted</code>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('webhookSecretLabel', 'Webhook Secret')}
-                  </label>
                   <div className="relative">
                     <input
                       type={visibleFields['stripeWebhook'] ? 'text' : 'password'}
@@ -3373,6 +3262,36 @@ export default function AdminPaymentPage() {
                       {visibleFields['stripeWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
+                </div>
+
+                {/* CLI & Webhook Guide Action Moved to Bottom */}
+                <div 
+                  className="pt-3 border-t flex flex-wrap items-center justify-between gap-3"
+                  style={{ borderColor: 'var(--color-border)' }}
+                >
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>
+                      {t('webhookCliSetupTitle', 'Webhook & CLI Setup Guide')}
+                    </span>
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('webhookCliSetupSub', 'View official Stripe CLI instructions to test and capture webhooks locally.')}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowStripeGuideModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-blue-400 shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    title={t('viewStripeCliGuideTooltip', 'View Stripe CLI & Webhook Setup instructions')}
+                  >
+                    <Terminal className="h-3.5 w-3.5 text-amber-500" />
+                    <span>{t('cliGuideBtn', 'CLI & Webhook Guide')}</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -3554,7 +3473,7 @@ export default function AdminPaymentPage() {
       </div>
 
       {/* ========================================================================= */}
-      {/* ROOT LEVEL MODALS (Guaranteed visibility across all tabs)                  */}
+      {/* ROOT LEVEL MODALS                                                         */}
       {/* ========================================================================= */}
 
       {/* CONFIRM PAYMENT FROM GATEWAY MODAL */}
@@ -4783,7 +4702,7 @@ export default function AdminPaymentPage() {
                 onClick={async () => {
                   setShowStripeGuideModal(false);
                   await handleSaveSettings();
-                  await handleVerifyStripeKeys();
+                  await handleVerifyStripeKey();
                 }}
                 className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}

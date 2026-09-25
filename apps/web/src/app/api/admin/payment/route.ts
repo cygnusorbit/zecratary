@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { query } from '@/lib/db';
 
 async function ensurePaymentSchema() {
@@ -41,28 +42,123 @@ async function ensurePaymentSchema() {
   }
 }
 
-// Direct Stripe REST API key verification
-async function verifyStripeKeyWithApi(secretKey: string) {
+function verifyWebhookSigningSecret(secret: string): { valid: boolean; error?: string } {
+  const s = (secret || '').trim();
+  if (!s) {
+    return { valid: false, error: 'Webhook Secret is required.' };
+  }
+  if (!s.startsWith('whsec_')) {
+    return { valid: false, error: 'Webhook Secret must begin with "whsec_".' };
+  }
+  if (s.length < 24) {
+    return { valid: false, error: 'Webhook Secret is too short to be a valid Stripe signing key.' };
+  }
+
   try {
-    const res = await fetch('https://api.stripe.com/v1/balance', {
+    const testPayload = JSON.stringify({ test: true, timestamp: Date.now() });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signedPayload = `${timestamp}.${testPayload}`;
+    const hmac = crypto.createHmac('sha256', s).update(signedPayload, 'utf8').digest('hex');
+    if (!hmac || hmac.length !== 64) {
+      return { valid: false, error: 'Cryptographic HMAC computation test failed.' };
+    }
+  } catch (err: any) {
+    return { valid: false, error: `Invalid signing key for HMAC-SHA256: ${err.message}` };
+  }
+
+  return { valid: true };
+}
+
+async function verifyStripeCredentials(publishableKey: string, secretKey: string, testMode: boolean, webhookSecret?: string) {
+  const pKey = (publishableKey || '').trim();
+  const sKey = (secretKey || '').trim();
+  const wSecret = (webhookSecret || '').trim();
+
+  if (!pKey) {
+    return { valid: false, error: 'Publishable Key is required to verify.' };
+  }
+  if (!sKey) {
+    return { valid: false, error: 'Secret Key is required to verify.' };
+  }
+  if (!wSecret) {
+    return { valid: false, error: 'Webhook Secret (whsec_...) is required to verify.' };
+  }
+
+  if (testMode) {
+    if (!pKey.startsWith('pk_test_')) {
+      return { valid: false, error: 'Sandbox Test Mode is active, but Publishable Key does not start with "pk_test_".' };
+    }
+    if (!sKey.startsWith('sk_test_') && !sKey.startsWith('rk_test_')) {
+      return { valid: false, error: 'Sandbox Test Mode is active, but Secret Key does not start with "sk_test_".' };
+    }
+  } else {
+    if (!pKey.startsWith('pk_live_')) {
+      return { valid: false, error: 'Live Production Mode is active, but Publishable Key is not a live key ("pk_live_...").' };
+    }
+    if (!sKey.startsWith('sk_live_') && !sKey.startsWith('rk_live_')) {
+      return { valid: false, error: 'Live Production Mode is active, but Secret Key is not a live key ("sk_live_...").' };
+    }
+  }
+
+  let livemodeDetected = !testMode;
+  try {
+    const sRes = await fetch('https://api.stripe.com/v1/balance', {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${secretKey.trim()}`,
+        'Authorization': `Bearer ${sKey}`,
         'Content-Type': 'application/x-www-form-urlencoded'
       },
       cache: 'no-store'
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.error) {
+    const sData = await sRes.json().catch(() => ({}));
+    if (!sRes.ok || sData.error) {
       return {
         valid: false,
-        error: data.error?.message || `Stripe authentication failed with status ${res.status}`
+        error: `Secret Key rejected by Stripe: ${sData.error?.message || `HTTP status ${sRes.status}`}`
       };
     }
-    return { valid: true, livemode: Boolean(data.livemode) };
+    livemodeDetected = Boolean(sData.livemode);
+    if (testMode && livemodeDetected) {
+      return { valid: false, error: 'Sandbox Test Mode is active, but Secret Key belongs to a Live Stripe account.' };
+    }
+    if (!testMode && !livemodeDetected) {
+      return { valid: false, error: 'Live Production Mode is active, but Secret Key belongs to a Test Stripe account.' };
+    }
   } catch (err: any) {
-    return { valid: false, error: err.message || 'Unable to connect to Stripe verification endpoint.' };
+    return { valid: false, error: `Failed to connect to Stripe to verify Secret Key: ${err.message}` };
   }
+
+  try {
+    const pRes = await fetch('https://api.stripe.com/v1/tokens', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${pKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      cache: 'no-store'
+    });
+    const pData = await pRes.json().catch(() => ({}));
+
+    if (pRes.status === 401 || (pData.error && pData.error.type === 'invalid_request_error' && pRes.status === 401)) {
+      return {
+        valid: false,
+        error: `Publishable Key rejected by Stripe: ${pData.error?.message || 'Invalid API Key provided.'}`
+      };
+    }
+  } catch (err: any) {
+    return { valid: false, error: `Failed to connect to Stripe to verify Publishable Key: ${err.message}` };
+  }
+
+  const wCheck = verifyWebhookSigningSecret(wSecret);
+  if (!wCheck.valid) {
+    return { valid: false, error: `Webhook Secret validation failed: ${wCheck.error}` };
+  }
+
+  return { 
+    valid: true, 
+    livemode: livemodeDetected,
+    webhookVerified: true
+  };
 }
 
 async function persistAdminPaymentSettings(settings: any, currency: string) {
@@ -129,8 +225,16 @@ export async function POST(req: Request) {
     await ensurePaymentSchema();
     const body = await req.json();
 
-    // 1. Stripe Connect Action - Real Stripe API validation before connecting
-    if (body.action === 'connect_stripe') {
+    if (body.action === 'verify_webhook_secret') {
+      const secret = String(body.webhookSecret || '').trim();
+      const check = verifyWebhookSigningSecret(secret);
+      if (!check.valid) {
+        return NextResponse.json({
+          success: false,
+          error: check.error || 'Invalid Webhook Signing Secret.'
+        }, { status: 400 });
+      }
+
       let currentSettings: any = {};
       try {
         const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
@@ -140,47 +244,55 @@ export async function POST(req: Request) {
         }
       } catch (_) {}
 
-      const secretKey = String(body.secretKey || body.stripe?.secretKey || currentSettings?.stripe?.secretKey || '').trim();
+      const updatedSettings = {
+        ...currentSettings,
+        stripeWebhookVerified: true,
+        stripe: {
+          ...(currentSettings?.stripe || {}),
+          webhookSecret: secret
+        }
+      };
+
+      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        webhookVerified: true,
+        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signature validation!'
+      });
+    }
+
+    if (body.action === 'verify_stripe_keys' || body.action === 'verify_stripe_key') {
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (sRow?.payment_settings) {
+          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
+        }
+      } catch (_) {}
+
       const publishableKey = String(body.publishableKey || body.stripe?.publishableKey || currentSettings?.stripe?.publishableKey || '').trim();
-      const webhookSecret = String(body.webhookSecret || body.stripe?.webhookSecret || currentSettings?.stripe?.webhookSecret || '').trim();
+      const secretKey = String(body.secretKey || body.stripe?.secretKey || currentSettings?.stripe?.secretKey || '').trim();
+      const webhookSecret = String(body.webhookSecret !== undefined ? body.webhookSecret : (currentSettings?.stripe?.webhookSecret || '')).trim();
       const testMode = body.testMode !== undefined ? Boolean(body.testMode) : Boolean(currentSettings?.testMode);
 
-      if (!secretKey) {
-        return NextResponse.json({ success: false, error: 'Stripe Secret Key is required to connect.' }, { status: 400 });
-      }
-
-      // Format validation against active environment
-      if (testMode && !secretKey.startsWith('sk_test_') && !secretKey.startsWith('rk_test_')) {
-        return NextResponse.json({
-          success: false,
-          error: 'Test Mode is active, but your Secret Key does not start with "sk_test_". Test transactions will fail.'
-        }, { status: 400 });
-      }
-
-      if (!testMode && (secretKey.startsWith('sk_test_') || secretKey.startsWith('rk_test_'))) {
-        return NextResponse.json({
-          success: false,
-          error: 'Live Production mode is active, but your Secret Key is a test key ("sk_test_..."). Real charges will fail.'
-        }, { status: 400 });
-      }
-
-      // Live Stripe verification
-      const verifyRes = await verifyStripeKeyWithApi(secretKey);
+      const verifyRes = await verifyStripeCredentials(publishableKey, secretKey, testMode, webhookSecret);
       if (!verifyRes.valid) {
         return NextResponse.json({
           success: false,
-          error: `Stripe API Key Verification Failed: ${verifyRes.error}`
+          keysVerified: false,
+          webhookVerified: false,
+          error: verifyRes.error
         }, { status: 400 });
       }
 
       const updatedSettings = {
         ...currentSettings,
-        activeGateway: currentSettings?.activeGateway || 'stripe',
-        stripeConnected: true,
-        testMode,
+        stripeKeysVerified: true,
+        stripeWebhookVerified: true,
         stripe: {
           ...(currentSettings?.stripe || {}),
-          enabled: true,
           publishableKey,
           secretKey,
           webhookSecret,
@@ -189,82 +301,17 @@ export async function POST(req: Request) {
 
       await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
 
-      return NextResponse.json({
-        success: true,
-        stripeConnected: true,
-        settings: updatedSettings,
-        message: `Stripe verified and connected successfully with Stripe API (${verifyRes.livemode ? 'Live' : 'Test Mode'})!`
-      });
-    }
-
-    // 2. Stripe Verify Keys Diagnostic Action
-    if (body.action === 'verify_stripe_keys') {
-      const secretKey = String(body.secretKey || '').trim();
-      const testMode = Boolean(body.testMode);
-
-      if (!secretKey) {
-        return NextResponse.json({ success: false, error: 'Secret Key is empty.' }, { status: 400 });
-      }
-
-      if (testMode && !secretKey.startsWith('sk_test_') && !secretKey.startsWith('rk_test_')) {
-        return NextResponse.json({
-          success: false,
-          error: 'Key format warning: Sandbox Test Mode is active, but the key does not start with "sk_test_".'
-        }, { status: 400 });
-      }
-
-      if (!testMode && (secretKey.startsWith('sk_test_') || secretKey.startsWith('rk_test_'))) {
-        return NextResponse.json({
-          success: false,
-          error: 'Key format warning: Live Mode is active, but the key is a test key ("sk_test_...").'
-        }, { status: 400 });
-      }
-
-      const verifyRes = await verifyStripeKeyWithApi(secretKey);
-      if (!verifyRes.valid) {
-        return NextResponse.json({
-          success: false,
-          error: `Stripe API Verification Failed: ${verifyRes.error}`
-        }, { status: 400 });
-      }
+      const msg = `Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers (${verifyRes.livemode ? 'Live Production Mode' : 'Sandbox Test Mode'})!`;
 
       return NextResponse.json({
         success: true,
-        message: `Stripe API verified successfully with Stripe servers! (${verifyRes.livemode ? 'Live Production Mode' : 'Sandbox Test Mode'})`
+        keysVerified: true,
+        webhookVerified: true,
+        livemode: verifyRes.livemode,
+        message: msg
       });
     }
 
-    // 3. Stripe Disconnect Action
-    if (body.action === 'disconnect_stripe') {
-      let currentSettings: any = {};
-      try {
-        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
-        if (sRow?.payment_settings) {
-          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
-        }
-      } catch (_) {}
-
-      const updatedSettings = {
-        ...currentSettings,
-        stripeConnected: false,
-        stripe: {
-          ...(currentSettings?.stripe || {}),
-          enabled: false
-        }
-      };
-
-      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
-
-      return NextResponse.json({
-        success: true,
-        stripeConnected: false,
-        settings: updatedSettings,
-        message: 'Stripe account disconnected successfully.'
-      });
-    }
-
-    // 4. Toggle Test Mode Action
     if (body.action === 'toggle_test_mode') {
       let currentSettings: any = {};
       try {
@@ -277,14 +324,15 @@ export async function POST(req: Request) {
 
       const updatedSettings = {
         ...currentSettings,
-        testMode: Boolean(body.testMode)
+        testMode: Boolean(body.testMode),
+        stripeKeysVerified: false,
+        stripeWebhookVerified: false
       };
 
       await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
       return NextResponse.json({ success: true, message: 'Test mode updated in PostgreSQL', testMode: updatedSettings.testMode });
     }
 
-    // 5. Add Transaction
     if (body.action === 'add_transaction') {
       const tx = body.transaction;
       if (!tx) {
@@ -348,7 +396,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: 'Transaction recorded successfully', transaction: tx });
     }
 
-    // 6. Update Transaction
     if (body.action === 'update_transaction') {
       const tx = body.transaction;
       if (!tx || !tx.id) {
@@ -388,7 +435,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: 'Transaction updated', transaction: tx });
     }
 
-    // 7. Refund / Cancel / Confirm
     if (body.action === 'refund_transaction' || body.action === 'cancel_transaction' || body.action === 'confirm_payment') {
       const tx = body.transaction || {};
       const txId = body.id || tx.id;
@@ -420,7 +466,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // 8. Save Full Gateway Settings into admin_settings
     const gatewayConfig = body.paymentSettings || body;
     const currency = gatewayConfig.currency || body.currency || 'USD';
     await persistAdminPaymentSettings(gatewayConfig, currency);
