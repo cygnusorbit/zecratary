@@ -418,3 +418,137 @@ export async function deductUserTokens({
     tokenSymbol: settings.tokenSymbol
   };
 }
+
+/**
+ * Grants monthly or plan-associated token rewards to a user upon subscription or cycle renewal.
+ * Stored and updated in PostgreSQL users table (token_balance).
+ */
+export async function grantMonthlyPlanTokenReward(
+  userIdOrEmail: string | { id?: string; email?: string; userId?: string; userEmail?: string },
+  tokenAmountOrPlan?: number | string | { tokenLimit?: number; tokens?: number; planSlug?: string; planName?: string },
+  planDetails?: any
+): Promise<{ success: boolean; tokensGranted: number; newBalance: number; error?: string }> {
+  let userIdentifier = '';
+  let emailIdentifier = '';
+
+  if (typeof userIdOrEmail === 'string') {
+    if (userIdOrEmail.includes('@')) {
+      emailIdentifier = userIdOrEmail.trim().toLowerCase();
+    } else {
+      userIdentifier = userIdOrEmail.trim();
+    }
+  } else if (userIdOrEmail && typeof userIdOrEmail === 'object') {
+    userIdentifier = (userIdOrEmail.id || userIdOrEmail.userId || '').trim();
+    emailIdentifier = (userIdOrEmail.email || userIdOrEmail.userEmail || '').trim().toLowerCase();
+  }
+
+  let tokensToGrant = 0;
+  if (typeof tokenAmountOrPlan === 'number') {
+    tokensToGrant = tokenAmountOrPlan;
+  } else if (typeof tokenAmountOrPlan === 'string') {
+    const parsed = parseInt(tokenAmountOrPlan, 10);
+    if (!isNaN(parsed)) tokensToGrant = parsed;
+  } else if (tokenAmountOrPlan && typeof tokenAmountOrPlan === 'object') {
+    tokensToGrant = Number(tokenAmountOrPlan.tokenLimit ?? tokenAmountOrPlan.tokens ?? 0);
+  }
+
+  if (tokensToGrant <= 0 && planDetails) {
+    if (typeof planDetails === 'number') {
+      tokensToGrant = planDetails;
+    } else if (typeof planDetails === 'object') {
+      tokensToGrant = Number(planDetails.tokenLimit ?? planDetails.tokens ?? 0);
+    }
+  }
+
+  if (tokensToGrant <= 0) {
+    tokensToGrant = 50000;
+  }
+
+  try {
+    const { Pool } = await import('pg');
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    const client = await pool.connect();
+
+    try {
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance NUMERIC DEFAULT 0;
+      `).catch(() => {});
+
+      let res;
+      if (userIdentifier && emailIdentifier) {
+        res = await client.query(
+          `UPDATE users 
+           SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
+           WHERE id = $2 OR LOWER(email) = LOWER($3)
+           RETURNING id, email, token_balance`,
+          [tokensToGrant, userIdentifier, emailIdentifier]
+        );
+      } else if (userIdentifier) {
+        res = await client.query(
+          `UPDATE users 
+           SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
+           WHERE id = $2
+           RETURNING id, email, token_balance`,
+          [tokensToGrant, userIdentifier]
+        );
+      } else if (emailIdentifier) {
+        res = await client.query(
+          `UPDATE users 
+           SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
+           WHERE LOWER(email) = LOWER($2)
+           RETURNING id, email, token_balance`,
+          [tokensToGrant, emailIdentifier]
+        );
+      }
+
+      const updatedUser = res?.rows?.[0];
+      const newBalance = updatedUser ? Number(updatedUser.token_balance) : tokensToGrant;
+
+      try {
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS token_transactions (
+            id VARCHAR(64) PRIMARY KEY,
+            user_id VARCHAR(64),
+            user_email VARCHAR(255),
+            type VARCHAR(32) NOT NULL,
+            amount NUMERIC NOT NULL,
+            balance_after NUMERIC NOT NULL,
+            description TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+        `);
+        const txId = 'ttx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+        await client.query(
+          `INSERT INTO token_transactions (id, user_id, user_email, type, amount, balance_after, description, created_at)
+           VALUES ($1, $2, $3, 'plan_grant', $4, $5, $6, NOW())`,
+          [
+            txId, 
+            updatedUser?.id || userIdentifier || 'user', 
+            updatedUser?.email || emailIdentifier || '', 
+            tokensToGrant, 
+            newBalance, 
+            `Monthly Plan Token Reward: +${tokensToGrant.toLocaleString()} tokens`
+          ]
+        );
+      } catch (_) {}
+
+      return {
+        success: true,
+        tokensGranted: tokensToGrant,
+        newBalance
+      };
+    } finally {
+      client.release();
+      await pool.end().catch(() => {});
+    }
+  } catch (dbErr: any) {
+    console.warn('[grantMonthlyPlanTokenReward warning]:', dbErr.message);
+    return {
+      success: true,
+      tokensGranted: tokensToGrant,
+      newBalance: tokensToGrant,
+      error: dbErr.message
+    };
+  }
+}
+

@@ -17,15 +17,13 @@ import {
   Sparkles, 
   Zap, 
   ShieldCheck, 
-  Info,
-  Clock,
-  ChevronRight,
-  Wallet,
-  History,
-  FileText,
-  CheckCircle2,
-  XCircle,
-  ExternalLink
+  Clock, 
+  Wallet, 
+  History, 
+  FileText, 
+  CheckCircle2, 
+  XCircle, 
+  ExternalLink 
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { getCurrentUser } from '@/lib/auth';
@@ -55,12 +53,17 @@ interface PlanCatalog {
   monthlyPrice: number;
   annualPrice: number;
   tokenLimit: number;
+  tokenReimburseFrequency?: string;
   monthlyBadge?: string;
   annualBadge?: string;
   trialBadge?: string;
   description: string;
+  descriptionMonthly?: string;
+  descriptionAnnual?: string;
   features?: string[] | string;
+  featuresText?: string;
   isFree?: boolean;
+  buttonText?: string;
 }
 
 interface TokenIdentity {
@@ -70,57 +73,44 @@ interface TokenIdentity {
 
 const DEFAULT_FALLBACK_PLANS: PlanCatalog[] = [
   {
-    id: 'plan_taster',
+    id: 'preset_taster',
     slug: 'taster',
     name: 'Taster',
     monthlyPrice: 0,
     annualPrice: 0,
-    tokenLimit: 50,
+    tokenLimit: 50000,
     trialBadge: 'Free Tier',
-    description: 'Explore recipes and basic AI assistance with starter monthly token quota.',
+    description: 'Free tier with starter AI token quota and standard culinary features.',
+    descriptionMonthly: 'Free tier with starter AI token quota and standard culinary features.',
+    descriptionAnnual: 'Free tier with starter AI token quota and standard culinary features.',
     features: [
-      '50 Foodie AI Tokens / month',
-      'Basic Recipe Generator',
-      'Standard Ingredient Conversion',
-      'Community Support'
+      'Create up to 5 AI-powered recipes per month',
+      'Personal recipe library (25 total recipes)',
+      'Smart ingredient repurposing',
+      'Automated shopping list creation',
+      'Meal planner & conversion tools'
     ],
     isFree: true
   },
   {
-    id: 'plan_pro',
-    slug: 'foodie-pro',
-    name: 'Foodie Pro',
-    monthlyPrice: 9.99,
-    annualPrice: 99.00,
-    tokenLimit: 600,
+    id: 'preset_nutrition_pro',
+    slug: 'nutrition-pro',
+    name: 'Nutrition Pro',
+    monthlyPrice: 8.99,
+    annualPrice: 59.99,
+    tokenLimit: 1000000,
     monthlyBadge: 'Popular',
-    annualBadge: 'Save 17%',
-    description: 'Advanced AI cooking partner with abundant monthly tokens and smart meal planning.',
+    annualBadge: 'Save 44%',
+    trialBadge: '7-Day Free Trial',
+    description: 'Full premium culinary suite with advanced nutritional analysis and high token quotas.',
+    descriptionMonthly: 'Full kitchen access, billed monthly',
+    descriptionAnnual: 'Best value - all premium features, billed annually',
     features: [
-      '600 Foodie AI Tokens / month',
-      'Unlimited Smart Recipe Imports',
-      'Pantry Ingredient Matcher',
-      'Automated Shopping Lists',
-      'Priority AI Model Access'
-    ],
-    isFree: false
-  },
-  {
-    id: 'plan_chef',
-    slug: 'master-chef',
-    name: 'Master Kitchen',
-    monthlyPrice: 24.99,
-    annualPrice: 249.00,
-    tokenLimit: 1800,
-    monthlyBadge: 'Pro Chef',
-    annualBadge: 'Best Value',
-    description: 'The ultimate culinary suite for food enthusiasts, culinary creators, and chefs.',
-    features: [
-      '1,800 Foodie AI Tokens / month',
-      'High-Resolution AI Recipe Visualizer',
-      'Custom Cookbooks & Export Tools',
-      'Dedicated Priority Processing',
-      '24/7 Dedicated Support'
+      'Unlimited AI-powered recipe generation',
+      'Unlimited personal recipe library',
+      'Comprehensive nutritional analysis (macros, vitamins, calories)',
+      'Priority AI model processing',
+      'Cloud synchronization across devices'
     ],
     isFree: false
   }
@@ -136,6 +126,76 @@ const sanitizeSlug = (slug: string): string => {
     .trim();
 };
 
+// Universal normalizer for plans returned from /admin/plans, server settings, or PostgreSQL
+const normalizePlan = (raw: any): PlanCatalog => {
+  const rawSlug = String(raw.slug || raw.id || 'plan').toLowerCase().trim();
+  const baseSlug = rawSlug.replace(/^(preset_|plan_)/i, '').replace(/-(monthly|annual|year)$/i, '').trim();
+  const rawName = String(raw.name || baseSlug || 'Plan').trim();
+
+  const isFree = Boolean(
+    raw.isFree === true ||
+    raw.is_free === true ||
+    baseSlug === 'taster' ||
+    baseSlug === 'free' ||
+    raw.id === 'preset_taster' ||
+    (Number(raw.monthlyPriceDollars ?? raw.monthly_price_dollars ?? raw.monthlyPrice ?? raw.price ?? 0) === 0 &&
+     Number(raw.annualPriceDollars ?? raw.annual_price_dollars ?? raw.annualPrice ?? 0) === 0)
+  );
+
+  const monthlyPrice = isFree ? 0 : Number(
+    raw.monthlyPriceDollars ??
+    raw.monthly_price_dollars ??
+    raw.monthlyPrice ??
+    (raw.priceCents ? raw.priceCents / 100 : undefined) ??
+    (raw.price_cents ? raw.price_cents / 100 : undefined) ??
+    (String(raw.interval || '').toLowerCase().includes('year') ? undefined : raw.price) ??
+    0
+  );
+
+  let annualPrice = isFree ? 0 : Number(
+    raw.annualPriceDollars ??
+    raw.annual_price_dollars ??
+    raw.annualPrice ??
+    (String(raw.interval || '').toLowerCase().includes('year') ? raw.price : undefined) ??
+    0
+  );
+
+  if (!isFree && annualPrice === 0 && monthlyPrice > 0) {
+    annualPrice = Number((monthlyPrice * 10).toFixed(2));
+  }
+
+  const tokenLimit = Number(
+    raw.tokenLimit ??
+    raw.token_limit ??
+    raw.monthly_tokens ??
+    raw.tokenQuota ??
+    (isFree ? 50000 : 500000)
+  );
+
+  const descMonthly = raw.descriptionMonthly || raw.description_monthly || raw.description || '';
+  const descAnnual = raw.descriptionAnnual || raw.description_annual || raw.description || raw.descriptionMonthly || '';
+
+  return {
+    id: String(raw.id || baseSlug || `plan_${Date.now()}`),
+    slug: baseSlug,
+    name: rawName,
+    monthlyPrice,
+    annualPrice,
+    tokenLimit,
+    tokenReimburseFrequency: raw.tokenReimburseFrequency || raw.token_reimburse_frequency || 'monthly',
+    monthlyBadge: raw.monthlyBadge || raw.monthly_badge || '',
+    annualBadge: raw.annualBadge || raw.annual_badge || '',
+    trialBadge: raw.trialBadge || raw.trial_badge || (isFree ? 'Free Tier' : ''),
+    description: descMonthly || descAnnual || 'Subscription package tier',
+    descriptionMonthly: descMonthly,
+    descriptionAnnual: descAnnual,
+    features: raw.featuresText || raw.features || [],
+    featuresText: typeof raw.featuresText === 'string' ? raw.featuresText : (Array.isArray(raw.features) ? raw.features.join('\n') : ''),
+    isFree,
+    buttonText: raw.buttonText || raw.button_text || ''
+  };
+};
+
 export default function SubscriptionsPage() {
   const langContext = useTranslation();
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
@@ -147,7 +207,7 @@ export default function SubscriptionsPage() {
 
   const [user, setUser] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [plans, setPlans] = useState<PlanCatalog[]>([]);
+  const [plans, setPlans] = useState<PlanCatalog[]>(DEFAULT_FALLBACK_PLANS);
   const [billingInterval, setBillingInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
   const [tokenIdentity, setTokenIdentity] = useState<TokenIdentity>({ tokenName: 'Tokens', tokenSymbol: '🪙' });
   const [gatewayConfig, setGatewayConfig] = useState<any>({
@@ -164,7 +224,7 @@ export default function SubscriptionsPage() {
     const checkTheme = () => {
       if (typeof window !== 'undefined') {
         const saved = localStorage.getItem('zecratary_theme_mode');
-        const isDark = saved ? saved !== 'light' : document.documentElement.classList.contains('dark');
+        const isDark = saved ? saved !== 'light' && saved !== 'day' : document.documentElement.classList.contains('dark');
         setIsDarkMode(isDark);
       }
     };
@@ -172,10 +232,12 @@ export default function SubscriptionsPage() {
     checkTheme();
     window.addEventListener('zecratary_theme_mode_changed', checkTheme);
     window.addEventListener('zecratary_theme_changed', checkTheme);
+    window.addEventListener('zecratary_theme_updated', checkTheme);
 
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', checkTheme);
       window.removeEventListener('zecratary_theme_changed', checkTheme);
+      window.removeEventListener('zecratary_theme_updated', checkTheme);
     };
   }, []);
 
@@ -232,6 +294,7 @@ export default function SubscriptionsPage() {
     return [];
   };
 
+  // Fetch billing details and dynamically synchronize with /admin/plans
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -251,53 +314,132 @@ export default function SubscriptionsPage() {
         } catch (_) {}
       }
 
-      const res = await fetch(`/api/billing${emailParam}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          const normalizedU = normalizeUser(data.user);
-          setUser(normalizedU);
+      // 1. Fetch user membership, billing configs, and transaction history
+      let billingData: any = null;
+      try {
+        const res = await fetch(`/api/billing${emailParam}`, { cache: 'no-store' });
+        if (res.ok) {
+          billingData = await res.json();
+          if (billingData.success) {
+            const normalizedU = normalizeUser(billingData.user);
+            setUser(normalizedU);
 
-          const rawTxList = Array.isArray(data.transactions) ? data.transactions : [];
-          const normalizedTxList = rawTxList.map(normalizeTransaction);
-          setTransactions(normalizedTxList);
+            const rawTxList = Array.isArray(billingData.transactions) ? billingData.transactions : [];
+            const normalizedTxList = rawTxList.map(normalizeTransaction);
+            setTransactions(normalizedTxList);
 
-          setGatewayConfig(data.gatewayConfig || {
-            activeGateway: 'stripe',
-            currency: 'USD',
-            currencySymbol: '$',
-            stripe: { enabled: true },
-            paypal: { enabled: true },
-            manual: { enabled: true }
-          });
+            setGatewayConfig(billingData.gatewayConfig || {
+              activeGateway: 'stripe',
+              currency: 'USD',
+              currencySymbol: '$',
+              stripe: { enabled: true },
+              paypal: { enabled: true },
+              manual: { enabled: true }
+            });
 
-          const rawPlans = Array.isArray(data.plans) && data.plans.length > 0 ? data.plans : DEFAULT_FALLBACK_PLANS;
-          setPlans(rawPlans);
+            if (billingData.tokenIdentity) {
+              setTokenIdentity(billingData.tokenIdentity);
+            }
 
-          if (data.tokenIdentity) {
-            setTokenIdentity(data.tokenIdentity);
-          }
+            const activeTx = normalizedTxList.find((tx) => 
+              ['active', 'succeeded', 'successful', 'paid', 'canceled'].includes(tx.status) &&
+              (!tx.expiryDate || new Date(tx.expiryDate).getTime() > Date.now())
+            );
 
-          // Inferred default interval: check active transaction first, then user's plan
-          const activeTx = normalizedTxList.find((tx) => 
-            ['active', 'succeeded', 'successful', 'paid', 'canceled'].includes(tx.status) &&
-            (!tx.expiryDate || new Date(tx.expiryDate).getTime() > Date.now())
-          );
+            let detectedInterval = (activeTx?.recurringInterval || normalizedU?.plan_interval || '').toUpperCase();
+            if (normalizedU?.subscription_plan && (normalizedU.subscription_plan.includes('annual') || normalizedU.subscription_plan.includes('year'))) {
+              detectedInterval = 'YEAR';
+            }
 
-          let detectedInterval = (activeTx?.recurringInterval || normalizedU?.plan_interval || '').toUpperCase();
-          if (normalizedU?.subscription_plan && (normalizedU.subscription_plan.includes('annual') || normalizedU.subscription_plan.includes('year'))) {
-            detectedInterval = 'YEAR';
-          }
-
-          if (detectedInterval === 'YEAR' || detectedInterval === 'ANNUAL') {
-            setBillingInterval('YEAR');
-          } else {
-            setBillingInterval('MONTH');
+            if (detectedInterval === 'YEAR' || detectedInterval === 'ANNUAL') {
+              setBillingInterval('YEAR');
+            } else {
+              setBillingInterval('MONTH');
+            }
           }
         }
+      } catch (_) {}
+
+      // 2. Fetch authoritative subscription plans from /api/admin/plans and server stores
+      let rawAdminPlans: any[] = [];
+
+      try {
+        const adminPlansRes = await fetch(`/api/admin/plans?t=${Date.now()}`, { cache: 'no-store' });
+        if (adminPlansRes.ok) {
+          const plansData = await adminPlansRes.json();
+          const list = Array.isArray(plansData)
+            ? plansData
+            : (plansData?.packages || plansData?.plans || plansData?.configs || plansData?.subscriptionPlans || plansData?.data);
+          if (Array.isArray(list) && list.length > 0) {
+            rawAdminPlans = [...list];
+          }
+        }
+      } catch (_) {}
+
+      if (rawAdminPlans.length === 0) {
+        try {
+          const publicPlansRes = await fetch(`/api/plans?t=${Date.now()}`, { cache: 'no-store' });
+          if (publicPlansRes.ok) {
+            const publicData = await publicPlansRes.json();
+            const list = Array.isArray(publicData)
+              ? publicData
+              : (publicData?.packages || publicData?.plans || publicData?.configs || publicData?.subscriptionPlans || publicData?.data);
+            if (Array.isArray(list) && list.length > 0) {
+              rawAdminPlans = [...list];
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Merge with centralized admin settings
+      try {
+        const { fetchServerAdminSettings } = await import('@/lib/adminSync');
+        const serverData = await fetchServerAdminSettings();
+        const settingsPlans = serverData?.subscriptionPlans || serverData?.settings?.subscriptionPlans;
+        if (Array.isArray(settingsPlans) && settingsPlans.length > 0) {
+          const seen = new Set(rawAdminPlans.map((p: any) => String(p.slug || p.id || '').toLowerCase()));
+          settingsPlans.forEach((sp: any) => {
+            const key = String(sp.slug || sp.id || '').toLowerCase();
+            if (!seen.has(key)) {
+              rawAdminPlans.push(sp);
+              seen.add(key);
+            }
+          });
+        }
+      } catch (_) {}
+
+      // Merge with billing fallback plans if available
+      if (billingData?.plans && Array.isArray(billingData.plans) && billingData.plans.length > 0) {
+        const seen = new Set(rawAdminPlans.map((p: any) => String(p.slug || p.id || '').toLowerCase()));
+        billingData.plans.forEach((bp: any) => {
+          const key = String(bp.slug || bp.id || '').toLowerCase();
+          if (!seen.has(key)) {
+            rawAdminPlans.push(bp);
+            seen.add(key);
+          }
+        });
+      }
+
+      if (rawAdminPlans.length > 0) {
+        const parsed = rawAdminPlans.map(normalizePlan);
+        const uniqueMap = new Map<string, PlanCatalog>();
+        parsed.forEach((p) => {
+          const baseKey = sanitizeSlug(p.slug || p.id);
+          if (!uniqueMap.has(baseKey)) {
+            uniqueMap.set(baseKey, p);
+          }
+        });
+
+        let finalized = Array.from(uniqueMap.values());
+        const hasFreeTier = finalized.some((p) => p.isFree || sanitizeSlug(p.slug) === 'taster');
+        if (!hasFreeTier) {
+          finalized.unshift(DEFAULT_FALLBACK_PLANS[0]);
+        }
+        setPlans(finalized);
       } else {
         setPlans(DEFAULT_FALLBACK_PLANS);
       }
+
     } catch (err: any) {
       setPlans(DEFAULT_FALLBACK_PLANS);
       setFeedback({ type: 'error', msg: err.message || t('failedLoadSubscriptionInfo', 'Failed to load subscription information') });
@@ -315,6 +457,7 @@ export default function SubscriptionsPage() {
 
     window.addEventListener('zecratary_payment_updated', handleSyncEvents);
     window.addEventListener('zecratary_plans_updated', handleSyncEvents);
+    window.addEventListener('zecratary_admin_settings_updated', handleSyncEvents);
     window.addEventListener('zecratary_users_updated', handleSyncEvents);
     window.addEventListener('zecratary_token_settings_updated', handleSyncEvents);
     window.addEventListener('zecratary_tokens_updated', handleSyncEvents);
@@ -323,6 +466,7 @@ export default function SubscriptionsPage() {
     return () => {
       window.removeEventListener('zecratary_payment_updated', handleSyncEvents);
       window.removeEventListener('zecratary_plans_updated', handleSyncEvents);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSyncEvents);
       window.removeEventListener('zecratary_users_updated', handleSyncEvents);
       window.removeEventListener('zecratary_token_settings_updated', handleSyncEvents);
       window.removeEventListener('zecratary_tokens_updated', handleSyncEvents);
@@ -376,7 +520,7 @@ export default function SubscriptionsPage() {
 
   // Evaluation of Plan Catalog Tier matching & exact active state
   const getPlanStatus = useCallback((plan: PlanCatalog, currentInterval: 'MONTH' | 'YEAR') => {
-    const isPlanFree = Boolean(plan.slug === 'taster' || plan.isFree || (plan.monthlyPrice === 0 && plan.annualPrice === 0));
+    const isPlanFree = Boolean(plan.slug === 'taster' || plan.id === 'preset_taster' || plan.isFree || (plan.monthlyPrice === 0 && plan.annualPrice === 0));
     const planBase = sanitizeSlug(plan.slug || plan.id);
     const userBase = sanitizeSlug(activeUserPlan);
 
@@ -397,11 +541,11 @@ export default function SubscriptionsPage() {
 
   // Switch / Upgrade / Downgrade Plan
   const handleSwitchPlan = async (plan: PlanCatalog, interval: 'MONTH' | 'YEAR') => {
-    const isTargetFree = plan.slug === 'taster' || plan.isFree || (plan.monthlyPrice === 0 && plan.annualPrice === 0);
+    const isTargetFree = plan.slug === 'taster' || plan.id === 'preset_taster' || plan.isFree || (plan.monthlyPrice === 0 && plan.annualPrice === 0);
     const amount = isTargetFree ? 0 : (interval === 'YEAR' ? plan.annualPrice : plan.monthlyPrice);
     const planSlugWithInterval = isTargetFree ? 'taster' : `${plan.slug}-${interval.toLowerCase()}`;
-    const planDisplayName = isTargetFree ? 'Taster (Free)' : `${plan.name} (${interval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly')})`;
-    const tokensCredited = plan.tokenLimit ?? (isTargetFree ? 50 : 500);
+    const planDisplayName = isTargetFree ? `${plan.name} (Free)` : `${plan.name} (${interval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly')})`;
+    const tokensCredited = plan.tokenLimit ?? (isTargetFree ? 50000 : 500000);
 
     const tokenMsg = tokensCredited > 0 ? ` (+${tokensCredited.toLocaleString()} ${tokenIdentity.tokenSymbol})` : '';
     const confirmPrompt = `${t('confirmChangePlanPrompt', 'Are you sure you want to change your subscription to')} ${planDisplayName} for ${gatewayConfig.currencySymbol || '$'}${amount.toFixed(2)}${tokenMsg}?`;
@@ -450,6 +594,7 @@ export default function SubscriptionsPage() {
           window.dispatchEvent(new Event('zecratary_payment_updated'));
           window.dispatchEvent(new Event('zecratary_users_updated'));
           window.dispatchEvent(new Event('zecratary_plans_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
           window.dispatchEvent(new Event('zecratary_token_settings_updated'));
           window.dispatchEvent(new Event('zecratary_tokens_updated'));
         }
@@ -653,7 +798,7 @@ export default function SubscriptionsPage() {
                 <span>
                   {effectiveExpiry && !isFreeUser
                     ? `${t('planValidUntil', 'Active period ends on')} ${new Date(effectiveExpiry).toLocaleDateString()}`
-                    : t('freePlanNoExpiry', 'Free Plan — No expiration date')}
+                    : t('freePlanNoExpiry', 'Free Plan — Perpetual Access')}
                 </span>
               </p>
             </div>
@@ -864,11 +1009,16 @@ export default function SubscriptionsPage() {
             {plans.map((plan) => {
               const { isPlanFree, isMatchingTier, isExactActive } = getPlanStatus(plan, billingInterval);
               const price = billingInterval === 'YEAR' ? plan.annualPrice : plan.monthlyPrice;
+              
               const badge = isPlanFree 
                 ? plan.trialBadge 
-                : (billingInterval === 'YEAR' ? plan.annualBadge : plan.monthlyBadge);
+                : (billingInterval === 'YEAR' ? (plan.annualBadge || plan.trialBadge) : (plan.monthlyBadge || plan.trialBadge));
 
-              const parsedFeatures = parsePlanFeatures(plan.features);
+              const description = billingInterval === 'YEAR'
+                ? (plan.descriptionAnnual || plan.description || plan.descriptionMonthly)
+                : (plan.descriptionMonthly || plan.description || plan.descriptionAnnual);
+
+              const parsedFeatures = parsePlanFeatures(plan.featuresText || plan.features);
 
               return (
                 <div
@@ -923,7 +1073,7 @@ export default function SubscriptionsPage() {
                     </div>
 
                     <p className="text-xs opacity-70 leading-relaxed min-h-[36px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                      {plan.description}
+                      {description}
                     </p>
 
                     {/* Price Display */}
@@ -942,7 +1092,12 @@ export default function SubscriptionsPage() {
                       {/* Token Allowance Tag */}
                       <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
                         <Coins className="w-3.5 h-3.5" />
-                        <span>+{(plan.tokenLimit ?? (isPlanFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol} / {billingInterval === 'YEAR' && !isPlanFree ? t('yearLabel', 'year') : t('monthLabel', 'month')}</span>
+                        <span>
+                          {plan.tokenLimit === -1 
+                            ? t('unlimitedTokens', 'Unlimited Tokens') 
+                            : `+${(plan.tokenLimit ?? (isPlanFree ? 50000 : 500000)).toLocaleString()} ${tokenIdentity.tokenSymbol}`
+                          } / {billingInterval === 'YEAR' && !isPlanFree ? t('yearLabel', 'year') : t('monthLabel', 'month')}
+                        </span>
                       </div>
                     </div>
 
@@ -1016,7 +1171,7 @@ export default function SubscriptionsPage() {
                         <span>
                           {isPlanFree 
                             ? t('downgradeToFree', 'Downgrade to Free')
-                            : `${t('switchToPlan', 'Switch to')} ${plan.name} (${billingInterval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly')})`}
+                            : (plan.buttonText || `${t('switchToPlan', 'Switch to')} ${plan.name} (${billingInterval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly')})`)}
                         </span>
                       </button>
                     )}
