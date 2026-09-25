@@ -1295,15 +1295,6 @@ export default function Sidebar() {
 
                 {isAdmin && (
                   <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
-                    <Link
-                      href="/admin/notification-settings"
-                      onClick={() => setShowNotificationsMobile(false)}
-                      className="text-xs font-bold hover:underline inline-flex items-center gap-1.5"
-                      style={{ color: 'var(--color-primary)' }}
-                    >
-                      <Settings className="h-3 w-3" />
-                      <span>{t('manageNotifSettings', 'Manage Notification Settings')}</span>
-                    </Link>
                   </div>
                 )}
               </div>
@@ -2229,17 +2220,13 @@ export default function Sidebar() {
                       <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
                     </Link>
-                    <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
-                      <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
-                    </Link>
                     <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
                       <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
                     </Link>
-                    <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
+                    <Link href="/admin/payment-gateway" className={navClass('/admin/payment-gateway')} title={t('paymentGateway') || 'Payment Gateway'}>
                       <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('paymentGateway') || 'Payment Gateway'}</span>}
                     </Link>
                     <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
                       <Key className="h-4 w-4 shrink-0" style={iconStyle} />
@@ -2256,6 +2243,10 @@ export default function Sidebar() {
                     <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
                       <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
+                    </Link>
+                    <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
+                      <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
                     </Link>
                     <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
                       <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
