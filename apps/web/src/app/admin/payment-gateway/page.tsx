@@ -738,12 +738,35 @@ export default function AdminPaymentGatewayPage() {
                 <div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
                 <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('stripeApiConfig', 'Stripe API Configuration')}</h3>
               </div>
-              <input
-                type="checkbox"
-                checked={config.stripe.enabled}
-                onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, enabled: e.target.checked } })}
-                className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
-              />
+              <div className="flex items-center gap-2.5">
+                <span
+                  className="text-[11px] font-bold tracking-tight select-none transition-colors duration-200"
+                  style={{ color: config.stripe.enabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
+                >
+                  {config.stripe.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.stripe.enabled}
+                  onClick={() => setConfig((prev) => ({ ...prev, stripe: { ...prev.stripe, enabled: !prev.stripe.enabled } }))}
+                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:ring-offset-1"
+                  style={{
+                    backgroundColor: config.stripe.enabled ? 'var(--color-primary)' : 'var(--color-border)',
+                  }}
+                  title={config.stripe.enabled ? t('disableStripeGateway', 'Disable Stripe Gateway') : t('enableStripeGateway', 'Enable Stripe Gateway')}
+                >
+                  <span className="sr-only">
+                    {config.stripe.enabled ? t('stripeEnabled', 'Stripe Enabled') : t('stripeDisabled', 'Stripe Disabled')}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out ${
+                      config.stripe.enabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
 
             <div className="space-y-1.5 pb-2">
@@ -1072,12 +1095,35 @@ export default function AdminPaymentGatewayPage() {
                 <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
                 <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('paypalApiConfig', 'PayPal API Configuration')}</h3>
               </div>
-              <input
-                type="checkbox"
-                checked={config.paypal.enabled}
-                onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, enabled: e.target.checked } })}
-                className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
-              />
+              <div className="flex items-center gap-2.5">
+                <span
+                  className="text-[11px] font-bold tracking-tight select-none transition-colors duration-200"
+                  style={{ color: config.paypal.enabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
+                >
+                  {config.paypal.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.paypal.enabled}
+                  onClick={() => setConfig((prev) => ({ ...prev, paypal: { ...prev.paypal, enabled: !prev.paypal.enabled } }))}
+                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:ring-offset-1"
+                  style={{
+                    backgroundColor: config.paypal.enabled ? 'var(--color-primary)' : 'var(--color-border)',
+                  }}
+                  title={config.paypal.enabled ? t('disablePaypalGateway', 'Disable PayPal Gateway') : t('enablePaypalGateway', 'Enable PayPal Gateway')}
+                >
+                  <span className="sr-only">
+                    {config.paypal.enabled ? t('paypalEnabled', 'PayPal Enabled') : t('paypalDisabled', 'PayPal Disabled')}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out ${
+                      config.paypal.enabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
 
             <div className="space-y-3">
